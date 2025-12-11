@@ -3,7 +3,7 @@
     <div class="container">
         <!-- Brand -->
         <a class="navbar-brand" href="/">
-            <i class="bi bi-box"></i> <?= htmlspecialchars($site_name ?? 'MyApp') ?>
+            <i class="bi bi-box"></i> <?= htmlspecialchars($site_name ?? 'Tiknix') ?>
         </a>
         
         <!-- Mobile Toggle -->

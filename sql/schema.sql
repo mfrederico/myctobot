@@ -7,12 +7,15 @@ CREATE TABLE IF NOT EXISTS `member` (
   `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT,
   `email` varchar(255) NOT NULL,
   `username` varchar(100) DEFAULT NULL,
-  `password` varchar(255) NOT NULL,
+  `password` varchar(255) DEFAULT NULL COMMENT 'NULL for OAuth-only users',
   `level` int(11) DEFAULT 100 COMMENT '1=Root, 50=Admin, 100=Member',
   `status` enum('active','pending','suspended','deleted') DEFAULT 'pending',
   `first_name` varchar(100) DEFAULT NULL,
   `last_name` varchar(100) DEFAULT NULL,
+  `display_name` varchar(255) DEFAULT NULL,
   `avatar` varchar(255) DEFAULT NULL,
+  `avatar_url` varchar(500) DEFAULT NULL COMMENT 'External avatar URL (e.g., from OAuth)',
+  `google_id` varchar(255) DEFAULT NULL COMMENT 'Google OAuth user ID',
   `bio` text DEFAULT NULL,
   `city` varchar(100) DEFAULT NULL,
   `state` varchar(100) DEFAULT NULL,
@@ -29,6 +32,7 @@ CREATE TABLE IF NOT EXISTS `member` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`),
   UNIQUE KEY `username` (`username`),
+  UNIQUE KEY `google_id` (`google_id`),
   KEY `status` (`status`),
   KEY `level` (`level`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -106,6 +110,8 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('auth', 'doforgot', 101, 'Process forgot password'),
 ('auth', 'reset', 101, 'Reset password page'),
 ('auth', 'doreset', 101, 'Process reset password'),
+('auth', 'google', 101, 'Google OAuth login'),
+('auth', 'googlecallback', 101, 'Google OAuth callback'),
 ('auth', 'logout', 100, 'Logout'),
 
 -- Member routes

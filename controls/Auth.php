@@ -358,9 +358,83 @@ class Auth extends BaseControls\Control {
             
             $this->flash('success', 'Password reset successful! Please login with your new password');
             Flight::redirect('/auth/login');
-            
+
         } catch (Exception $e) {
             $this->handleException($e, 'Password reset failed');
         }
+    }
+
+    // ==================== Google OAuth ====================
+
+    /**
+     * Redirect to Google OAuth login
+     */
+    public function google() {
+        require_once __DIR__ . '/../lib/plugins/GoogleAuth.php';
+
+        if (!\app\plugins\GoogleAuth::isConfigured()) {
+            $this->flash('error', 'Google sign-in is not configured');
+            Flight::redirect('/auth/login');
+            return;
+        }
+
+        try {
+            $url = \app\plugins\GoogleAuth::getLoginUrl();
+            Flight::redirect($url);
+        } catch (Exception $e) {
+            $this->logger->error('Google OAuth error: ' . $e->getMessage());
+            $this->flash('error', 'Failed to initialize Google sign-in');
+            Flight::redirect('/auth/login');
+        }
+    }
+
+    /**
+     * Handle Google OAuth callback
+     */
+    public function googlecallback() {
+        require_once __DIR__ . '/../lib/plugins/GoogleAuth.php';
+
+        $code = $_GET['code'] ?? null;
+        $state = $_GET['state'] ?? null;
+        $error = $_GET['error'] ?? null;
+
+        // Handle OAuth errors
+        if ($error) {
+            $this->logger->warning('Google OAuth denied', ['error' => $error]);
+            $this->flash('error', 'Google sign-in was cancelled');
+            Flight::redirect('/auth/login');
+            return;
+        }
+
+        // Process the callback
+        $result = \app\plugins\GoogleAuth::handleCallback($code, $state);
+
+        if (!$result['success']) {
+            $this->flash('error', 'Google sign-in failed: ' . ($result['error'] ?? 'Unknown error'));
+            Flight::redirect('/auth/login');
+            return;
+        }
+
+        $member = $result['member'];
+
+        // Check if account is active
+        if ($member->status !== 'active') {
+            $this->flash('error', 'Your account is not active. Please contact support.');
+            Flight::redirect('/auth/login');
+            return;
+        }
+
+        // Set session
+        $_SESSION['member'] = $member->export();
+
+        $this->logger->info('User logged in via Google', [
+            'id' => $member->id,
+            'email' => $member->email
+        ]);
+
+        $displayName = $member->display_name ?: $member->username ?: $member->email;
+        $this->flash('success', "Welcome, {$displayName}!");
+
+        Flight::redirect('/dashboard');
     }
 }

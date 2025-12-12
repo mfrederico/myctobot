@@ -430,6 +430,13 @@ class Auth extends BaseControls\Control {
                 return;
             }
 
+            // Check if account is active
+            if ($member->status !== 'active') {
+                $this->flash('error', 'Your account is not active. Please contact support.');
+                Flight::redirect('/auth/login');
+                return;
+            }
+
             // Ensure user has their database set up
             $this->ensureUserDatabase($member);
 

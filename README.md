@@ -1,12 +1,18 @@
-# TikNix PHP Framework
+# Tiknix PHP Framework
+
+[![Built with Claude Code](https://img.shields.io/badge/Built%20with-Claude%20Code-blueviolet)](https://claude.ai/claude-code)
 
 A modern, production-ready PHP framework featuring automatic routing, authentication, role-based permissions, and a Bootstrap 5 UI. Built on top of FlightPHP and RedBeanPHP for simplicity and power.
+
+**AI-Assisted Development**: This project is actively developed with [Claude Code](https://claude.ai/claude-code). The clean architecture and comprehensive documentation are designed to work well with AI coding assistants.
 
 ## Features
 
 ### Core Framework
 - **Auto-Routing System**: Convention-based routing that automatically maps URLs to controllers
-- **Authentication**: Complete auth system with simple registration, login, and password reset
+- **Authentication**: Complete auth system with registration, login, password reset, and Google OAuth
+- **Google OAuth 2.0**: One-click sign in with Google - see `lib/plugins/GoogleAuth.php`
+- **Pluggable Architecture**: Drop-in plugins in `lib/plugins/` for authentication, services, and more
 - **Simple Registration**: No email verification required - accounts are active immediately
 - **Role-Based Permissions**: Granular permission control with automatic route protection
 - **High-Performance Caching**: Multi-tier caching system with 9.4x query performance boost
@@ -34,9 +40,14 @@ A modern, production-ready PHP framework featuring automatic routing, authentica
 - **Flash Messages**: User feedback system with Bootstrap toasts
 - **PHP 8.1+ Compatible**: Updated for modern PHP versions
 
+### AI-Friendly Documentation
+Quick reference guides designed for AI coding assistants and developers:
+- **[FLIGHTPHP_README.md](FLIGHTPHP_README.md)**: FlightPHP patterns, custom methods, and Tiknix conventions
+- **[REDBEAN_README.md](REDBEAN_README.md)**: RedBeanPHP CRUD operations, query cache, and common patterns
+
 ## High-Performance Caching System
 
-TikNix includes a sophisticated multi-tier caching system that provides **9.4x faster database queries** with zero code changes required.
+Tiknix includes a sophisticated multi-tier caching system that provides **9.4x faster database queries** with zero code changes required.
 
 ### Caching Components
 
@@ -821,6 +832,10 @@ Built with:
 - [Monolog](https://github.com/Seldaek/monolog) - Logging
 - [AntiCSRF](https://github.com/paragonie/anti-csrf) - CSRF Protection
 
+### AI-Assisted Development
+
+This project is developed with assistance from [Claude Code](https://claude.ai/claude-code) by Anthropic. The codebase architecture, documentation, and patterns are designed to be AI-friendly - making it easier for both human developers and AI coding assistants to understand and extend.
+
 ---
 
-Happy coding! 🚀
+Happy coding!

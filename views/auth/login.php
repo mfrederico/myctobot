@@ -1,3 +1,7 @@
+<?php
+// Check if Google OAuth is configured
+$googleEnabled = !empty(Flight::get('social.google_client_id')) && !empty(Flight::get('social.google_client_secret'));
+?>
 <div class="container py-5">
     <div class="row justify-content-center">
         <div class="col-md-4">

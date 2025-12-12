@@ -14,9 +14,10 @@
         "php": ">=8.1",
         "flightphp/core": "^3.0",
         "gabordemooij/redbean": "dev-master",
+        "guzzlehttp/guzzle": "^7.10",
         "monolog/monolog": "^3.5",
-        "paragonie/anti-csrf": "^2.3",
         "nesbot/carbon": "^3.1",
+        "paragonie/anti-csrf": "^2.3",
         "vlucas/phpdotenv": "^5.5"
     },
     "require-dev": {

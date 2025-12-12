@@ -15,16 +15,12 @@ class Index extends BaseControls\Control {
      * Home page
      */
     public function index() {
-        // Example of loading data
-        $stats = [
-            'total_users' => R::count('member'),
-            'active_users' => R::count('member', 'status = ?', ['active']),
-            'total_permissions' => R::count('authcontrol')
-        ];
-        
+        // Check if Google OAuth is configured
+        $googleEnabled = !empty(Flight::get('social.google_client_id'));
+
         $this->render('index/index', [
-            'title' => 'Welcome',
-            'stats' => $stats
+            'title' => 'MyCTOBot - AI Sprint Digests',
+            'googleEnabled' => $googleEnabled
         ]);
     }
     

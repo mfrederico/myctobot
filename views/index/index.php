@@ -3,18 +3,24 @@
     <div class="container">
         <div class="row align-items-center">
             <div class="col-lg-6">
-                <h1 class="display-4 fw-bold">Welcome to PHP Framework Starter</h1>
-                <p class="lead">A modern, secure, and feature-rich PHP framework built with FlightPHP, RedBeanPHP, and Bootstrap 5.</p>
+                <h1 class="display-4 fw-bold">MyCTOBot</h1>
+                <p class="lead">AI-powered daily sprint digests for Jira. Get intelligent prioritization and actionable insights delivered to your inbox every morning.</p>
                 <div class="d-grid gap-2 d-md-flex">
                     <?php if (!$isLoggedIn): ?>
-                        <a href="/auth/register" class="btn btn-light btn-lg">Get Started</a>
-                        <a href="/auth/login" class="btn btn-outline-light btn-lg">Login</a>
+                        <?php if (!empty($googleEnabled)): ?>
+                        <a href="/auth/google" class="btn btn-light btn-lg">
+                            <i class="bi bi-google"></i> Sign in with Google
+                        </a>
+                        <?php else: ?>
+                        <a href="/auth/login" class="btn btn-light btn-lg">Get Started</a>
+                        <?php endif; ?>
                     <?php else: ?>
                         <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="col-lg-6">
+            <div class="col-lg-6 text-center">
+                <i class="bi bi-kanban-fill" style="font-size: 12rem; opacity: 0.3;"></i>
             </div>
         </div>
     </div>
@@ -23,64 +29,34 @@
 <!-- Features Section -->
 <div class="py-5">
     <div class="container">
-        <h2 class="text-center mb-5">Framework Features</h2>
+        <h2 class="text-center mb-5">How It Works</h2>
         <div class="row g-4">
             <div class="col-md-4">
                 <div class="card h-100 shadow-sm">
                     <div class="card-body text-center">
-                        <i class="bi bi-shield-check text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">Authentication System</h4>
-                        <p class="card-text">Complete auth system with registration, login, password reset, and email verification.</p>
+                        <i class="bi bi-link-45deg text-primary" style="font-size: 3rem;"></i>
+                        <h4 class="card-title mt-3">1. Connect Your Jira</h4>
+                        <p class="card-text">Securely link your Atlassian account using OAuth. No API keys to manage.</p>
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-md-4">
                 <div class="card h-100 shadow-sm">
                     <div class="card-body text-center">
-                        <i class="bi bi-lock text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">Role-Based Permissions</h4>
-                        <p class="card-text">Granular permission system with roles, levels, and automatic route protection.</p>
+                        <i class="bi bi-kanban text-primary" style="font-size: 3rem;"></i>
+                        <h4 class="card-title mt-3">2. Select Your Boards</h4>
+                        <p class="card-text">Choose which Jira boards to track and customize your digest schedule.</p>
                     </div>
                 </div>
             </div>
-            
+
             <div class="col-md-4">
                 <div class="card h-100 shadow-sm">
                     <div class="card-body text-center">
-                        <i class="bi bi-lightning-charge text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">Auto-Routing</h4>
-                        <p class="card-text">Intelligent routing system that automatically maps URLs to controllers and methods.</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-database text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">RedBeanPHP ORM</h4>
-                        <p class="card-text">Zero-config ORM that creates tables and columns on the fly.</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-bootstrap text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">Bootstrap 5 UI</h4>
-                        <p class="card-text">Modern, responsive UI with Bootstrap 5 and customizable themes.</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-gear text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">Easy Configuration</h4>
-                        <p class="card-text">Simple INI-based configuration with environment support.</p>
+                        <i class="bi bi-envelope-check text-primary" style="font-size: 3rem;"></i>
+                        <h4 class="card-title mt-3">3. Get Daily Insights</h4>
+                        <p class="card-text">Receive AI-powered priority analysis and recommendations every morning.</p>
                     </div>
                 </div>
             </div>
@@ -88,51 +64,115 @@
     </div>
 </div>
 
-<!-- Tech Stack -->
+<!-- Benefits Section -->
 <div class="bg-light py-5">
     <div class="container">
-        <h2 class="text-center mb-5">Built With Modern Technologies</h2>
-        <div class="row justify-content-center">
-            <div class="col-md-8">
-                <ul class="list-group">
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>FlightPHP</strong> - Extensible micro-framework</span>
-                        <span class="badge bg-primary rounded-pill">v3.0+</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>RedBeanPHP</strong> - Zero-config ORM</span>
-                        <span class="badge bg-primary rounded-pill">v5.7+</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>Bootstrap</strong> - Responsive UI framework</span>
-                        <span class="badge bg-primary rounded-pill">v5.3</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>Monolog</strong> - Comprehensive logging</span>
-                        <span class="badge bg-primary rounded-pill">v3.5+</span>
-                    </li>
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span><strong>AntiCSRF</strong> - CSRF protection</span>
-                        <span class="badge bg-primary rounded-pill">v2.3+</span>
-                    </li>
+        <h2 class="text-center mb-5">Why MyCTOBot?</h2>
+        <div class="row g-4">
+            <div class="col-md-6">
+                <div class="d-flex">
+                    <div class="flex-shrink-0">
+                        <i class="bi bi-robot text-primary" style="font-size: 2rem;"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h5>AI-Powered Analysis</h5>
+                        <p class="text-muted">Claude AI analyzes your sprint backlog to identify customer-impacting priorities and potential blockers.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="d-flex">
+                    <div class="flex-shrink-0">
+                        <i class="bi bi-clock-history text-primary" style="font-size: 2rem;"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h5>Save Time Every Day</h5>
+                        <p class="text-muted">No more morning stand-up prep. Get a curated summary of what matters most.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="d-flex">
+                    <div class="flex-shrink-0">
+                        <i class="bi bi-shield-check text-primary" style="font-size: 2rem;"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h5>Secure OAuth Integration</h5>
+                        <p class="text-muted">Your Jira data stays safe with industry-standard OAuth 2.0 authentication.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="d-flex">
+                    <div class="flex-shrink-0">
+                        <i class="bi bi-calendar-check text-primary" style="font-size: 2rem;"></i>
+                    </div>
+                    <div class="ms-3">
+                        <h5>Customizable Schedule</h5>
+                        <p class="text-muted">Set your preferred digest time for each board. Get insights when you need them.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sample Digest Section -->
+<div class="py-5">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-6">
+                <h2 class="mb-4">Sample Daily Digest</h2>
+                <p class="lead">Every morning, you'll receive an email like this with prioritized action items and risk alerts.</p>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Customer-first prioritization</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Blocked ticket identification</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Risk alerts and recommendations</li>
+                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Direct links to Jira tickets</li>
                 </ul>
+            </div>
+            <div class="col-lg-6">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-envelope"></i> [PROJ] Daily Sprint Digest
+                    </div>
+                    <div class="card-body" style="font-family: monospace; font-size: 0.85rem;">
+                        <p><strong>Priority 1: Customer-Impacting</strong></p>
+                        <ul class="small">
+                            <li>PROJ-123: Fix login timeout issue</li>
+                            <li>PROJ-145: Payment gateway error handling</li>
+                        </ul>
+                        <p class="mt-3"><strong>Blocked Tickets</strong></p>
+                        <ul class="small text-danger">
+                            <li>PROJ-156: Awaiting API documentation</li>
+                        </ul>
+                        <p class="mt-3"><strong>Recommendations</strong></p>
+                        <p class="small text-muted">Consider pairing on PROJ-123 to expedite resolution...</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
 <!-- CTA Section -->
-<div class="py-5">
+<div class="bg-primary text-white py-5">
     <div class="container text-center">
-        <h2 class="mb-4">Ready to Build Your Next Project?</h2>
-        <p class="lead mb-4">Get started with our comprehensive documentation and examples.</p>
-        <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-            <a href="https://github.com/mfrederico/tiknix" class="btn btn-primary btn-lg">
-                <i class="bi bi-github"></i> View on GitHub
+        <h2 class="mb-4">Start Getting Smarter Sprint Insights Today</h2>
+        <p class="lead mb-4">Free to use. Connect your Jira in under 2 minutes.</p>
+        <?php if (!$isLoggedIn): ?>
+            <?php if (!empty($googleEnabled)): ?>
+            <a href="/auth/google" class="btn btn-light btn-lg">
+                <i class="bi bi-google"></i> Sign in with Google
             </a>
-            <a href="/docs" class="btn btn-outline-primary btn-lg">
-                <i class="bi bi-book"></i> Documentation
-            </a>
-        </div>
+            <?php else: ?>
+            <a href="/auth/register" class="btn btn-light btn-lg">Get Started Free</a>
+            <?php endif; ?>
+        <?php else: ?>
+            <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
+        <?php endif; ?>
     </div>
 </div>

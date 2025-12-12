@@ -268,18 +268,23 @@ class Bootstrap {
      * Initialize CORS headers for API access
      */
     private function initCORS() {
+        // Skip CORS in CLI mode
+        if (php_sapi_name() === 'cli') {
+            return;
+        }
+
         // Only set CORS headers if configured
         if ($this->config['cors']['enabled'] ?? false) {
             $origin = $this->config['cors']['origin'] ?? '*';
             $methods = $this->config['cors']['methods'] ?? 'GET, POST, PUT, DELETE, OPTIONS';
             $headers = $this->config['cors']['headers'] ?? 'Content-Type, Authorization';
-            
+
             header("Access-Control-Allow-Origin: {$origin}");
             header("Access-Control-Allow-Methods: {$methods}");
             header("Access-Control-Allow-Headers: {$headers}");
-            
+
             // Handle preflight requests
-            if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+            if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
                 http_response_code(200);
                 exit();
             }

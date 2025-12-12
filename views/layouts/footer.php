@@ -4,7 +4,7 @@
         <div class="row">
             <!-- About Section -->
             <div class="col-md-4">
-                <h5><?= htmlspecialchars($site_name ?? 'MyApp') ?></h5>
+                <h5><?= htmlspecialchars($site_name ?? 'MyCTOBot.ai') ?></h5>
                 <p class="text-muted">
                     <?= htmlspecialchars($site_description ?? 'A modern PHP application built with Flight, RedBean, and Bootstrap.') ?>
                 </p>
@@ -49,7 +49,7 @@
         <div class="row">
             <div class="col-md-6">
                 <p class="text-muted mb-0">
-                    &copy; <?= date('Y') ?> <?= htmlspecialchars($site_name ?? 'MyApp') ?>. All rights reserved.
+                    &copy; <?= date('Y') ?> <?= htmlspecialchars($site_name ?? 'MyCTOBot.ai') ?>. All rights reserved.
                 </p>
             </div>
             <div class="col-md-6 text-md-end">
@@ -57,6 +57,7 @@
                     Built with <i class="bi bi-heart-fill text-danger"></i> using 
                     <a href="https://flightphp.com" class="text-muted" target="_blank">Flight</a> &amp; 
                     <a href="https://redbeanphp.com" class="text-muted" target="_blank">RedBean</a>
+                    <a href="https://claude.com" class="text-muted" target="_blank">Claude</a>
                 </p>
             </div>
         </div>

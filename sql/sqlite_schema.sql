@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS jira_boards (
     digest_cc TEXT DEFAULT '',
     timezone TEXT DEFAULT 'UTC',
     status_filter TEXT DEFAULT 'To Do',
+    priority_weights TEXT,
+    goals TEXT,
     last_analysis_at TEXT,
     last_digest_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -48,6 +50,22 @@ CREATE TABLE IF NOT EXISTS digest_history (
     FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
 );
 
+-- Ticket analysis cache (for clarity scoring and AI confidence)
+CREATE TABLE IF NOT EXISTS ticket_analysis_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id INTEGER NOT NULL,
+    issue_key TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    clarity_score INTEGER,
+    clarity_analysis TEXT,
+    reporter_name TEXT,
+    reporter_email TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT,
+    UNIQUE(board_id, issue_key),
+    FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+);
+
 -- User settings (key-value store)
 CREATE TABLE IF NOT EXISTS user_settings (
     key TEXT PRIMARY KEY,
@@ -64,6 +82,8 @@ CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysis_results(created_at D
 CREATE INDEX IF NOT EXISTS idx_analysis_type ON analysis_results(analysis_type);
 CREATE INDEX IF NOT EXISTS idx_digest_board ON digest_history(board_id);
 CREATE INDEX IF NOT EXISTS idx_digest_created ON digest_history(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticket_analysis_cache(board_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticket_analysis_cache(content_hash);
 
 -- Default settings
 INSERT OR IGNORE INTO user_settings (key, value) VALUES ('digest_email', '');

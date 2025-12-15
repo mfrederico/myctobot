@@ -18,8 +18,8 @@
                     <li><a href="/docs" class="text-muted text-decoration-none">Documentation</a></li>
                     <li><a href="/help" class="text-muted text-decoration-none">Help Center</a></li>
                     <li><a href="/contact" class="text-muted text-decoration-none">Contact</a></li>
-                    <li><a href="/privacy" class="text-muted text-decoration-none">Privacy Policy</a></li>
-                    <li><a href="/terms" class="text-muted text-decoration-none">Terms of Service</a></li>
+                    <li><a href="/legal/privacy" class="text-muted text-decoration-none">Privacy Policy</a></li>
+                    <li><a href="/legal/terms" class="text-muted text-decoration-none">Terms of Service</a></li>
                 </ul>
             </div>
             
@@ -35,9 +35,16 @@
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </div>
-                <?php if (isset($contact_email)): ?>
-                    <p class="mt-3 text-muted">
-                        <i class="bi bi-envelope"></i> <?= htmlspecialchars($contact_email) ?>
+                <?php $contactPhone = Flight::get('contact.phone'); ?>
+                <?php $contactEmail = Flight::get('contact.email'); ?>
+                <?php if ($contactPhone): ?>
+                    <p class="mt-3 mb-1 text-muted">
+                        <i class="bi bi-telephone"></i> <?= htmlspecialchars($contactPhone) ?>
+                    </p>
+                <?php endif; ?>
+                <?php if ($contactEmail): ?>
+                    <p class="mb-0 text-muted">
+                        <i class="bi bi-envelope"></i> <?= htmlspecialchars($contactEmail) ?>
                     </p>
                 <?php endif; ?>
             </div>
@@ -49,7 +56,7 @@
         <div class="row">
             <div class="col-md-6">
                 <p class="text-muted mb-0">
-                    &copy; <?= date('Y') ?> <?= htmlspecialchars($site_name ?? 'MyCTOBot.ai') ?>. All rights reserved.
+                    &copy; <?= date('Y') ?> ClickSimple, Inc. All rights reserved.
                 </p>
             </div>
             <div class="col-md-6 text-md-end">

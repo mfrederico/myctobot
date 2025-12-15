@@ -15,7 +15,10 @@ require_once __DIR__ . '/UserDatabaseService.php';
 require_once __DIR__ . '/JiraClient.php';
 require_once __DIR__ . '/ClaudeClient.php';
 require_once __DIR__ . '/MailgunService.php';
+require_once __DIR__ . '/SubscriptionService.php';
+require_once __DIR__ . '/TierFeatures.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
+require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
 
 class DigestService {
 
@@ -188,12 +191,57 @@ class DigestService {
             return;
         }
 
-        // Run analysis
+        // Load board weights and goals (Pro features)
+        $weights = null;
+        $goals = null;
+        $clarityThreshold = 6;
+        $isPro = SubscriptionService::isPro($member->id);
+
+        if ($isPro) {
+            if (!empty($board['priority_weights'])) {
+                $weights = json_decode($board['priority_weights'], true);
+            }
+            if (!empty($board['goals'])) {
+                $goals = json_decode($board['goals'], true);
+                $clarityThreshold = $goals['clarity_threshold'] ?? 6;
+            }
+        }
+
+        // Run clarity analysis with caching (Pro feature)
+        $clarityResult = null;
+        $clarityAnalyzer = new \app\analyzers\ClarityAnalyzer($claudeClient);
+        if ($isPro || SubscriptionService::canAccessFeature($member->id, TierFeatures::FEATURE_CLARITY_ANALYSIS)) {
+            $clarityResult = $clarityAnalyzer->analyzeWithCache(
+                $issues,
+                $board['id'],
+                $userDb,
+                $clarityThreshold
+            );
+        }
+
+        // Run priority analysis with weights, goals, and clarity data
         $analyzer = new \app\analyzers\PriorityAnalyzer($claudeClient);
-        $result = $analyzer->generateDailyPriorities($issues);
+        $result = $analyzer->generateDailyPriorities(
+            $issues,
+            null, // estimations
+            $clarityResult ? $clarityResult['clarifications_needed'] : null,
+            null, // similarities
+            $weights,
+            $goals
+        );
 
         if (!$result['success']) {
             throw new \Exception('Analysis failed: ' . ($result['error'] ?? 'Unknown error'));
+        }
+
+        // Add clarity results to the result
+        if ($clarityResult) {
+            $result['analysis']['clarifications_needed'] = $clarityResult['clarifications_needed'];
+            $result['clarity_stats'] = [
+                'analyzed_count' => $clarityResult['analyzed_count'],
+                'cached_count' => $clarityResult['cached_count'],
+                'clarification_count' => count($clarityResult['clarifications_needed'])
+            ];
         }
 
         // Get Jira site URL for creating ticket links
@@ -201,6 +249,11 @@ class DigestService {
 
         // Generate markdown with Jira links
         $markdown = $analyzer->generateDailyLog($result, $jiraSiteUrl);
+
+        // Append clarification section to markdown if there are items
+        if ($clarityResult && !empty($clarityResult['clarifications_needed'])) {
+            $markdown .= $this->generateClarificationMarkdown($clarityResult['clarifications_needed'], $jiraSiteUrl);
+        }
 
         // Store analysis
         $result['status_filter'] = $statusFilter;
@@ -235,5 +288,60 @@ class DigestService {
             echo "[" . date('Y-m-d H:i:s') . "] {$message}\n";
         }
         $this->logger->info($message);
+    }
+
+    /**
+     * Generate markdown section for clarification items
+     */
+    private function generateClarificationMarkdown(array $clarifications, ?string $jiraSiteUrl = null): string {
+        if (empty($clarifications)) {
+            return '';
+        }
+
+        $md = "\n\n## Tickets Needing Clarification\n\n";
+        $md .= "The following tickets have low clarity scores and may need stakeholder input before work can begin.\n\n";
+
+        foreach ($clarifications as $item) {
+            $ticketLink = $jiraSiteUrl
+                ? "[{$item['key']}](" . rtrim($jiraSiteUrl, '/') . '/browse/' . $item['key'] . ")"
+                : $item['key'];
+
+            $scoreEmoji = $item['clarity_score'] < 4 ? '🔴' : ($item['clarity_score'] < 6 ? '🟡' : '🟢');
+
+            $md .= "### {$scoreEmoji} {$ticketLink} - {$item['summary']}\n\n";
+            $md .= "| Attribute | Value |\n";
+            $md .= "|-----------|-------|\n";
+            $md .= "| Clarity Score | **{$item['clarity_score']}/10** |\n";
+            $md .= "| Reporter | {$item['reporter_name']} |\n";
+            if (!empty($item['reporter_email'])) {
+                $md .= "| Email | {$item['reporter_email']} |\n";
+            }
+            $md .= "| Type | {$item['type']} |\n";
+            $md .= "| Priority | {$item['priority']} |\n\n";
+
+            if (!empty($item['assessment'])) {
+                $md .= "**Assessment**: {$item['assessment']}\n\n";
+            }
+
+            if (!empty($item['missing_elements'])) {
+                $md .= "**Missing Elements**:\n";
+                foreach ($item['missing_elements'] as $element) {
+                    $md .= "- {$element}\n";
+                }
+                $md .= "\n";
+            }
+
+            if (!empty($item['suggested_questions'])) {
+                $md .= "**Suggested Questions for Stakeholder**:\n";
+                foreach ($item['suggested_questions'] as $question) {
+                    $md .= "- {$question}\n";
+                }
+                $md .= "\n";
+            }
+
+            $md .= "---\n\n";
+        }
+
+        return $md;
     }
 }

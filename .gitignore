@@ -1,6 +1,8 @@
 # Configuration files with sensitive data
 /conf/config.ini
 config.ini
+stripe
+storage
 
 # But keep the example config
 !/conf/config.example.ini

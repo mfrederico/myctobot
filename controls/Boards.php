@@ -244,6 +244,63 @@ class Boards extends BaseControls\Control {
                 'status_filter' => $this->getParam('status_filter') ?? 'To Do'
             ];
 
+            // Handle priority weights (Pro feature)
+            if (Flight::isPro()) {
+                $priorityWeights = [
+                    'quick_wins' => [
+                        'enabled' => (bool)$this->getParam('weight_quick_wins_enabled'),
+                        'value' => (int)($this->getParam('weight_quick_wins') ?? 50)
+                    ],
+                    'synergy' => [
+                        'enabled' => (bool)$this->getParam('weight_synergy_enabled'),
+                        'value' => (int)($this->getParam('weight_synergy') ?? 30)
+                    ],
+                    'customer' => [
+                        'enabled' => (bool)$this->getParam('weight_customer_enabled'),
+                        'value' => (int)($this->getParam('weight_customer') ?? 70)
+                    ],
+                    'design' => [
+                        'enabled' => (bool)$this->getParam('weight_design_enabled'),
+                        'value' => (int)($this->getParam('weight_design') ?? 40)
+                    ],
+                    'tech_debt' => [
+                        'enabled' => (bool)$this->getParam('weight_tech_debt_enabled'),
+                        'value' => (int)($this->getParam('weight_tech_debt') ?? 20)
+                    ],
+                    'risk' => [
+                        'enabled' => (bool)$this->getParam('weight_risk_enabled'),
+                        'value' => (int)($this->getParam('weight_risk') ?? 50)
+                    ]
+                ];
+                $data['priority_weights'] = json_encode($priorityWeights);
+
+                // Handle engineering goals (Pro feature)
+                $fteCount = $this->getParam('goal_fte_count') ? (float)$this->getParam('goal_fte_count') : null;
+                $hoursPerDay = $this->getParam('goal_hours_per_day') ? (int)$this->getParam('goal_hours_per_day') : 8;
+                $sprintDays = $this->getParam('goal_sprint_days') ? (int)$this->getParam('goal_sprint_days') : 10;
+                $productivity = $this->getParam('goal_productivity') ? (int)$this->getParam('goal_productivity') : 70;
+
+                // Calculate capacity if FTE count is provided
+                $calculatedCapacity = null;
+                if ($fteCount) {
+                    $totalHours = $fteCount * $hoursPerDay * $sprintDays;
+                    $calculatedCapacity = round($totalHours * ($productivity / 100));
+                }
+
+                $goals = [
+                    'velocity' => $this->getParam('goal_velocity') ? (int)$this->getParam('goal_velocity') : null,
+                    'debt_reduction' => $this->getParam('goal_debt_reduction') ? (int)$this->getParam('goal_debt_reduction') : null,
+                    'predictability' => $this->getParam('goal_predictability') ? (int)$this->getParam('goal_predictability') : null,
+                    'sprint_days' => $sprintDays,
+                    'fte_count' => $fteCount,
+                    'hours_per_day' => $hoursPerDay,
+                    'productivity' => $productivity,
+                    'capacity' => $calculatedCapacity,
+                    'clarity_threshold' => $this->getParam('goal_clarity_threshold') ? (int)$this->getParam('goal_clarity_threshold') : 6
+                ];
+                $data['goals'] = json_encode($goals);
+            }
+
             if ($this->userDb->updateBoard($id, $data)) {
                 $this->flash('success', 'Board settings updated');
             } else {
@@ -257,10 +314,17 @@ class Boards extends BaseControls\Control {
         // Get timezone list
         $timezones = \DateTimeZone::listIdentifiers();
 
+        // Get recent analyses for this board
+        $analyses = $this->userDb->getRecentAnalyses($id, 5);
+        $lastAnalysis = !empty($analyses) ? $analyses[0] : null;
+
         $this->render('boards/edit', [
             'title' => 'Edit Board - ' . $board['board_name'],
             'board' => $board,
-            'timezones' => $timezones
+            'timezones' => $timezones,
+            'analyses' => $analyses,
+            'lastAnalysis' => $lastAnalysis,
+            'isPro' => Flight::isPro()
         ]);
     }
 

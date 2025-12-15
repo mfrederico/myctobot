@@ -173,6 +173,9 @@ class Bootstrap {
             // Set freeze mode based on environment
             $freeze = $this->config['app']['environment'] === 'production';
             R::freeze($freeze);
+
+            // Load RedBean FUSE models
+            require_once __DIR__ . '/models/Model_Member.php';
             
             // Enable query logging in debug mode
             if ($this->config['app']['debug'] ?? false) {

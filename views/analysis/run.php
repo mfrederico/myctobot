@@ -8,6 +8,27 @@
                 </a>
             </div>
 
+            <?php if (!empty($activeJob)): ?>
+            <!-- Active Job Alert -->
+            <div class="alert alert-info mb-4">
+                <div class="d-flex align-items-center">
+                    <div class="spinner-border spinner-border-sm me-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <div class="flex-grow-1">
+                        <strong>Analysis in Progress</strong><br>
+                        <small>
+                            <?= htmlspecialchars($activeJob['current_step']) ?>
+                            (<?= $activeJob['progress'] ?>% complete)
+                        </small>
+                    </div>
+                    <a href="/analysis/progress/<?= urlencode($activeJob['job_id']) ?>" class="btn btn-primary btn-sm">
+                        <i class="bi bi-eye"></i> View Progress
+                    </a>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <div class="card">
                 <div class="card-header bg-primary text-white">
                     <i class="bi bi-kanban"></i> <?= htmlspecialchars($board['board_name']) ?>

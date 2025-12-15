@@ -3,6 +3,31 @@
         <div class="col-md-8 offset-md-2">
             <h1 class="mb-4">Settings</h1>
 
+            <!-- Subscription Section -->
+            <?php
+            $currentTier = Flight::getTier();
+            $tierInfo = \app\services\SubscriptionService::getTierInfo($currentTier);
+            ?>
+            <div class="card mb-4 border-<?= $tierInfo['color'] ?>">
+                <div class="card-header bg-<?= $tierInfo['color'] ?> <?= $currentTier !== 'free' ? 'text-white' : '' ?>">
+                    <i class="bi bi-star-fill"></i> Subscription
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-1"><?= $tierInfo['name'] ?> Plan</h5>
+                            <p class="text-muted mb-0"><?= $tierInfo['description'] ?></p>
+                        </div>
+                        <div class="text-end">
+                            <div class="h5 mb-1"><?= $tierInfo['price'] ?></div>
+                            <a href="/settings/subscription" class="btn btn-<?= $currentTier === 'free' ? 'primary' : 'outline-' . $tierInfo['color'] ?> btn-sm">
+                                <?= $currentTier === 'free' ? '<i class="bi bi-rocket"></i> Upgrade' : '<i class="bi bi-gear"></i> Manage' ?>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Profile Section -->
             <div class="card mb-4">
                 <div class="card-header bg-primary text-white">

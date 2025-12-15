@@ -126,8 +126,11 @@ class Analysis extends BaseControls\Control {
                 throw new Exception('Analysis failed: ' . ($priorityResult['error'] ?? 'Unknown error'));
             }
 
-            // Generate markdown report
-            $markdown = $priorityAnalyzer->generateDailyLog($priorityResult);
+            // Get Jira site URL for creating ticket links
+            $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->member->id, $board['cloud_id']);
+
+            // Generate markdown report with Jira links
+            $markdown = $priorityAnalyzer->generateDailyLog($priorityResult, $jiraSiteUrl);
 
             // Store results
             $priorityResult['status_filter'] = $statusFilter;

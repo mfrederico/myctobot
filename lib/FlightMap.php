@@ -314,23 +314,21 @@ Flight::map('isOff', function($val) {
 
 /**
  * Setting management helpers
+ * Note: getSetting/setSetting now only use the current user's ID from session
+ * Use getSystemSetting/setSystemSetting for system-wide settings (member_id = 0)
  */
-Flight::map('getSetting', function($key, $memberId = null) {
-    if ($memberId === null) {
-        $member = Flight::getMember();
-        $memberId = $member->id;
-    }
-    
+Flight::map('getSetting', function($key) {
+    $member = Flight::getMember();
+    $memberId = $member->id;
+
     $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [$memberId, $key]);
     return $setting ? $setting->setting_value : null;
 });
 
-Flight::map('setSetting', function($key, $value, $memberId = null) {
-    if ($memberId === null) {
-        $member = Flight::getMember();
-        $memberId = $member->id;
-    }
-    
+Flight::map('setSetting', function($key, $value) {
+    $member = Flight::getMember();
+    $memberId = $member->id;
+
     $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [$memberId, $key]);
     if (!$setting) {
         $setting = R::dispense('settings');
@@ -339,6 +337,28 @@ Flight::map('setSetting', function($key, $value, $memberId = null) {
     }
     $setting->setting_value = $value;
     $setting->updated_at = date('Y-m-d H:i:s');
-    
+
+    return R::store($setting);
+});
+
+/**
+ * System-wide settings (member_id = 0)
+ * These are global application settings not tied to any user
+ */
+Flight::map('getSystemSetting', function($key) {
+    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [0, $key]);
+    return $setting ? $setting->setting_value : null;
+});
+
+Flight::map('setSystemSetting', function($key, $value) {
+    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [0, $key]);
+    if (!$setting) {
+        $setting = R::dispense('settings');
+        $setting->member_id = 0;
+        $setting->setting_key = $key;
+    }
+    $setting->setting_value = $value;
+    $setting->updated_at = date('Y-m-d H:i:s');
+
     return R::store($setting);
 });

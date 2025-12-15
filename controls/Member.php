@@ -126,7 +126,7 @@ class Member extends Control {
             // Save settings
             foreach ($request->data as $key => $value) {
                 if ($key !== 'csrf_token' && $key !== 'csrf_token_name') {
-                    Flight::setSetting($key, $value, $this->member->id);
+                    Flight::setSetting($key, $value);
                 }
             }
             $this->viewData['success'] = 'Settings saved successfully';

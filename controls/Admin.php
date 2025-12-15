@@ -346,7 +346,7 @@ class Admin extends Control {
                 // Update settings
                 foreach ($request->data as $key => $value) {
                     if ($key !== 'csrf_token' && $key !== 'csrf_token_name') {
-                        Flight::setSetting($key, $value, 0); // System-wide setting
+                        Flight::setSystemSetting($key, $value); // System-wide setting
                     }
                 }
                 $this->viewData['success'] = 'Settings updated successfully';

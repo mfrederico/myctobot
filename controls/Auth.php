@@ -88,6 +88,9 @@ class Auth extends BaseControls\Control {
             $member->login_count = ($member->login_count ?? 0) + 1;
             R::store($member);
 
+            // Regenerate session ID to prevent session fixation attacks
+            session_regenerate_id(true);
+
             // Set session
             $_SESSION['member'] = $member->export();
 
@@ -221,6 +224,9 @@ class Auth extends BaseControls\Control {
             $this->ensureUserDatabase($member);
 
             Flight::get('log')->info('New user registered', ['id' => $id, 'username' => $username]);
+
+            // Regenerate session ID to prevent session fixation attacks
+            session_regenerate_id(true);
 
             // Auto-login after registration
             $_SESSION['member'] = $member->export();
@@ -439,6 +445,9 @@ class Auth extends BaseControls\Control {
 
             // Ensure user has their database set up
             $this->ensureUserDatabase($member);
+
+            // Regenerate session ID to prevent session fixation attacks
+            session_regenerate_id(true);
 
             // Set session
             $_SESSION['member'] = $member->export();

@@ -26,7 +26,7 @@
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="email_notifications" 
                                        name="email_notifications" value="1"
-                                       <?= Flight::getSetting('email_notifications', $member->id) ? 'checked' : '' ?>>
+                                       <?= Flight::getSetting('email_notifications') ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="email_notifications">
                                     Email notifications
                                 </label>
@@ -37,7 +37,7 @@
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="newsletter" 
                                        name="newsletter" value="1"
-                                       <?= Flight::getSetting('newsletter', $member->id) ? 'checked' : '' ?>>
+                                       <?= Flight::getSetting('newsletter') ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="newsletter">
                                     Subscribe to newsletter
                                 </label>
@@ -51,9 +51,9 @@
                         <div class="mb-3">
                             <label for="profile_visibility" class="form-label">Profile Visibility</label>
                             <select class="form-select" id="profile_visibility" name="profile_visibility">
-                                <option value="public" <?= Flight::getSetting('profile_visibility', $member->id) == 'public' ? 'selected' : '' ?>>Public</option>
-                                <option value="members" <?= Flight::getSetting('profile_visibility', $member->id) == 'members' ? 'selected' : '' ?>>Members Only</option>
-                                <option value="private" <?= Flight::getSetting('profile_visibility', $member->id) == 'private' ? 'selected' : '' ?>>Private</option>
+                                <option value="public" <?= Flight::getSetting('profile_visibility') == 'public' ? 'selected' : '' ?>>Public</option>
+                                <option value="members" <?= Flight::getSetting('profile_visibility') == 'members' ? 'selected' : '' ?>>Members Only</option>
+                                <option value="private" <?= Flight::getSetting('profile_visibility') == 'private' ? 'selected' : '' ?>>Private</option>
                             </select>
                         </div>
                         
@@ -61,7 +61,7 @@
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="show_email" 
                                        name="show_email" value="1"
-                                       <?= Flight::getSetting('show_email', $member->id) ? 'checked' : '' ?>>
+                                       <?= Flight::getSetting('show_email') ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="show_email">
                                     Show email address on profile
                                 </label>
@@ -75,24 +75,24 @@
                         <div class="mb-3">
                             <label for="timezone" class="form-label">Timezone</label>
                             <select class="form-select" id="timezone" name="timezone">
-                                <option value="UTC" <?= Flight::getSetting('timezone', $member->id) == 'UTC' ? 'selected' : '' ?>>UTC</option>
-                                <option value="America/New_York" <?= Flight::getSetting('timezone', $member->id) == 'America/New_York' ? 'selected' : '' ?>>Eastern Time</option>
-                                <option value="America/Chicago" <?= Flight::getSetting('timezone', $member->id) == 'America/Chicago' ? 'selected' : '' ?>>Central Time</option>
-                                <option value="America/Denver" <?= Flight::getSetting('timezone', $member->id) == 'America/Denver' ? 'selected' : '' ?>>Mountain Time</option>
-                                <option value="America/Los_Angeles" <?= Flight::getSetting('timezone', $member->id) == 'America/Los_Angeles' ? 'selected' : '' ?>>Pacific Time</option>
-                                <option value="Europe/London" <?= Flight::getSetting('timezone', $member->id) == 'Europe/London' ? 'selected' : '' ?>>London</option>
-                                <option value="Europe/Paris" <?= Flight::getSetting('timezone', $member->id) == 'Europe/Paris' ? 'selected' : '' ?>>Paris</option>
-                                <option value="Asia/Tokyo" <?= Flight::getSetting('timezone', $member->id) == 'Asia/Tokyo' ? 'selected' : '' ?>>Tokyo</option>
+                                <option value="UTC" <?= Flight::getSetting('timezone') == 'UTC' ? 'selected' : '' ?>>UTC</option>
+                                <option value="America/New_York" <?= Flight::getSetting('timezone') == 'America/New_York' ? 'selected' : '' ?>>Eastern Time</option>
+                                <option value="America/Chicago" <?= Flight::getSetting('timezone') == 'America/Chicago' ? 'selected' : '' ?>>Central Time</option>
+                                <option value="America/Denver" <?= Flight::getSetting('timezone') == 'America/Denver' ? 'selected' : '' ?>>Mountain Time</option>
+                                <option value="America/Los_Angeles" <?= Flight::getSetting('timezone') == 'America/Los_Angeles' ? 'selected' : '' ?>>Pacific Time</option>
+                                <option value="Europe/London" <?= Flight::getSetting('timezone') == 'Europe/London' ? 'selected' : '' ?>>London</option>
+                                <option value="Europe/Paris" <?= Flight::getSetting('timezone') == 'Europe/Paris' ? 'selected' : '' ?>>Paris</option>
+                                <option value="Asia/Tokyo" <?= Flight::getSetting('timezone') == 'Asia/Tokyo' ? 'selected' : '' ?>>Tokyo</option>
                             </select>
                         </div>
                         
                         <div class="mb-3">
                             <label for="date_format" class="form-label">Date Format</label>
                             <select class="form-select" id="date_format" name="date_format">
-                                <option value="Y-m-d" <?= Flight::getSetting('date_format', $member->id) == 'Y-m-d' ? 'selected' : '' ?>>2024-12-25</option>
-                                <option value="m/d/Y" <?= Flight::getSetting('date_format', $member->id) == 'm/d/Y' ? 'selected' : '' ?>>12/25/2024</option>
-                                <option value="d/m/Y" <?= Flight::getSetting('date_format', $member->id) == 'd/m/Y' ? 'selected' : '' ?>>25/12/2024</option>
-                                <option value="F j, Y" <?= Flight::getSetting('date_format', $member->id) == 'F j, Y' ? 'selected' : '' ?>>December 25, 2024</option>
+                                <option value="Y-m-d" <?= Flight::getSetting('date_format') == 'Y-m-d' ? 'selected' : '' ?>>2024-12-25</option>
+                                <option value="m/d/Y" <?= Flight::getSetting('date_format') == 'm/d/Y' ? 'selected' : '' ?>>12/25/2024</option>
+                                <option value="d/m/Y" <?= Flight::getSetting('date_format') == 'd/m/Y' ? 'selected' : '' ?>>25/12/2024</option>
+                                <option value="F j, Y" <?= Flight::getSetting('date_format') == 'F j, Y' ? 'selected' : '' ?>>December 25, 2024</option>
                             </select>
                         </div>
                         

@@ -178,9 +178,27 @@ MSG;
     }
 
     /**
-     * Generate a markdown daily log
+     * Format a Jira ticket key as a markdown link
+     *
+     * @param string $ticketKey The ticket key (e.g., "PROJ-123")
+     * @param string|null $jiraBaseUrl The Jira site URL (e.g., "https://yoursite.atlassian.net")
+     * @return string Formatted ticket (link or plain text)
      */
-    public function generateDailyLog(array $priorityResult): string {
+    private function formatTicketLink(string $ticketKey, ?string $jiraBaseUrl): string {
+        if ($jiraBaseUrl) {
+            $url = rtrim($jiraBaseUrl, '/') . '/browse/' . $ticketKey;
+            return "[{$ticketKey}]({$url})";
+        }
+        return $ticketKey;
+    }
+
+    /**
+     * Generate a markdown daily log
+     *
+     * @param array $priorityResult The result from generateDailyPriorities()
+     * @param string|null $jiraBaseUrl Optional Jira site URL for creating ticket links
+     */
+    public function generateDailyLog(array $priorityResult, ?string $jiraBaseUrl = null): string {
         $date = $priorityResult['date'];
         $log = "# Daily Priority Log - {$date}\n\n";
         $log .= "Generated: " . date('Y-m-d H:i:s') . "\n\n";
@@ -216,7 +234,8 @@ MSG;
             foreach ($analysis['priorities'] as $task) {
                 $rank = $task['rank'];
                 $impact = strtoupper($task['customer_impact'] ?? 'unknown');
-                $log .= "### #{$rank}: {$task['key']} - {$task['summary']}\n\n";
+                $ticketLink = $this->formatTicketLink($task['key'], $jiraBaseUrl);
+                $log .= "### #{$rank}: {$ticketLink} - {$task['summary']}\n\n";
                 $log .= "| Attribute | Value |\n";
                 $log .= "|-----------|-------|\n";
                 $log .= "| Customer Impact | **{$impact}** |\n";
@@ -226,7 +245,8 @@ MSG;
                 $log .= "**Why this priority**: {$task['reason']}\n\n";
 
                 if (!empty($task['batch_with'])) {
-                    $batch = implode(', ', $task['batch_with']);
+                    $batchLinks = array_map(fn($key) => $this->formatTicketLink($key, $jiraBaseUrl), $task['batch_with']);
+                    $batch = implode(', ', $batchLinks);
                     $log .= "**Consider batching with**: {$batch}\n\n";
                 }
 
@@ -246,7 +266,8 @@ MSG;
         if (!empty($analysis['blocked_tickets'])) {
             $log .= "## Blocked Tickets\n\n";
             foreach ($analysis['blocked_tickets'] as $blocked) {
-                $log .= "### {$blocked['key']}\n";
+                $blockedLink = $this->formatTicketLink($blocked['key'], $jiraBaseUrl);
+                $log .= "### {$blockedLink}\n";
                 $log .= "- **Reason**: {$blocked['reason']}\n";
                 $log .= "- **Action Needed**: {$blocked['action_needed']}\n\n";
             }

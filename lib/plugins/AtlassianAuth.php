@@ -398,6 +398,22 @@ class AtlassianAuth {
     }
 
     /**
+     * Get Jira site URL for a member and cloud ID
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Cloud ID
+     * @return string|null Site URL (e.g., https://yoursite.atlassian.net) or null if not found
+     */
+    public static function getSiteUrl($memberId, $cloudId) {
+        $token = R::findOne('atlassiantoken',
+            'member_id = ? AND cloud_id = ?',
+            [$memberId, $cloudId]
+        );
+
+        return $token ? $token->site_url : null;
+    }
+
+    /**
      * Get Jira API base URL for a cloud ID
      *
      * @param string $cloudId Cloud ID

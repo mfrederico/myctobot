@@ -196,8 +196,11 @@ class DigestService {
             throw new \Exception('Analysis failed: ' . ($result['error'] ?? 'Unknown error'));
         }
 
-        // Generate markdown
-        $markdown = $analyzer->generateDailyLog($result);
+        // Get Jira site URL for creating ticket links
+        $jiraSiteUrl = AtlassianAuth::getSiteUrl($member->id, $board['cloud_id']);
+
+        // Generate markdown with Jira links
+        $markdown = $analyzer->generateDailyLog($result, $jiraSiteUrl);
 
         // Store analysis
         $result['status_filter'] = $statusFilter;

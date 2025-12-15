@@ -23,21 +23,12 @@ class AnalysisStatusService {
     }
 
     /**
-     * Generate a secure job ID that includes member ID
+     * Generate an opaque job ID (no member ID exposed)
+     * Member ID is stored inside the status file only
      */
-    private static function generateJobId(int $memberId): string {
-        // Format: m{memberId}_{timestamp}_{random}
-        return 'm' . $memberId . '_' . time() . '_' . bin2hex(random_bytes(8));
-    }
-
-    /**
-     * Extract member ID from job ID
-     */
-    private static function extractMemberId(string $jobId): ?int {
-        if (preg_match('/^m(\d+)_/', $jobId, $matches)) {
-            return (int)$matches[1];
-        }
-        return null;
+    private static function generateJobId(): string {
+        // Opaque format: random bytes only to prevent enumeration attacks
+        return bin2hex(random_bytes(16));
     }
 
     /**
@@ -54,7 +45,7 @@ class AnalysisStatusService {
      * Create a new analysis job
      */
     public static function createJob(int $memberId, int $boardId, string $boardName): string {
-        $jobId = self::generateJobId($memberId);
+        $jobId = self::generateJobId();
 
         $status = [
             'job_id' => $jobId,
@@ -79,13 +70,13 @@ class AnalysisStatusService {
 
     /**
      * Update job status
+     * @param int $memberId Member ID who owns this job
+     * @param string $jobId The job ID
+     * @param string $step Current step description
+     * @param int $progress Progress percentage (0-100)
+     * @param string $status Job status (running, pending, etc.)
      */
-    public static function updateStatus(string $jobId, string $step, int $progress, string $status = 'running'): void {
-        $memberId = self::extractMemberId($jobId);
-        if (!$memberId) {
-            return;
-        }
-
+    public static function updateStatus(int $memberId, string $jobId, string $step, int $progress, string $status = 'running'): void {
         $path = self::getStatusPath($memberId, $jobId);
         if (!file_exists($path)) {
             return;
@@ -107,13 +98,11 @@ class AnalysisStatusService {
 
     /**
      * Mark job as complete
+     * @param int $memberId Member ID who owns this job
+     * @param string $jobId The job ID
+     * @param int $analysisId The resulting analysis ID
      */
-    public static function complete(string $jobId, int $analysisId): void {
-        $memberId = self::extractMemberId($jobId);
-        if (!$memberId) {
-            return;
-        }
-
+    public static function complete(int $memberId, string $jobId, int $analysisId): void {
         $path = self::getStatusPath($memberId, $jobId);
         if (!file_exists($path)) {
             return;
@@ -132,13 +121,11 @@ class AnalysisStatusService {
 
     /**
      * Mark job as failed
+     * @param int $memberId Member ID who owns this job
+     * @param string $jobId The job ID
+     * @param string $error Error message
      */
-    public static function fail(string $jobId, string $error): void {
-        $memberId = self::extractMemberId($jobId);
-        if (!$memberId) {
-            return;
-        }
-
+    public static function fail(int $memberId, string $jobId, string $error): void {
         $path = self::getStatusPath($memberId, $jobId);
         if (!file_exists($path)) {
             return;
@@ -156,22 +143,19 @@ class AnalysisStatusService {
     /**
      * Get job status (with ownership verification)
      * Returns null if job doesn't exist or doesn't belong to the member
+     * @param string $jobId The opaque job ID
+     * @param int $requestingMemberId Member ID requesting the status
      */
     public static function getStatus(string $jobId, int $requestingMemberId): ?array {
-        // Extract member ID from job ID and verify ownership
-        $jobMemberId = self::extractMemberId($jobId);
-        if (!$jobMemberId || $jobMemberId !== $requestingMemberId) {
-            return null; // Job doesn't belong to this user
-        }
-
-        $path = self::getStatusPath($jobMemberId, $jobId);
+        // Look for the job in the requesting member's directory
+        $path = self::getStatusPath($requestingMemberId, $jobId);
         if (!file_exists($path)) {
-            return null;
+            return null; // Job doesn't exist for this user
         }
 
         $data = json_decode(file_get_contents($path), true);
 
-        // Double-check member ID in data matches
+        // Verify member ID in data matches (defense in depth)
         if (($data['member_id'] ?? null) !== $requestingMemberId) {
             return null;
         }

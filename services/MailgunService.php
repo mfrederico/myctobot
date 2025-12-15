@@ -112,6 +112,9 @@ class MailgunService {
         // Italic
         $html = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $html);
 
+        // Links - [text](url) format
+        $html = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2" style="color: #3498db;">$1</a>', $html);
+
         // Blockquotes
         $html = preg_replace('/^> (.+)$/m', '<blockquote>$1</blockquote>', $html);
 

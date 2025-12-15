@@ -126,9 +126,11 @@ class Analysis extends BaseControls\Control {
 
             // Build the command to run in background
             $scriptPath = realpath(__DIR__ . '/../scripts/cron-analysis.php');
+            $cronSecret = Flight::get('cron.api_key');
             $cmd = sprintf(
-                'php %s --script --member=%d --board=%d --job=%s --status-filter=%s > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --board=%d --job=%s --status-filter=%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
+                escapeshellarg($cronSecret),
                 $this->member->id,
                 (int)$boardId,
                 escapeshellarg($jobId),

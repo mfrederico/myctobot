@@ -7,21 +7,22 @@
  *
  * COMMAND LINE USAGE:
  * -------------------
- * # Run analysis for a specific board (requires --script flag):
- * php scripts/cron-analysis.php --script --member=3 --board=1 --verbose
+ * # Run analysis for a specific board (requires --script flag and --secret):
+ * php scripts/cron-analysis.php --script --secret=YOUR_KEY --member=3 --board=1 --verbose
  *
  * # With status filter:
- * php scripts/cron-analysis.php --script --member=3 --board=1 --status-filter="To Do,In Progress"
+ * php scripts/cron-analysis.php --script --secret=YOUR_KEY --member=3 --board=1 --status-filter="To Do,In Progress"
  *
  * # With job ID for status tracking (used by web UI):
- * php scripts/cron-analysis.php --script --member=3 --board=1 --job=m3_123456_abc123
+ * php scripts/cron-analysis.php --script --secret=YOUR_KEY --member=3 --board=1 --job=abc123def456
  *
  * # Run all scheduled analyses (cron mode):
- * php scripts/cron-analysis.php --script --all-scheduled
+ * php scripts/cron-analysis.php --script --secret=YOUR_KEY --all-scheduled
  *
  * OPTIONS:
  * --------
  *   --script        REQUIRED for CLI execution (bypasses controller routing)
+ *   --secret        REQUIRED - Authentication key (must match cron.api_key in config.ini)
  *   --member        Member ID to run analysis for
  *   --board         Board ID to analyze
  *   --job           Job ID for status tracking (optional)
@@ -45,14 +46,15 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['member:', 'board:', 'job:', 'status-filter:', 'all-scheduled', 'verbose', 'help', 'script']);
+$options = getopt('', ['member:', 'board:', 'job:', 'status-filter:', 'all-scheduled', 'verbose', 'help', 'script', 'secret:']);
 
 if (isset($options['help'])) {
     echo "MyCTOBot Background Analysis Runner\n\n";
     echo "Usage:\n";
-    echo "  php scripts/cron-analysis.php --member=ID --board=ID --job=JOB_ID\n";
-    echo "  php scripts/cron-analysis.php --all-scheduled\n\n";
+    echo "  php scripts/cron-analysis.php --secret=KEY --member=ID --board=ID --job=JOB_ID\n";
+    echo "  php scripts/cron-analysis.php --secret=KEY --all-scheduled\n\n";
     echo "Options:\n";
+    echo "  --secret        REQUIRED - Authentication key (from config.ini cron.api_key)\n";
     echo "  --member        Member ID to run analysis for\n";
     echo "  --board         Board ID to analyze\n";
     echo "  --job           Job ID for status tracking\n";
@@ -103,6 +105,16 @@ try {
 
     if ($verbose) {
         echo "Application initialized\n\n";
+    }
+
+    // Validate CLI secret key for authentication
+    $providedSecret = $options['secret'] ?? null;
+    $expectedSecret = Flight::get('cron.api_key');
+
+    if (empty($providedSecret) || !hash_equals($expectedSecret, $providedSecret)) {
+        echo "Error: Invalid or missing --secret parameter\n";
+        echo "The secret key must match cron.api_key in config.ini\n";
+        exit(1);
     }
 
     // Mode: Run a specific analysis for a member/board
@@ -164,7 +176,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Starting
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Initializing analysis...', 5, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Initializing analysis...', 5, 'running');
     }
 
     // Initialize user database
@@ -174,7 +186,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
     $board = $userDb->getBoard($boardId);
     if (!$board) {
         if ($jobId) {
-            AnalysisStatusService::fail($jobId, 'Board not found');
+            AnalysisStatusService::fail($memberId, $jobId, 'Board not found');
         }
         throw new Exception("Board not found: {$boardId}");
     }
@@ -192,7 +204,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Connecting to Jira
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Connecting to Jira...', 10, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Connecting to Jira...', 10, 'running');
     }
 
     // Initialize Jira client
@@ -200,7 +212,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Fetching issues
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Fetching sprint issues...', 20, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Fetching sprint issues...', 20, 'running');
     }
 
     // Fetch sprint issues
@@ -208,7 +220,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     if (empty($issues)) {
         if ($jobId) {
-            AnalysisStatusService::fail($jobId, 'No issues found in the current sprint');
+            AnalysisStatusService::fail($memberId, $jobId, 'No issues found in the current sprint');
         }
         throw new Exception('No issues found in the current sprint');
     }
@@ -219,7 +231,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: AI Analysis starting
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Starting AI analysis (' . count($issues) . ' issues)...', 30, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Starting AI analysis (' . count($issues) . ' issues)...', 30, 'running');
     }
 
     // Initialize Claude client and analyzers
@@ -253,7 +265,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
     if ($isPro || Flight::canAccessFeature(\app\services\TierFeatures::FEATURE_CLARITY_ANALYSIS)) {
         $imageNote = $includeImages ? ' (with image analysis)' : '';
         if ($jobId) {
-            AnalysisStatusService::updateStatus($jobId, 'Analyzing ticket clarity' . $imageNote . '...', 50, 'running');
+            AnalysisStatusService::updateStatus($memberId, $jobId, 'Analyzing ticket clarity' . $imageNote . '...', 50, 'running');
         }
 
         $clarityResult = $clarityAnalyzer->analyzeWithCache(
@@ -270,7 +282,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Priority analysis
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Generating priority recommendations...', 70, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Generating priority recommendations...', 70, 'running');
     }
 
     // Run priority analysis
@@ -285,7 +297,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     if (!$priorityResult['success']) {
         if ($jobId) {
-            AnalysisStatusService::fail($jobId, 'Priority analysis failed: ' . ($priorityResult['error'] ?? 'Unknown error'));
+            AnalysisStatusService::fail($memberId, $jobId, 'Priority analysis failed: ' . ($priorityResult['error'] ?? 'Unknown error'));
         }
         throw new Exception('Analysis failed: ' . ($priorityResult['error'] ?? 'Unknown error'));
     }
@@ -302,7 +314,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Generating report
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Generating report...', 85, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Generating report...', 85, 'running');
     }
 
     // Get Jira site URL for creating ticket links
@@ -318,7 +330,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Saving results
     if ($jobId) {
-        AnalysisStatusService::updateStatus($jobId, 'Saving analysis results...', 95, 'running');
+        AnalysisStatusService::updateStatus($memberId, $jobId, 'Saving analysis results...', 95, 'running');
     }
 
     // Store results
@@ -335,7 +347,7 @@ function runAnalysis(int $memberId, int $boardId, ?string $jobId, ?string $statu
 
     // Update status: Complete
     if ($jobId) {
-        AnalysisStatusService::complete($jobId, $analysisId);
+        AnalysisStatusService::complete($memberId, $jobId, $analysisId);
     }
 
     if ($verbose) {

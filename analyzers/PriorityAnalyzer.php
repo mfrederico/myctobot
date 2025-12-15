@@ -18,12 +18,21 @@ class PriorityAnalyzer {
 
     /**
      * Generate daily prioritized task list
+     *
+     * @param array $issues Jira issues to analyze
+     * @param array|null $estimations Optional estimation data
+     * @param array|null $clarifications Optional clarification data
+     * @param array|null $similarities Optional similarity groupings
+     * @param array|null $weights Priority weight configuration (Pro feature)
+     * @param array|null $goals Engineering goals (Pro feature)
      */
     public function generateDailyPriorities(
         array $issues,
         ?array $estimations = null,
         ?array $clarifications = null,
-        ?array $similarities = null
+        ?array $similarities = null,
+        ?array $weights = null,
+        ?array $goals = null
     ): array {
         // Prepare comprehensive issue data
         $issueData = [];
@@ -55,8 +64,8 @@ class PriorityAnalyzer {
             // Add clarification status if available
             if ($clarifications) {
                 foreach ($clarifications as $clar) {
-                    if ($clar['key'] === $key && $clar['success']) {
-                        $data['needs_clarification'] = $clar['needs_clarification'];
+                    if (($clar['key'] ?? '') === $key && ($clar['success'] ?? false)) {
+                        $data['needs_clarification'] = $clar['needs_clarification'] ?? false;
                         $data['clarity_score'] = $clar['clarification']['clarity_score'] ?? null;
                         break;
                     }
@@ -64,6 +73,86 @@ class PriorityAnalyzer {
             }
 
             $issueData[$key] = $data;
+        }
+
+        // Build dynamic weight instructions
+        $weightInstructions = "";
+        if ($weights && is_array($weights)) {
+            $activeWeights = [];
+            if (!empty($weights['quick_wins']['enabled'])) {
+                $activeWeights[] = "- **Quick Wins** ({$weights['quick_wins']['value']}% weight): Favor low-effort, high-impact tasks that can be completed quickly";
+            }
+            if (!empty($weights['synergy']['enabled'])) {
+                $activeWeights[] = "- **Task Synergy** ({$weights['synergy']['value']}% weight): Group related tasks together to reduce context switching";
+            }
+            if (!empty($weights['customer']['enabled'])) {
+                $activeWeights[] = "- **Customer Directed** ({$weights['customer']['value']}% weight): Prioritize customer-facing work and features";
+            }
+            if (!empty($weights['design']['enabled'])) {
+                $activeWeights[] = "- **Design Directed** ({$weights['design']['value']}% weight): Prioritize design/UX improvements and polish";
+            }
+            if (!empty($weights['tech_debt']['enabled'])) {
+                $activeWeights[] = "- **Technical Debt** ({$weights['tech_debt']['value']}% weight): Allocate time for paying down technical debt";
+            }
+            if (!empty($weights['risk']['enabled'])) {
+                $activeWeights[] = "- **Risk Mitigation** ({$weights['risk']['value']}% weight): Prioritize tasks that reduce project risk or blockers";
+            }
+
+            if (!empty($activeWeights)) {
+                $weightInstructions = "\n\n## CUSTOM PRIORITY WEIGHTS (Apply these when ranking tasks)\n" . implode("\n", $activeWeights);
+            }
+        }
+
+        // Build goals context
+        $goalsContext = "";
+        if ($goals && is_array($goals)) {
+            $goalsList = [];
+            if (!empty($goals['velocity'])) {
+                $goalsList[] = "- Sprint Velocity Target: {$goals['velocity']} story points";
+            }
+            if (!empty($goals['debt_reduction'])) {
+                $goalsList[] = "- Tech Debt Allocation: {$goals['debt_reduction']}% of sprint capacity";
+            }
+            if (!empty($goals['predictability'])) {
+                $goalsList[] = "- Delivery Predictability Target: {$goals['predictability']}%";
+            }
+
+            // Team capacity details
+            if (!empty($goals['fte_count'])) {
+                $fteCount = $goals['fte_count'];
+                $sprintDays = $goals['sprint_days'] ?? 10;
+                $hoursPerDay = $goals['hours_per_day'] ?? 8;
+                $productivity = $goals['productivity'] ?? 70;
+                $capacity = $goals['capacity'] ?? 0;
+
+                $goalsList[] = "- Team Size: {$fteCount} FTEs (full-time equivalent engineers)";
+                $goalsList[] = "- Sprint Length: {$sprintDays} working days";
+                $goalsList[] = "- Available Capacity: {$capacity} productive hours this sprint ({$productivity}% of {$fteCount} × {$hoursPerDay}hrs × {$sprintDays} days)";
+
+                // Add capacity guidance
+                $hoursPerPoint = !empty($goals['velocity']) && $goals['velocity'] > 0
+                    ? round($capacity / $goals['velocity'], 1)
+                    : null;
+
+                if ($hoursPerPoint) {
+                    $goalsList[] = "- Estimated: ~{$hoursPerPoint} hours per story point based on velocity target";
+                }
+            } elseif (!empty($goals['capacity'])) {
+                $goalsList[] = "- Team Capacity: {$goals['capacity']} hours/sprint";
+            }
+
+            if (!empty($goals['clarity_threshold'])) {
+                $goalsList[] = "- Clarity Threshold: {$goals['clarity_threshold']}/10 (tickets below this need clarification)";
+            }
+
+            if (!empty($goalsList)) {
+                $goalsContext = "\n\n## ENGINEERING GOALS (Consider these when making recommendations)\n" . implode("\n", $goalsList);
+
+                // Add capacity warning if over-committed
+                if (!empty($goals['velocity']) && !empty($goals['capacity'])) {
+                    $goalsContext .= "\n\nWhen analyzing capacity, warn if the planned work appears to exceed available hours.";
+                }
+            }
         }
 
         $systemPrompt = <<<PROMPT
@@ -84,6 +173,7 @@ Also consider:
 - Tasks that need clarification might need to be deprioritized until clarified
 - Similar tasks could be batched together for efficiency
 - Balance quick wins with important larger tasks
+{$weightInstructions}{$goalsContext}
 PROMPT;
 
         // Format issue data for Claude
@@ -162,11 +252,51 @@ MSG;
 
         try {
             $analysis = $this->claude->chatJson($systemPrompt, $userMessage);
+
+            // Build configuration context for transparency
+            $configContext = [
+                'weights_applied' => [],
+                'goals_applied' => [],
+                'system_prompt_used' => $systemPrompt
+            ];
+
+            // Document which weights were active
+            if ($weights && is_array($weights)) {
+                foreach (['quick_wins', 'synergy', 'customer', 'design', 'tech_debt', 'risk'] as $key) {
+                    if (!empty($weights[$key]['enabled'])) {
+                        $configContext['weights_applied'][$key] = $weights[$key]['value'] . '%';
+                    }
+                }
+            }
+
+            // Document which goals were set
+            if ($goals && is_array($goals)) {
+                if (!empty($goals['velocity'])) {
+                    $configContext['goals_applied']['velocity'] = $goals['velocity'] . ' story points';
+                }
+                if (!empty($goals['debt_reduction'])) {
+                    $configContext['goals_applied']['debt_reduction'] = $goals['debt_reduction'] . '%';
+                }
+                if (!empty($goals['predictability'])) {
+                    $configContext['goals_applied']['predictability'] = $goals['predictability'] . '%';
+                }
+                if (!empty($goals['fte_count'])) {
+                    $configContext['goals_applied']['team_size'] = $goals['fte_count'] . ' FTEs';
+                }
+                if (!empty($goals['capacity'])) {
+                    $configContext['goals_applied']['capacity'] = $goals['capacity'] . ' hours';
+                }
+                if (!empty($goals['clarity_threshold'])) {
+                    $configContext['goals_applied']['clarity_threshold'] = $goals['clarity_threshold'] . '/10';
+                }
+            }
+
             return [
                 'success' => true,
                 'date' => date('Y-m-d'),
                 'analysis' => $analysis,
                 'issue_count' => count($issues),
+                'config_context' => $configContext,
             ];
         } catch (\Exception $e) {
             return [

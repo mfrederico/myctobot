@@ -11,6 +11,8 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\UserDatabaseService;
+use \app\services\SubscriptionService;
+use \app\services\TierFeatures;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
@@ -107,6 +109,57 @@ class Settings extends BaseControls\Control {
         $this->userDb->setSetting('digest_enabled', $digestEnabled ? '1' : '0');
 
         $this->jsonSuccess([], 'Notification preferences updated');
+    }
+
+    /**
+     * Subscription management page
+     */
+    public function subscription() {
+        if (!$this->requireLogin()) return;
+
+        $request = Flight::request();
+
+        // Handle POST actions (upgrade/downgrade)
+        if ($request->method === 'POST') {
+            $action = $this->getParam('action');
+
+            if ($action === 'upgrade') {
+                SubscriptionService::stubUpgrade($this->member->id);
+                $this->flash('success', 'Upgraded to Pro! Enjoy your new features.');
+            } elseif ($action === 'downgrade') {
+                SubscriptionService::stubDowngrade($this->member->id);
+                $this->flash('info', 'Downgraded to Free tier.');
+            }
+
+            Flight::redirect('/settings/subscription');
+            return;
+        }
+
+        // Get current subscription info
+        $currentTier = SubscriptionService::getTier($this->member->id);
+        $subscription = SubscriptionService::getSubscription($this->member->id);
+        $tierInfo = SubscriptionService::getTierInfo($currentTier);
+
+        // Get board count for context
+        $boardCount = 0;
+        if ($this->initUserDb()) {
+            $boards = $this->userDb->getBoards();
+            $boardCount = count($boards);
+        }
+
+        // Get feature access
+        $features = TierFeatures::getFeatures($currentTier);
+        $limits = TierFeatures::getLimits($currentTier);
+
+        $this->render('settings/subscription', [
+            'title' => 'Subscription',
+            'currentTier' => $currentTier,
+            'subscription' => $subscription,
+            'tierInfo' => $tierInfo,
+            'boardCount' => $boardCount,
+            'features' => $features,
+            'limits' => $limits
+        ]);
     }
 
     /**

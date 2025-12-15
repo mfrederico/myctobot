@@ -54,6 +54,14 @@
             <!-- Right Side Menu -->
             <ul class="navbar-nav ms-auto">
                 <?php if ($isLoggedIn ?? false): ?>
+                    <?php if (!($member && $member->isPro())): ?>
+                        <!-- GO PRO Button -->
+                        <li class="nav-item me-2">
+                            <a class="btn btn-warning btn-sm" href="/settings/subscription">
+                                <i class="bi bi-star-fill"></i> GO PRO
+                            </a>
+                        </li>
+                    <?php endif; ?>
                     <!-- User Dropdown -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">

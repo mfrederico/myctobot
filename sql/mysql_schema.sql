@@ -81,6 +81,25 @@ CREATE TABLE IF NOT EXISTS system_settings (
     updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Subscription/tier management (no underscore for RedBeanPHP compatibility)
+CREATE TABLE IF NOT EXISTS subscription (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL UNIQUE,
+    tier VARCHAR(20) NOT NULL DEFAULT 'free',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    stripe_customer_id VARCHAR(255),
+    stripe_subscription_id VARCHAR(255),
+    current_period_start DATETIME,
+    current_period_end DATETIME,
+    trial_ends_at DATETIME,
+    cancelled_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES member(id) ON DELETE CASCADE,
+    INDEX idx_subscription_tier (tier),
+    INDEX idx_subscription_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Insert default public user for guest permissions
 INSERT INTO member (id, username, email, password, display_name, level, status)
 VALUES (1, 'public', 'public@system.local', '', 'Public User', 101, 'system')

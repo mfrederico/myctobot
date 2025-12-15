@@ -18,6 +18,7 @@
         "monolog/monolog": "^3.5",
         "nesbot/carbon": "^3.1",
         "paragonie/anti-csrf": "^2.3",
+        "stripe/stripe-php": "^19.0",
         "vlucas/phpdotenv": "^5.5"
     },
     "require-dev": {
@@ -35,7 +36,9 @@
         "psr-4": {
             "app\\": "controls/",
             "app\\Models\\": "models/",
-            "app\\BaseControls\\": "controls/BaseControls/"
+            "app\\BaseControls\\": "controls/BaseControls/",
+            "app\\services\\": "services/",
+            "app\\analyzers\\": "analyzers/"
         },
         "files": [
             "lib/FlightMap.php",

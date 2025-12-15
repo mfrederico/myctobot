@@ -332,12 +332,19 @@ class PermissionCache {
         }
 
         try {
-            Flight::get('log')->info("PermissionCache: Auto-creating permission for {$control}->{$method}");
+            // Use logged-in user's level if available, otherwise default to MEMBER level
+            // This ensures auto-generated routes require at least the access level of the first user to access them
+            $userLevel = LEVELS['MEMBER']; // Default to member level (100)
+            if (isset($_SESSION['member']['level'])) {
+                $userLevel = (int)$_SESSION['member']['level'];
+            }
+
+            Flight::get('log')->info("PermissionCache: Auto-creating permission for {$control}->{$method} with level {$userLevel}");
 
             $auth = R::dispense('authcontrol');
             $auth->control = $control;
             $auth->method = $method;
-            $auth->level = LEVELS['ADMIN']; // Default to admin level
+            $auth->level = $userLevel;
             $auth->description = "Auto-generated permission for {$control}::{$method}";
             $auth->validcount = 0;
             $auth->created_at = date('Y-m-d H:i:s');
@@ -346,7 +353,7 @@ class PermissionCache {
             // Add to local cache immediately
             $key = strtolower("{$control}::{$method}");
             if (self::$localCache !== null) {
-                self::$localCache[$key] = LEVELS['ADMIN'];
+                self::$localCache[$key] = $userLevel;
             }
 
             // Clear APCu to force reload on next request

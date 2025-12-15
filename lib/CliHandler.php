@@ -43,7 +43,8 @@ class CliHandler {
         $this->parseOptions();
         
         // Validate required options for command execution
-        if ($this->argc > 1 && !$this->isConfigOnly()) {
+        // Skip validation if --script mode (standalone scripts handle their own routing)
+        if ($this->argc > 1 && !$this->isConfigOnly() && !$this->isScriptMode()) {
             if (!isset($this->options['control'])) {
                 $this->error("Controller (--control) is required for CLI execution");
             }
@@ -79,6 +80,7 @@ class CliHandler {
             "json:",       // JSON parameters
             "cron",        // Cron mode (suppress output)
             "verbose",     // Verbose output
+            "script",      // Standalone script mode (skip controller routing)
         ];
         
         // Try getopt first
@@ -101,6 +103,8 @@ class CliHandler {
                     $options['cron'] = true;
                 } elseif ($arg === '--verbose') {
                     $options['verbose'] = true;
+                } elseif ($arg === '--script') {
+                    $options['script'] = true;
                 }
             }
         }
@@ -199,12 +203,19 @@ class CliHandler {
     public function isCronMode() {
         return isset($this->options['cron']);
     }
-    
+
     /**
      * Check if verbose mode
      */
     public function isVerbose() {
         return isset($this->options['verbose']);
+    }
+
+    /**
+     * Check if running in script mode (standalone scripts, skip controller routing)
+     */
+    public function isScriptMode() {
+        return isset($this->options['script']);
     }
     
     /**

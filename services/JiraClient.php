@@ -84,7 +84,7 @@ class JiraClient {
         $startAt = 0;
         $maxResults = 50;
 
-        $fields = 'summary,description,status,priority,assignee,reporter,created,updated,issuetype,labels,customfield_10016,comment';
+        $fields = 'summary,description,status,priority,assignee,reporter,created,updated,issuetype,labels,customfield_10016,comment,attachment';
 
         do {
             $response = $this->client->get($this->baseUrl . '/search/jql', [
@@ -196,5 +196,123 @@ class JiraClient {
      */
     public function getCloudId(): string {
         return $this->cloudId;
+    }
+
+    /**
+     * Get image attachments from an issue
+     * Returns array of image info with base64 data
+     *
+     * @param array $issue Issue data with 'fields' containing 'attachment'
+     * @param int $maxImages Maximum images to fetch (default 3)
+     * @param int $maxSizeKb Maximum image size in KB (default 1024 = 1MB)
+     * @return array Array of ['filename' => string, 'mimeType' => string, 'base64' => string]
+     */
+    public function getIssueImages(array $issue, int $maxImages = 3, int $maxSizeKb = 1024): array {
+        $attachments = $issue['fields']['attachment'] ?? [];
+        if (empty($attachments)) {
+            return [];
+        }
+
+        // Filter to only image attachments
+        $imageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+        $images = [];
+
+        foreach ($attachments as $attachment) {
+            if (count($images) >= $maxImages) {
+                break;
+            }
+
+            $mimeType = $attachment['mimeType'] ?? '';
+            $size = $attachment['size'] ?? 0;
+
+            // Check if it's an image and within size limit
+            if (!in_array($mimeType, $imageTypes)) {
+                continue;
+            }
+
+            if ($size > ($maxSizeKb * 1024)) {
+                continue; // Skip images that are too large
+            }
+
+            // Download the image
+            $imageData = $this->downloadAttachment($attachment['content'] ?? '');
+            if ($imageData) {
+                $images[] = [
+                    'filename' => $attachment['filename'] ?? 'image',
+                    'mimeType' => $mimeType,
+                    'base64' => base64_encode($imageData),
+                    'size' => $size
+                ];
+            }
+        }
+
+        return $images;
+    }
+
+    /**
+     * Download an attachment from Jira
+     *
+     * @param string $url Attachment URL
+     * @return string|null Binary image data or null on failure
+     */
+    private function downloadAttachment(string $url): ?string {
+        if (empty($url)) {
+            return null;
+        }
+
+        try {
+            $response = $this->client->get($url);
+            return $response->getBody()->getContents();
+        } catch (\Exception $e) {
+            // Log error but don't fail the whole analysis
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to download Jira attachment', [
+                    'url' => $url,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Extract image URLs from ADF content (inline images)
+     * These are images embedded in the description, not attachments
+     *
+     * @param array|null $adf ADF content
+     * @return array Array of image URLs
+     */
+    public static function extractImagesFromAdf($adf): array {
+        if (empty($adf) || !is_array($adf) || !isset($adf['content'])) {
+            return [];
+        }
+
+        $images = [];
+        self::findImagesInContent($adf['content'], $images);
+        return $images;
+    }
+
+    private static function findImagesInContent(array $content, array &$images): void {
+        foreach ($content as $block) {
+            if (isset($block['type']) && $block['type'] === 'mediaSingle') {
+                // Found a media block
+                if (isset($block['content'])) {
+                    foreach ($block['content'] as $media) {
+                        if (isset($media['type']) && $media['type'] === 'media') {
+                            $images[] = [
+                                'id' => $media['attrs']['id'] ?? null,
+                                'collection' => $media['attrs']['collection'] ?? null,
+                                'type' => $media['attrs']['type'] ?? 'file'
+                            ];
+                        }
+                    }
+                }
+            }
+
+            // Recurse into nested content
+            if (isset($block['content'])) {
+                self::findImagesInContent($block['content'], $images);
+            }
+        }
     }
 }

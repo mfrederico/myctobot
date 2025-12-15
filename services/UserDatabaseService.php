@@ -52,19 +52,49 @@ class UserDatabaseService {
      * Run database migrations for schema updates
      */
     private function runMigrations() {
-        // Add digest_cc column if it doesn't exist
+        // Get current columns in jira_boards
         $result = $this->db->query("PRAGMA table_info(jira_boards)");
-        $hasDigestCc = false;
+        $columns = [];
         while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
-            if ($col['name'] === 'digest_cc') {
-                $hasDigestCc = true;
-                break;
-            }
+            $columns[$col['name']] = true;
         }
 
-        if (!$hasDigestCc) {
+        // Add digest_cc column if it doesn't exist
+        if (!isset($columns['digest_cc'])) {
             $this->db->exec("ALTER TABLE jira_boards ADD COLUMN digest_cc TEXT DEFAULT ''");
         }
+
+        // Add priority_weights column if it doesn't exist
+        if (!isset($columns['priority_weights'])) {
+            $this->db->exec("ALTER TABLE jira_boards ADD COLUMN priority_weights TEXT");
+        }
+
+        // Add goals column if it doesn't exist
+        if (!isset($columns['goals'])) {
+            $this->db->exec("ALTER TABLE jira_boards ADD COLUMN goals TEXT");
+        }
+
+        // Create ticket_analysis_cache table if it doesn't exist
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS ticket_analysis_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL,
+                issue_key TEXT NOT NULL,
+                content_hash TEXT NOT NULL,
+                clarity_score INTEGER,
+                clarity_analysis TEXT,
+                reporter_name TEXT,
+                reporter_email TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT,
+                UNIQUE(board_id, issue_key),
+                FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+            )
+        ");
+
+        // Create indexes for ticket_analysis_cache
+        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticket_analysis_cache(board_id)");
+        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticket_analysis_cache(content_hash)");
     }
 
     /**
@@ -242,6 +272,7 @@ class UserDatabaseService {
         $allowedFields = [
             'board_name', 'project_key', 'board_type', 'enabled',
             'digest_enabled', 'digest_time', 'digest_cc', 'timezone', 'status_filter',
+            'priority_weights', 'goals',
             'last_analysis_at', 'last_digest_at'
         ];
 
@@ -626,6 +657,148 @@ class UserDatabaseService {
         $stats['recent_analyses'] = $this->getAllRecentAnalyses(5);
 
         return $stats;
+    }
+
+    // ==================== Ticket Analysis Cache ====================
+
+    /**
+     * Get cached analysis for a ticket
+     *
+     * @param int $boardId Board ID
+     * @param string $issueKey Issue key (e.g., "PROJ-123")
+     * @return array|null
+     */
+    public function getTicketAnalysisCache($boardId, $issueKey) {
+        $stmt = $this->db->prepare("
+            SELECT * FROM ticket_analysis_cache
+            WHERE board_id = :board_id AND issue_key = :issue_key
+        ");
+        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        $result = $stmt->execute();
+
+        $row = $result->fetchArray(SQLITE3_ASSOC);
+        if ($row && $row['clarity_analysis']) {
+            $row['clarity_analysis'] = json_decode($row['clarity_analysis'], true);
+        }
+
+        return $row ?: null;
+    }
+
+    /**
+     * Set cached analysis for a ticket
+     *
+     * @param int $boardId Board ID
+     * @param string $issueKey Issue key
+     * @param string $contentHash Hash of ticket content
+     * @param array $data Analysis data (clarity_score, clarity_analysis, reporter_name, reporter_email)
+     * @return bool
+     */
+    public function setTicketAnalysisCache($boardId, $issueKey, $contentHash, $data) {
+        $stmt = $this->db->prepare("
+            INSERT OR REPLACE INTO ticket_analysis_cache (
+                board_id, issue_key, content_hash, clarity_score, clarity_analysis,
+                reporter_name, reporter_email, updated_at
+            ) VALUES (
+                :board_id, :issue_key, :content_hash, :clarity_score, :clarity_analysis,
+                :reporter_name, :reporter_email, :updated_at
+            )
+        ");
+
+        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        $stmt->bindValue(':content_hash', $contentHash, SQLITE3_TEXT);
+        $stmt->bindValue(':clarity_score', $data['clarity_score'] ?? null, SQLITE3_INTEGER);
+        $stmt->bindValue(':clarity_analysis', isset($data['clarity_analysis']) ? json_encode($data['clarity_analysis']) : null, SQLITE3_TEXT);
+        $stmt->bindValue(':reporter_name', $data['reporter_name'] ?? null, SQLITE3_TEXT);
+        $stmt->bindValue(':reporter_email', $data['reporter_email'] ?? null, SQLITE3_TEXT);
+        $stmt->bindValue(':updated_at', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+
+        return $stmt->execute() !== false;
+    }
+
+    /**
+     * Check if ticket needs re-analysis based on content hash
+     *
+     * @param int $boardId Board ID
+     * @param string $issueKey Issue key
+     * @param string $newHash New content hash
+     * @return bool True if re-analysis needed
+     */
+    public function shouldReanalyzeTicket($boardId, $issueKey, $newHash) {
+        $cached = $this->getTicketAnalysisCache($boardId, $issueKey);
+
+        if (!$cached) {
+            return true; // No cache exists
+        }
+
+        return $cached['content_hash'] !== $newHash;
+    }
+
+    /**
+     * Get all cached analyses for a board
+     *
+     * @param int $boardId Board ID
+     * @return array
+     */
+    public function getAllTicketAnalysisCache($boardId) {
+        $stmt = $this->db->prepare("
+            SELECT * FROM ticket_analysis_cache
+            WHERE board_id = :board_id
+            ORDER BY issue_key ASC
+        ");
+        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+
+        $caches = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            if ($row['clarity_analysis']) {
+                $row['clarity_analysis'] = json_decode($row['clarity_analysis'], true);
+            }
+            $caches[$row['issue_key']] = $row;
+        }
+
+        return $caches;
+    }
+
+    /**
+     * Clear old ticket analysis cache for a board
+     *
+     * @param int $boardId Board ID
+     * @param int $daysOld Delete entries older than this many days
+     * @return int Number of deleted records
+     */
+    public function clearOldTicketAnalysisCache($boardId, $daysOld = 30) {
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
+
+        $stmt = $this->db->prepare("
+            DELETE FROM ticket_analysis_cache
+            WHERE board_id = :board_id AND updated_at < :cutoff
+        ");
+        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
+        $stmt->bindValue(':cutoff', $cutoff, SQLITE3_TEXT);
+        $stmt->execute();
+
+        return $this->db->changes();
+    }
+
+    /**
+     * Generate content hash for a ticket
+     *
+     * @param array $issue Issue data from Jira
+     * @return string SHA256 hash
+     */
+    public static function generateTicketHash($issue) {
+        $fields = $issue['fields'] ?? [];
+        $content = json_encode([
+            'key' => $issue['key'] ?? '',
+            'summary' => $fields['summary'] ?? '',
+            'description' => $fields['description'] ?? '',
+            'status' => $fields['status']['name'] ?? '',
+            'priority' => $fields['priority']['name'] ?? '',
+        ]);
+
+        return hash('sha256', $content);
     }
 
     // ==================== Helpers ====================

@@ -4,8 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
-    <title><?= htmlspecialchars($title ?? 'App') ?></title>
-    
+    <title><?= htmlspecialchars($title ?? 'MyCTOBot - AI Sprint Intelligence') ?></title>
+
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'AI-powered daily sprint digests for Jira') ?>">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="<?= htmlspecialchars(Flight::get('social.og_type') ?? 'website') ?>">
+    <meta property="og:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? 'https://myctobot.ai') ?>">
+    <meta property="og:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? 'MyCTOBot - AI-Powered Sprint Intelligence') ?>">
+    <meta property="og:description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'Replace your $275K CTO with AI') ?>">
+    <meta property="og:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? 'https://myctobot.ai/images/og-preview.png') ?>">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="<?= htmlspecialchars(Flight::get('social.twitter_card') ?? 'summary_large_image') ?>">
+    <meta name="twitter:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? 'https://myctobot.ai') ?>">
+    <meta name="twitter:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? 'MyCTOBot - AI-Powered Sprint Intelligence') ?>">
+    <meta name="twitter:description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'Replace your $275K CTO with AI') ?>">
+    <meta name="twitter:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? 'https://myctobot.ai/images/og-preview.png') ?>">
+    <?php if (Flight::get('social.twitter_site')): ?>
+    <meta name="twitter:site" content="<?= htmlspecialchars(Flight::get('social.twitter_site')) ?>">
+    <?php endif; ?>
+
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     

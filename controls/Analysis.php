@@ -14,14 +14,18 @@ use \app\services\UserDatabaseService;
 use \app\services\JiraClient;
 use \app\services\ClaudeClient;
 use \app\services\MailgunService;
+use \app\services\AnalysisStatusService;
 use \app\analyzers\PriorityAnalyzer;
+use \app\analyzers\ClarityAnalyzer;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/JiraClient.php';
 require_once __DIR__ . '/../services/ClaudeClient.php';
 require_once __DIR__ . '/../services/MailgunService.php';
+require_once __DIR__ . '/../services/AnalysisStatusService.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
+require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
 
 class Analysis extends BaseControls\Control {
 
@@ -62,7 +66,7 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Run analysis on a specific board
+     * Run analysis on a specific board (triggers background job)
      */
     public function run($params = []) {
         if (!$this->requireLogin()) return;
@@ -90,67 +94,130 @@ class Analysis extends BaseControls\Control {
         // Show run form on GET
         $request = Flight::request();
         if ($request->method === 'GET') {
+            // Check for any active jobs for this board
+            $activeJobs = AnalysisStatusService::getActiveJobs($this->member->id);
+            $boardActiveJob = null;
+            foreach ($activeJobs as $job) {
+                if ($job['board_id'] == $boardId) {
+                    $boardActiveJob = $job;
+                    break;
+                }
+            }
+
             $this->render('analysis/run', [
                 'title' => 'Run Analysis - ' . $board['board_name'],
-                'board' => $board
+                'board' => $board,
+                'activeJob' => $boardActiveJob
             ]);
             return;
         }
 
-        // Run analysis on POST
+        // Run analysis on POST - trigger background job
         try {
             // Get status filter from form or board defaults
             $statusFilter = $this->getParam('status_filter') ?? $board['status_filter'] ?? 'To Do';
-            $statusArray = array_map('trim', explode(',', $statusFilter));
 
-            // Initialize Jira client
-            $jiraClient = new JiraClient($this->member->id, $board['cloud_id']);
+            // Create a job for status tracking
+            $jobId = AnalysisStatusService::createJob(
+                $this->member->id,
+                (int)$boardId,
+                $board['board_name']
+            );
 
-            // Fetch sprint issues using project key (uses standard Jira REST API with JQL)
-            $issues = $jiraClient->getCurrentSprintIssues($board['project_key'], $statusArray);
+            // Build the command to run in background
+            $scriptPath = realpath(__DIR__ . '/../scripts/cron-analysis.php');
+            $cmd = sprintf(
+                'php %s --script --member=%d --board=%d --job=%s --status-filter=%s > /dev/null 2>&1 &',
+                escapeshellarg($scriptPath),
+                $this->member->id,
+                (int)$boardId,
+                escapeshellarg($jobId),
+                escapeshellarg($statusFilter)
+            );
 
-            if (empty($issues)) {
-                $this->flash('warning', 'No issues found in the current sprint with the selected status filter');
-                Flight::redirect('/analysis/run/' . $boardId);
-                return;
-            }
+            // Execute in background
+            exec($cmd);
 
-            // Initialize Claude client and analyzer
-            $claudeClient = new ClaudeClient();
-            $priorityAnalyzer = new PriorityAnalyzer($claudeClient);
-
-            // Run priority analysis
-            $priorityResult = $priorityAnalyzer->generateDailyPriorities($issues);
-
-            if (!$priorityResult['success']) {
-                throw new Exception('Analysis failed: ' . ($priorityResult['error'] ?? 'Unknown error'));
-            }
-
-            // Get Jira site URL for creating ticket links
-            $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->member->id, $board['cloud_id']);
-
-            // Generate markdown report with Jira links
-            $markdown = $priorityAnalyzer->generateDailyLog($priorityResult, $jiraSiteUrl);
-
-            // Store results
-            $priorityResult['status_filter'] = $statusFilter;
-            $analysisId = $this->userDb->storeAnalysis($boardId, 'priorities', $priorityResult, $markdown);
-
-            $this->logger->info('Analysis completed', [
+            $this->logger->info('Background analysis started', [
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
-                'analysis_id' => $analysisId,
-                'issue_count' => count($issues)
+                'job_id' => $jobId
             ]);
 
-            $this->flash('success', 'Analysis completed successfully for ' . count($issues) . ' issues');
-            Flight::redirect('/analysis/view/' . $analysisId);
+            // Redirect to progress page
+            Flight::redirect('/analysis/progress/' . urlencode($jobId));
 
         } catch (Exception $e) {
-            $this->logger->error('Analysis failed: ' . $e->getMessage());
-            $this->flash('error', 'Analysis failed: ' . $e->getMessage());
+            $this->logger->error('Failed to start analysis: ' . $e->getMessage());
+            $this->flash('error', 'Failed to start analysis: ' . $e->getMessage());
             Flight::redirect('/analysis/run/' . $boardId);
         }
+    }
+
+    /**
+     * Show analysis progress page
+     */
+    public function progress($params = []) {
+        if (!$this->requireLogin()) return;
+
+        // Job ID comes from URL: /analysis/progress/{job_id}
+        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        if (!$jobId) {
+            $this->flash('error', 'No job specified');
+            Flight::redirect('/analysis');
+            return;
+        }
+
+        // Get status with ownership verification
+        $status = AnalysisStatusService::getStatus($jobId, $this->member->id);
+        if (!$status) {
+            $this->flash('error', 'Job not found or access denied');
+            Flight::redirect('/analysis');
+            return;
+        }
+
+        // If complete, redirect to the analysis view
+        if ($status['status'] === 'complete' && !empty($status['analysis_id'])) {
+            $this->flash('success', 'Analysis completed successfully!');
+            Flight::redirect('/analysis/view/' . $status['analysis_id']);
+            return;
+        }
+
+        // If failed, show error and redirect
+        if ($status['status'] === 'failed') {
+            $this->flash('error', 'Analysis failed: ' . ($status['error'] ?? 'Unknown error'));
+            Flight::redirect('/analysis');
+            return;
+        }
+
+        $this->render('analysis/progress', [
+            'title' => 'Analysis in Progress',
+            'jobId' => $jobId,
+            'status' => $status
+        ]);
+    }
+
+    /**
+     * Get analysis job status (AJAX endpoint)
+     */
+    public function status($params = []) {
+        if (!$this->requireLogin()) return;
+
+        // Job ID comes from URL: /analysis/status/{job_id}
+        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        if (!$jobId) {
+            $this->jsonError('No job specified');
+            return;
+        }
+
+        // Get status with ownership verification
+        $status = AnalysisStatusService::getStatus($jobId, $this->member->id);
+        if (!$status) {
+            $this->jsonError('Job not found or access denied');
+            return;
+        }
+
+        $this->jsonSuccess($status);
     }
 
     /**
@@ -304,5 +371,60 @@ class Analysis extends BaseControls\Control {
         $analyses = $this->userDb->getRecentAnalyses($boardId, $limit);
 
         $this->jsonSuccess(['analyses' => $analyses]);
+    }
+
+    /**
+     * Generate markdown section for clarification items
+     */
+    private function generateClarificationMarkdown(array $clarifications, ?string $jiraSiteUrl = null): string {
+        if (empty($clarifications)) {
+            return '';
+        }
+
+        $md = "\n\n## Tickets Needing Clarification\n\n";
+        $md .= "The following tickets have low clarity scores and may need stakeholder input before work can begin.\n\n";
+
+        foreach ($clarifications as $item) {
+            $ticketLink = $jiraSiteUrl
+                ? "[{$item['key']}](" . rtrim($jiraSiteUrl, '/') . '/browse/' . $item['key'] . ")"
+                : $item['key'];
+
+            $scoreClass = $item['clarity_score'] < 4 ? '🔴' : ($item['clarity_score'] < 6 ? '🟡' : '🟢');
+
+            $md .= "### {$scoreClass} {$ticketLink} - {$item['summary']}\n\n";
+            $md .= "| Attribute | Value |\n";
+            $md .= "|-----------|-------|\n";
+            $md .= "| Clarity Score | **{$item['clarity_score']}/10** |\n";
+            $md .= "| Reporter | {$item['reporter_name']} |\n";
+            if (!empty($item['reporter_email'])) {
+                $md .= "| Email | {$item['reporter_email']} |\n";
+            }
+            $md .= "| Type | {$item['type']} |\n";
+            $md .= "| Priority | {$item['priority']} |\n\n";
+
+            if (!empty($item['assessment'])) {
+                $md .= "**Assessment**: {$item['assessment']}\n\n";
+            }
+
+            if (!empty($item['missing_elements'])) {
+                $md .= "**Missing Elements**:\n";
+                foreach ($item['missing_elements'] as $element) {
+                    $md .= "- {$element}\n";
+                }
+                $md .= "\n";
+            }
+
+            if (!empty($item['suggested_questions'])) {
+                $md .= "**Suggested Questions for Stakeholder**:\n";
+                foreach ($item['suggested_questions'] as $question) {
+                    $md .= "- {$question}\n";
+                }
+                $md .= "\n";
+            }
+
+            $md .= "---\n\n";
+        }
+
+        return $md;
     }
 }

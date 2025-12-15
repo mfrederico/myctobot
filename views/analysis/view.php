@@ -43,6 +43,65 @@
             </div>
             <?php endif; ?>
 
+            <!-- Configuration Context (Why These Results) -->
+            <?php if (!empty($data['config_context'])): ?>
+            <div class="card mb-4 border-info">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-gear"></i> Analysis Configuration</span>
+                    <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="collapse" data-bs-target="#configDetails">
+                        <i class="bi bi-chevron-down"></i> Details
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <?php if (!empty($data['config_context']['weights_applied'])): ?>
+                        <div class="col-md-6">
+                            <h6><i class="bi bi-sliders"></i> Priority Weights Applied</h6>
+                            <ul class="list-unstyled mb-0">
+                                <?php foreach ($data['config_context']['weights_applied'] as $weight => $value): ?>
+                                <li>
+                                    <span class="badge bg-primary me-2"><?= htmlspecialchars($value) ?></span>
+                                    <?= htmlspecialchars(ucwords(str_replace('_', ' ', $weight))) ?>
+                                </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($data['config_context']['goals_applied'])): ?>
+                        <div class="col-md-6">
+                            <h6><i class="bi bi-bullseye"></i> Engineering Goals Applied</h6>
+                            <ul class="list-unstyled mb-0">
+                                <?php foreach ($data['config_context']['goals_applied'] as $goal => $value): ?>
+                                <li>
+                                    <span class="badge bg-success me-2"><?= htmlspecialchars($value) ?></span>
+                                    <?= htmlspecialchars(ucwords(str_replace('_', ' ', $goal))) ?>
+                                </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if (empty($data['config_context']['weights_applied']) && empty($data['config_context']['goals_applied'])): ?>
+                        <div class="col-12">
+                            <p class="text-muted mb-0">
+                                <i class="bi bi-info-circle"></i> No custom weights or goals configured.
+                                <a href="/boards/edit/<?= $board['id'] ?? '' ?>">Configure Pro settings</a> to customize prioritization.
+                            </p>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Collapsible System Prompt -->
+                    <div class="collapse mt-3" id="configDetails">
+                        <hr>
+                        <h6><i class="bi bi-cpu"></i> System Prompt Sent to AI</h6>
+                        <pre class="bg-dark text-light p-3 rounded" style="max-height: 400px; overflow-y: auto; font-size: 0.85rem; white-space: pre-wrap;"><?= htmlspecialchars($data['config_context']['system_prompt_used'] ?? 'Not available') ?></pre>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <!-- Parsed Analysis Data -->
             <?php if (!empty($data) && is_array($data)): ?>
             <div class="row mb-4">
@@ -88,6 +147,17 @@
                         <div class="card-body">
                             <h2 class="text-info"><?= count($data['recommendations']) ?></h2>
                             <p class="mb-0">Recommendations</p>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <?php if (!empty($data['clarifications_needed'])): ?>
+                <div class="col-md-3">
+                    <div class="card text-center border-secondary">
+                        <div class="card-body">
+                            <h2 class="text-secondary"><?= count($data['clarifications_needed']) ?></h2>
+                            <p class="mb-0">Need Clarification</p>
                         </div>
                     </div>
                 </div>
@@ -169,6 +239,91 @@
                         <li><?= htmlspecialchars($rec) ?></li>
                         <?php endforeach; ?>
                     </ul>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Tickets Needing Clarification -->
+            <?php if (!empty($data['clarifications_needed'])): ?>
+            <div class="card mb-4 border-secondary">
+                <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-question-circle"></i> Tickets Needing Clarification</span>
+                    <span class="badge bg-light text-dark"><?= count($data['clarifications_needed']) ?> ticket(s)</span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">
+                        <small>These tickets have low clarity scores and may need stakeholder input before work begins.</small>
+                    </p>
+
+                    <?php foreach ($data['clarifications_needed'] as $index => $item): ?>
+                    <div class="card mb-3 <?= $item['clarity_score'] < 4 ? 'border-danger' : ($item['clarity_score'] < 6 ? 'border-warning' : 'border-secondary') ?>">
+                        <div class="card-header d-flex justify-content-between align-items-center py-2">
+                            <div>
+                                <strong><?= htmlspecialchars($item['key']) ?></strong>
+                                <span class="text-muted">- <?= htmlspecialchars($item['summary'] ?? '') ?></span>
+                            </div>
+                            <span class="badge <?= \app\analyzers\ClarityAnalyzer::getClarityBadgeClass($item['clarity_score']) ?>">
+                                <?= $item['clarity_score'] ?>/10 - <?= \app\analyzers\ClarityAnalyzer::getClarityLevel($item['clarity_score']) ?>
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <small class="text-muted">Reporter:</small>
+                                    <div>
+                                        <i class="bi bi-person"></i>
+                                        <?= htmlspecialchars($item['reporter_name'] ?? 'Unknown') ?>
+                                        <?php if (!empty($item['reporter_email'])): ?>
+                                        <br><small class="text-muted">
+                                            <i class="bi bi-envelope"></i>
+                                            <a href="mailto:<?= htmlspecialchars($item['reporter_email']) ?>">
+                                                <?= htmlspecialchars($item['reporter_email']) ?>
+                                            </a>
+                                        </small>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">Type:</small>
+                                    <div><?= htmlspecialchars($item['type'] ?? 'Task') ?></div>
+                                </div>
+                                <div class="col-md-3">
+                                    <small class="text-muted">Priority:</small>
+                                    <div><?= htmlspecialchars($item['priority'] ?? 'Medium') ?></div>
+                                </div>
+                            </div>
+
+                            <?php if (!empty($item['assessment'])): ?>
+                            <div class="mb-3">
+                                <small class="text-muted">Assessment:</small>
+                                <p class="mb-0"><?= htmlspecialchars($item['assessment']) ?></p>
+                            </div>
+                            <?php endif; ?>
+
+                            <?php if (!empty($item['missing_elements'])): ?>
+                            <div class="mb-3">
+                                <small class="text-muted">Missing Elements:</small>
+                                <ul class="mb-0 ps-3">
+                                    <?php foreach ($item['missing_elements'] as $element): ?>
+                                    <li><span class="text-danger"><?= htmlspecialchars($element) ?></span></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                            <?php endif; ?>
+
+                            <?php if (!empty($item['suggested_questions'])): ?>
+                            <div class="mb-0">
+                                <small class="text-muted">Suggested Questions for Stakeholder:</small>
+                                <ul class="mb-0 ps-3">
+                                    <?php foreach ($item['suggested_questions'] as $question): ?>
+                                    <li class="text-primary"><?= htmlspecialchars($question) ?></li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
             <?php endif; ?>

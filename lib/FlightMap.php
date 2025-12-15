@@ -148,6 +148,39 @@ Flight::map('isLoggedIn', function() {
 });
 
 /**
+ * Check if user has Pro subscription tier
+ */
+Flight::map('isPro', function() {
+    if (!Flight::isLoggedIn()) {
+        return false;
+    }
+    $member = Flight::getMember();
+    return \app\services\SubscriptionService::isPro($member->id);
+});
+
+/**
+ * Check if user can access a specific feature
+ */
+Flight::map('canAccessFeature', function($feature) {
+    if (!Flight::isLoggedIn()) {
+        return false;
+    }
+    $member = Flight::getMember();
+    return \app\services\SubscriptionService::canAccessFeature($member->id, $feature);
+});
+
+/**
+ * Get user's subscription tier
+ */
+Flight::map('getTier', function() {
+    if (!Flight::isLoggedIn()) {
+        return 'free';
+    }
+    $member = Flight::getMember();
+    return \app\services\SubscriptionService::getTier($member->id);
+});
+
+/**
  * Check if user has permission level
  */
 Flight::map('hasLevel', function($requiredLevel) {

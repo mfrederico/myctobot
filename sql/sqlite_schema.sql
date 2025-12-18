@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS jira_boards (
     goals TEXT,
     last_analysis_at TEXT,
     last_digest_at TEXT,
+    -- AI Developer status transition settings (per-board)
+    -- Store the target status NAME (not ID) - we'll look up transition ID at runtime
+    aidev_status_working TEXT DEFAULT NULL,      -- Status when AI starts working (e.g., "In Progress")
+    aidev_status_pr_created TEXT DEFAULT NULL,   -- Status when PR is created (e.g., "Ready for QA")
+    aidev_status_clarification TEXT DEFAULT NULL, -- Status when clarification needed (e.g., "Blocked")
+    aidev_status_failed TEXT DEFAULT NULL,       -- Status on failure (null = don't change)
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
     UNIQUE(board_id, cloud_id)

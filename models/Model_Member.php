@@ -10,15 +10,39 @@ use \app\services\SubscriptionService;
 class Model_Member extends \RedBeanPHP\SimpleModel {
 
     /**
+     * Tier hierarchy for comparison (higher = more access)
+     */
+    private const TIER_HIERARCHY = [
+        'free' => 0,
+        'pro' => 1,
+        'enterprise' => 2
+    ];
+
+    /**
+     * Check if member has at least the specified tier level
+     *
+     * @param string $requiredTier The minimum tier required ('free', 'pro', 'enterprise')
+     * @return bool True if member's tier is >= required tier
+     */
+    public function hasTier(string $requiredTier): bool {
+        if (!$this->bean->id) {
+            return $requiredTier === 'free';
+        }
+
+        $memberTier = $this->getTier();
+        $memberLevel = self::TIER_HIERARCHY[$memberTier] ?? 0;
+        $requiredLevel = self::TIER_HIERARCHY[$requiredTier] ?? 0;
+
+        return $memberLevel >= $requiredLevel;
+    }
+
+    /**
      * Check if member has Pro tier or higher
      *
      * @return bool
      */
     public function isPro(): bool {
-        if (!$this->bean->id) {
-            return false;
-        }
-        return SubscriptionService::isPro($this->bean->id);
+        return $this->hasTier('pro');
     }
 
     /**
@@ -27,10 +51,7 @@ class Model_Member extends \RedBeanPHP\SimpleModel {
      * @return bool
      */
     public function isEnterprise(): bool {
-        if (!$this->bean->id) {
-            return false;
-        }
-        return SubscriptionService::isEnterprise($this->bean->id);
+        return $this->hasTier('enterprise');
     }
 
     /**

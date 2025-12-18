@@ -1,14 +1,23 @@
 #!/usr/bin/env php
 <?php
 /**
- * MyCTOBot Daily Digest Cron Job
+ * MyCTOBot Daily Digest Scheduler
  *
- * Run this script via cron every 15 minutes to process scheduled digests:
- * 0,15,30,45 * * * * php /path/to/myctobot/scripts/cron-digest.php
+ * Run this script via cron every 15 minutes to process scheduled digests.
+ * It checks each member's boards and runs analysis + sends email for boards
+ * that are due based on their configured digest_time and timezone.
  *
- * Options:
+ * CRONTAB:
+ * --------
+ * 0,15,30,45 * * * * cd /path/to/myctobot/scripts && php cron-digest.php --script --verbose >> ../log/cron.log 2>&1
+ *
+ * OPTIONS:
+ * --------
+ *   --script     REQUIRED for CLI execution
  *   --verbose    Show detailed output
  *   --dry-run    Check what would be sent without actually sending
+ *   --force      Send digests now, ignoring time window (for missed digests)
+ *   --help       Show this help message
  */
 
 // Determine paths
@@ -19,26 +28,32 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['verbose', 'dry-run', 'help']);
+$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'help']);
 
 if (isset($options['help'])) {
-    echo "MyCTOBot Daily Digest Processor\n\n";
-    echo "Usage: php cron-digest.php [options]\n\n";
+    echo "MyCTOBot Daily Digest Scheduler\n\n";
+    echo "Usage: php cron-digest.php --script [options]\n\n";
     echo "Options:\n";
+    echo "  --script     REQUIRED for standalone script mode\n";
     echo "  --verbose    Show detailed output\n";
     echo "  --dry-run    Check what would be sent without sending\n";
+    echo "  --force      Send digests now, ignoring time window\n";
     echo "  --help       Show this help message\n";
     exit(0);
 }
 
 $verbose = isset($options['verbose']);
 $dryRun = isset($options['dry-run']);
+$force = isset($options['force']);
 
 if ($verbose) {
-    echo "MyCTOBot Digest Processor\n";
+    echo "MyCTOBot Digest Scheduler\n";
     echo "=========================\n";
     echo "Time: " . date('Y-m-d H:i:s') . "\n";
-    echo "Base: {$baseDir}\n\n";
+    echo "Base: {$baseDir}\n";
+    if ($force) echo "Mode: FORCE (ignoring time windows)\n";
+    if ($dryRun) echo "Mode: DRY RUN\n";
+    echo "\n";
 }
 
 // Load vendor autoload first
@@ -49,8 +64,11 @@ require_once $baseDir . '/bootstrap.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\services\AnalysisService;
 
-// Initialize the application via Bootstrap
+// Load the service
+require_once $baseDir . '/services/AnalysisService.php';
+
 try {
     $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
 
@@ -58,49 +76,40 @@ try {
         echo "Application initialized\n\n";
     }
 
-    // Check if this is a dry run
-    if ($dryRun) {
-        echo "DRY RUN MODE - No emails will be sent\n\n";
+    // Process all members
+    $members = R::findAll('member', 'status = ?', ['active']);
+    $processedCount = 0;
+    $errorCount = 0;
 
-        // Just list what would be processed
-        $members = R::findAll('member', 'status = ?', ['active']);
-        $userDbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-
-        foreach ($members as $member) {
-            if (empty($member->ceobot_db)) continue;
-
-            $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
-            if (!file_exists($dbPath)) continue;
-
-            $userDb = new \SQLite3($dbPath);
-            $result = $userDb->query("SELECT * FROM jira_boards WHERE enabled = 1 AND digest_enabled = 1");
-
-            while ($board = $result->fetchArray(SQLITE3_ASSOC)) {
-                echo "Would process: {$member->email} - {$board['board_name']} ({$board['project_key']})\n";
-                echo "  Digest Time: {$board['digest_time']} ({$board['timezone']})\n";
-                echo "  Last Digest: " . ($board['last_digest_at'] ?? 'Never') . "\n\n";
-            }
-
-            $userDb->close();
+    foreach ($members as $member) {
+        if (empty($member->ceobot_db)) {
+            continue; // Skip members without database
         }
 
-        exit(0);
+        try {
+            $result = processMemberDigests($member, $verbose, $dryRun, $force);
+            $processedCount += $result['processed'];
+            $errorCount += $result['errors'];
+        } catch (\Exception $e) {
+            $errorCount++;
+            if ($verbose) {
+                echo "Error processing member {$member->id}: {$e->getMessage()}\n";
+            }
+            Flight::get('log')->error('Digest cron error for member', [
+                'member_id' => $member->id,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
-
-    // Process digests
-    require_once $baseDir . '/services/DigestService.php';
-
-    $digestService = new \app\services\DigestService($verbose);
-    $result = $digestService->processAllDigests();
 
     if ($verbose) {
         echo "\n=========================\n";
         echo "Processing complete!\n";
-        echo "Digests sent: {$result['processed']}\n";
-        echo "Errors: {$result['errors']}\n";
+        echo "Digests sent: {$processedCount}\n";
+        echo "Errors: {$errorCount}\n";
     }
 
-    exit($result['errors'] > 0 ? 1 : 0);
+    exit($errorCount > 0 ? 1 : 0);
 
 } catch (Exception $e) {
     $message = "FATAL ERROR: " . $e->getMessage();
@@ -110,9 +119,8 @@ try {
         echo "Stack trace:\n" . $e->getTraceAsString() . "\n";
     }
 
-    // Try to log if possible
     try {
-        $logger = Flight::log();
+        $logger = Flight::get('log');
         if ($logger) {
             $logger->error($message, ['trace' => $e->getTraceAsString()]);
         }
@@ -121,4 +129,153 @@ try {
     }
 
     exit(1);
+}
+
+/**
+ * Process digests for a single member
+ */
+function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force): array {
+    $userDbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
+    $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
+
+    if (!file_exists($dbPath)) {
+        return ['processed' => 0, 'errors' => 0];
+    }
+
+    $userDb = new \SQLite3($dbPath);
+    $result = $userDb->query("SELECT * FROM jira_boards WHERE enabled = 1 AND digest_enabled = 1");
+
+    $boards = [];
+    while ($board = $result->fetchArray(SQLITE3_ASSOC)) {
+        $boards[] = $board;
+    }
+    $userDb->close();
+
+    if (empty($boards)) {
+        return ['processed' => 0, 'errors' => 0];
+    }
+
+    if ($verbose) {
+        echo "Processing member {$member->id} ({$member->email}), " . count($boards) . " boards\n";
+    }
+
+    $processedCount = 0;
+    $errorCount = 0;
+
+    foreach ($boards as $board) {
+        if (shouldSendDigest($board, $force)) {
+            if ($verbose) {
+                echo "  -> Board: {$board['board_name']} ({$board['project_key']})\n";
+            }
+
+            if ($dryRun) {
+                echo "     [DRY RUN] Would send digest for {$board['board_name']}\n";
+                echo "     Digest Time: {$board['digest_time']} ({$board['timezone']})\n";
+                echo "     Last Digest: " . ($board['last_digest_at'] ?? 'Never') . "\n";
+                $processedCount++;
+                continue;
+            }
+
+            try {
+                // Use the unified AnalysisService
+                $service = new AnalysisService($member->id, $verbose);
+                $analysisResult = $service->runAnalysis((int)$board['id'], [
+                    'send_email' => true,
+                    'analysis_type' => 'digest'
+                ]);
+
+                if ($analysisResult['success']) {
+                    // Update last_digest_at in the board
+                    updateLastDigestTime($member, $board['id']);
+                    $processedCount++;
+
+                    if ($verbose) {
+                        echo "     Digest sent successfully\n";
+                    }
+                } else {
+                    $errorCount++;
+                    if ($verbose) {
+                        echo "     Analysis returned no success\n";
+                    }
+                }
+            } catch (\Exception $e) {
+                $errorCount++;
+                if ($verbose) {
+                    echo "     ERROR: {$e->getMessage()}\n";
+                }
+                Flight::get('log')->error('Board digest failed', [
+                    'member_id' => $member->id,
+                    'board_id' => $board['id'],
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    return ['processed' => $processedCount, 'errors' => $errorCount];
+}
+
+/**
+ * Check if it's time to send digest for a board
+ */
+function shouldSendDigest(array $board, bool $force): bool {
+    $digestTime = $board['digest_time'] ?? '08:00';
+    $timezone = $board['timezone'] ?? 'UTC';
+
+    try {
+        $tz = new \DateTimeZone($timezone);
+        $now = new \DateTime('now', $tz);
+
+        // Check if already sent today (always check this, even with --force)
+        $lastDigest = $board['last_digest_at'];
+        if ($lastDigest) {
+            $lastDigestDate = (new \DateTime($lastDigest, $tz))->format('Y-m-d');
+            $today = $now->format('Y-m-d');
+
+            if ($lastDigestDate === $today) {
+                return false; // Already sent today
+            }
+        }
+
+        // If force mode, skip time window check
+        if ($force) {
+            return true;
+        }
+
+        // Check if current time is within 15 minutes of digest time
+        $currentTime = $now->format('H:i');
+        $digestParts = explode(':', $digestTime);
+        $currentParts = explode(':', $currentTime);
+
+        $digestMinutes = ((int)$digestParts[0] * 60) + (int)($digestParts[1] ?? 0);
+        $currentMinutes = ((int)$currentParts[0] * 60) + (int)$currentParts[1];
+
+        $diff = abs($currentMinutes - $digestMinutes);
+
+        // Within 15 minute window
+        return $diff <= 15;
+
+    } catch (\Exception $e) {
+        Flight::get('log')->warning('Timezone error for board', [
+            'board_id' => $board['id'],
+            'timezone' => $timezone,
+            'error' => $e->getMessage()
+        ]);
+        return false;
+    }
+}
+
+/**
+ * Update the last_digest_at timestamp for a board
+ */
+function updateLastDigestTime($member, int $boardId): void {
+    $userDbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
+    $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
+
+    $userDb = new \SQLite3($dbPath);
+    $stmt = $userDb->prepare("UPDATE jira_boards SET last_digest_at = ? WHERE id = ?");
+    $stmt->bindValue(1, date('Y-m-d H:i:s'), SQLITE3_TEXT);
+    $stmt->bindValue(2, $boardId, SQLITE3_INTEGER);
+    $stmt->execute();
+    $userDb->close();
 }

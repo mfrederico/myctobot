@@ -562,6 +562,98 @@ class Auth extends BaseControls\Control {
             $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_status_filter', 'To Do')");
             $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_digest_time', '08:00')");
 
+            // Enterprise: Settings table for encrypted API keys and configuration
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS enterprise_settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT NOT NULL UNIQUE,
+                    setting_value TEXT NOT NULL,
+                    is_encrypted INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT
+                )
+            ");
+
+            // Enterprise: Git repository connections
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS repo_connections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    repo_owner TEXT NOT NULL,
+                    repo_name TEXT NOT NULL,
+                    default_branch TEXT DEFAULT 'main',
+                    clone_url TEXT NOT NULL,
+                    access_token TEXT,
+                    enabled INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    UNIQUE(provider, repo_owner, repo_name)
+                )
+            ");
+
+            // Enterprise: Board to repository mappings
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS board_repo_mappings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    board_id INTEGER NOT NULL,
+                    repo_connection_id INTEGER NOT NULL,
+                    is_default INTEGER DEFAULT 0,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(board_id, repo_connection_id),
+                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE CASCADE
+                )
+            ");
+
+            // Enterprise: AI Developer jobs (one record per Jira issue)
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS ai_dev_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_key TEXT NOT NULL UNIQUE,
+                    board_id INTEGER NOT NULL,
+                    repo_connection_id INTEGER,
+                    cloud_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    current_shard_job_id TEXT,
+                    branch_name TEXT,
+                    pr_url TEXT,
+                    pr_number INTEGER,
+                    clarification_comment_id TEXT,
+                    clarification_questions TEXT,
+                    error_message TEXT,
+                    run_count INTEGER DEFAULT 0,
+                    last_output TEXT,
+                    last_result_json TEXT,
+                    files_changed TEXT,
+                    commit_sha TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                )
+            ");
+
+            // Enterprise: AI Developer job logs
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS ai_dev_job_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL,
+                    log_level TEXT DEFAULT 'info',
+                    message TEXT NOT NULL,
+                    context_json TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            ");
+
+            // Enterprise indexes
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_provider ON repo_connections(provider)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_enabled ON repo_connections(enabled)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_mapping_board ON board_repo_mappings(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON ai_dev_job_logs(job_id)");
+
             $userDb->close();
 
             $this->logger->info('Created user database', [

@@ -110,7 +110,7 @@ class JiraClient {
     public function getIssue(string $issueKey): array {
         $response = $this->client->get($this->baseUrl . "/issue/{$issueKey}", [
             'query' => [
-                'fields' => 'summary,description,status,priority,assignee,reporter,created,updated,issuetype,labels,customfield_10016,comment,subtasks',
+                'fields' => 'summary,description,status,priority,assignee,reporter,created,updated,issuetype,labels,customfield_10016,comment,subtasks,attachment',
             ],
         ]);
 
@@ -314,5 +314,481 @@ class JiraClient {
                 self::findImagesInContent($block['content'], $images);
             }
         }
+    }
+
+    // ========================================
+    // Write Methods (Enterprise tier - requires write:jira-work scope)
+    // ========================================
+
+    /**
+     * Add a comment to an issue
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key (e.g., "PROJ-123")
+     * @param string $body Comment body in plain text (will be converted to ADF)
+     * @return array Comment data
+     */
+    public function addComment(string $issueKey, string $body): array {
+        // Convert plain text to ADF format
+        $adfBody = self::textToAdf($body);
+
+        $response = $this->client->post($this->baseUrl . "/issue/{$issueKey}/comment", [
+            'json' => [
+                'body' => $adfBody
+            ]
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Add a comment to an issue with ADF formatting
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param array $adfBody ADF formatted body
+     * @return array Comment data
+     */
+    public function addCommentAdf(string $issueKey, array $adfBody): array {
+        $response = $this->client->post($this->baseUrl . "/issue/{$issueKey}/comment", [
+            'json' => [
+                'body' => $adfBody
+            ]
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Update an existing comment
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $commentId Comment ID
+     * @param string $body New comment body
+     * @return array Updated comment data
+     */
+    public function updateComment(string $issueKey, string $commentId, string $body): array {
+        $adfBody = self::textToAdf($body);
+
+        $response = $this->client->put($this->baseUrl . "/issue/{$issueKey}/comment/{$commentId}", [
+            'json' => [
+                'body' => $adfBody
+            ]
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Delete a comment
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $commentId Comment ID
+     */
+    public function deleteComment(string $issueKey, string $commentId): void {
+        $this->client->delete($this->baseUrl . "/issue/{$issueKey}/comment/{$commentId}");
+    }
+
+    // ========================================
+    // Issue Transitions
+    // ========================================
+
+    /**
+     * Execute a transition on an issue by transition ID
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $transitionId Transition ID
+     * @param array $fields Optional fields to set during transition
+     * @return bool Success
+     */
+    public function doTransition(string $issueKey, string $transitionId, array $fields = []): bool {
+        $body = [
+            'transition' => ['id' => $transitionId]
+        ];
+
+        if (!empty($fields)) {
+            $body['fields'] = $fields;
+        }
+
+        $response = $this->client->post($this->baseUrl . "/issue/{$issueKey}/transitions", [
+            'json' => $body
+        ]);
+
+        return $response->getStatusCode() === 204;
+    }
+
+    /**
+     * Transition an issue to a target status by name
+     * Looks up the transition ID and executes it
+     *
+     * @param string $issueKey Issue key
+     * @param string $targetStatusName Target status name (e.g., "In Progress", "Ready for QA")
+     * @return array Result with 'success', 'message', 'from_status', 'to_status'
+     */
+    public function transitionToStatus(string $issueKey, string $targetStatusName): array {
+        try {
+            // Get current issue status for logging
+            $issue = $this->getIssue($issueKey, ['status']);
+            $currentStatus = $issue['fields']['status']['name'] ?? 'Unknown';
+
+            // If already in target status, skip
+            if (strcasecmp($currentStatus, $targetStatusName) === 0) {
+                return [
+                    'success' => true,
+                    'message' => 'Already in target status',
+                    'from_status' => $currentStatus,
+                    'to_status' => $targetStatusName,
+                    'skipped' => true
+                ];
+            }
+
+            // Get available transitions
+            $transitions = $this->getTransitions($issueKey);
+
+            // Find transition that leads to target status
+            $targetTransition = null;
+            foreach ($transitions as $transition) {
+                $toStatusName = $transition['to']['name'] ?? '';
+                if (strcasecmp($toStatusName, $targetStatusName) === 0) {
+                    $targetTransition = $transition;
+                    break;
+                }
+            }
+
+            if (!$targetTransition) {
+                // List available statuses for debugging
+                $availableStatuses = array_map(function($t) {
+                    return $t['to']['name'] ?? 'Unknown';
+                }, $transitions);
+
+                return [
+                    'success' => false,
+                    'message' => "Cannot transition to '{$targetStatusName}' from '{$currentStatus}'",
+                    'from_status' => $currentStatus,
+                    'to_status' => $targetStatusName,
+                    'available_statuses' => $availableStatuses
+                ];
+            }
+
+            // Execute the transition
+            $success = $this->doTransition($issueKey, $targetTransition['id']);
+
+            return [
+                'success' => $success,
+                'message' => $success ? 'Transition successful' : 'Transition failed',
+                'from_status' => $currentStatus,
+                'to_status' => $targetStatusName,
+                'transition_id' => $targetTransition['id'],
+                'transition_name' => $targetTransition['name']
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Error: ' . $e->getMessage(),
+                'from_status' => $currentStatus ?? 'Unknown',
+                'to_status' => $targetStatusName
+            ];
+        }
+    }
+
+    /**
+     * Get all statuses available for a project
+     *
+     * @param string $projectKey Project key
+     * @return array Array of status objects
+     */
+    public function getProjectStatuses(string $projectKey): array {
+        $response = $this->client->get($this->baseUrl . "/project/{$projectKey}/statuses");
+        $data = json_decode($response->getBody()->getContents(), true);
+
+        // Flatten the statuses from all issue types
+        $statuses = [];
+        $seen = [];
+        foreach ($data as $issueType) {
+            foreach ($issueType['statuses'] ?? [] as $status) {
+                $name = $status['name'];
+                if (!isset($seen[$name])) {
+                    $statuses[] = $status;
+                    $seen[$name] = true;
+                }
+            }
+        }
+
+        return $statuses;
+    }
+
+    /**
+     * Get all comments for an issue
+     *
+     * @param string $issueKey Issue key
+     * @return array Array of comments
+     */
+    public function getComments(string $issueKey): array {
+        $response = $this->client->get($this->baseUrl . "/issue/{$issueKey}/comment");
+        $data = json_decode($response->getBody()->getContents(), true);
+        return $data['comments'] ?? [];
+    }
+
+    /**
+     * Add a label to an issue
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $label Label to add
+     * @return array Updated issue data
+     */
+    public function addLabel(string $issueKey, string $label): array {
+        $response = $this->client->put($this->baseUrl . "/issue/{$issueKey}", [
+            'json' => [
+                'update' => [
+                    'labels' => [
+                        ['add' => $label]
+                    ]
+                ]
+            ]
+        ]);
+
+        // Return updated issue
+        return $this->getIssue($issueKey);
+    }
+
+    /**
+     * Remove a label from an issue
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $label Label to remove
+     * @return array Updated issue data
+     */
+    public function removeLabel(string $issueKey, string $label): array {
+        $response = $this->client->put($this->baseUrl . "/issue/{$issueKey}", [
+            'json' => [
+                'update' => [
+                    'labels' => [
+                        ['remove' => $label]
+                    ]
+                ]
+            ]
+        ]);
+
+        // Return updated issue
+        return $this->getIssue($issueKey);
+    }
+
+    /**
+     * Update issue fields
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param array $fields Fields to update
+     * @return array Updated issue data
+     */
+    public function updateIssue(string $issueKey, array $fields): array {
+        $this->client->put($this->baseUrl . "/issue/{$issueKey}", [
+            'json' => [
+                'fields' => $fields
+            ]
+        ]);
+
+        return $this->getIssue($issueKey);
+    }
+
+    /**
+     * Transition an issue to a new status
+     * Requires write:jira-work scope
+     *
+     * @param string $issueKey Issue key
+     * @param string $transitionId Transition ID
+     * @param array $fields Optional fields to update during transition
+     */
+    public function transitionIssue(string $issueKey, string $transitionId, array $fields = []): void {
+        $payload = [
+            'transition' => ['id' => $transitionId]
+        ];
+
+        if (!empty($fields)) {
+            $payload['fields'] = $fields;
+        }
+
+        $this->client->post($this->baseUrl . "/issue/{$issueKey}/transitions", [
+            'json' => $payload
+        ]);
+    }
+
+    /**
+     * Get available transitions for an issue
+     *
+     * @param string $issueKey Issue key
+     * @return array Available transitions
+     */
+    public function getTransitions(string $issueKey): array {
+        $response = $this->client->get($this->baseUrl . "/issue/{$issueKey}/transitions");
+        $data = json_decode($response->getBody()->getContents(), true);
+        return $data['transitions'] ?? [];
+    }
+
+    // ========================================
+    // ADF Helper Methods
+    // ========================================
+
+    /**
+     * Convert plain text to Atlassian Document Format (ADF)
+     *
+     * @param string $text Plain text content
+     * @return array ADF document
+     */
+    public static function textToAdf(string $text): array {
+        $paragraphs = preg_split('/\n\n+/', $text);
+
+        $content = [];
+        foreach ($paragraphs as $para) {
+            if (empty(trim($para))) {
+                continue;
+            }
+
+            // Split by single newlines within paragraphs
+            $lines = explode("\n", $para);
+            $paraContent = [];
+
+            foreach ($lines as $i => $line) {
+                if ($i > 0) {
+                    $paraContent[] = ['type' => 'hardBreak'];
+                }
+                $paraContent[] = ['type' => 'text', 'text' => $line];
+            }
+
+            $content[] = [
+                'type' => 'paragraph',
+                'content' => $paraContent
+            ];
+        }
+
+        return [
+            'type' => 'doc',
+            'version' => 1,
+            'content' => $content
+        ];
+    }
+
+    /**
+     * Create ADF with formatting (bold, italic, links, etc.)
+     *
+     * @param array $elements Array of elements with formatting
+     * @return array ADF document
+     */
+    public static function createAdf(array $elements): array {
+        return [
+            'type' => 'doc',
+            'version' => 1,
+            'content' => $elements
+        ];
+    }
+
+    /**
+     * Create a paragraph element for ADF
+     */
+    public static function adfParagraph(array $content): array {
+        return [
+            'type' => 'paragraph',
+            'content' => $content
+        ];
+    }
+
+    /**
+     * Create a text element for ADF
+     *
+     * @param string $text Text content
+     * @param array $marks Optional marks (bold, italic, link, etc.)
+     */
+    public static function adfText(string $text, array $marks = []): array {
+        $element = ['type' => 'text', 'text' => $text];
+        if (!empty($marks)) {
+            $element['marks'] = $marks;
+        }
+        return $element;
+    }
+
+    /**
+     * Create a bold mark for ADF
+     */
+    public static function adfBold(): array {
+        return ['type' => 'strong'];
+    }
+
+    /**
+     * Create an italic mark for ADF
+     */
+    public static function adfItalic(): array {
+        return ['type' => 'em'];
+    }
+
+    /**
+     * Create a link mark for ADF
+     */
+    public static function adfLink(string $url): array {
+        return ['type' => 'link', 'attrs' => ['href' => $url]];
+    }
+
+    /**
+     * Create a code block for ADF
+     */
+    public static function adfCodeBlock(string $code, string $language = ''): array {
+        $block = [
+            'type' => 'codeBlock',
+            'content' => [
+                ['type' => 'text', 'text' => $code]
+            ]
+        ];
+
+        if ($language) {
+            $block['attrs'] = ['language' => $language];
+        }
+
+        return $block;
+    }
+
+    /**
+     * Create a bullet list for ADF
+     */
+    public static function adfBulletList(array $items): array {
+        $listItems = [];
+        foreach ($items as $item) {
+            $listItems[] = [
+                'type' => 'listItem',
+                'content' => [
+                    [
+                        'type' => 'paragraph',
+                        'content' => is_string($item)
+                            ? [['type' => 'text', 'text' => $item]]
+                            : $item
+                    ]
+                ]
+            ];
+        }
+
+        return [
+            'type' => 'bulletList',
+            'content' => $listItems
+        ];
+    }
+
+    /**
+     * Create a heading for ADF
+     *
+     * @param string $text Heading text
+     * @param int $level Heading level (1-6)
+     */
+    public static function adfHeading(string $text, int $level = 1): array {
+        return [
+            'type' => 'heading',
+            'attrs' => ['level' => min(6, max(1, $level))],
+            'content' => [
+                ['type' => 'text', 'text' => $text]
+            ]
+        ];
     }
 }

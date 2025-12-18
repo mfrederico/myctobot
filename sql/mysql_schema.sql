@@ -133,5 +133,6 @@ INSERT INTO authcontrol (control, method, level, description) VALUES
 ('settings', 'notifications', 100, 'Notification settings'),
 ('admin', 'index', 50, 'Admin dashboard'),
 ('admin', 'members', 50, 'Manage members'),
-('api', 'crondigest', 1, 'Cron digest endpoint')
+('api', 'crondigest', 1, 'Cron digest endpoint'),
+('analysis', 'sharddigest', 1, 'Shard digest analysis endpoint')
 ON DUPLICATE KEY UPDATE level = VALUES(level);

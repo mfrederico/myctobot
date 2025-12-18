@@ -127,14 +127,36 @@ Flight::map('getMember', function() {
         $guest->email = '';
         return $guest;
     }
-    
+
     // Refresh member data from database
     $member = R::load('member', $_SESSION['member']['id']);
     if ($member->id) {
         $_SESSION['member'] = $member->export();
+
+        // Register user database if member has one (Enterprise feature)
+        // This allows R::selectDatabase('user_X') anywhere in the request
+        if (!empty($member->ceobot_db)) {
+            $dbKey = 'user_' . $member->id;
+            $dbDir = Flight::get('ceobot.user_db_path') ?? 'database/';
+            $dbPath = $dbDir . $member->ceobot_db . '.sqlite';
+
+            // Only add if file exists and not already registered
+            if (file_exists($dbPath)) {
+                try {
+                    R::selectDatabase($dbKey);
+                    // Already registered, switch back to default
+                    R::selectDatabase('default');
+                } catch (\Throwable $e) {
+                    // Not registered yet, add it
+                    R::addDatabase($dbKey, 'sqlite:' . $dbPath);
+                    R::selectDatabase('default');
+                }
+            }
+        }
+
         return $member;
     }
-    
+
     // Invalid session
     unset($_SESSION['member']);
     return Flight::getMember(); // Return guest
@@ -243,15 +265,18 @@ Flight::map('loadMenu', function() {
     
     if (Flight::isLoggedIn()) {
         // Member menu items
-        $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'dashboard'];
-        $menu[] = ['url' => '/member/profile', 'label' => 'Profile', 'icon' => 'user'];
-        
+        $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
+
+        // Enterprise tier - AI Developer
+        $member = Flight::get('member');
+        if ($member && $member->isEnterprise()) {
+            $menu[] = ['url' => '/enterprise', 'label' => 'AI Developer', 'icon' => 'robot'];
+        }
+
         // Admin menu items
         if (Flight::hasLevel(LEVELS['ADMIN'])) {
-            $menu[] = ['url' => '/admin', 'label' => 'Admin', 'icon' => 'cog'];
+            $menu[] = ['url' => '/admin', 'label' => 'Admin', 'icon' => 'gear'];
         }
-        
-        $menu[] = ['url' => '/auth/logout', 'label' => 'Logout', 'icon' => 'sign-out'];
     } else {
         $menu[] = ['url' => '/auth/login', 'label' => 'Login', 'icon' => 'sign-in'];
         $menu[] = ['url' => '/auth/register', 'label' => 'Register', 'icon' => 'user-plus'];

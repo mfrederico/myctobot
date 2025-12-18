@@ -95,6 +95,131 @@ class UserDatabaseService {
         // Create indexes for ticket_analysis_cache
         $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticket_analysis_cache(board_id)");
         $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticket_analysis_cache(content_hash)");
+
+        // Migrate ai_dev_jobs to new schema (one record per issue_key)
+        $this->migrateAiDevJobs();
+    }
+
+    /**
+     * Migrate ai_dev_jobs table to new schema (one record per issue_key)
+     */
+    private function migrateAiDevJobs() {
+        // Check if table exists
+        $tableExists = $this->db->querySingle(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_dev_jobs'"
+        );
+
+        if (!$tableExists) {
+            // Create new table from scratch
+            $this->db->exec("
+                CREATE TABLE IF NOT EXISTS ai_dev_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_key TEXT NOT NULL UNIQUE,
+                    board_id INTEGER NOT NULL,
+                    repo_connection_id INTEGER,
+                    cloud_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    current_shard_job_id TEXT,
+                    branch_name TEXT,
+                    pr_url TEXT,
+                    pr_number INTEGER,
+                    clarification_comment_id TEXT,
+                    clarification_questions TEXT,
+                    error_message TEXT,
+                    run_count INTEGER DEFAULT 0,
+                    last_output TEXT,
+                    last_result_json TEXT,
+                    files_changed TEXT,
+                    commit_sha TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                )
+            ");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
+            return;
+        }
+
+        // Check if we need to migrate (old schema has job_id column, new has current_shard_job_id)
+        $result = $this->db->query("PRAGMA table_info(ai_dev_jobs)");
+        $columns = [];
+        while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
+            $columns[$col['name']] = true;
+        }
+
+        // Already migrated
+        if (isset($columns['current_shard_job_id'])) {
+            return;
+        }
+
+        // Need to migrate - create new table, copy data, swap
+        $this->db->exec("BEGIN TRANSACTION");
+
+        try {
+            // Create new table
+            $this->db->exec("
+                CREATE TABLE ai_dev_jobs_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_key TEXT NOT NULL UNIQUE,
+                    board_id INTEGER NOT NULL,
+                    repo_connection_id INTEGER,
+                    cloud_id TEXT,
+                    status TEXT DEFAULT 'pending',
+                    current_shard_job_id TEXT,
+                    branch_name TEXT,
+                    pr_url TEXT,
+                    pr_number INTEGER,
+                    clarification_comment_id TEXT,
+                    clarification_questions TEXT,
+                    error_message TEXT,
+                    run_count INTEGER DEFAULT 0,
+                    last_output TEXT,
+                    last_result_json TEXT,
+                    files_changed TEXT,
+                    commit_sha TEXT,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                )
+            ");
+
+            // Migrate data - keep most recent job per issue_key
+            $this->db->exec("
+                INSERT OR REPLACE INTO ai_dev_jobs_new (
+                    issue_key, board_id, repo_connection_id, status, current_shard_job_id,
+                    branch_name, pr_url, pr_number, clarification_comment_id,
+                    error_message, run_count, started_at, completed_at, created_at, updated_at
+                )
+                SELECT
+                    issue_key, board_id, repo_connection_id, status, job_id,
+                    branch_name, pr_url, pr_number, clarification_comment_id,
+                    error_message, 1, started_at, completed_at, created_at, updated_at
+                FROM ai_dev_jobs
+                WHERE id IN (
+                    SELECT MAX(id) FROM ai_dev_jobs GROUP BY issue_key
+                )
+            ");
+
+            // Drop old table and rename new
+            $this->db->exec("DROP TABLE ai_dev_jobs");
+            $this->db->exec("ALTER TABLE ai_dev_jobs_new RENAME TO ai_dev_jobs");
+
+            // Recreate indexes
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
+
+            $this->db->exec("COMMIT");
+        } catch (\Exception $e) {
+            $this->db->exec("ROLLBACK");
+            throw $e;
+        }
     }
 
     /**
@@ -273,7 +398,10 @@ class UserDatabaseService {
             'board_name', 'project_key', 'board_type', 'enabled',
             'digest_enabled', 'digest_time', 'digest_cc', 'timezone', 'status_filter',
             'priority_weights', 'goals',
-            'last_analysis_at', 'last_digest_at'
+            'last_analysis_at', 'last_digest_at',
+            // AI Developer status transition settings
+            'aidev_status_working', 'aidev_status_pr_created',
+            'aidev_status_clarification', 'aidev_status_failed'
         ];
 
         foreach ($data as $key => $value) {
@@ -824,5 +952,324 @@ class UserDatabaseService {
         }
 
         return $data;
+    }
+
+    // ==================== AI Developer Jobs ====================
+
+    /**
+     * Get or create a job record for an issue
+     *
+     * @param string $issueKey Jira issue key
+     * @param int $boardId Board ID
+     * @param int|null $repoConnectionId Repository connection ID
+     * @param string|null $cloudId Atlassian cloud ID
+     * @return array Job record
+     */
+    public function getOrCreateAiDevJob(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null): array {
+        $stmt = $this->db->prepare("SELECT * FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        $result = $stmt->execute();
+        $job = $result->fetchArray(SQLITE3_ASSOC);
+
+        if ($job) {
+            return $job;
+        }
+
+        // Create new job record
+        $stmt = $this->db->prepare("
+            INSERT INTO ai_dev_jobs (issue_key, board_id, repo_connection_id, cloud_id, status, run_count, created_at)
+            VALUES (:issue_key, :board_id, :repo_id, :cloud_id, 'pending', 0, datetime('now'))
+        ");
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
+        $stmt->bindValue(':repo_id', $repoConnectionId, $repoConnectionId ? SQLITE3_INTEGER : SQLITE3_NULL);
+        $stmt->bindValue(':cloud_id', $cloudId, $cloudId ? SQLITE3_TEXT : SQLITE3_NULL);
+        $stmt->execute();
+
+        return $this->getAiDevJob($issueKey);
+    }
+
+    /**
+     * Get a job by issue key
+     *
+     * @param string $issueKey Jira issue key
+     * @return array|null
+     */
+    public function getAiDevJob(string $issueKey): ?array {
+        $stmt = $this->db->prepare("SELECT * FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        $result = $stmt->execute();
+        $job = $result->fetchArray(SQLITE3_ASSOC);
+
+        if ($job) {
+            $job['clarification_questions'] = json_decode($job['clarification_questions'] ?? '[]', true);
+            $job['files_changed'] = json_decode($job['files_changed'] ?? '[]', true);
+            $job['last_result'] = json_decode($job['last_result_json'] ?? '{}', true);
+        }
+
+        return $job ?: null;
+    }
+
+    /**
+     * Update a job's status and related fields
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $data Fields to update
+     * @return bool
+     */
+    public function updateAiDevJob(string $issueKey, array $data): bool {
+        $allowedFields = [
+            'status', 'current_shard_job_id', 'branch_name', 'pr_url', 'pr_number',
+            'clarification_comment_id', 'clarification_questions', 'error_message',
+            'run_count', 'last_output', 'last_result_json', 'files_changed',
+            'commit_sha', 'started_at', 'completed_at', 'board_id', 'repo_connection_id', 'cloud_id'
+        ];
+
+        $fields = [];
+        $values = [':issue_key' => $issueKey];
+
+        foreach ($data as $key => $value) {
+            if (in_array($key, $allowedFields)) {
+                // JSON encode arrays
+                if (in_array($key, ['clarification_questions', 'files_changed']) && is_array($value)) {
+                    $value = json_encode($value);
+                }
+                if ($key === 'last_result_json' && is_array($value)) {
+                    $value = json_encode($value);
+                }
+                $fields[] = "{$key} = :{$key}";
+                $values[":{$key}"] = $value;
+            }
+        }
+
+        if (empty($fields)) {
+            return false;
+        }
+
+        $fields[] = "updated_at = datetime('now')";
+
+        $sql = "UPDATE ai_dev_jobs SET " . implode(', ', $fields) . " WHERE issue_key = :issue_key";
+        $stmt = $this->db->prepare($sql);
+
+        foreach ($values as $key => $value) {
+            if (is_null($value)) {
+                $stmt->bindValue($key, null, SQLITE3_NULL);
+            } elseif (is_int($value)) {
+                $stmt->bindValue($key, $value, SQLITE3_INTEGER);
+            } else {
+                $stmt->bindValue($key, $value, SQLITE3_TEXT);
+            }
+        }
+
+        return $stmt->execute() !== false;
+    }
+
+    /**
+     * Start a new run on a job
+     *
+     * @param string $issueKey Jira issue key
+     * @param string $shardJobId The shard job ID for this run
+     * @return bool
+     */
+    public function startAiDevJobRun(string $issueKey, string $shardJobId): bool {
+        return $this->updateAiDevJob($issueKey, [
+            'status' => 'running',
+            'current_shard_job_id' => $shardJobId,
+            'started_at' => date('Y-m-d H:i:s'),
+            'error_message' => null,
+            'completed_at' => null
+        ]);
+
+        // Also increment run_count
+        $this->db->exec("UPDATE ai_dev_jobs SET run_count = run_count + 1 WHERE issue_key = '" . $this->db->escapeString($issueKey) . "'");
+
+        return true;
+    }
+
+    /**
+     * Complete a job run with PR info
+     *
+     * @param string $issueKey Jira issue key
+     * @param string $prUrl PR URL
+     * @param int|null $prNumber PR number
+     * @param string|null $branchName Branch name
+     * @param string|null $output Full output log
+     * @param array|null $result Result data
+     * @return bool
+     */
+    public function completeAiDevJob(string $issueKey, string $prUrl, ?int $prNumber, ?string $branchName = null, ?string $output = null, ?array $result = null): bool {
+        return $this->updateAiDevJob($issueKey, [
+            'status' => 'pr_created',
+            'pr_url' => $prUrl,
+            'pr_number' => $prNumber,
+            'branch_name' => $branchName,
+            'last_output' => $output,
+            'last_result_json' => $result,
+            'completed_at' => date('Y-m-d H:i:s'),
+            'error_message' => null
+        ]);
+    }
+
+    /**
+     * Mark a job as failed
+     *
+     * @param string $issueKey Jira issue key
+     * @param string $error Error message
+     * @param string|null $output Output log
+     * @return bool
+     */
+    public function failAiDevJob(string $issueKey, string $error, ?string $output = null): bool {
+        return $this->updateAiDevJob($issueKey, [
+            'status' => 'failed',
+            'error_message' => $error,
+            'last_output' => $output,
+            'completed_at' => date('Y-m-d H:i:s')
+        ]);
+    }
+
+    /**
+     * Mark a job as waiting for clarification
+     *
+     * @param string $issueKey Jira issue key
+     * @param string $commentId The Jira comment ID with questions
+     * @param array $questions The clarification questions
+     * @return bool
+     */
+    public function setAiDevJobWaitingClarification(string $issueKey, string $commentId, array $questions): bool {
+        return $this->updateAiDevJob($issueKey, [
+            'status' => 'waiting_clarification',
+            'clarification_comment_id' => $commentId,
+            'clarification_questions' => $questions
+        ]);
+    }
+
+    /**
+     * Get all jobs (for listing)
+     *
+     * @param int $limit Max number of jobs
+     * @return array
+     */
+    public function getAllAiDevJobs(int $limit = 50): array {
+        $stmt = $this->db->prepare("
+            SELECT * FROM ai_dev_jobs
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT :limit
+        ");
+        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+
+        $jobs = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $row['clarification_questions'] = json_decode($row['clarification_questions'] ?? '[]', true);
+            $row['files_changed'] = json_decode($row['files_changed'] ?? '[]', true);
+            $jobs[] = $row;
+        }
+
+        return $jobs;
+    }
+
+    /**
+     * Get active jobs (running, pending, or waiting_clarification)
+     *
+     * @return array
+     */
+    public function getActiveAiDevJobs(): array {
+        $result = $this->db->query("
+            SELECT * FROM ai_dev_jobs
+            WHERE status IN ('pending', 'running', 'waiting_clarification')
+            ORDER BY started_at DESC
+        ");
+
+        $jobs = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $row['clarification_questions'] = json_decode($row['clarification_questions'] ?? '[]', true);
+            $row['files_changed'] = json_decode($row['files_changed'] ?? '[]', true);
+            $jobs[] = $row;
+        }
+
+        return $jobs;
+    }
+
+    /**
+     * Check if a job is currently running for an issue
+     *
+     * @param string $issueKey Jira issue key
+     * @return bool
+     */
+    public function isAiDevJobRunning(string $issueKey): bool {
+        $job = $this->getAiDevJob($issueKey);
+        return $job && $job['status'] === 'running';
+    }
+
+    /**
+     * Delete a job record
+     *
+     * @param string $issueKey Jira issue key
+     * @return bool
+     */
+    public function deleteAiDevJob(string $issueKey): bool {
+        $stmt = $this->db->prepare("DELETE FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
+        return $stmt->execute() !== false;
+    }
+
+    /**
+     * Add a log entry for a job
+     *
+     * @param string $issueKey Jira issue key
+     * @param string $level Log level
+     * @param string $message Log message
+     * @param array|null $context Context data
+     * @return bool
+     */
+    public function addAiDevJobLog(string $issueKey, string $level, string $message, ?array $context = null): bool {
+        // First get the current_shard_job_id for this issue
+        $job = $this->getAiDevJob($issueKey);
+        $jobId = $job['current_shard_job_id'] ?? $issueKey;
+
+        $stmt = $this->db->prepare("
+            INSERT INTO ai_dev_job_logs (job_id, log_level, message, context_json, created_at)
+            VALUES (:job_id, :level, :message, :context, datetime('now'))
+        ");
+        $stmt->bindValue(':job_id', $jobId, SQLITE3_TEXT);
+        $stmt->bindValue(':level', $level, SQLITE3_TEXT);
+        $stmt->bindValue(':message', $message, SQLITE3_TEXT);
+        $stmt->bindValue(':context', $context ? json_encode($context) : null, $context ? SQLITE3_TEXT : SQLITE3_NULL);
+
+        return $stmt->execute() !== false;
+    }
+
+    /**
+     * Get logs for a job
+     *
+     * @param string $issueKey Jira issue key
+     * @param int $limit Max number of logs
+     * @return array
+     */
+    public function getAiDevJobLogs(string $issueKey, int $limit = 100): array {
+        $job = $this->getAiDevJob($issueKey);
+        if (!$job) {
+            return [];
+        }
+
+        $jobId = $job['current_shard_job_id'] ?? $issueKey;
+
+        $stmt = $this->db->prepare("
+            SELECT * FROM ai_dev_job_logs
+            WHERE job_id = :job_id
+            ORDER BY created_at DESC
+            LIMIT :limit
+        ");
+        $stmt->bindValue(':job_id', $jobId, SQLITE3_TEXT);
+        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
+        $result = $stmt->execute();
+
+        $logs = [];
+        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
+            $row['context'] = json_decode($row['context_json'] ?? '{}', true);
+            $logs[] = $row;
+        }
+
+        return array_reverse($logs); // Oldest first for display
     }
 }

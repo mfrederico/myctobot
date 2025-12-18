@@ -235,17 +235,28 @@ class Boards extends BaseControls\Control {
         $request = Flight::request();
 
         if ($request->method === 'POST') {
+            // Handle status_filter - can be array (multi-select) or string (text fallback)
+            $statusFilter = $this->getParam('status_filter');
+            if (is_array($statusFilter)) {
+                $statusFilter = implode(', ', array_filter($statusFilter));
+            }
+
             $data = [
                 'enabled' => $this->getParam('enabled') ? 1 : 0,
                 'digest_enabled' => $this->getParam('digest_enabled') ? 1 : 0,
                 'digest_time' => $this->getParam('digest_time') ?? '08:00',
                 'digest_cc' => trim($this->getParam('digest_cc') ?? ''),
                 'timezone' => $this->getParam('timezone') ?? 'UTC',
-                'status_filter' => $this->getParam('status_filter') ?? 'To Do'
+                'status_filter' => $statusFilter ?? '',
+                // AI Developer status transition settings (Enterprise feature)
+                'aidev_status_working' => trim($this->getParam('aidev_status_working') ?? '') ?: null,
+                'aidev_status_pr_created' => trim($this->getParam('aidev_status_pr_created') ?? '') ?: null,
+                'aidev_status_clarification' => trim($this->getParam('aidev_status_clarification') ?? '') ?: null,
+                'aidev_status_failed' => trim($this->getParam('aidev_status_failed') ?? '') ?: null
             ];
 
             // Handle priority weights (Pro feature)
-            if (Flight::isPro()) {
+            if ($this->member->isPro()) {
                 $priorityWeights = [
                     'quick_wins' => [
                         'enabled' => (bool)$this->getParam('weight_quick_wins_enabled'),
@@ -318,13 +329,28 @@ class Boards extends BaseControls\Control {
         $analyses = $this->userDb->getRecentAnalyses($id, 5);
         $lastAnalysis = !empty($analyses) ? $analyses[0] : null;
 
+        // Fetch Jira statuses for this board's project (for Status Filter and AI Developer dropdowns)
+        $jiraStatuses = [];
+        if (!empty($board['cloud_id']) && !empty($board['project_key'])) {
+            try {
+                require_once __DIR__ . '/../services/JiraClient.php';
+                $jiraClient = new \app\services\JiraClient($this->member->id, $board['cloud_id']);
+                $jiraStatuses = $jiraClient->getProjectStatuses($board['project_key']);
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to fetch Jira statuses: ' . $e->getMessage());
+            }
+        }
+
         $this->render('boards/edit', [
             'title' => 'Edit Board - ' . $board['board_name'],
             'board' => $board,
             'timezones' => $timezones,
             'analyses' => $analyses,
             'lastAnalysis' => $lastAnalysis,
-            'isPro' => Flight::isPro()
+            'isPro' => $this->member->isPro(),
+            'tier' => $this->member->getTier(),
+            'isEnterprise' => $this->member->isEnterprise(),
+            'jiraStatuses' => $jiraStatuses
         ]);
     }
 

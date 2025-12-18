@@ -24,6 +24,9 @@ class AtlassianAuth {
     // Required scopes for Jira access (including Agile/Software for boards)
     private static $defaultScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software offline_access';
 
+    // Write scopes for Enterprise tier (AI Developer feature) - includes webhook management
+    private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook offline_access';
+
     /**
      * Get Atlassian OAuth authorization URL
      *
@@ -95,6 +98,11 @@ class AtlassianAuth {
         // Store tokens for each cloud resource
         foreach ($resources as $resource) {
             self::storeTokens($memberId, $tokens, $resource);
+        }
+
+        // Register AI Developer webhooks for each site (Enterprise feature)
+        foreach ($resources as $resource) {
+            self::registerAIDevWebhook($memberId, $resource['id'], $tokens['access_token']);
         }
 
         $logger->info('Atlassian OAuth completed', [
@@ -349,6 +357,9 @@ class AtlassianAuth {
         );
 
         if ($token) {
+            // Remove AI Developer webhook before disconnecting
+            self::removeAIDevWebhook($memberId, $cloudId);
+
             R::trash($token);
             Flight::get('log')->info('Disconnected Atlassian site', [
                 'member_id' => $memberId,
@@ -371,6 +382,8 @@ class AtlassianAuth {
         $count = count($tokens);
 
         foreach ($tokens as $token) {
+            // Remove AI Developer webhook before disconnecting
+            self::removeAIDevWebhook($memberId, $token->cloud_id);
             R::trash($token);
         }
 
@@ -431,5 +444,303 @@ class AtlassianAuth {
      */
     public static function getAgileApiBaseUrl($cloudId) {
         return "https://api.atlassian.com/ex/jira/{$cloudId}/rest/agile/1.0";
+    }
+
+    /**
+     * Get Atlassian OAuth authorization URL with write scopes
+     * Used for Enterprise tier AI Developer feature
+     *
+     * @param string $state Optional state parameter for CSRF protection
+     * @return string The authorization URL with write scopes
+     */
+    public static function getLoginUrlWithWriteScopes($state = null) {
+        $clientId = Flight::get('atlassian.client_id');
+        $redirectUri = Flight::get('atlassian.redirect_uri');
+
+        if (empty($clientId) || empty($redirectUri)) {
+            throw new \Exception('Atlassian OAuth not configured. Set atlassian.client_id and atlassian.redirect_uri in config.ini');
+        }
+
+        // Generate state for CSRF protection if not provided
+        if ($state === null) {
+            $state = bin2hex(random_bytes(16));
+            $_SESSION['atlassian_oauth_state'] = $state;
+        }
+
+        // Store that we're requesting write scopes
+        $_SESSION['atlassian_write_scope_upgrade'] = true;
+
+        $params = [
+            'audience' => 'api.atlassian.com',
+            'client_id' => $clientId,
+            'scope' => self::$writeScopes,
+            'redirect_uri' => $redirectUri,
+            'state' => $state,
+            'response_type' => 'code',
+            'prompt' => 'consent'
+        ];
+
+        return self::$authUrl . '?' . http_build_query($params);
+    }
+
+    /**
+     * Check if a member has write scopes for a specific cloud
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Cloud ID
+     * @return bool True if write scopes are available
+     */
+    public static function hasWriteScopes($memberId, $cloudId) {
+        $token = R::findOne('atlassiantoken',
+            'member_id = ? AND cloud_id = ?',
+            [$memberId, $cloudId]
+        );
+
+        if (!$token || empty($token->scopes)) {
+            return false;
+        }
+
+        return strpos($token->scopes, 'write:jira-work') !== false;
+    }
+
+    /**
+     * Get the write scopes string
+     *
+     * @return string Write scopes
+     */
+    public static function getWriteScopes() {
+        return self::$writeScopes;
+    }
+
+    /**
+     * Register AI Developer webhook for a Jira site
+     * This webhook listens for issue updates and comment events
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Atlassian Cloud ID
+     * @param string $accessToken Access token
+     * @return bool Success
+     */
+    public static function registerAIDevWebhook(int $memberId, string $cloudId, string $accessToken): bool {
+        $logger = Flight::get('log');
+
+        // Check if member has Enterprise tier
+        $member = R::load('member', $memberId);
+        if (!$member || $member->getTier() !== 'enterprise') {
+            $logger->debug('Skipping webhook registration - not Enterprise tier', [
+                'member_id' => $memberId
+            ]);
+            return false;
+        }
+
+        $baseUrl = Flight::get('baseurl');
+        $webhookUrl = $baseUrl . '/webhook/jira';
+
+        // Check if webhook already exists
+        $existingWebhooks = self::getRegisteredWebhooks($cloudId, $accessToken);
+        foreach ($existingWebhooks as $webhook) {
+            if (isset($webhook['url']) && strpos($webhook['url'], $webhookUrl) !== false) {
+                $logger->debug('AI Developer webhook already registered', [
+                    'cloud_id' => $cloudId,
+                    'webhook_id' => $webhook['id'] ?? 'unknown'
+                ]);
+                return true;
+            }
+        }
+
+        // Register new webhook
+        // Format per Atlassian docs: url at top level, webhooks array with jqlFilter and events
+        $requestBody = [
+            'url' => $webhookUrl,
+            'webhooks' => [
+                [
+                    'jqlFilter' => 'labels = ai-dev',
+                    'events' => [
+                        'jira:issue_updated',
+                        'comment_created'
+                    ]
+                ]
+            ]
+        ];
+
+        $apiUrl = "https://api.atlassian.com/ex/jira/{$cloudId}/rest/api/3/webhook";
+
+        $ch = curl_init($apiUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($requestBody));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+            'Accept: application/json'
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode >= 200 && $httpCode < 300) {
+            $result = json_decode($response, true);
+            $webhookId = $result['webhookRegistrationResult'][0]['createdWebhookId'] ?? null;
+
+            $logger->info('AI Developer webhook registered', [
+                'member_id' => $memberId,
+                'cloud_id' => $cloudId,
+                'webhook_id' => $webhookId
+            ]);
+
+            // Store webhook ID for later management
+            self::storeWebhookId($memberId, $cloudId, $webhookId);
+
+            return true;
+        } else {
+            $logger->warning('Failed to register AI Developer webhook', [
+                'member_id' => $memberId,
+                'cloud_id' => $cloudId,
+                'http_code' => $httpCode,
+                'response' => $response,
+                'request_url' => $apiUrl,
+                'request_body' => json_encode($requestBody)
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Get registered webhooks for a Jira site
+     *
+     * @param string $cloudId Atlassian Cloud ID
+     * @param string $accessToken Access token
+     * @return array List of webhooks
+     */
+    public static function getRegisteredWebhooks(string $cloudId, string $accessToken): array {
+        $apiUrl = "https://api.atlassian.com/ex/jira/{$cloudId}/rest/api/3/webhook";
+
+        $ch = curl_init($apiUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Accept: application/json'
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200) {
+            $data = json_decode($response, true);
+            return $data['values'] ?? [];
+        }
+
+        return [];
+    }
+
+    /**
+     * Store webhook ID in member's database for management
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Cloud ID
+     * @param string|null $webhookId Webhook ID
+     */
+    private static function storeWebhookId(int $memberId, string $cloudId, ?string $webhookId): void {
+        if (!$webhookId) return;
+
+        $member = R::load('member', $memberId);
+        if (!$member || empty($member->ceobot_db)) return;
+
+        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
+        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
+
+        if (!file_exists($dbFile)) return;
+
+        try {
+            $db = new \SQLite3($dbFile);
+
+            // Ensure table exists
+            $db->exec("CREATE TABLE IF NOT EXISTS jira_webhooks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cloud_id TEXT NOT NULL,
+                webhook_id TEXT NOT NULL,
+                webhook_type TEXT DEFAULT 'aidev',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(cloud_id, webhook_type)
+            )");
+
+            // Insert or replace webhook ID
+            $stmt = $db->prepare("INSERT OR REPLACE INTO jira_webhooks (cloud_id, webhook_id, webhook_type) VALUES (?, ?, 'aidev')");
+            $stmt->bindValue(1, $cloudId, SQLITE3_TEXT);
+            $stmt->bindValue(2, $webhookId, SQLITE3_TEXT);
+            $stmt->execute();
+
+            $db->close();
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Failed to store webhook ID', [
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Remove AI Developer webhook from a Jira site
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Atlassian Cloud ID
+     * @return bool Success
+     */
+    public static function removeAIDevWebhook(int $memberId, string $cloudId): bool {
+        $logger = Flight::get('log');
+
+        $accessToken = self::getValidToken($memberId, $cloudId);
+        if (!$accessToken) {
+            return false;
+        }
+
+        // Get stored webhook ID
+        $member = R::load('member', $memberId);
+        if (!$member || empty($member->ceobot_db)) return false;
+
+        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
+        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
+
+        if (!file_exists($dbFile)) return false;
+
+        try {
+            $db = new \SQLite3($dbFile);
+            $webhookId = $db->querySingle("SELECT webhook_id FROM jira_webhooks WHERE cloud_id = '{$db->escapeString($cloudId)}' AND webhook_type = 'aidev'");
+            $db->close();
+
+            if (!$webhookId) {
+                return true; // No webhook to remove
+            }
+
+            // Delete webhook via API
+            $apiUrl = "https://api.atlassian.com/ex/jira/{$cloudId}/rest/api/3/webhook";
+
+            $ch = curl_init($apiUrl);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['webhookIds' => [(int)$webhookId]]));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/json'
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode >= 200 && $httpCode < 300) {
+                $logger->info('AI Developer webhook removed', [
+                    'member_id' => $memberId,
+                    'cloud_id' => $cloudId
+                ]);
+                return true;
+            }
+
+        } catch (\Exception $e) {
+            $logger->error('Failed to remove webhook', ['error' => $e->getMessage()]);
+        }
+
+        return false;
     }
 }

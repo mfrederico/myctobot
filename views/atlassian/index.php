@@ -96,19 +96,28 @@
                 </div>
                 <div class="card-body">
                     <h6>What permissions does MyCTOBot need?</h6>
-                    <p class="small text-muted">Jira Platform REST API:</p>
+
+                    <p class="small text-muted mb-2"><strong>Read Permissions</strong> - Required for sprint analysis and digest emails:</p>
                     <ul class="small text-muted">
-                        <li><strong>read:jira-work</strong> - Read Jira issues and projects</li>
-                        <li><strong>read:jira-user</strong> - Read user information for assignments</li>
+                        <li><strong>read:jira-work</strong> - Read your tickets to analyze sprint progress and generate insights</li>
+                        <li><strong>read:jira-user</strong> - See who's assigned to tickets for workload analysis</li>
+                        <li><strong>read:board-scope:jira-software</strong> - Access your Kanban/Scrum boards</li>
+                        <li><strong>read:sprint:jira-software</strong> - Read sprint data for velocity and burndown analysis</li>
+                        <li><strong>read:project:jira</strong> - Access project settings and structure</li>
                     </ul>
-                    <p class="small text-muted">Jira Software (Agile) API:</p>
+
+                    <p class="small text-muted mb-2"><strong>Write Permissions</strong> - Required for AI Developer feature (Enterprise):</p>
                     <ul class="small text-muted">
-                        <li><strong>read:board-scope:jira-software</strong> - Access Jira boards</li>
-                        <li><strong>read:sprint:jira-software</strong> - Read sprint data</li>
-                        <li><strong>read:project:jira</strong> - Read project information</li>
+                        <li><strong>write:jira-work</strong> - Post comments on tickets when AI Developer needs clarification or completes work</li>
+                        <li><strong>manage:jira-webhook</strong> - Automatically listen for ticket updates when you add the <code>ai-dev</code> label</li>
                     </ul>
+
+                    <div class="alert alert-info small py-2 mt-3">
+                        <i class="bi bi-shield-check"></i>
+                        <strong>Your data is safe:</strong> MyCTOBot uses OAuth 2.0 for secure authentication. We never store your Atlassian password, and write permissions are only used when you explicitly trigger AI Developer on a ticket.
+                    </div>
+
                     <p class="small text-muted mb-0">
-                        MyCTOBot uses OAuth 2.0 for secure authentication. We never store your Atlassian password.
                         You can revoke access at any time from your
                         <a href="https://id.atlassian.com/manage-profile/apps" target="_blank">Atlassian account settings</a>.
                     </p>

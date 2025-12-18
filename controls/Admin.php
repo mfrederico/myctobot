@@ -337,8 +337,10 @@ class Admin extends Control {
      */
     public function settings($params = []) {
         $this->viewData['title'] = 'System Settings';
-        
-        if (Flight::request()->method === 'POST') {
+
+        $request = Flight::request();
+
+        if ($request->method === 'POST') {
             // Validate CSRF
             if (!Flight::csrf()->validateRequest()) {
                 $this->viewData['error'] = 'Invalid CSRF token';
@@ -574,5 +576,321 @@ class Admin extends Control {
         // Clear the permission cache when permissions are modified
         \app\PermissionCache::clear();
         $this->logger->info('Permission cache cleared after update');
+    }
+
+    // ========================================
+    // Shard Management (Account Executive)
+    // ========================================
+
+    /**
+     * List all Claude Code shards
+     */
+    public function shards($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $this->viewData['title'] = 'Claude Code Shards';
+
+        // Get all shards with stats
+        $shards = \app\services\ShardService::getAllShards(false);
+
+        foreach ($shards as &$shard) {
+            $shard['stats'] = \app\services\ShardService::getShardStats($shard['id']);
+            $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
+        }
+
+        $this->viewData['shards'] = $shards;
+
+        $this->render('admin/shards', $this->viewData);
+    }
+
+    /**
+     * Create a new shard
+     */
+    public function createshard($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $request = Flight::request();
+
+        if ($request->method === 'POST') {
+            if (!Flight::csrf()->validateRequest()) {
+                $this->flash('error', 'Invalid CSRF token');
+                Flight::redirect('/admin/shards');
+                return;
+            }
+
+            $data = [
+                'name' => $request->data->name ?? '',
+                'description' => $request->data->description ?? '',
+                'host' => $request->data->host ?? '',
+                'port' => (int)($request->data->port ?? 3500),
+                'api_key' => $request->data->api_key ?? '',
+                'shard_type' => $request->data->shard_type ?? 'general',
+                'capabilities' => array_filter(array_map('trim', explode(',', $request->data->capabilities ?? ''))),
+                'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
+                'is_active' => isset($request->data->is_active) ? 1 : 0,
+                'is_default' => isset($request->data->is_default) ? 1 : 0
+            ];
+
+            if (empty($data['name']) || empty($data['host']) || empty($data['api_key'])) {
+                $this->flash('error', 'Name, host, and API key are required');
+                Flight::redirect('/admin/createshard');
+                return;
+            }
+
+            try {
+                $shardId = \app\services\ShardService::createShard($data);
+                $this->logger->info('Shard created', ['shard_id' => $shardId, 'name' => $data['name']]);
+                $this->flash('success', 'Shard created successfully');
+                Flight::redirect('/admin/shards');
+            } catch (\Exception $e) {
+                $this->flash('error', 'Failed to create shard: ' . $e->getMessage());
+                Flight::redirect('/admin/createshard');
+            }
+            return;
+        }
+
+        $this->viewData['title'] = 'Create Shard';
+        $this->render('admin/shard_form', $this->viewData);
+    }
+
+    /**
+     * Edit a shard
+     */
+    public function editshard($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $shardId = (int)($params['operation']->name ?? 0);
+        if (!$shardId) {
+            Flight::redirect('/admin/shards');
+            return;
+        }
+
+        $shard = \app\services\ShardService::getShard($shardId);
+        if (!$shard) {
+            $this->flash('error', 'Shard not found');
+            Flight::redirect('/admin/shards');
+            return;
+        }
+
+        $request = Flight::request();
+
+        if ($request->method === 'POST') {
+            if (!Flight::csrf()->validateRequest()) {
+                $this->flash('error', 'Invalid CSRF token');
+                Flight::redirect('/admin/editshard/' . $shardId);
+                return;
+            }
+
+            $data = [
+                'name' => $request->data->name ?? '',
+                'description' => $request->data->description ?? '',
+                'host' => $request->data->host ?? '',
+                'port' => (int)($request->data->port ?? 3500),
+                'shard_type' => $request->data->shard_type ?? 'general',
+                'capabilities' => array_filter(array_map('trim', explode(',', $request->data->capabilities ?? ''))),
+                'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
+                'is_active' => isset($request->data->is_active) ? 1 : 0,
+                'is_default' => isset($request->data->is_default) ? 1 : 0
+            ];
+
+            // Only update API key if provided
+            if (!empty($request->data->api_key)) {
+                $data['api_key'] = $request->data->api_key;
+            }
+
+            try {
+                \app\services\ShardService::updateShard($shardId, $data);
+                $this->logger->info('Shard updated', ['shard_id' => $shardId]);
+                $this->flash('success', 'Shard updated successfully');
+                Flight::redirect('/admin/shards');
+            } catch (\Exception $e) {
+                $this->flash('error', 'Failed to update shard: ' . $e->getMessage());
+                Flight::redirect('/admin/editshard/' . $shardId);
+            }
+            return;
+        }
+
+        $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
+        $this->viewData['title'] = 'Edit Shard';
+        $this->viewData['shard'] = $shard;
+        $this->render('admin/shard_form', $this->viewData);
+    }
+
+    /**
+     * Delete a shard
+     */
+    public function deleteshard($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $shardId = (int)($params['operation']->name ?? 0);
+        if (!$shardId) {
+            Flight::redirect('/admin/shards');
+            return;
+        }
+
+        try {
+            \app\services\ShardService::deleteShard($shardId);
+            $this->logger->info('Shard deleted', ['shard_id' => $shardId]);
+            $this->flash('success', 'Shard deleted');
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to delete shard: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/admin/shards');
+    }
+
+    /**
+     * Test shard connectivity
+     */
+    public function testshard($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $shardId = (int)($params['operation']->name ?? 0);
+        if (!$shardId) {
+            $this->json(['success' => false, 'error' => 'Shard ID required']);
+            return;
+        }
+
+        $result = \app\services\ShardService::healthCheck($shardId);
+
+        $this->json([
+            'success' => $result['healthy'],
+            'data' => $result['data'] ?? null,
+            'error' => $result['error'] ?? null
+        ]);
+    }
+
+    /**
+     * Health check all shards
+     */
+    public function shardhealth($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $results = \app\services\ShardService::healthCheckAll();
+
+        $this->json([
+            'success' => true,
+            'results' => $results
+        ]);
+    }
+
+    /**
+     * View/Edit MCP servers for a shard
+     */
+    public function shardmcp($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+
+        $shardId = (int) ($params['operation']->name ?? 0);
+        if (!$shardId) {
+            Flight::redirect('/admin/shards');
+            exit;
+        }
+
+        $shard = \app\services\ShardService::getShard($shardId);
+        if (!$shard) {
+            Flight::redirect('/admin/shards');
+            exit;
+        }
+
+        // Get current MCP config from shard
+        $mcpServers = [];
+        $availableServers = [];
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'timeout' => 10,
+                'headers' => ['Authorization' => 'Bearer ' . $shard['api_key']]
+            ]);
+
+            // Get current config
+            $response = $client->get('/config/mcp');
+            $data = json_decode($response->getBody()->getContents(), true);
+            $mcpServers = $data['mcp_servers'] ?? [];
+
+            // Get available servers
+            $response = $client->get('/config/mcp/available');
+            $data = json_decode($response->getBody()->getContents(), true);
+            $availableServers = $data['available'] ?? [];
+
+        } catch (\Exception $e) {
+            $this->viewData['error'] = 'Could not connect to shard: ' . $e->getMessage();
+        }
+
+        // Handle POST (update MCP config)
+        if (Flight::request()->method === 'POST') {
+            $posted = Flight::request()->data;
+
+            $newConfig = [];
+            foreach ($posted['mcp'] ?? [] as $name => $server) {
+                if (!empty($server['enabled'])) {
+                    $newConfig[$name] = [
+                        'command' => $server['command'] ?? 'npx',
+                        'args' => array_filter(explode(' ', $server['args'] ?? '')),
+                        'env' => [],
+                        'enabled' => true
+                    ];
+
+                    // Parse env vars
+                    if (!empty($server['env'])) {
+                        foreach (explode("\n", $server['env']) as $line) {
+                            $line = trim($line);
+                            if (strpos($line, '=') !== false) {
+                                list($key, $value) = explode('=', $line, 2);
+                                $newConfig[$name]['env'][trim($key)] = trim($value);
+                            }
+                        }
+                    }
+                }
+            }
+
+            try {
+                $client = new \GuzzleHttp\Client([
+                    'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                    'timeout' => 10,
+                    'headers' => [
+                        'Authorization' => 'Bearer ' . $shard['api_key'],
+                        'Content-Type' => 'application/json'
+                    ]
+                ]);
+
+                $response = $client->post('/config/mcp', [
+                    'json' => ['mcp_servers' => $newConfig]
+                ]);
+
+                $result = json_decode($response->getBody()->getContents(), true);
+
+                // Update database
+                R::exec(
+                    "UPDATE claudeshards SET mcp_servers = ? WHERE id = ?",
+                    [json_encode($newConfig), $shardId]
+                );
+
+                // Update capabilities based on enabled MCP servers
+                $capabilities = ['git', 'filesystem'];
+                foreach (array_keys($newConfig) as $mcpName) {
+                    if (!in_array($mcpName, $capabilities)) {
+                        $capabilities[] = $mcpName;
+                    }
+                }
+                R::exec(
+                    "UPDATE claudeshards SET capabilities = ? WHERE id = ?",
+                    [json_encode($capabilities), $shardId]
+                );
+
+                $this->viewData['success'] = 'MCP configuration updated successfully';
+                $mcpServers = $result['mcp_servers'] ?? $newConfig;
+
+            } catch (\Exception $e) {
+                $this->viewData['error'] = 'Failed to update MCP config: ' . $e->getMessage();
+            }
+        }
+
+        $this->viewData['title'] = 'MCP Servers - ' . $shard['name'];
+        $this->viewData['shard'] = $shard;
+        $this->viewData['mcp_servers'] = $mcpServers;
+        $this->viewData['available_servers'] = $availableServers;
+
+        $this->render('admin/shard_mcp');
     }
 }

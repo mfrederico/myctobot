@@ -173,6 +173,57 @@ class SubscriptionService {
     }
 
     /**
+     * Manually set subscription tier (for Enterprise customers)
+     *
+     * @param int $memberId Member ID
+     * @param string $tier Tier name ('free', 'pro', 'enterprise')
+     * @param string|null $expiresAt Optional expiration date (null = never expires)
+     * @return bool Success
+     */
+    public static function setTier(int $memberId, string $tier, ?string $expiresAt = null): bool {
+        if (!in_array($tier, ['free', 'pro', 'enterprise'])) {
+            return false;
+        }
+
+        $subscription = self::ensureSubscription($memberId);
+
+        $subscription->tier = $tier;
+        $subscription->status = 'active';
+        $subscription->stripe_customer_id = 'manual_' . $memberId;
+        $subscription->stripe_subscription_id = 'manual_' . $tier . '_' . time();
+        $subscription->current_period_start = date('Y-m-d H:i:s');
+        $subscription->current_period_end = $expiresAt ?? date('Y-m-d H:i:s', strtotime('+100 years'));
+        $subscription->updated_at = date('Y-m-d H:i:s');
+
+        R::store($subscription);
+
+        Flight::get('log')->info('Manual tier assignment', [
+            'member_id' => $memberId,
+            'tier' => $tier,
+            'expires' => $expiresAt ?? 'never'
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Set Enterprise tier by email address
+     *
+     * @param string $email Member email
+     * @param string|null $expiresAt Optional expiration date
+     * @return bool Success
+     */
+    public static function setEnterpriseByEmail(string $email, ?string $expiresAt = null): bool {
+        $member = R::findOne('member', 'email = ?', [$email]);
+
+        if (!$member) {
+            return false;
+        }
+
+        return self::setTier($member->id, 'enterprise', $expiresAt);
+    }
+
+    /**
      * Get Pro monthly price from config
      *
      * @return int Price in dollars

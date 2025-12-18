@@ -97,11 +97,16 @@ abstract class Control {
      * Validate CSRF token
      */
     protected function validateCSRF() {
+        // Skip CSRF validation if disabled in config
+        if (!Flight::get('security.csrf_enabled')) {
+            return true;
+        }
+
         if (Flight::request()->method !== 'GET') {
             try {
                 if (!Flight::csrf()->validateRequest()) {
                     $this->logger->warning('CSRF validation failed');
-                    
+
                     if (Flight::request()->ajax) {
                         Flight::jsonError('CSRF validation failed', 403);
                     } else {

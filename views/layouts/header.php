@@ -74,6 +74,14 @@
                                     <i class="bi bi-speedometer2"></i> Dashboard
                                 </a>
                             </li>
+                            <?php if ($member && $member->isEnterprise()): ?>
+                            <li>
+                                <a class="dropdown-item" href="/enterprise">
+                                    <i class="bi bi-robot"></i> AI Developer
+                                    <span class="badge bg-primary ms-1">Enterprise</span>
+                                </a>
+                            </li>
+                            <?php endif; ?>
                             <li>
                                 <a class="dropdown-item" href="/member/profile">
                                     <i class="bi bi-person"></i> Profile

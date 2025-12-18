@@ -60,6 +60,13 @@ $permissions = [
     ['control' => 'admin', 'method' => 'members', 'level' => 50, 'description' => 'Member management'],
     ['control' => 'admin', 'method' => 'permissions', 'level' => 50, 'description' => 'Permission management'],
     ['control' => 'admin', 'method' => 'settings', 'level' => 50, 'description' => 'System settings'],
+
+    // Enterprise tier - AI Developer (requires login, tier check in controller)
+    ['control' => 'enterprise', 'method' => '*', 'level' => 100, 'description' => 'Enterprise AI Developer features'],
+
+    // Webhooks - Public access (signature validation in controller)
+    ['control' => 'webhook', 'method' => 'jira', 'level' => 101, 'description' => 'Jira webhook endpoint'],
+    ['control' => 'webhook', 'method' => 'github', 'level' => 101, 'description' => 'GitHub webhook endpoint'],
 ];
 
 foreach ($permissions as $perm) {

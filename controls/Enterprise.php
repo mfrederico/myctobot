@@ -7,25 +7,26 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\TierFeatures;
 use \app\services\EncryptionService;
 use \app\services\GitHubClient;
 use \app\services\AIDevAgent;
-use \app\services\AiDevJobManager;
+use \app\services\AIDevJobManager;
 use \app\services\UserDatabase;
 use \app\services\UserDatabaseService;
 use \app\services\ShardService;
 use \app\services\ShardRouter;
 
+require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/GitHubClient.php';
 require_once __DIR__ . '/../services/AIDevAgent.php';
-require_once __DIR__ . '/../services/AiDevJobManager.php';
+require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/UserDatabase.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/ShardService.php';
@@ -52,7 +53,7 @@ class Enterprise extends BaseControls\Control {
 
     /**
      * Connect to user's SQLite database via RedBean
-     * Call this at start of method, then use R:: methods directly
+     * Call this at start of method, then use Bean:: methods directly
      */
     private function connectUserDb(): void {
         UserDatabase::connect($this->member->id);
@@ -86,15 +87,15 @@ class Enterprise extends BaseControls\Control {
 
         UserDatabase::with($memberId, function() use (&$apiKeySet, &$githubConnected, &$creditBalanceError, &$boards) {
             // Check API key
-            $apiKeySetting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
             $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
             // Check GitHub connections
-            $githubCount = R::count('repo_connection', 'provider = ? AND enabled = ?', ['github', 1]);
+            $githubCount = Bean::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
             $githubConnected = $githubCount > 0;
 
             // Check credit balance errors (within last 24 hours)
-            $creditSetting = R::findOne('enterprise_setting',
+            $creditSetting = Bean::findOne('enterprisesettings',
                 'setting_key = ? AND updated_at > ?',
                 ['credit_balance_error', date('Y-m-d H:i:s', strtotime('-24 hours'))]
             );
@@ -103,7 +104,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Get boards
-            $boardBeans = R::findAll('jira_board', 'ORDER BY board_name ASC');
+            $boardBeans = Bean::findAll('jiraboards', 'ORDER BY board_name ASC');
             foreach ($boardBeans as $board) {
                 $boards[] = [
                     'id' => $board->id,
@@ -127,8 +128,8 @@ class Enterprise extends BaseControls\Control {
         // Get repo connections
         $repos = $this->getRepoConnections();
 
-        // Get recent jobs using AiDevJobManager
-        $jobManager = new AiDevJobManager($memberId);
+        // Get recent jobs using AIDevJobManager
+        $jobManager = new AIDevJobManager($memberId);
         $jobs = $jobManager->getAll(10);
 
         // Get active jobs
@@ -179,15 +180,15 @@ class Enterprise extends BaseControls\Control {
                     $encrypted = EncryptionService::encrypt($apiKey);
 
                     // Find or create setting bean
-                    $setting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+                    $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
                     if (!$setting) {
-                        $setting = R::dispense('enterprise_setting');
+                        $setting = Bean::dispense('enterprisesettings');
                         $setting->setting_key = 'anthropic_api_key';
                     }
                     $setting->setting_value = $encrypted;
                     $setting->is_encrypted = 1;
                     $setting->updated_at = date('Y-m-d H:i:s');
-                    R::store($setting);
+                    Bean::store($setting);
 
                     $this->flash('success', 'API key saved successfully.');
                     $this->logger->info('Enterprise API key updated', ['member_id' => $this->member->id]);
@@ -199,7 +200,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Check if API key is set
-            $apiKeySetting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
             $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
             $this->disconnectUserDb();
@@ -222,7 +223,7 @@ class Enterprise extends BaseControls\Control {
 
         $this->connectUserDb();
         try {
-            $setting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
 
             if (!$setting || empty($setting->setting_value)) {
                 $this->disconnectUserDb();
@@ -322,26 +323,26 @@ class Enterprise extends BaseControls\Control {
             $this->connectUserDb();
 
             // Store GitHub user info for reference
-            $userSetting = R::findOne('enterprise_setting', 'setting_key = ?', ['github_user']);
+            $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_user']);
             if (!$userSetting) {
-                $userSetting = R::dispense('enterprise_setting');
+                $userSetting = Bean::dispense('enterprisesettings');
                 $userSetting->setting_key = 'github_user';
             }
             $userSetting->setting_value = json_encode($result['user']);
             $userSetting->is_encrypted = 0;
             $userSetting->updated_at = date('Y-m-d H:i:s');
-            R::store($userSetting);
+            Bean::store($userSetting);
 
             // Store GitHub token
-            $tokenSetting = R::findOne('enterprise_setting', 'setting_key = ?', ['github_token']);
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
             if (!$tokenSetting) {
-                $tokenSetting = R::dispense('enterprise_setting');
+                $tokenSetting = Bean::dispense('enterprisesettings');
                 $tokenSetting->setting_key = 'github_token';
             }
             $tokenSetting->setting_value = $encryptedToken;
             $tokenSetting->is_encrypted = 1;
             $tokenSetting->updated_at = date('Y-m-d H:i:s');
-            R::store($tokenSetting);
+            Bean::store($tokenSetting);
 
             $this->disconnectUserDb();
 
@@ -381,7 +382,7 @@ class Enterprise extends BaseControls\Control {
         try {
             // Get board-repo mappings
             $mappings = [];
-            $mappingBeans = R::findAll('board_repo_mapping');
+            $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
                 $mappings[$bean->board_id][] = [
                     'id' => $bean->id,
@@ -393,7 +394,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Check if GitHub is connected
-            $tokenSetting = R::findOne('enterprise_setting', 'setting_key = ?', ['github_token']);
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
             $githubToken = $tokenSetting ? $tokenSetting->setting_value : null;
 
             $this->disconnectUserDb();
@@ -450,7 +451,7 @@ class Enterprise extends BaseControls\Control {
             $this->connectUserDb();
 
             // Get the token
-            $tokenSetting = R::findOne('enterprise_setting', 'setting_key = ?', ['github_token']);
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
 
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
                 $this->disconnectUserDb();
@@ -472,10 +473,10 @@ class Enterprise extends BaseControls\Control {
             $encryptedToken = EncryptionService::encrypt($token);
 
             // Find or create repo connection
-            $repo = R::findOne('repo_connection', 'provider = ? AND repo_owner = ? AND repo_name = ?',
+            $repo = Bean::findOne('repoconnections', 'provider = ? AND repo_owner = ? AND repo_name = ?',
                 [$provider, $owner, $repoName]);
             if (!$repo) {
-                $repo = R::dispense('repo_connection');
+                $repo = Bean::dispense('repoconnections');
                 $repo->created_at = date('Y-m-d H:i:s');
             }
             $repo->provider = $provider;
@@ -486,7 +487,7 @@ class Enterprise extends BaseControls\Control {
             $repo->access_token = $encryptedToken;
             $repo->enabled = 1;
             $repo->updated_at = date('Y-m-d H:i:s');
-            R::store($repo);
+            Bean::store($repo);
 
             $this->disconnectUserDb();
 
@@ -521,14 +522,14 @@ class Enterprise extends BaseControls\Control {
             $this->connectUserDb();
 
             // Delete repo connection
-            $repo = R::load('repo_connection', (int)$repoId);
+            $repo = Bean::load('repoconnections', (int)$repoId);
             if ($repo->id) {
-                R::trash($repo);
+                Bean::trash($repo);
             }
 
             // Delete board mappings for this repo
-            $mappings = R::find('board_repo_mapping', 'repo_connection_id = ?', [(int)$repoId]);
-            R::trashAll($mappings);
+            $mappings = Bean::find('boardrepomapping', 'repo_connection_id = ?', [(int)$repoId]);
+            Bean::trashAll($mappings);
 
             $this->disconnectUserDb();
 
@@ -575,24 +576,24 @@ class Enterprise extends BaseControls\Control {
 
             // If setting as default, clear other defaults for this board
             if ($isDefault) {
-                $existingMappings = R::find('board_repo_mapping', 'board_id = ?', [$boardId]);
+                $existingMappings = Bean::find('boardrepomapping', 'board_id = ?', [$boardId]);
                 foreach ($existingMappings as $mapping) {
                     $mapping->is_default = 0;
-                    R::store($mapping);
+                    Bean::store($mapping);
                 }
             }
 
             // Find or create mapping
-            $mapping = R::findOne('board_repo_mapping', 'board_id = ? AND repo_connection_id = ?',
+            $mapping = Bean::findOne('boardrepomapping', 'board_id = ? AND repo_connection_id = ?',
                 [$boardId, $repoId]);
             if (!$mapping) {
-                $mapping = R::dispense('board_repo_mapping');
+                $mapping = Bean::dispense('boardrepomapping');
                 $mapping->created_at = date('Y-m-d H:i:s');
             }
             $mapping->board_id = $boardId;
             $mapping->repo_connection_id = $repoId;
             $mapping->is_default = $isDefault;
-            R::store($mapping);
+            Bean::store($mapping);
 
             $this->disconnectUserDb();
             $this->flash('success', 'Board mapped to repository successfully.');
@@ -614,7 +615,7 @@ class Enterprise extends BaseControls\Control {
         $repos = [];
 
         UserDatabase::with($memberId, function() use (&$repos) {
-            $repoBeans = R::findAll('repo_connection', 'ORDER BY created_at DESC');
+            $repoBeans = Bean::findAll('repoconnections', 'ORDER BY created_at DESC');
 
             foreach ($repoBeans as $bean) {
                 $repos[] = [
@@ -652,7 +653,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $job = $jobManager->get($issueKey);
 
         if (!$job) {
@@ -680,7 +681,7 @@ class Enterprise extends BaseControls\Control {
     public function jobs() {
         if (!$this->requireEnterprise()) return;
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $jobs = $jobManager->getAll(50);
         $activeJobs = $jobManager->getActive();
 
@@ -724,7 +725,7 @@ class Enterprise extends BaseControls\Control {
             $this->connectUserDb();
 
             // Get Anthropic API key
-            $apiKeySetting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
 
             if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
                 $this->disconnectUserDb();
@@ -744,7 +745,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Get repository details
-            $repoBean = R::load('repo_connection', (int)$repoId);
+            $repoBean = Bean::load('repoconnections', (int)$repoId);
 
             if (!$repoBean->id) {
                 $this->disconnectUserDb();
@@ -801,8 +802,8 @@ class Enterprise extends BaseControls\Control {
             $jiraToken = $jiraCreds['jira_api_token'] ?? '';
             $jiraSiteUrl = $jiraCreds['jira_site_url'] ?? '';
 
-            // Create or get job using AiDevJobManager
-            $jobManager = new AiDevJobManager($this->member->id);
+            // Create or get job using AIDevJobManager
+            $jobManager = new AIDevJobManager($this->member->id);
             $job = $jobManager->getOrCreate($issueKey, $boardId, $repoId, $cloudId);
 
             // Generate shard job ID (this will be stored when job starts running)
@@ -1021,7 +1022,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $job = $jobManager->get($issueKey);
 
         if (!$job) {
@@ -1048,7 +1049,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
 
         // Verify job exists
         $job = $jobManager->get($issueKey);
@@ -1078,14 +1079,14 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $job = $jobManager->get($issueKey);
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
             return;
         }
 
-        if ($job->status !== AiDevJobManager::STATUS_WAITING_CLARIFICATION) {
+        if ($job->status !== AIDevJobManager::STATUS_WAITING_CLARIFICATION) {
             $this->json(['success' => false, 'error' => 'Job is not waiting for clarification']);
             return;
         }
@@ -1129,7 +1130,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $job = $jobManager->get($issueKey);
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
@@ -1144,9 +1145,9 @@ class Enterprise extends BaseControls\Control {
 
         // Can only retry completed, pr_created, or failed jobs
         if (!in_array($job->status, [
-            AiDevJobManager::STATUS_COMPLETE,
-            AiDevJobManager::STATUS_PR_CREATED,
-            AiDevJobManager::STATUS_FAILED
+            AIDevJobManager::STATUS_COMPLETE,
+            AIDevJobManager::STATUS_PR_CREATED,
+            AIDevJobManager::STATUS_FAILED
         ])) {
             $this->json(['success' => false, 'error' => 'Can only retry completed, pr_created, or failed jobs']);
             return;
@@ -1156,7 +1157,7 @@ class Enterprise extends BaseControls\Control {
             $this->connectUserDb();
 
             // Get API key
-            $apiKeySetting = R::findOne('enterprise_setting', 'setting_key = ?', ['anthropic_api_key']);
+            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
 
             if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
                 $this->disconnectUserDb();
@@ -1167,7 +1168,7 @@ class Enterprise extends BaseControls\Control {
             // Get cloud_id from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
-                $board = R::load('jira_board', (int)$job->board_id);
+                $board = Bean::load('jiraboards', (int)$job->board_id);
                 $cloudId = $board->cloud_id ?? null;
             }
 
@@ -1228,7 +1229,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AiDevJobManager($this->member->id);
+        $jobManager = new AIDevJobManager($this->member->id);
         $job = $jobManager->get($issueKey);
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
@@ -1236,7 +1237,7 @@ class Enterprise extends BaseControls\Control {
         }
 
         // Can only complete pr_created jobs
-        if ($job->status !== AiDevJobManager::STATUS_PR_CREATED) {
+        if ($job->status !== AIDevJobManager::STATUS_PR_CREATED) {
             $this->json(['success' => false, 'error' => 'Can only mark pr_created jobs as complete']);
             return;
         }

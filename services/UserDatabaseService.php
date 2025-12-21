@@ -52,8 +52,8 @@ class UserDatabaseService {
      * Run database migrations for schema updates
      */
     private function runMigrations() {
-        // Get current columns in jira_boards
-        $result = $this->db->query("PRAGMA table_info(jira_boards)");
+        // Get current columns in jiraboards
+        $result = $this->db->query("PRAGMA table_info(jiraboards)");
         $columns = [];
         while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
             $columns[$col['name']] = true;
@@ -61,22 +61,22 @@ class UserDatabaseService {
 
         // Add digest_cc column if it doesn't exist
         if (!isset($columns['digest_cc'])) {
-            $this->db->exec("ALTER TABLE jira_boards ADD COLUMN digest_cc TEXT DEFAULT ''");
+            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN digest_cc TEXT DEFAULT ''");
         }
 
         // Add priority_weights column if it doesn't exist
         if (!isset($columns['priority_weights'])) {
-            $this->db->exec("ALTER TABLE jira_boards ADD COLUMN priority_weights TEXT");
+            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN priority_weights TEXT");
         }
 
         // Add goals column if it doesn't exist
         if (!isset($columns['goals'])) {
-            $this->db->exec("ALTER TABLE jira_boards ADD COLUMN goals TEXT");
+            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN goals TEXT");
         }
 
-        // Create ticket_analysis_cache table if it doesn't exist
+        // Create ticketanalysiscache table if it doesn't exist
         $this->db->exec("
-            CREATE TABLE IF NOT EXISTS ticket_analysis_cache (
+            CREATE TABLE IF NOT EXISTS ticketanalysiscache (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 board_id INTEGER NOT NULL,
                 issue_key TEXT NOT NULL,
@@ -88,31 +88,31 @@ class UserDatabaseService {
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT,
                 UNIQUE(board_id, issue_key),
-                FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
             )
         ");
 
-        // Create indexes for ticket_analysis_cache
-        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticket_analysis_cache(board_id)");
-        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticket_analysis_cache(content_hash)");
+        // Create indexes for ticketanalysiscache
+        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticketanalysiscache(board_id)");
+        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticketanalysiscache(content_hash)");
 
-        // Migrate ai_dev_jobs to new schema (one record per issue_key)
+        // Migrate aidevjobs to new schema (one record per issue_key)
         $this->migrateAiDevJobs();
     }
 
     /**
-     * Migrate ai_dev_jobs table to new schema (one record per issue_key)
+     * Migrate aidevjobs table to new schema (one record per issue_key)
      */
     private function migrateAiDevJobs() {
         // Check if table exists
         $tableExists = $this->db->querySingle(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_dev_jobs'"
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='aidevjobs'"
         );
 
         if (!$tableExists) {
             // Create new table from scratch
             $this->db->exec("
-                CREATE TABLE IF NOT EXISTS ai_dev_jobs (
+                CREATE TABLE IF NOT EXISTS aidevjobs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     issue_key TEXT NOT NULL UNIQUE,
                     board_id INTEGER NOT NULL,
@@ -135,17 +135,17 @@ class UserDatabaseService {
                     completed_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
                 )
             ");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
             return;
         }
 
         // Check if we need to migrate (old schema has job_id column, new has current_shard_job_id)
-        $result = $this->db->query("PRAGMA table_info(ai_dev_jobs)");
+        $result = $this->db->query("PRAGMA table_info(aidevjobs)");
         $columns = [];
         while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
             $columns[$col['name']] = true;
@@ -162,7 +162,7 @@ class UserDatabaseService {
         try {
             // Create new table
             $this->db->exec("
-                CREATE TABLE ai_dev_jobs_new (
+                CREATE TABLE aidevjobs_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     issue_key TEXT NOT NULL UNIQUE,
                     board_id INTEGER NOT NULL,
@@ -185,13 +185,13 @@ class UserDatabaseService {
                     completed_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
                 )
             ");
 
             // Migrate data - keep most recent job per issue_key
             $this->db->exec("
-                INSERT OR REPLACE INTO ai_dev_jobs_new (
+                INSERT OR REPLACE INTO aidevjobs_new (
                     issue_key, board_id, repo_connection_id, status, current_shard_job_id,
                     branch_name, pr_url, pr_number, clarification_comment_id,
                     error_message, run_count, started_at, completed_at, created_at, updated_at
@@ -200,20 +200,20 @@ class UserDatabaseService {
                     issue_key, board_id, repo_connection_id, status, job_id,
                     branch_name, pr_url, pr_number, clarification_comment_id,
                     error_message, 1, started_at, completed_at, created_at, updated_at
-                FROM ai_dev_jobs
+                FROM aidevjobs
                 WHERE id IN (
-                    SELECT MAX(id) FROM ai_dev_jobs GROUP BY issue_key
+                    SELECT MAX(id) FROM aidevjobs GROUP BY issue_key
                 )
             ");
 
             // Drop old table and rename new
-            $this->db->exec("DROP TABLE ai_dev_jobs");
-            $this->db->exec("ALTER TABLE ai_dev_jobs_new RENAME TO ai_dev_jobs");
+            $this->db->exec("DROP TABLE aidevjobs");
+            $this->db->exec("ALTER TABLE aidevjobs_new RENAME TO aidevjobs");
 
             // Recreate indexes
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
+            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
 
             $this->db->exec("COMMIT");
         } catch (\Exception $e) {
@@ -240,7 +240,7 @@ class UserDatabaseService {
      */
     public function getBoards() {
         $result = $this->db->query("
-            SELECT * FROM jira_boards
+            SELECT * FROM jiraboards
             ORDER BY board_name ASC
         ");
 
@@ -260,7 +260,7 @@ class UserDatabaseService {
      */
     public function getBoardsByCloudId($cloudId) {
         $stmt = $this->db->prepare("
-            SELECT * FROM jira_boards
+            SELECT * FROM jiraboards
             WHERE cloud_id = :cloud_id
             ORDER BY board_name ASC
         ");
@@ -282,7 +282,7 @@ class UserDatabaseService {
      */
     public function getEnabledBoards() {
         $result = $this->db->query("
-            SELECT * FROM jira_boards
+            SELECT * FROM jiraboards
             WHERE enabled = 1
             ORDER BY board_name ASC
         ");
@@ -302,7 +302,7 @@ class UserDatabaseService {
      */
     public function getBoardsForDigest() {
         $result = $this->db->query("
-            SELECT * FROM jira_boards
+            SELECT * FROM jiraboards
             WHERE enabled = 1 AND digest_enabled = 1
             ORDER BY digest_time ASC
         ");
@@ -322,7 +322,7 @@ class UserDatabaseService {
      * @return array|null
      */
     public function getBoard($id) {
-        $stmt = $this->db->prepare("SELECT * FROM jira_boards WHERE id = :id");
+        $stmt = $this->db->prepare("SELECT * FROM jiraboards WHERE id = :id");
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
         $result = $stmt->execute();
 
@@ -338,7 +338,7 @@ class UserDatabaseService {
      */
     public function getBoardByJiraId($boardId, $cloudId) {
         $stmt = $this->db->prepare("
-            SELECT * FROM jira_boards
+            SELECT * FROM jiraboards
             WHERE board_id = :board_id AND cloud_id = :cloud_id
         ");
         $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
@@ -356,7 +356,7 @@ class UserDatabaseService {
      */
     public function addBoard($data) {
         $stmt = $this->db->prepare("
-            INSERT INTO jira_boards (
+            INSERT INTO jiraboards (
                 board_id, board_name, project_key, cloud_id, board_type,
                 enabled, digest_enabled, digest_time, timezone, status_filter
             ) VALUES (
@@ -418,7 +418,7 @@ class UserDatabaseService {
         $fields[] = "updated_at = :updated_at";
         $values[':updated_at'] = date('Y-m-d H:i:s');
 
-        $sql = "UPDATE jira_boards SET " . implode(', ', $fields) . " WHERE id = :id";
+        $sql = "UPDATE jiraboards SET " . implode(', ', $fields) . " WHERE id = :id";
         $stmt = $this->db->prepare($sql);
 
         foreach ($values as $key => $value) {
@@ -437,17 +437,17 @@ class UserDatabaseService {
      */
     public function removeBoard($id) {
         // Delete associated analysis results first
-        $stmt = $this->db->prepare("DELETE FROM analysis_results WHERE board_id = :id");
+        $stmt = $this->db->prepare("DELETE FROM analysisresults WHERE board_id = :id");
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
         $stmt->execute();
 
         // Delete digest history
-        $stmt = $this->db->prepare("DELETE FROM digest_history WHERE board_id = :id");
+        $stmt = $this->db->prepare("DELETE FROM digesthistory WHERE board_id = :id");
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
         $stmt->execute();
 
         // Delete the board
-        $stmt = $this->db->prepare("DELETE FROM jira_boards WHERE id = :id");
+        $stmt = $this->db->prepare("DELETE FROM jiraboards WHERE id = :id");
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
 
         return $stmt->execute() !== false;
@@ -484,7 +484,7 @@ class UserDatabaseService {
      */
     public function storeAnalysis($boardId, $type, $results, $markdown = null) {
         $stmt = $this->db->prepare("
-            INSERT INTO analysis_results (
+            INSERT INTO analysisresults (
                 board_id, analysis_type, content_json, content_markdown,
                 issue_count, status_filter
             ) VALUES (
@@ -526,7 +526,7 @@ class UserDatabaseService {
      * @return array|null
      */
     public function getAnalysis($id) {
-        $stmt = $this->db->prepare("SELECT * FROM analysis_results WHERE id = :id");
+        $stmt = $this->db->prepare("SELECT * FROM analysisresults WHERE id = :id");
         $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
         $result = $stmt->execute();
 
@@ -547,7 +547,7 @@ class UserDatabaseService {
      */
     public function getRecentAnalyses($boardId, $limit = 10) {
         $stmt = $this->db->prepare("
-            SELECT * FROM analysis_results
+            SELECT * FROM analysisresults
             WHERE board_id = :board_id
             ORDER BY created_at DESC
             LIMIT :limit
@@ -574,8 +574,8 @@ class UserDatabaseService {
     public function getAllRecentAnalyses($limit = 20) {
         $stmt = $this->db->prepare("
             SELECT a.*, b.board_name, b.project_key
-            FROM analysis_results a
-            JOIN jira_boards b ON a.board_id = b.id
+            FROM analysisresults a
+            JOIN jiraboards b ON a.board_id = b.id
             ORDER BY a.created_at DESC
             LIMIT :limit
         ");
@@ -603,10 +603,10 @@ class UserDatabaseService {
 
         foreach ($boards as $board) {
             $stmt = $this->db->prepare("
-                DELETE FROM analysis_results
+                DELETE FROM analysisresults
                 WHERE board_id = :board_id
                 AND id NOT IN (
-                    SELECT id FROM analysis_results
+                    SELECT id FROM analysisresults
                     WHERE board_id = :board_id2
                     ORDER BY created_at DESC
                     LIMIT :keep_count
@@ -638,7 +638,7 @@ class UserDatabaseService {
      */
     public function logDigest($boardId, $sentTo, $subject, $contentPreview, $status = 'sent', $errorMessage = null) {
         $stmt = $this->db->prepare("
-            INSERT INTO digest_history (
+            INSERT INTO digesthistory (
                 board_id, sent_to, subject, content_preview, status, error_message
             ) VALUES (
                 :board_id, :sent_to, :subject, :content_preview, :status, :error_message
@@ -671,7 +671,7 @@ class UserDatabaseService {
      */
     public function getDigestHistory($boardId, $limit = 20) {
         $stmt = $this->db->prepare("
-            SELECT * FROM digest_history
+            SELECT * FROM digesthistory
             WHERE board_id = :board_id
             ORDER BY created_at DESC
             LIMIT :limit
@@ -698,7 +698,7 @@ class UserDatabaseService {
      * @return mixed
      */
     public function getSetting($key, $default = null) {
-        $stmt = $this->db->prepare("SELECT value FROM user_settings WHERE key = :key");
+        $stmt = $this->db->prepare("SELECT value FROM usersettings WHERE key = :key");
         $stmt->bindValue(':key', $key, SQLITE3_TEXT);
         $result = $stmt->execute();
 
@@ -715,7 +715,7 @@ class UserDatabaseService {
      */
     public function setSetting($key, $value) {
         $stmt = $this->db->prepare("
-            INSERT OR REPLACE INTO user_settings (key, value, updated_at)
+            INSERT OR REPLACE INTO usersettings (key, value, updated_at)
             VALUES (:key, :value, :updated_at)
         ");
         $stmt->bindValue(':key', $key, SQLITE3_TEXT);
@@ -731,7 +731,7 @@ class UserDatabaseService {
      * @return array
      */
     public function getAllSettings() {
-        $result = $this->db->query("SELECT * FROM user_settings");
+        $result = $this->db->query("SELECT * FROM usersettings");
 
         $settings = [];
         while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
@@ -759,25 +759,25 @@ class UserDatabaseService {
         ];
 
         // Board counts
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jira_boards");
+        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards");
         $row = $result->fetchArray(SQLITE3_ASSOC);
         $stats['total_boards'] = $row['count'];
 
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jira_boards WHERE enabled = 1");
+        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards WHERE enabled = 1");
         $row = $result->fetchArray(SQLITE3_ASSOC);
         $stats['enabled_boards'] = $row['count'];
 
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jira_boards WHERE digest_enabled = 1");
+        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards WHERE digest_enabled = 1");
         $row = $result->fetchArray(SQLITE3_ASSOC);
         $stats['digest_enabled_boards'] = $row['count'];
 
         // Analysis count
-        $result = $this->db->query("SELECT COUNT(*) as count FROM analysis_results");
+        $result = $this->db->query("SELECT COUNT(*) as count FROM analysisresults");
         $row = $result->fetchArray(SQLITE3_ASSOC);
         $stats['total_analyses'] = $row['count'];
 
         // Digest count
-        $result = $this->db->query("SELECT COUNT(*) as count FROM digest_history WHERE status = 'sent'");
+        $result = $this->db->query("SELECT COUNT(*) as count FROM digesthistory WHERE status = 'sent'");
         $row = $result->fetchArray(SQLITE3_ASSOC);
         $stats['total_digests'] = $row['count'];
 
@@ -798,7 +798,7 @@ class UserDatabaseService {
      */
     public function getTicketAnalysisCache($boardId, $issueKey) {
         $stmt = $this->db->prepare("
-            SELECT * FROM ticket_analysis_cache
+            SELECT * FROM ticketanalysiscache
             WHERE board_id = :board_id AND issue_key = :issue_key
         ");
         $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
@@ -824,7 +824,7 @@ class UserDatabaseService {
      */
     public function setTicketAnalysisCache($boardId, $issueKey, $contentHash, $data) {
         $stmt = $this->db->prepare("
-            INSERT OR REPLACE INTO ticket_analysis_cache (
+            INSERT OR REPLACE INTO ticketanalysiscache (
                 board_id, issue_key, content_hash, clarity_score, clarity_analysis,
                 reporter_name, reporter_email, updated_at
             ) VALUES (
@@ -871,7 +871,7 @@ class UserDatabaseService {
      */
     public function getAllTicketAnalysisCache($boardId) {
         $stmt = $this->db->prepare("
-            SELECT * FROM ticket_analysis_cache
+            SELECT * FROM ticketanalysiscache
             WHERE board_id = :board_id
             ORDER BY issue_key ASC
         ");
@@ -900,7 +900,7 @@ class UserDatabaseService {
         $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
 
         $stmt = $this->db->prepare("
-            DELETE FROM ticket_analysis_cache
+            DELETE FROM ticketanalysiscache
             WHERE board_id = :board_id AND updated_at < :cutoff
         ");
         $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
@@ -966,7 +966,7 @@ class UserDatabaseService {
      * @return array Job record
      */
     public function getOrCreateAiDevJob(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null): array {
-        $stmt = $this->db->prepare("SELECT * FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt = $this->db->prepare("SELECT * FROM aidevjobs WHERE issue_key = :issue_key");
         $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
         $result = $stmt->execute();
         $job = $result->fetchArray(SQLITE3_ASSOC);
@@ -977,7 +977,7 @@ class UserDatabaseService {
 
         // Create new job record
         $stmt = $this->db->prepare("
-            INSERT INTO ai_dev_jobs (issue_key, board_id, repo_connection_id, cloud_id, status, run_count, created_at)
+            INSERT INTO aidevjobs (issue_key, board_id, repo_connection_id, cloud_id, status, run_count, created_at)
             VALUES (:issue_key, :board_id, :repo_id, :cloud_id, 'pending', 0, datetime('now'))
         ");
         $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
@@ -996,7 +996,7 @@ class UserDatabaseService {
      * @return array|null
      */
     public function getAiDevJob(string $issueKey): ?array {
-        $stmt = $this->db->prepare("SELECT * FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt = $this->db->prepare("SELECT * FROM aidevjobs WHERE issue_key = :issue_key");
         $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
         $result = $stmt->execute();
         $job = $result->fetchArray(SQLITE3_ASSOC);
@@ -1048,7 +1048,7 @@ class UserDatabaseService {
 
         $fields[] = "updated_at = datetime('now')";
 
-        $sql = "UPDATE ai_dev_jobs SET " . implode(', ', $fields) . " WHERE issue_key = :issue_key";
+        $sql = "UPDATE aidevjobs SET " . implode(', ', $fields) . " WHERE issue_key = :issue_key";
         $stmt = $this->db->prepare($sql);
 
         foreach ($values as $key => $value) {
@@ -1081,7 +1081,7 @@ class UserDatabaseService {
         ]);
 
         // Also increment run_count
-        $this->db->exec("UPDATE ai_dev_jobs SET run_count = run_count + 1 WHERE issue_key = '" . $this->db->escapeString($issueKey) . "'");
+        $this->db->exec("UPDATE aidevjobs SET run_count = run_count + 1 WHERE issue_key = '" . $this->db->escapeString($issueKey) . "'");
 
         return true;
     }
@@ -1151,7 +1151,7 @@ class UserDatabaseService {
      */
     public function getAllAiDevJobs(int $limit = 50): array {
         $stmt = $this->db->prepare("
-            SELECT * FROM ai_dev_jobs
+            SELECT * FROM aidevjobs
             ORDER BY COALESCE(updated_at, created_at) DESC
             LIMIT :limit
         ");
@@ -1175,7 +1175,7 @@ class UserDatabaseService {
      */
     public function getActiveAiDevJobs(): array {
         $result = $this->db->query("
-            SELECT * FROM ai_dev_jobs
+            SELECT * FROM aidevjobs
             WHERE status IN ('pending', 'running', 'waiting_clarification')
             ORDER BY started_at DESC
         ");
@@ -1208,7 +1208,7 @@ class UserDatabaseService {
      * @return bool
      */
     public function deleteAiDevJob(string $issueKey): bool {
-        $stmt = $this->db->prepare("DELETE FROM ai_dev_jobs WHERE issue_key = :issue_key");
+        $stmt = $this->db->prepare("DELETE FROM aidevjobs WHERE issue_key = :issue_key");
         $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
         return $stmt->execute() !== false;
     }
@@ -1228,7 +1228,7 @@ class UserDatabaseService {
         $jobId = $job['current_shard_job_id'] ?? $issueKey;
 
         $stmt = $this->db->prepare("
-            INSERT INTO ai_dev_job_logs (job_id, log_level, message, context_json, created_at)
+            INSERT INTO aidevjoblogs (job_id, log_level, message, context_json, created_at)
             VALUES (:job_id, :level, :message, :context, datetime('now'))
         ");
         $stmt->bindValue(':job_id', $jobId, SQLITE3_TEXT);
@@ -1255,7 +1255,7 @@ class UserDatabaseService {
         $jobId = $job['current_shard_job_id'] ?? $issueKey;
 
         $stmt = $this->db->prepare("
-            SELECT * FROM ai_dev_job_logs
+            SELECT * FROM aidevjoblogs
             WHERE job_id = :job_id
             ORDER BY created_at DESC
             LIMIT :limit

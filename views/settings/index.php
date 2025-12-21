@@ -1,7 +1,12 @@
 <div class="container-fluid">
     <div class="row">
         <div class="col-md-8 offset-md-2">
-            <h1 class="mb-4">Settings</h1>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="mb-0">Settings</h1>
+                <a href="/settings/connections" class="btn btn-outline-primary">
+                    <i class="bi bi-plug me-1"></i>Connected Services
+                </a>
+            </div>
 
             <!-- Subscription Section -->
             <?php

@@ -314,9 +314,9 @@ class GoogleAuth {
         // Initialize the user's database with MyCTOBot schema
         $userDb = new \SQLite3($dbFile);
 
-        // Create jira_boards table
+        // Create jiraboards table
         $userDb->exec("
-            CREATE TABLE IF NOT EXISTS jira_boards (
+            CREATE TABLE IF NOT EXISTS jiraboards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 board_id INTEGER NOT NULL,
                 board_name TEXT NOT NULL,
@@ -337,9 +337,9 @@ class GoogleAuth {
             )
         ");
 
-        // Create analysis_results table
+        // Create analysisresults table
         $userDb->exec("
-            CREATE TABLE IF NOT EXISTS analysis_results (
+            CREATE TABLE IF NOT EXISTS analysisresults (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 board_id INTEGER NOT NULL,
                 analysis_type TEXT NOT NULL,
@@ -348,13 +348,13 @@ class GoogleAuth {
                 issue_count INTEGER,
                 status_filter TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
             )
         ");
 
-        // Create digest_history table
+        // Create digesthistory table
         $userDb->exec("
-            CREATE TABLE IF NOT EXISTS digest_history (
+            CREATE TABLE IF NOT EXISTS digesthistory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 board_id INTEGER NOT NULL,
                 sent_to TEXT NOT NULL,
@@ -363,13 +363,13 @@ class GoogleAuth {
                 status TEXT DEFAULT 'sent',
                 error_message TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
             )
         ");
 
-        // Create user_settings table
+        // Create usersettings table
         $userDb->exec("
-            CREATE TABLE IF NOT EXISTS user_settings (
+            CREATE TABLE IF NOT EXISTS usersettings (
                 key TEXT PRIMARY KEY,
                 value TEXT,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -377,17 +377,17 @@ class GoogleAuth {
         ");
 
         // Create indexes
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jira_boards(cloud_id)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jira_boards(enabled)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jira_boards(digest_enabled)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysis_results(board_id)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysis_results(created_at DESC)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digest_history(board_id)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_id)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysisresults(created_at DESC)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digesthistory(board_id)");
 
         // Insert default settings
-        $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('digest_email', '')");
-        $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_status_filter', 'To Do')");
-        $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_digest_time', '08:00')");
+        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('digest_email', '')");
+        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_status_filter', 'To Do')");
+        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_digest_time', '08:00')");
 
         $userDb->close();
 

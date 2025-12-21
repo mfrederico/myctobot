@@ -488,9 +488,9 @@ class Auth extends BaseControls\Control {
             // Initialize the user's database with MyCTOBot schema
             $userDb = new \SQLite3($dbFile);
 
-            // Create jira_boards table
+            // Create jiraboards table
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS jira_boards (
+                CREATE TABLE IF NOT EXISTS jiraboards (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     board_id INTEGER NOT NULL,
                     board_name TEXT NOT NULL,
@@ -510,9 +510,9 @@ class Auth extends BaseControls\Control {
                 )
             ");
 
-            // Create analysis_results table
+            // Create analysisresults table
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS analysis_results (
+                CREATE TABLE IF NOT EXISTS analysisresults (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     board_id INTEGER NOT NULL,
                     analysis_type TEXT NOT NULL,
@@ -521,13 +521,13 @@ class Auth extends BaseControls\Control {
                     issue_count INTEGER,
                     status_filter TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+                    FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
                 )
             ");
 
-            // Create digest_history table
+            // Create digesthistory table
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS digest_history (
+                CREATE TABLE IF NOT EXISTS digesthistory (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     board_id INTEGER NOT NULL,
                     sent_to TEXT NOT NULL,
@@ -536,13 +536,13 @@ class Auth extends BaseControls\Control {
                     status TEXT DEFAULT 'sent',
                     error_message TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (board_id) REFERENCES jira_boards(id) ON DELETE CASCADE
+                    FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
                 )
             ");
 
-            // Create user_settings table
+            // Create usersettings table
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS user_settings (
+                CREATE TABLE IF NOT EXISTS usersettings (
                     key TEXT PRIMARY KEY,
                     value TEXT,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -550,21 +550,21 @@ class Auth extends BaseControls\Control {
             ");
 
             // Create indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jira_boards(cloud_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jira_boards(enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jira_boards(digest_enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysis_results(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysis_results(created_at DESC)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digest_history(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysisresults(created_at DESC)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digesthistory(board_id)");
 
             // Insert default settings
-            $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('digest_email', '')");
-            $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_status_filter', 'To Do')");
-            $userDb->exec("INSERT OR IGNORE INTO user_settings (key, value) VALUES ('default_digest_time', '08:00')");
+            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('digest_email', '')");
+            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_status_filter', 'To Do')");
+            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_digest_time', '08:00')");
 
             // Enterprise: Settings table for encrypted API keys and configuration
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS enterprise_settings (
+                CREATE TABLE IF NOT EXISTS enterprisesettings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     setting_key TEXT NOT NULL UNIQUE,
                     setting_value TEXT NOT NULL,
@@ -576,7 +576,7 @@ class Auth extends BaseControls\Control {
 
             // Enterprise: Git repository connections
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS repo_connections (
+                CREATE TABLE IF NOT EXISTS repoconnections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     provider TEXT NOT NULL,
                     repo_owner TEXT NOT NULL,
@@ -593,20 +593,20 @@ class Auth extends BaseControls\Control {
 
             // Enterprise: Board to repository mappings
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS board_repo_mappings (
+                CREATE TABLE IF NOT EXISTS boardrepomappings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     board_id INTEGER NOT NULL,
                     repo_connection_id INTEGER NOT NULL,
                     is_default INTEGER DEFAULT 0,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(board_id, repo_connection_id),
-                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE CASCADE
+                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE CASCADE
                 )
             ");
 
             // Enterprise: AI Developer jobs (one record per Jira issue)
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS ai_dev_jobs (
+                CREATE TABLE IF NOT EXISTS aidevjobs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     issue_key TEXT NOT NULL UNIQUE,
                     board_id INTEGER NOT NULL,
@@ -629,13 +629,13 @@ class Auth extends BaseControls\Control {
                     completed_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repo_connections(id) ON DELETE SET NULL
+                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
                 )
             ");
 
             // Enterprise: AI Developer job logs
             $userDb->exec("
-                CREATE TABLE IF NOT EXISTS ai_dev_job_logs (
+                CREATE TABLE IF NOT EXISTS aidevjoblogs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     job_id TEXT NOT NULL,
                     log_level TEXT DEFAULT 'info',
@@ -646,13 +646,13 @@ class Auth extends BaseControls\Control {
             ");
 
             // Enterprise indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_provider ON repo_connections(provider)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_enabled ON repo_connections(enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_mapping_board ON board_repo_mappings(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON ai_dev_jobs(status)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON ai_dev_jobs(issue_key)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON ai_dev_jobs(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON ai_dev_job_logs(job_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_provider ON repoconnections(provider)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_enabled ON repoconnections(enabled)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_mapping_board ON boardrepomappings(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON aidevjoblogs(job_id)");
 
             $userDb->close();
 

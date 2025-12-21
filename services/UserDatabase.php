@@ -5,20 +5,22 @@
  * Handles RedBeanPHP connections to per-user SQLite databases.
  * Each user has their own isolated database file.
  *
- * IMPORTANT: Follow RedBeanPHP naming conventions!
- * - Bean types use camelCase: R::dispense('aiDevJob')
- * - Properties use camelCase: $bean->issueKey
- * - RedBean auto-converts to snake_case in database
+ * IMPORTANT: Use the Bean wrapper class for all bean operations!
+ * - Bean types must be all lowercase, no underscores: Bean::dispense('aidevjobs')
+ * - Use Bean::findOne(), Bean::find(), Bean::store(), etc.
+ * - See lib/Bean.php for the full API
  *
  * Usage:
+ *   use \app\Bean;
+ *
  *   UserDatabase::connect($memberId);
- *   $job = R::findOne('aiDevJob', 'issue_key = ?', [$issueKey]);
- *   R::store($job);
+ *   $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+ *   Bean::store($job);
  *   UserDatabase::disconnect();
  *
  * Or use the callback pattern (auto-disconnects):
  *   $job = UserDatabase::with($memberId, function() use ($issueKey) {
- *       return R::findOne('aiDevJob', 'issue_key = ?', [$issueKey]);
+ *       return Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
  *   });
  */
 
@@ -123,13 +125,13 @@ class UserDatabase {
      * Note: R::exec is used here for DDL (schema creation), not CRUD.
      * This is the only acceptable use of R::exec per conventions.
      *
-     * IMPORTANT: Table names use snake_case to match RedBean conventions.
-     * RedBean auto-converts camelCase bean types to snake_case table names.
+     * IMPORTANT: Table names must be all lowercase, no underscores.
+     * This matches RedBeanPHP R::dispense() requirements.
      */
     private static function runMigrations(): void {
-        // Create ai_dev_job table (bean type: ai_dev_job)
+        // Create aidevjobs table (AI Developer job tracking)
         R::exec("
-            CREATE TABLE IF NOT EXISTS ai_dev_job (
+            CREATE TABLE IF NOT EXISTS aidevjobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 issue_key TEXT NOT NULL UNIQUE,
                 board_id INTEGER NOT NULL,
@@ -155,14 +157,14 @@ class UserDatabase {
             )
         ");
 
-        // Create indexes
-        R::exec("CREATE INDEX IF NOT EXISTS idx_ai_dev_job_status ON ai_dev_job(status)");
-        R::exec("CREATE INDEX IF NOT EXISTS idx_ai_dev_job_issue ON ai_dev_job(issue_key)");
-        R::exec("CREATE INDEX IF NOT EXISTS idx_ai_dev_job_board ON ai_dev_job(board_id)");
+        // Create indexes for aidevjobs
+        R::exec("CREATE INDEX IF NOT EXISTS idx_aidevjobs_status ON aidevjobs(status)");
+        R::exec("CREATE INDEX IF NOT EXISTS idx_aidevjobs_issue ON aidevjobs(issue_key)");
+        R::exec("CREATE INDEX IF NOT EXISTS idx_aidevjobs_board ON aidevjobs(board_id)");
 
-        // Create job logs table (bean type: ai_dev_job_log)
+        // Create aidevjoblogs table (AI Developer job logs)
         R::exec("
-            CREATE TABLE IF NOT EXISTS ai_dev_job_log (
+            CREATE TABLE IF NOT EXISTS aidevjoblogs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 issue_key TEXT NOT NULL,
                 log_level TEXT DEFAULT 'info',
@@ -171,7 +173,44 @@ class UserDatabase {
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
         ");
-        R::exec("CREATE INDEX IF NOT EXISTS idx_ai_dev_job_log_issue ON ai_dev_job_log(issue_key)");
+        R::exec("CREATE INDEX IF NOT EXISTS idx_aidevjoblogs_issue ON aidevjoblogs(issue_key)");
+
+        // Create enterprisesettings table (Enterprise tier settings like API keys)
+        R::exec("
+            CREATE TABLE IF NOT EXISTS enterprisesettings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                setting_key TEXT NOT NULL UNIQUE,
+                setting_value TEXT,
+                is_encrypted INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT
+            )
+        ");
+        R::exec("CREATE INDEX IF NOT EXISTS idx_enterprisesettings_key ON enterprisesettings(setting_key)");
+
+        // Create repoconnections table (GitHub/GitLab repository connections)
+        R::exec("
+            CREATE TABLE IF NOT EXISTS repoconnections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider TEXT NOT NULL DEFAULT 'github',
+                repo_url TEXT NOT NULL,
+                access_token TEXT,
+                is_encrypted INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT
+            )
+        ");
+
+        // Create boardrepomapping table (Maps Jira boards to repositories)
+        R::exec("
+            CREATE TABLE IF NOT EXISTS boardrepomapping (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                board_id INTEGER NOT NULL,
+                repo_connection_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ");
+        R::exec("CREATE INDEX IF NOT EXISTS idx_boardrepomapping_board ON boardrepomapping(board_id)");
     }
 
     /**

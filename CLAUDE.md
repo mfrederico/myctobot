@@ -7,29 +7,58 @@ This project uses FlightPHP and RedBeanPHP. You MUST follow these conventions st
 > **Official Documentation**: https://redbeanphp.com/
 > Always refer to the official docs for the most accurate information.
 
-### Naming Conventions (IMPORTANT)
+### Bean Wrapper Class (REQUIRED for User Database)
 
-RedBeanPHP automatically converts camelCase in PHP to underscore_case in the database.
+**For user database operations, use the `Bean` wrapper class instead of direct R:: calls.**
 
-**In PHP code, use camelCase:**
+The Bean class (`lib/Bean.php`) normalizes bean type names to all lowercase, which is required
+by RedBeanPHP's R::dispense(). It accepts camelCase, snake_case, or lowercase and converts them.
+
 ```php
-// Table names - use camelCase (NO underscores)
-$bean = R::dispense('orderItem');     // Creates table: order_item
-$bean = R::dispense('userProfile');   // Creates table: user_profile
-$bean = R::dispense('member');        // Creates table: member
+use \app\Bean;
 
-// Column names - use camelCase
-$bean->firstName = 'John';            // Creates column: first_name
-$bean->createdAt = date('Y-m-d');     // Creates column: created_at
-$bean->userId = 5;                    // Creates column: user_id
+// User database operations - use Bean::
+$setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['api_key']);
+$job = Bean::dispense('aidevjobs');
+Bean::store($job);
+Bean::trash($job);
+
+// Default database operations - R:: is still fine
+$member = R::load('member', $memberId);
+$tokens = R::find('atlassiantoken', 'cloud_id = ?', [$cloudId]);
 ```
 
-**WRONG - Don't use underscore_case in PHP:**
+**User database table names (all lowercase, no underscores):**
+| Bean Type | Table Name |
+|-----------|------------|
+| `aidevjobs` | aidevjobs |
+| `aidevjoblogs` | aidevjoblogs |
+| `enterprisesettings` | enterprisesettings |
+| `repoconnections` | repoconnections |
+| `boardrepomapping` | boardrepomapping |
+| `jiraboards` | jiraboards |
+
+### Naming Conventions (IMPORTANT)
+
+For **default database** tables (member, atlassiantoken, etc.), RedBeanPHP automatically
+converts camelCase in PHP to underscore_case in the database.
+
+For **user database** tables, always use all lowercase with no underscores (via Bean::).
+
+**Column names - use snake_case (these map directly to database columns):**
 ```php
-// WRONG - Don't use underscores in PHP bean code
-$bean = R::dispense('order_item');    // WRONG!
-$bean->first_name = 'John';           // WRONG!
-$bean->created_at = date('Y-m-d');    // WRONG!
+$bean->setting_key = 'api_key';       // Column: setting_key
+$bean->setting_value = 'encrypted';   // Column: setting_value
+$bean->created_at = date('Y-m-d');    // Column: created_at
+$bean->issue_key = 'PROJ-123';        // Column: issue_key
+```
+
+**WRONG - Don't use underscores in bean TYPE names with R::dispense:**
+```php
+// WRONG - R::dispense will fail with these!
+$bean = R::dispense('order_item');    // WRONG! Use 'orderitem'
+$bean = R::dispense('aiDevJobs');     // WRONG! Use 'aidevjobs'
+$bean = R::dispense('EnterpriseSettings'); // WRONG! Use 'enterprisesettings'
 ```
 
 ### Relations (One-to-Many)
@@ -84,41 +113,35 @@ Foreign keys are automatically named `[parent_type]_id`:
 
 ### Bean Operations (CRITICAL)
 
-**ALWAYS use bean operations for CRUD. R::exec should ONLY be used in extreme situations where there is no other way to get the data.**
+**ALWAYS use bean operations for CRUD. R::exec/Bean::exec should ONLY be used for DDL (schema) or extreme situations.**
 
 ```php
-// CORRECT - Use beans for create
-$member = R::dispense('member');
-$member->email = 'test@example.com';
-$member->createdAt = date('Y-m-d H:i:s');
-R::store($member);
+// CORRECT - User database (use Bean::)
+$job = Bean::dispense('aidevjobs');
+$job->issue_key = 'PROJ-123';
+$job->status = 'pending';
+Bean::store($job);
 
-// CORRECT - Use R::load for updates
+$setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['api_key']);
+Bean::trash($setting);
+
+// CORRECT - Default database (use R::)
 $member = R::load('member', $id);
 $member->lastLogin = date('Y-m-d H:i:s');
 R::store($member);
 
-// CORRECT - Use R::findOne for lookups
-$member = R::findOne('member', 'email = ?', [$email]);
-
-// CORRECT - Use R::trash for deletes
-$member = R::load('member', $id);
-R::trash($member);
-// Or: R::trash('member', $id);
-
-// WRONG - NEVER use R::exec for simple CRUD
+// WRONG - NEVER use exec for simple CRUD
 R::exec('INSERT INTO member (email) VALUES (?)', [$email]);  // WRONG!
-R::exec('UPDATE member SET email = ? WHERE id = ?', [$email, $id]);  // WRONG!
-R::exec('DELETE FROM member WHERE id = ?', [$id]);  // WRONG!
+Bean::exec('UPDATE aidevjobs SET status = ?', ['done']);     // WRONG!
 ```
 
-**The ONLY acceptable uses for R::exec:**
+**The ONLY acceptable uses for R::exec/Bean::exec:**
 ```php
-// Complex atomic operation that can't be done with beans
-R::exec('UPDATE member SET loginCount = loginCount + 1 WHERE id = ?', [$id]);
+// DDL (schema creation) - OK
+R::exec('CREATE TABLE IF NOT EXISTS mytable (...)');
 
-// Bulk operations on many records with complex conditions
-R::exec('DELETE FROM session WHERE expiresAt < NOW() AND memberId IN (SELECT id FROM member WHERE isDeleted = 1)');
+// Complex atomic operation that can't be done with beans - OK sparingly
+R::exec('UPDATE member SET loginCount = loginCount + 1 WHERE id = ?', [$id]);
 ```
 
 **If you think you need R::exec, ask yourself:**
@@ -138,13 +161,26 @@ If you use R::exec for simple CRUD, the ORM becomes useless and models are ignor
 
 ### Query Methods Reference
 
+**For user database tables, use Bean:: methods (same API as R::):**
+
+| Method | Returns | Use Case |
+|--------|---------|----------|
+| `Bean::load($type, $id)` | Single bean (empty if not found) | Get by ID |
+| `Bean::findOne($type, $sql, $params)` | Single bean or NULL | Get first match |
+| `Bean::find($type, $sql, $params)` | Array of beans | Get matching rows |
+| `Bean::findAll($type, $sql, $params)` | Array of beans | Same as find |
+| `Bean::count($type, $sql, $params)` | Integer | Count rows |
+| `Bean::dispense($type)` | New bean | Create new bean |
+| `Bean::store($bean)` | ID | Save bean |
+| `Bean::trash($bean)` | void | Delete bean |
+
+**For default database tables, use R:: methods:**
+
 | Method | Returns | Use Case |
 |--------|---------|----------|
 | `R::load($type, $id)` | Single bean (empty if not found) | Get by ID |
 | `R::findOne($type, $sql, $params)` | Single bean or NULL | Get first match |
 | `R::find($type, $sql, $params)` | Array of beans | Get matching rows |
-| `R::findAll($type, $sql, $params)` | Array of beans | Same as find |
-| `R::count($type, $sql, $params)` | Integer | Count rows |
 | `R::getAll($sql, $params)` | Array of arrays | Complex SELECT with joins |
 
 ### Quick Reference: PHP Property → Database Column
@@ -206,6 +242,29 @@ Lower number = higher privilege. Check with `Flight::hasLevel(LEVELS['ADMIN'])`.
 /routes         - Custom route definitions
 /conf           - Configuration files
 ```
+
+## Shard Infrastructure
+
+Shards are remote servers that run AI Developer jobs (Claude Code CLI).
+
+### SSH Access
+```bash
+# Connect to shard (use claudeuser, NOT root)
+ssh claudeuser@173.231.12.84
+
+# Logs location
+/var/www/html/default/myctobot/log/shard-YYYY-MM-DD.log
+
+# Job work directories
+/tmp/aidev-job-{job_id}/
+
+# Sync code to shards
+./scripts/sync-to-shards.sh
+```
+
+### Shard Endpoints
+- `POST /analysis/shardaidev` - Run AI Developer job
+- `GET /health` - Health check
 
 ## See Also
 

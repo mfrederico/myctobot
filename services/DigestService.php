@@ -90,7 +90,7 @@ class DigestService {
         }
 
         $userDb = new \SQLite3($dbPath);
-        $result = $userDb->query("SELECT * FROM jira_boards WHERE enabled = 1 AND digest_enabled = 1");
+        $result = $userDb->query("SELECT * FROM jiraboards WHERE enabled = 1 AND digest_enabled = 1");
 
         $boards = [];
         while ($board = $result->fetchArray(SQLITE3_ASSOC)) {
@@ -190,7 +190,7 @@ class DigestService {
         $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
 
         $userDb = new \SQLite3($dbPath);
-        $stmt = $userDb->prepare("UPDATE jira_boards SET last_digest_at = ? WHERE id = ?");
+        $stmt = $userDb->prepare("UPDATE jiraboards SET last_digest_at = ? WHERE id = ?");
         $stmt->bindValue(1, date('Y-m-d H:i:s'), SQLITE3_TEXT);
         $stmt->bindValue(2, $boardId, SQLITE3_INTEGER);
         $stmt->execute();

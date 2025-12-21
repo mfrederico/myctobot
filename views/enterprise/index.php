@@ -30,8 +30,11 @@
     <div class="row mb-4">
         <div class="col-12">
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Setup Status</h5>
+                    <a href="/settings/connections" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-plug me-1"></i>Manage Connections
+                    </a>
                 </div>
                 <div class="card-body">
                     <div class="row">

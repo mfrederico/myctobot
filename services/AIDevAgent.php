@@ -19,6 +19,8 @@ namespace app\services;
 use \Flight as Flight;
 use GuzzleHttp\Client;
 
+require_once __DIR__ . '/ShopifyClient.php';
+
 class AIDevAgent {
     private int $memberId;
     private string $cloudId;
@@ -29,9 +31,11 @@ class AIDevAgent {
     private ?JiraClient $jira = null;
     private ?GitHubClient $github = null;
     private ?GitOperations $git = null;
+    private ?ShopifyClient $shopify = null;
 
     private array $repoConfig = [];
     private string $model = 'claude-sonnet-4-20250514';
+    private bool $isShopifyTheme = false;
 
     /**
      * Create a new AI Developer Agent
@@ -60,6 +64,23 @@ class AIDevAgent {
 
         // Load repository configuration
         $this->loadRepoConfig();
+
+        // Initialize Shopify client if connected
+        $this->initShopify();
+    }
+
+    /**
+     * Initialize Shopify client if connected
+     */
+    private function initShopify(): void {
+        try {
+            $this->shopify = new ShopifyClient($this->memberId);
+            if (!$this->shopify->isConnected()) {
+                $this->shopify = null;
+            }
+        } catch (\Exception $e) {
+            $this->shopify = null;
+        }
     }
 
     /**
@@ -68,7 +89,7 @@ class AIDevAgent {
     private function loadRepoConfig(): void {
         $db = $this->getUserDb();
         $result = $db->querySingle(
-            "SELECT * FROM repo_connections WHERE id = " . (int)$this->repoConnectionId,
+            "SELECT * FROM repoconnections WHERE id = " . (int)$this->repoConnectionId,
             true
         );
 
@@ -156,6 +177,12 @@ class AIDevAgent {
             $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
             $changes = $this->implementChanges($plan);
 
+            // Step 7b: Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
             // Step 8: Create PR
             $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
             $pr = $this->createPullRequest($issueKey, $issue, $changes, $plan);
@@ -171,13 +198,21 @@ class AIDevAgent {
 
             $this->log('info', 'Job completed successfully', ['pr_url' => $pr['url']]);
 
-            return [
+            $result = [
                 'status' => 'success',
                 'pr_url' => $pr['url'],
                 'pr_number' => $pr['number'],
                 'branch' => $pr['branch'],
                 'files_changed' => count($changes['files'] ?? [])
             ];
+
+            // Add Shopify info if available
+            if ($shopifyResult) {
+                $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+            }
+
+            return $result;
 
         } catch (\Exception $e) {
             $this->log('error', 'Job failed', ['error' => $e->getMessage()]);
@@ -253,6 +288,12 @@ class AIDevAgent {
             $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
             $changes = $this->implementChanges($plan);
 
+            // Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
             // Create PR
             $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
             $pr = $this->createPullRequest($issueKey, $issue, $changes, $plan);
@@ -265,12 +306,19 @@ class AIDevAgent {
                 $pr['branch']
             );
 
-            return [
+            $result = [
                 'status' => 'success',
                 'pr_url' => $pr['url'],
                 'pr_number' => $pr['number'],
                 'branch' => $pr['branch']
             ];
+
+            if ($shopifyResult) {
+                $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+            }
+
+            return $result;
 
         } catch (\Exception $e) {
             $this->log('error', 'Resume failed', ['error' => $e->getMessage()]);
@@ -350,6 +398,12 @@ class AIDevAgent {
             $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
             $changes = $this->implementChangesOnExistingBranch($plan, $branchName);
 
+            // Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
             // Step 7: If no PR exists, create one; otherwise just push updates
             if ($prNumber) {
                 // Just update the PR with a comment
@@ -366,13 +420,20 @@ class AIDevAgent {
                     $branchName
                 );
 
-                return [
+                $result = [
                     'status' => 'success',
                     'pr_url' => $prUrl,
                     'pr_number' => $prNumber,
                     'branch' => $branchName,
                     'files_changed' => count($changes['files'] ?? [])
                 ];
+
+                if ($shopifyResult) {
+                    $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                    $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                }
+
+                return $result;
             } else {
                 // Create new PR
                 $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
@@ -386,13 +447,20 @@ class AIDevAgent {
                     $branchName
                 );
 
-                return [
+                $result = [
                     'status' => 'success',
                     'pr_url' => $pr['url'],
                     'pr_number' => $pr['number'],
                     'branch' => $branchName,
                     'files_changed' => count($changes['files'] ?? [])
                 ];
+
+                if ($shopifyResult) {
+                    $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                    $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                }
+
+                return $result;
             }
 
         } catch (\Exception $e) {
@@ -1018,6 +1086,215 @@ PROMPT;
         $body .= "*This PR was created automatically by [MyCTOBot AI Developer](https://myctobot.ai)*\n";
 
         return $body;
+    }
+
+    // ========================================
+    // Shopify Integration Methods
+    // ========================================
+
+    /**
+     * Check if the repository is a Shopify theme
+     */
+    private function isShopifyThemeRepo(): bool {
+        if ($this->isShopifyTheme) {
+            return true;
+        }
+
+        // Check for Shopify theme indicators
+        $themeIndicators = [
+            'config/settings_schema.json',
+            'layout/theme.liquid',
+            'templates/index.liquid',
+            'templates/index.json'
+        ];
+
+        foreach ($themeIndicators as $indicator) {
+            try {
+                $this->git->readFile($indicator);
+                $this->isShopifyTheme = true;
+                $this->log('info', 'Detected Shopify theme repository');
+                return true;
+            } catch (\Exception $e) {
+                // File doesn't exist, continue checking
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Sync changed files to Shopify development theme
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $issue Jira issue data
+     * @param array $changes Changes made by implementation
+     * @return array|null Result with theme_id and preview_url, or null on failure
+     */
+    private function syncToShopify(string $issueKey, array $issue, array $changes): ?array {
+        if (!$this->shopify) {
+            return null;
+        }
+
+        try {
+            $this->updateStatus(AIDevStatusService::STEP_SYNCING_SHOPIFY, 75);
+            $this->log('info', 'Starting Shopify theme sync');
+
+            // Get or create development theme for this ticket
+            $summary = $issue['fields']['summary'] ?? '';
+            $theme = $this->shopify->getOrCreateDevTheme($issueKey, $summary);
+
+            if (empty($theme['id'])) {
+                $this->log('warning', 'Could not create Shopify development theme');
+                return null;
+            }
+
+            $themeId = (int)$theme['id'];
+            $this->log('info', 'Using Shopify theme', ['theme_id' => $themeId, 'theme_name' => $theme['name'] ?? '']);
+
+            // Prepare files to upload
+            $filesToUpload = [];
+            foreach ($changes['files'] ?? [] as $file) {
+                $path = $file['path'];
+                $action = $file['action'];
+
+                // Skip deleted files (Shopify handles via separate delete call)
+                if ($action === 'deleted') {
+                    continue;
+                }
+
+                // Only sync theme files (assets, config, layout, locales, sections, snippets, templates)
+                if (!$this->isShopifyThemeFile($path)) {
+                    continue;
+                }
+
+                try {
+                    $content = $this->git->readFile($path);
+                    $assetKey = $this->toShopifyAssetKey($path);
+
+                    // Check if it's a binary file
+                    if ($this->isBinaryFile($path)) {
+                        $filesToUpload[] = [
+                            'key' => $assetKey,
+                            'attachment' => base64_encode($content)
+                        ];
+                    } else {
+                        $filesToUpload[] = [
+                            'key' => $assetKey,
+                            'value' => $content
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    $this->log('warning', "Could not read file for Shopify sync: {$path}");
+                }
+            }
+
+            if (empty($filesToUpload)) {
+                $this->log('info', 'No theme files to sync to Shopify');
+                return [
+                    'theme_id' => $themeId,
+                    'preview_url' => $theme['preview_url']
+                ];
+            }
+
+            // Upload files to Shopify theme
+            $this->updateStatus(AIDevStatusService::STEP_CREATING_PREVIEW, 78);
+            $uploadResult = $this->shopify->uploadThemeFiles($themeId, $filesToUpload);
+
+            $this->log('info', 'Shopify theme sync complete', [
+                'uploaded' => count($uploadResult['success']),
+                'failed' => count($uploadResult['failed'])
+            ]);
+
+            // Get preview URL
+            $previewUrl = $this->shopify->getPreviewUrl($themeId);
+
+            // Update job status with Shopify info
+            AIDevStatusService::updateShopifyTheme(
+                $this->memberId,
+                $this->jobId,
+                $themeId,
+                $previewUrl
+            );
+
+            // Post preview URL to Jira
+            $this->postShopifyPreviewToJira($issueKey, $previewUrl);
+
+            return [
+                'theme_id' => $themeId,
+                'preview_url' => $previewUrl,
+                'files_synced' => count($uploadResult['success']),
+                'files_failed' => count($uploadResult['failed'])
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', 'Shopify sync failed', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Check if a file path is a Shopify theme file
+     */
+    private function isShopifyThemeFile(string $path): bool {
+        $themeDirectories = [
+            'assets/',
+            'config/',
+            'layout/',
+            'locales/',
+            'sections/',
+            'snippets/',
+            'templates/',
+            'blocks/'
+        ];
+
+        foreach ($themeDirectories as $dir) {
+            if (str_starts_with($path, $dir)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Convert file path to Shopify asset key
+     */
+    private function toShopifyAssetKey(string $path): string {
+        // Shopify asset keys are just the path from theme root
+        return $path;
+    }
+
+    /**
+     * Check if a file is binary based on extension
+     */
+    private function isBinaryFile(string $path): bool {
+        $binaryExtensions = [
+            'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico',
+            'woff', 'woff2', 'ttf', 'eot', 'otf',
+            'mp4', 'webm', 'mp3', 'ogg',
+            'pdf', 'zip'
+        ];
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return in_array($ext, $binaryExtensions);
+    }
+
+    /**
+     * Post Shopify preview URL to Jira as a comment
+     */
+    private function postShopifyPreviewToJira(string $issueKey, string $previewUrl): void {
+        try {
+            $comment = "**MyCTOBot - Shopify Preview Ready**\n\n";
+            $comment .= "Your changes have been synced to a Shopify development theme.\n\n";
+            $comment .= "**Preview Link:** [{$previewUrl}]({$previewUrl})\n\n";
+            $comment .= "_Note: This is an unpublished preview. Changes will not affect your live store._";
+
+            $this->jira->addComment($issueKey, $comment);
+            $this->log('info', 'Posted Shopify preview to Jira', ['issue_key' => $issueKey]);
+
+        } catch (\Exception $e) {
+            $this->log('warning', 'Failed to post Shopify preview to Jira', ['error' => $e->getMessage()]);
+        }
     }
 
     // ========================================

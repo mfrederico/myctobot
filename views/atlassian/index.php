@@ -87,6 +87,21 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Danger Zone -->
+            <div class="card mt-4 border-danger">
+                <div class="card-header bg-danger text-white">
+                    <i class="bi bi-exclamation-triangle"></i> Danger Zone
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Disconnecting all Atlassian sites will remove all your boards and analysis history.
+                    </p>
+                    <button type="button" class="btn btn-outline-danger" onclick="disconnectAll()">
+                        <i class="bi bi-x-circle"></i> Disconnect All Atlassian Sites
+                    </button>
+                </div>
+            </div>
             <?php endif; ?>
 
             <!-- Help Section -->
@@ -170,6 +185,32 @@ function disconnectSite(cloudId, siteName) {
         .catch(error => {
             alert('Error: ' + error.message);
         });
+    }
+}
+
+function disconnectAll() {
+    if (confirm('Are you sure you want to disconnect ALL Atlassian sites? This will remove all your boards and analysis history.')) {
+        if (confirm('This action cannot be undone. Are you absolutely sure?')) {
+            fetch('/atlassian/disconnectall', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('All Atlassian sites disconnected');
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.message || 'Failed to disconnect'));
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            });
+        }
     }
 }
 </script>

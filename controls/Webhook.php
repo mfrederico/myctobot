@@ -8,15 +8,17 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\services\AIDevJobService;
-use \app\services\AiDevJobManager;
+use \app\services\AIDevJobManager;
 use \app\services\UserDatabase;
 use \app\services\EncryptionService;
 use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
 
+require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
-require_once __DIR__ . '/../services/AiDevJobManager.php';
+require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/UserDatabase.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
@@ -131,57 +133,135 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Handle issue:updated event - check for ai-dev label
+     * Handle issue:updated event - check for ai-dev label and Done transitions
      */
     private function handleIssueUpdated(array $data, string $issueKey, string $cloudId): void {
         $changelog = $data['changelog'] ?? [];
         $items = $changelog['items'] ?? [];
 
-        // Ignore if this is only a status change (likely our own transition)
-        $hasOnlyStatusChange = true;
-        $hasLabelChange = false;
-        foreach ($items as $item) {
-            if ($item['field'] === 'labels') {
-                $hasLabelChange = true;
-                $hasOnlyStatusChange = false;
-            } elseif ($item['field'] !== 'status') {
-                $hasOnlyStatusChange = false;
-            }
-        }
-
-        // Skip if this webhook is just a status transition (our bot's action)
-        if ($hasOnlyStatusChange && !$hasLabelChange) {
-            $this->logger->debug('Jira webhook: ignoring status-only change', ['issue_key' => $issueKey]);
-            return;
-        }
-
-        // Check current labels on the issue (not just changelog)
+        // Check current labels on the issue
         $issue = $data['issue'] ?? [];
         $currentLabels = [];
         foreach (($issue['fields']['labels'] ?? []) as $label) {
             $currentLabels[] = is_string($label) ? $label : ($label['name'] ?? '');
         }
 
+        // Check what changed
+        $hasOnlyStatusChange = true;
+        $hasLabelChange = false;
+        $hasBotLabelChange = false;
+        $isDoneTransition = false;
+
         foreach ($items as $item) {
-            // Check if labels changed
+            if ($item['field'] === 'labels') {
+                $hasLabelChange = true;
+                $hasOnlyStatusChange = false;
+                // Check if this is our bot's label change
+                $oldLabels = explode(' ', $item['fromString'] ?? '');
+                $newLabels = explode(' ', $item['toString'] ?? '');
+                if ((in_array('myctobot-working', $newLabels) && !in_array('myctobot-working', $oldLabels)) ||
+                    (!in_array('myctobot-working', $newLabels) && in_array('myctobot-working', $oldLabels))) {
+                    $hasBotLabelChange = true;
+                }
+            } elseif ($item['field'] === 'status') {
+                // Check for "Done" transition
+                $toStatus = strtolower($item['toString'] ?? '');
+                if (in_array($toStatus, ['done', 'closed', 'resolved', 'complete', 'completed'])) {
+                    $isDoneTransition = true;
+                }
+            } else {
+                $hasOnlyStatusChange = false;
+            }
+        }
+
+        // Handle "Done" transition - cleanup Shopify themes and branches
+        if ($isDoneTransition) {
+            $memberId = $this->findMemberByCloudId($cloudId);
+            if ($memberId) {
+                $this->logger->info('Ticket transitioned to Done, triggering cleanup', [
+                    'issue_key' => $issueKey,
+                    'member_id' => $memberId
+                ]);
+                $jobService = new AIDevJobService();
+                $cleanupResult = $jobService->cleanupOnTicketDone($memberId, $issueKey);
+                $this->logger->info('Cleanup completed', [
+                    'issue_key' => $issueKey,
+                    'shopify_themes_deleted' => $cleanupResult['shopify_themes_deleted'],
+                    'jobs_marked_complete' => $cleanupResult['jobs_marked_complete']
+                ]);
+            }
+            // Continue processing (don't return) - ticket might also have other changes
+        }
+
+        // Skip if this webhook is just our bot's label change
+        if ($hasLabelChange && $hasBotLabelChange && count($items) <= 2) {
+            $this->logger->debug('Jira webhook: ignoring bot label change', ['issue_key' => $issueKey]);
+            return;
+        }
+
+        // Skip status-only changes UNLESS the issue has ai-dev label (then check if job needed)
+        if ($hasOnlyStatusChange && !$hasLabelChange) {
+            // Even for status-only changes, check if ai-dev label is present and no job running
+            if (in_array('ai-dev', $currentLabels)) {
+                $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', ['issue_key' => $issueKey]);
+                $this->triggerAIDevJobIfNeeded($issueKey, $cloudId);
+            } else {
+                $this->logger->debug('Jira webhook: ignoring status-only change', ['issue_key' => $issueKey]);
+            }
+            return;
+        }
+
+        // Check changelog for ai-dev label being added
+        foreach ($items as $item) {
             if ($item['field'] === 'labels') {
                 $oldLabels = explode(' ', $item['fromString'] ?? '');
                 $newLabels = explode(' ', $item['toString'] ?? '');
 
-                // Check if ai-dev label was ADDED (not already present before)
-                // AND is still present on the issue
-                // AND myctobot-working wasn't the change (our bot's action)
+                // Check if ai-dev label was ADDED
                 $aiDevWasAdded = in_array('ai-dev', $newLabels) && !in_array('ai-dev', $oldLabels);
-                $botLabelChange = (in_array('myctobot-working', $newLabels) && !in_array('myctobot-working', $oldLabels)) ||
-                                  (!in_array('myctobot-working', $newLabels) && in_array('myctobot-working', $oldLabels));
 
-                // Only trigger if ai-dev was specifically added AND it's not just our bot adding/removing its working label
-                if ($aiDevWasAdded && in_array('ai-dev', $currentLabels) && !$botLabelChange) {
+                if ($aiDevWasAdded && in_array('ai-dev', $currentLabels)) {
                     $this->triggerAIDevJob($issueKey, $cloudId);
-                    return; // Only trigger once per webhook
+                    return;
                 }
             }
         }
+    }
+
+    /**
+     * Trigger AI Dev job only if not already running/completed
+     */
+    private function triggerAIDevJobIfNeeded(string $issueKey, string $cloudId): void {
+        $memberId = $this->findMemberByCloudId($cloudId);
+        if (!$memberId) {
+            return;
+        }
+
+        // Check if there's already an active job for this issue
+        $statusDir = __DIR__ . '/../storage/aidev_status/member_' . $memberId;
+        if (is_dir($statusDir)) {
+            $files = glob($statusDir . '/*.json');
+            foreach ($files as $file) {
+                $content = @file_get_contents($file);
+                if ($content) {
+                    $data = json_decode($content, true);
+                    if ($data && ($data['issue_key'] ?? '') === $issueKey) {
+                        $status = $data['status'] ?? '';
+                        // Skip if job is running, pending, or already has PR
+                        if (in_array($status, ['pending', 'running', 'pr_created', 'waiting_clarification'])) {
+                            $this->logger->debug('Jira webhook: job already exists for issue', [
+                                'issue_key' => $issueKey,
+                                'status' => $status
+                            ]);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // No active job found, trigger new one
+        $this->triggerAIDevJob($issueKey, $cloudId);
     }
 
     /**
@@ -200,14 +280,14 @@ class Webhook extends BaseControls\Control {
         }
 
         // Check if there's a job waiting for clarification for this issue
-        $jobManager = new AiDevJobManager($memberId);
+        $jobManager = new AIDevJobManager($memberId);
         $job = $jobManager->get($issueKey);
 
         if (!$job) {
             return;
         }
 
-        if ($job->status !== AiDevJobManager::STATUS_WAITING_CLARIFICATION) {
+        if ($job->status !== AIDevJobManager::STATUS_WAITING_CLARIFICATION) {
             return;
         }
 
@@ -372,7 +452,7 @@ class Webhook extends BaseControls\Control {
         // Could update job status when PR is merged
         if ($action === 'closed' && ($pr['merged'] ?? false)) {
             // Find job by PR number and update status to complete
-            // This would require adding pr_number lookup to AiDevJobManager
+            // This would require adding pr_number lookup to AIDevJobManager
         }
     }
 
@@ -768,7 +848,10 @@ class Webhook extends BaseControls\Control {
             $issueKey = $jobData['issue_key'] ?? '';
             $boardId = $jobData['board_id'] ?? 0;
             $jobService = new AIDevJobService();
-            $jobManager = new AiDevJobManager($memberId);
+            $jobManager = new AIDevJobManager($memberId);
+
+            // Ensure AIDevStatusService is available for all status handlers
+            require_once __DIR__ . '/../services/AIDevStatusService.php';
 
             // Handle based on status
             if ($status === 'completed' && !empty($result['success']) && !empty($result['pr_url'])) {
@@ -794,6 +877,31 @@ class Webhook extends BaseControls\Control {
                     $jobService->onJobCompleted($memberId, $cloudId, $issueKey, $boardId);
                 }
 
+            } elseif ($status === 'preview_ready' && !empty($result['shopify_preview_url'])) {
+                // Shopify preview is ready - update status and post to Jira
+                $themeId = (int)($result['shopify_theme_id'] ?? 0);
+                $previewUrl = $result['shopify_preview_url'];
+                $playwrightResults = $result['playwright_results'] ?? null;
+
+                \app\services\AIDevStatusService::previewReady(
+                    $memberId,
+                    $jobId,
+                    $themeId,
+                    $previewUrl,
+                    $playwrightResults
+                );
+
+                $this->logger->info('AIdev Shopify preview ready', [
+                    'job_id' => $jobId,
+                    'issue_key' => $issueKey,
+                    'preview_url' => $previewUrl
+                ]);
+
+                // Post preview URL to Jira
+                if ($cloudId && $issueKey) {
+                    $jobService->postPreviewToJira($memberId, $cloudId, $issueKey, $previewUrl, $playwrightResults);
+                }
+
             } elseif ($status === 'needs_clarification' && !empty($result['questions'])) {
                 // Claude needs clarification - post questions to Jira
                 $this->postClarificationToJira($memberId, $issueKey, $cloudId, $result['questions']);
@@ -812,6 +920,9 @@ class Webhook extends BaseControls\Control {
                 }
                 $errorMsg = $errorMsg ?: 'Unknown error';
                 $jobManager->fail($issueKey, $errorMsg, $result['raw_output'] ?? null);
+
+                // Also update JSON status file
+                \app\services\AIDevStatusService::fail($memberId, $jobId, $errorMsg);
 
                 $this->logger->error('AIdev job failed', [
                     'job_id' => $jobId,
@@ -833,6 +944,11 @@ class Webhook extends BaseControls\Control {
             // Store the full result for debugging
             $this->storeAIDevResult($memberId, $jobId, $result, $elapsedSeconds);
 
+            // Check for credit balance errors in verification (even on successful jobs)
+            if (!empty($result['verification']['credit_error'])) {
+                $this->storeCreditBalanceError($memberId, 'Anthropic API credits are low. Verification iterations may have been skipped.');
+            }
+
             echo json_encode(['success' => true]);
 
         } catch (\Exception $e) {
@@ -847,27 +963,54 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Find AI Dev job by shard job ID across all members
-     * Searches the database for jobs with matching current_shard_job_id
+     * Searches JSON status files first (primary source), then database as fallback
      */
     private function findAIDevJob(string $shardJobId): ?array {
-        // Find all members with user databases
+        // First, search JSON status files (primary source of truth for active jobs)
+        $statusDir = __DIR__ . '/../storage/aidev_status';
+        if (is_dir($statusDir)) {
+            $memberDirs = glob($statusDir . '/member_*', GLOB_ONLYDIR);
+            foreach ($memberDirs as $memberDir) {
+                $memberId = (int) str_replace($statusDir . '/member_', '', $memberDir);
+                $files = glob($memberDir . '/*.json');
+                foreach ($files as $file) {
+                    $content = @file_get_contents($file);
+                    if ($content) {
+                        $data = json_decode($content, true);
+                        if ($data && ($data['job_id'] ?? '') === $shardJobId) {
+                            return [
+                                'member_id' => $memberId,
+                                'job_id' => $shardJobId,
+                                'issue_key' => $data['issue_key'] ?? '',
+                                'cloud_id' => $data['cloud_id'] ?? '',
+                                'board_id' => (int) ($data['board_id'] ?? 0),
+                                'status' => $data['status'] ?? '',
+                                'repo_connection_id' => $data['repo_connection_id'] ?? null
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: search database for jobs with matching current_shard_job_id
         $members = R::find('member', 'ceobot_db IS NOT NULL AND ceobot_db != ?', ['']);
 
         foreach ($members as $member) {
             try {
                 $job = UserDatabase::with($member->id, function() use ($shardJobId) {
-                    return R::findOne('aiDevJob', 'current_shard_job_id = ?', [$shardJobId]);
+                    return Bean::findOne('aidevjobs', 'current_shard_job_id = ?', [$shardJobId]);
                 });
 
                 if ($job) {
                     return [
                         'member_id' => (int) $member->id,
                         'job_id' => $shardJobId,
-                        'issue_key' => $job->issueKey,
-                        'cloud_id' => $job->cloudId,
-                        'board_id' => (int) $job->boardId,
+                        'issue_key' => $job->issue_key,
+                        'cloud_id' => $job->cloud_id,
+                        'board_id' => (int) $job->board_id,
                         'status' => $job->status,
-                        'repo_connection_id' => $job->repoConnectionId
+                        'repo_connection_id' => $job->repo_connection_id
                     ];
                 }
             } catch (\Exception $e) {
@@ -894,7 +1037,7 @@ class Webhook extends BaseControls\Control {
         }
         $questionText .= "\nPlease reply to this comment with your answers.";
 
-        $jobManager = new AiDevJobManager($memberId);
+        $jobManager = new AIDevJobManager($memberId);
 
         try {
             // Get Jira client
@@ -938,7 +1081,7 @@ class Webhook extends BaseControls\Control {
             }
 
             $db = new \SQLite3($dbFile);
-            $db->exec("INSERT OR REPLACE INTO enterprise_settings
+            $db->exec("INSERT OR REPLACE INTO enterprisesettings
                        (setting_key, setting_value, is_encrypted, updated_at)
                        VALUES ('credit_balance_error', '" . $db->escapeString($errorMsg) . "', 0, datetime('now'))");
             $db->close();

@@ -16,6 +16,9 @@ use \app\services\TierFeatures;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
+require_once __DIR__ . '/../services/ConnectionsService.php';
+
+use \app\services\ConnectionsService;
 
 class Settings extends BaseControls\Control {
 
@@ -34,27 +37,11 @@ class Settings extends BaseControls\Control {
     }
 
     /**
-     * Settings index page
+     * Settings index page - redirects to unified connections page
      */
     public function index() {
-        if (!$this->requireLogin()) return;
-
-        // Get connected Atlassian sites
-        $sites = AtlassianAuth::getConnectedSites($this->member->id);
-
-        // Get user stats
-        $stats = [];
-        if ($this->initUserDb()) {
-            $stats = $this->userDb->getStats();
-        }
-
-        $this->render('settings/index', [
-            'title' => 'Settings',
-            'member' => $this->member,
-            'sites' => $sites,
-            'stats' => $stats,
-            'atlassianConfigured' => AtlassianAuth::isConfigured()
-        ]);
+        // Redirect to consolidated settings/connections page
+        Flight::redirect('/settings/connections');
     }
 
     /**
@@ -159,6 +146,47 @@ class Settings extends BaseControls\Control {
             'boardCount' => $boardCount,
             'features' => $features,
             'limits' => $limits
+        ]);
+    }
+
+    /**
+     * Unified connections management page
+     * Shows all connected services (Atlassian, GitHub, Anthropic, Shopify, etc.)
+     * Also includes profile, stats, and account actions (consolidated settings page)
+     */
+    public function connections() {
+        if (!$this->requireLogin()) return;
+
+        $connectionsService = new ConnectionsService($this->member->id);
+        $connections = $connectionsService->getAllConnections();
+        $summary = $connectionsService->getConnectionSummary();
+
+        // Check AI Developer requirements
+        $aiDevReady = $connectionsService->checkRequirements('ai_developer');
+
+        // Get connected Atlassian sites for stats
+        $sites = AtlassianAuth::getConnectedSites($this->member->id);
+
+        // Get user stats
+        $stats = [];
+        if ($this->initUserDb()) {
+            $stats = $this->userDb->getStats();
+        }
+
+        // Get subscription info
+        $currentTier = SubscriptionService::getTier($this->member->id);
+        $tierInfo = SubscriptionService::getTierInfo($currentTier);
+
+        $this->render('settings/connections', [
+            'title' => 'Settings',
+            'connections' => $connections,
+            'summary' => $summary,
+            'aiDevReady' => $aiDevReady,
+            'tier' => $summary['tier'],
+            'member' => $this->member,
+            'sites' => $sites,
+            'stats' => $stats,
+            'tierInfo' => $tierInfo
         ]);
     }
 

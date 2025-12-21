@@ -61,55 +61,97 @@ $bean = R::dispense('aiDevJobs');     // WRONG! Use 'aidevjobs'
 $bean = R::dispense('EnterpriseSettings'); // WRONG! Use 'enterprisesettings'
 ```
 
-### Relations (One-to-Many)
+### Relations - USE ASSOCIATIONS (PREFERRED METHOD)
 
-Use `own[BeanType]List` for one-to-many relationships:
+**ALWAYS use RedBeanPHP associations instead of manual foreign key management.**
 
-```php
-// Parent has many children
-$shop = R::dispense('shop');
-$shop->name = 'My Shop';
+Associations provide:
+- **Automatic FK creation** - RedBeanPHP creates the `parent_id` column for you
+- **Lazy loading** - Related beans only loaded when accessed
+- **Cleaner code** - No manual JOIN queries needed
+- **Cascade options** - Use `xown` prefix for cascade delete
 
-$product = R::dispense('product');
-$product->name = 'Vase';
-
-// Add product to shop (creates shop_id foreign key in product table)
-$shop->ownProductList[] = $product;
-R::store($shop);
-
-// Retrieve children
-$products = $shop->ownProductList;
-
-// Use xownProductList for CASCADE DELETE (deletes children when parent deleted)
-$shop->xownProductList[] = $product;
-```
-
-### Relations (Many-to-Many)
-
-Use `shared[BeanType]List` for many-to-many relationships:
+### One-to-Many: `ownBeanList`
 
 ```php
-// Products can have many tags, tags can have many products
-$product = R::dispense('product');
-$product->name = 'Widget';
+// Parent has many children - FK created automatically
+$board = Bean::load('jiraboards', $boardId);
 
-$tag = R::dispense('tag');
-$tag->name = 'Featured';
+// Lazy load all analysis results for this board (queries DB on access)
+foreach ($board->ownAnalysisresultsList as $result) {
+    echo $result->analysis_type;
+}
 
-// Add tag to product (creates product_tag link table automatically)
-$product->sharedTagList[] = $tag;
-R::store($product);
+// Add a new child - board_id set automatically
+$result = Bean::dispense('analysisresults');
+$result->analysis_type = 'sprint';
+$result->content_json = json_encode($data);
+$board->ownAnalysisresultsList[] = $result;
+Bean::store($board);  // Saves both board and new result
 
-// Retrieve related beans
-$tags = $product->sharedTagList;
-$products = $tag->sharedProductList;
+// CASCADE DELETE: Use xown prefix to delete children when parent deleted
+$board->xownAnalysisresultsList;  // Children deleted when board is trashed
 ```
 
-### Foreign Key Naming
+**Project examples:**
+```php
+// Board has many analysis results
+$board->ownAnalysisresultsList;      // → analysisresults.board_id
 
-Foreign keys are automatically named `[parent_type]_id`:
-- `shop_id` in product table (product belongs to shop)
-- `member_id` in order table (order belongs to member)
+// Board has many digest history entries
+$board->ownDigesthistoryList;        // → digesthistory.board_id
+
+// Job has many log entries
+$job->ownAidevjoblogsList;           // → aidevjoblogs.job_id (if using job_id FK)
+```
+
+### Many-to-Many: `sharedBeanList`
+
+```php
+// Boards can have many repos, repos can be on many boards
+$board = Bean::load('jiraboards', $boardId);
+$repo = Bean::load('repoconnections', $repoId);
+
+// Link them - creates jiraboards_repoconnections link table automatically
+$board->sharedRepoconnectionsList[] = $repo;
+Bean::store($board);
+
+// Access from either side
+$repos = $board->sharedRepoconnectionsList;
+$boards = $repo->sharedJiraboardsList;
+```
+
+### Foreign Key Naming (Automatic)
+
+RedBeanPHP automatically names FKs as `[parent_type]_id`:
+- `jiraboards_id` in analysisresults (result belongs to board)
+- `repoconnections_id` in boardrepomapping (mapping belongs to repo)
+
+**Note:** For lowercase table names, the FK is also lowercase:
+- `jiraboards` → `jiraboards_id`
+- `aidevjobs` → `aidevjobs_id`
+
+### Why Associations Over Manual FKs
+
+```php
+// BAD - Manual FK management
+$result = Bean::dispense('analysisresults');
+$result->board_id = $boardId;  // Manual FK assignment
+Bean::store($result);
+
+// GOOD - Use association
+$board = Bean::load('jiraboards', $boardId);
+$result = Bean::dispense('analysisresults');
+$board->ownAnalysisresultsList[] = $result;
+Bean::store($board);  // FK set automatically, both saved in transaction
+```
+
+Benefits of associations:
+1. FK value set automatically
+2. Both beans saved in single transaction
+3. Lazy loading when retrieving
+4. No need to define FK in schema - RedBeanPHP creates it
+5. Works with FUSE models for validation hooks
 
 ### Bean Operations (CRITICAL)
 

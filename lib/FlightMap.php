@@ -367,23 +367,23 @@ Flight::map('setSetting', function($key, $value) {
 });
 
 /**
- * System-wide settings (member_id = 0)
+ * System-wide settings (member_id = NULL)
  * These are global application settings not tied to any user
  */
 Flight::map('getSystemSetting', function($key) {
-    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [0, $key]);
+    $setting = R::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
     return $setting ? $setting->setting_value : null;
 });
 
 Flight::map('setSystemSetting', function($key, $value) {
-    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [0, $key]);
+    $setting = R::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
     if (!$setting) {
         $setting = R::dispense('settings');
-        $setting->member_id = 0;
-        $setting->setting_key = $key;
+        $setting->memberId = null; // System-wide settings have NULL member_id
+        $setting->settingKey = $key;
     }
-    $setting->setting_value = $value;
-    $setting->updated_at = date('Y-m-d H:i:s');
+    $setting->settingValue = $value;
+    $setting->updatedAt = date('Y-m-d H:i:s');
 
     return R::store($setting);
 });

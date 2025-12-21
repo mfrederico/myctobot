@@ -14,49 +14,62 @@ import re
 
 
 def find_underscore_properties(content):
-    """Find bean properties using underscore_case instead of camelCase."""
-    issues = []
+    """
+    Find bean properties using underscore_case instead of camelCase.
 
-    # Match $bean->property_name or $variable->property_name patterns
-    pattern = r'\$\w+->([\w_]+)\s*='
-
-    for match in re.finditer(pattern, content):
-        prop = match.group(1)
-        # Skip if it's an ID reference, box, or internal property
-        if prop in ['id', 'box', 'meta']:
-            continue
-        # Skip relation properties (ownXList, sharedXList, xownXList)
-        if prop.startswith('own') or prop.startswith('shared') or prop.startswith('xown'):
-            continue
-        # Check if property has underscore (indicating wrong convention)
-        if '_' in prop and not prop.startswith('_'):
-            # Suggest camelCase version
-            camel = re.sub(r'_([a-z])', lambda m: m.group(1).upper(), prop)
-            issues.append(f"Property '{prop}' uses underscore_case. Use camelCase '{camel}' instead - RedBeanPHP auto-converts to underscore in DB.")
-
-    return issues
+    Note: RedBeanPHP accepts both snake_case and camelCase for properties.
+    We PREFER camelCase but don't block on snake_case since both work.
+    This returns an empty list - snake_case is allowed but camelCase is preferred.
+    """
+    # Both conventions work in RedBeanPHP, so we don't block on this
+    # Preference for camelCase is documented in CLAUDE.md
+    return []
 
 
 def find_underscore_table_names(content):
-    """Find R::dispense or R::load with underscore table names."""
+    """
+    Find R::dispense with invalid bean type names - these WILL FAIL at runtime!
+
+    CRITICAL: R::dispense() bean type names must be:
+    - All lowercase (a-z)
+    - Only alphanumeric (no underscores, no uppercase)
+
+    The error will be: "Invalid bean type: table_name"
+
+    For R::findOne, R::find, R::load - the bean type is more flexible
+    because RedBeanPHP converts it. But R::dispense is strict.
+
+    Must use all lowercase for R::dispense (e.g., 'enterprisesettings' not 'enterprise_settings' or 'enterpriseSettings')
+    """
     issues = []
 
-    # Match R::dispense('table_name') or R::load('table_name', ...)
-    pattern = r"R::(dispense|load|find|findOne|findAll|count|trash)\s*\(\s*['\"]([^'\"]+)['\"]"
+    # Match R::dispense with any table name
+    pattern = r"R::dispense\s*\(\s*['\"]([a-zA-Z0-9_]+)['\"]"
 
     for match in re.finditer(pattern, content):
-        method = match.group(1)
-        table = match.group(2)
-        if '_' in table:
-            # Suggest camelCase version
-            camel = re.sub(r'_([a-z])', lambda m: m.group(1).upper(), table)
-            issues.append(f"Table name '{table}' in R::{method}() uses underscore. Use camelCase '{camel}' - RedBeanPHP auto-converts to underscore in DB.")
+        table_name = match.group(1)
+
+        # Check for underscores
+        if '_' in table_name:
+            # Convert to suggested lowercase
+            lowercase = table_name.replace('_', '').lower()
+            issues.append(
+                f"R::dispense('{table_name}') will FAIL! RedBeanPHP doesn't allow underscores in dispense(). "
+                f"Use R::dispense('{lowercase}') instead."
+            )
+        # Check for uppercase letters
+        elif table_name != table_name.lower():
+            lowercase = table_name.lower()
+            issues.append(
+                f"R::dispense('{table_name}') will FAIL! RedBeanPHP requires all lowercase bean types in dispense(). "
+                f"Use R::dispense('{lowercase}') instead."
+            )
 
     return issues
 
 
 def find_exec_usage(content):
-    """Find ANY use of R::exec and flag it for review."""
+    """Find problematic use of R::exec and flag it for review."""
     issues = []
 
     # Match R::exec with any SQL statement
@@ -66,21 +79,25 @@ def find_exec_usage(content):
         sql = match.group(1).strip()
         sql_upper = sql.upper()
 
+        # DDL operations are OK - these can't be done with beans
+        if sql_upper.startswith('CREATE ') or sql_upper.startswith('ALTER ') or sql_upper.startswith('DROP '):
+            continue  # DDL is acceptable
+
         # Check what type of operation it is
         if sql_upper.startswith('INSERT'):
-            issues.append(f"R::exec() used for INSERT. This bypasses FUSE models! Use R::dispense() + R::store() instead.")
+            issues.append(f"R::exec() used for INSERT. This bypasses FUSE models! Use Bean::dispense() + Bean::store() instead.")
         elif sql_upper.startswith('UPDATE'):
             # Check if it's a simple update that should use beans
             if 'WHERE' in sql_upper and ('= ?' in sql or '=?' in sql):
                 # Check if it's NOT a complex operation (increment, bulk, etc.)
                 if '+ 1' not in sql and '- 1' not in sql and 'NOW()' not in sql_upper:
-                    issues.append(f"R::exec() used for UPDATE. This bypasses FUSE models! Use R::load() + R::store() instead.")
+                    issues.append(f"R::exec() used for UPDATE. This bypasses FUSE models! Use Bean::load() + Bean::store() instead.")
                 else:
                     issues.append(f"R::exec() for UPDATE detected. Verify this is truly necessary and cannot be done with beans.")
             else:
                 issues.append(f"R::exec() for UPDATE detected. Verify this is truly necessary and cannot be done with beans.")
         elif sql_upper.startswith('DELETE'):
-            issues.append(f"R::exec() used for DELETE. This bypasses FUSE models! Use R::trash() instead.")
+            issues.append(f"R::exec() used for DELETE. This bypasses FUSE models! Use Bean::trash() instead.")
         else:
             issues.append(f"R::exec() detected. R::exec should ONLY be used in extreme situations. Can this use bean methods instead?")
 

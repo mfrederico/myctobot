@@ -62,6 +62,12 @@
                             </a>
                         </li>
                     <?php endif; ?>
+                    <!-- Settings Link -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="/settings">
+                            <i class="bi bi-gear"></i>
+                        </a>
+                    </li>
                     <!-- User Dropdown -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
@@ -88,7 +94,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/member/settings">
+                                <a class="dropdown-item" href="/settings">
                                     <i class="bi bi-gear"></i> Settings
                                 </a>
                             </li>

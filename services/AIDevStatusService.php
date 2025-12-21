@@ -15,6 +15,7 @@ class AIDevStatusService {
     const STATUS_PENDING = 'pending';
     const STATUS_RUNNING = 'running';
     const STATUS_WAITING_CLARIFICATION = 'waiting_clarification';
+    const STATUS_PREVIEW_READY = 'preview_ready';  // Shopify preview available
     const STATUS_PR_CREATED = 'pr_created';  // PR created, waiting for Jira ticket to be done
     const STATUS_COMPLETE = 'complete';
     const STATUS_FAILED = 'failed';
@@ -34,6 +35,9 @@ class AIDevStatusService {
     const STEP_COMMITTING_CHANGES = 'Committing changes';
     const STEP_PUSHING_CHANGES = 'Pushing to remote';
     const STEP_CREATING_PR = 'Creating pull request';
+    const STEP_SYNCING_SHOPIFY = 'Syncing to Shopify theme';
+    const STEP_CREATING_PREVIEW = 'Creating Shopify preview';
+    const STEP_RUNNING_TESTS = 'Running Playwright tests';
     const STEP_COMPLETE = 'Complete';
 
     /**
@@ -101,6 +105,11 @@ class AIDevStatusService {
             'files_changed' => [],
             'commit_sha' => null,
             'error' => null,
+            // Shopify integration
+            'shopify_theme_id' => null,
+            'shopify_preview_url' => null,
+            'playwright_results' => null,
+            'preserve_branch' => true,  // Don't delete branch until ticket Done
             'started_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
             'completed_at' => null
@@ -436,6 +445,102 @@ class AIDevStatusService {
                     self::STATUS_WAITING_CLARIFICATION
                 ])) {
                 return $data;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find all jobs for an issue key (including completed/PR states for cleanup)
+     */
+    public static function findAllJobsByIssueKey(int $memberId, string $issueKey): array {
+        $dir = self::$statusDir . '/member_' . $memberId;
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $jobs = [];
+        $files = glob($dir . '/*.json');
+
+        foreach ($files as $file) {
+            $data = json_decode(file_get_contents($file), true);
+            if ($data && $data['issue_key'] === $issueKey) {
+                $jobs[] = $data;
+            }
+        }
+
+        // Sort by updated_at descending
+        usort($jobs, fn($a, $b) => strtotime($b['updated_at'] ?? 0) - strtotime($a['updated_at'] ?? 0));
+
+        return $jobs;
+    }
+
+    /**
+     * Mark job as preview ready (Shopify preview available)
+     */
+    public static function previewReady(
+        int $memberId,
+        string $jobId,
+        int $shopifyThemeId,
+        string $previewUrl,
+        ?array $playwrightResults = null
+    ): void {
+        $path = self::getStatusPath($memberId, $jobId);
+        if (!file_exists($path)) {
+            return;
+        }
+
+        $data = json_decode(file_get_contents($path), true);
+        $data['status'] = self::STATUS_PREVIEW_READY;
+        $data['progress'] = 75;
+        $data['current_step'] = 'Preview ready';
+        $data['shopify_theme_id'] = $shopifyThemeId;
+        $data['shopify_preview_url'] = $previewUrl;
+        if ($playwrightResults !== null) {
+            $data['playwright_results'] = $playwrightResults;
+        }
+        $data['updated_at'] = date('Y-m-d H:i:s');
+
+        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+
+        self::log($jobId, $memberId, 'info', 'Shopify preview ready', [
+            'theme_id' => $shopifyThemeId,
+            'preview_url' => $previewUrl
+        ]);
+    }
+
+    /**
+     * Update Shopify theme info for a job
+     */
+    public static function updateShopifyTheme(
+        int $memberId,
+        string $jobId,
+        int $themeId,
+        string $previewUrl
+    ): void {
+        $path = self::getStatusPath($memberId, $jobId);
+        if (!file_exists($path)) {
+            return;
+        }
+
+        $data = json_decode(file_get_contents($path), true);
+        $data['shopify_theme_id'] = $themeId;
+        $data['shopify_preview_url'] = $previewUrl;
+        $data['updated_at'] = date('Y-m-d H:i:s');
+
+        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+    }
+
+    /**
+     * Get Shopify theme ID for an issue (reuse across job runs)
+     */
+    public static function getShopifyThemeForIssue(int $memberId, string $issueKey): ?int {
+        $jobs = self::findAllJobsByIssueKey($memberId, $issueKey);
+
+        foreach ($jobs as $job) {
+            if (!empty($job['shopify_theme_id'])) {
+                return (int)$job['shopify_theme_id'];
             }
         }
 

@@ -355,8 +355,8 @@ class Admin extends Control {
             }
         }
         
-        // Get current settings
-        $this->viewData['settings'] = R::findAll('settings', 'member_id = 0');
+        // Get current settings (system-wide settings have NULL member_id)
+        $this->viewData['settings'] = R::findAll('settings', 'member_id IS NULL');
         
         $this->render('admin/settings', $this->viewData);
     }

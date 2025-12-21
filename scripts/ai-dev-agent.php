@@ -152,7 +152,7 @@ try {
 
     // Get API key
     $apiKeyResult = $userDb->querySingle(
-        "SELECT setting_value FROM enterprise_settings WHERE setting_key = 'anthropic_api_key'"
+        "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'anthropic_api_key'"
     );
 
     if (empty($apiKeyResult)) {
@@ -211,7 +211,7 @@ try {
         if (empty($cloudId)) {
             // Try to find it from board
             $boardResult = $userDb->querySingle(
-                "SELECT cloud_id FROM jira_boards WHERE id = " . (int)$job['board_id'],
+                "SELECT cloud_id FROM jiraboards WHERE id = " . (int)$job['board_id'],
                 true
             );
             $cloudId = $boardResult['cloud_id'] ?? '';
@@ -254,7 +254,7 @@ try {
         // Get cloud_id if not in job data
         if (empty($cloudId)) {
             $boardResult = $userDb->querySingle(
-                "SELECT cloud_id FROM jira_boards WHERE id = " . (int)$job['board_id'],
+                "SELECT cloud_id FROM jiraboards WHERE id = " . (int)$job['board_id'],
                 true
             );
             $cloudId = $boardResult['cloud_id'] ?? '';

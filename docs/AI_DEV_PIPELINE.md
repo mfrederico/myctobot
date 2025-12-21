@@ -41,12 +41,14 @@ flowchart TD
     subgraph PostProcess["5. POST-PROCESSING"]
         E1[pushThemeWithCLI<br/>Shopify theme push]
         E2{Playwright<br/>Verification?}
-        E3[runPlaywrightVerification<br/>Visit preview URL]
+        E3[Iteration 1: Discovery<br/>Deep analysis]
         E4{Issues<br/>Found?}
-        E5[runFixCycle<br/>Fix issues]
+        E5[runFixCycle<br/>Fix issues + JSON presets]
         E6[repushTheme<br/>Re-push to Shopify]
-        E7[Post Jira Comment<br/>PR link, preview URL]
-        E8[Callback to Main Server<br/>/webhook/aidev]
+        E7[Iterations 2-4: Verify<br/>Visual confirmation]
+        E8[uploadScreenshotsToJira<br/>Proof of work]
+        E9[Post Jira Comment<br/>PR link, preview URL]
+        E10[Callback to Main Server<br/>/webhook/aidev]
     end
 
     subgraph Callback["6. CALLBACK HANDLING"]
@@ -68,13 +70,15 @@ flowchart TD
     D6 --> E1
     E1 --> E2
     E2 -->|Yes| E3
-    E2 -->|No| E7
+    E2 -->|No| E9
     E3 --> E4
     E4 -->|Yes| E5
-    E4 -->|No| E7
-    E5 --> E6 --> E3
-    E7 --> E8
-    E8 --> F1 --> F2 --> F3 --> F4 --> F5
+    E4 -->|No| E8
+    E5 --> E6 --> E7
+    E7 --> E4
+    E8 --> E9
+    E9 --> E10
+    E10 --> F1 --> F2 --> F3 --> F4 --> F5
 ```
 
 ## Component Details
@@ -158,51 +162,78 @@ HOME=/tmp/aidev-job-{id}
 | Component | File:Line | Description |
 |-----------|-----------|-------------|
 | pushThemeWithCLI() | `controls/Analysis.php:1770` | Pushes Shopify theme via CLI |
-| runPlaywrightVerification() | `controls/Analysis.php:1882` | Visual QA verification loop |
-| runFixCycle() | `controls/Analysis.php:2115` | Fixes issues found during verification |
-| repushThemeForVerification() | `controls/Analysis.php:2231` | Re-pushes theme after fixes |
+| runPlaywrightVerification() | `controls/Analysis.php:1925` | 4-iteration visual QA verification loop |
+| parseVerificationResult() | `controls/Analysis.php:2258` | Parses Claude output, detects credit errors |
+| runFixCycle() | `controls/Analysis.php:2285` | Fixes issues found during verification |
+| uploadScreenshotsToJira() | `controls/Analysis.php:2400` | Uploads proof screenshots to Jira |
+| repushThemeForVerification() | `controls/Analysis.php:2350` | Re-pushes theme after fixes |
 | postJiraComment() | (inline) | Posts PR/preview links to Jira |
-| Callback | `controls/Analysis.php:1341` | POSTs result to main server |
+| Callback | `controls/Analysis.php:1367` | POSTs result to main server |
 
-**Playwright Verification Loop:**
+**Playwright Verification Loop (4-Iteration Approach):**
 
-When `shopify_verify_playwright` is enabled in enterprise settings:
+When `shopify_verify_playwright` is enabled in enterprise settings, a 4-iteration verification process runs:
 
-1. After theme push, Claude visits the preview URL using dev-browser (Playwright)
-2. Claude compares what it sees against the original Jira requirements
-3. If issues are found, Claude fixes the theme code
-4. Theme is re-pushed and verified again
-5. Loop continues for up to 3 iterations
+| Iteration | Phase | Purpose |
+|-----------|-------|---------|
+| 1 | **Discovery** | Deep analysis of what's implemented vs. missing. Identifies root causes. |
+| 2-4 | **Fix/Verify** | Fix identified issues and verify they're resolved visually. |
+
+**Key insight:** Shopify schema `default` values only apply to NEW sections. Existing sections have settings in `templates/*.json` or `config/settings_data.json`. The discovery phase identifies when JSON presets need modification.
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Push Theme     │ --> │  Verify with     │ --> │  Issues Found?  │
-│  to Shopify     │     │  Playwright      │     │                 │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                              ┌───────────────────────────┤
-                              │ Yes                       │ No
-                              ▼                           ▼
-                        ┌─────────────┐           ┌─────────────────┐
-                        │ Fix Issues  │           │  Continue to    │
-                        │ with Claude │           │  Callback       │
-                        └──────┬──────┘           └─────────────────┘
+┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
+│  Push Theme     │ --> │  Iteration 1:        │ --> │  Issues Found?  │
+│  to Shopify     │     │  DISCOVERY PHASE     │     │                 │
+└─────────────────┘     │  - Deep code review  │     └────────┬────────┘
+                        │  - Check JSON presets│               │
+                        │  - Identify root cause│              │
+                        └──────────────────────┘               │
+                                                               │
+                              ┌────────────────────────────────┤
+                              │ Yes                            │ No
+                              ▼                                ▼
+                        ┌─────────────────┐           ┌─────────────────┐
+                        │ Fix Issues:     │           │  PASSED!        │
+                        │ - Modify code   │           │  Continue to    │
+                        │ - Update JSON   │           │  Callback       │
+                        │   presets       │           └─────────────────┘
+                        └──────┬──────────┘
                                │
                                ▼
-                        ┌─────────────┐
-                        │ Re-push     │ ──────────────┐
-                        │ Theme       │               │
-                        └─────────────┘               │
+                        ┌─────────────────┐
+                        │ Re-push Theme   │
+                        └──────┬──────────┘
+                               │
+                               ▼
+                        ┌──────────────────────┐
+                        │ Iterations 2-4:      │ ─────┐
+                        │ FIX/VERIFY PHASE     │      │
+                        │ - Visual verification │     │
+                        │ - Take screenshots   │      │
+                        │ - "Do what it takes" │      │
+                        └──────────────────────┘      │
                                ▲                      │
                                └──────────────────────┘
-                                    (max 3 iterations)
+                                    (max 4 iterations, 8 min timeout each)
 ```
+
+**Timeouts:**
+- Each iteration: 8 minutes max
+- Total verification: ~32 minutes max
 
 **Enabling Playwright Verification:**
 ```sql
 INSERT INTO enterprisesettings (setting_key, setting_value)
 VALUES ('shopify_verify_playwright', '1');
 ```
+
+**Credit Balance Alerts:**
+
+If Anthropic API credits run low during verification, the system:
+1. Detects "Credit balance is too low" errors in Claude output
+2. Stores alert in `enterprisesettings` table (24-hour TTL)
+3. Shows banner on Enterprise dashboard with link to Anthropic billing
 
 ### 6. Callback Layer
 
@@ -292,3 +323,20 @@ ssh claudeuser@173.231.12.84 "ls -la /tmp/aidev-job-*/"
 4. **Shopify Theme Push** (`Analysis.php:1761`)
    - Uses `shopify theme push --unpublished`
    - Creates preview URL for QA
+
+5. **Screenshot Upload to Jira** (`Analysis.php:2400`)
+   - Uploads proof-of-work screenshots after verification
+   - Filters to only `proof-*`, `before-*`, `after-*` prefixed images
+   - Uses Jira Cloud REST API with OAuth token
+   - Screenshots attached as evidence of visual verification
+
+6. **Credit Balance Detection** (`Analysis.php:2258`, `Webhook.php:947`)
+   - Detects "Credit balance is too low" during verification
+   - Stores warning in `enterprisesettings` table
+   - Shows alert banner on Enterprise dashboard for 24 hours
+
+7. **4-Iteration Verification** (`Analysis.php:1925`)
+   - Iteration 1: Discovery phase (deep analysis)
+   - Iterations 2-4: Fix/verify cycles
+   - 8-minute timeout per iteration
+   - Understands Shopify JSON presets vs schema defaults

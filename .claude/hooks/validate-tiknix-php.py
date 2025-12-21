@@ -3,9 +3,9 @@
 Tiknix PHP Code Validator Hook
 
 Validates PHP code against Tiknix/RedBeanPHP/FlightPHP coding standards:
-1. Bean property names should use camelCase (not underscore_case)
-2. Table names should use camelCase (not underscore_case)
-3. R::exec should almost NEVER be used - only in extreme situations
+1. Bean type names must be all lowercase (no underscores) for R::dispense
+2. R::exec should almost NEVER be used - only in extreme situations
+3. Prefer RedBeanPHP associations (ownBeanList/sharedBeanList) over manual FK management
 """
 
 import json
@@ -104,21 +104,101 @@ def find_exec_usage(content):
     return issues
 
 
+def find_manual_fk_assignments(content):
+    """
+    Detect manual foreign key assignments and suggest using associations instead.
+
+    Patterns to detect:
+    - $bean->parent_id = $id  (manual FK assignment)
+    - $bean->board_id = $boardId
+    - Bean::find('child', 'parent_id = ?', [$id])
+
+    These should use ownBeanList or sharedBeanList associations instead.
+    """
+    issues = []
+
+    # Common FK column patterns (table_id or tablename_id)
+    fk_patterns = [
+        r'\$\w+->(\w+_id)\s*=',  # $bean->parent_id =
+        r'\$\w+->(\w+Id)\s*=',   # $bean->parentId =
+    ]
+
+    # Known FK columns that should use associations
+    known_fks = [
+        'board_id', 'boardId', 'jiraboards_id',
+        'job_id', 'jobId', 'aidevjobs_id',
+        'repo_id', 'repoId', 'repoconnections_id',
+        'member_id', 'memberId',
+        'parent_id', 'parentId',
+    ]
+
+    for pattern in fk_patterns:
+        for match in re.finditer(pattern, content):
+            fk_column = match.group(1)
+            # Check if this looks like a FK column
+            if fk_column.lower() in [fk.lower() for fk in known_fks] or fk_column.endswith('_id') or fk_column.endswith('Id'):
+                # Extract parent table name from FK
+                if fk_column.endswith('_id'):
+                    parent = fk_column[:-3]  # Remove _id
+                elif fk_column.endswith('Id'):
+                    parent = fk_column[:-2]  # Remove Id
+                else:
+                    parent = fk_column
+
+                issues.append(
+                    f"Manual FK assignment detected: ${fk_column}. "
+                    f"Consider using RedBeanPHP associations instead: "
+                    f"$parent->ownChildList[] = $child (auto-sets FK, lazy loading, cascade delete with xown). "
+                    f"See CLAUDE.md for examples."
+                )
+                break  # Only report once per file to avoid spam
+
+    # Detect find queries with FK WHERE clauses
+    fk_find_pattern = r"(?:R|Bean)::(?:find|findOne|findAll)\s*\(\s*['\"](\w+)['\"],\s*['\"](\w+_id)\s*="
+
+    for match in re.finditer(fk_find_pattern, content):
+        child_table = match.group(1)
+        fk_column = match.group(2)
+
+        # Extract parent table from FK
+        parent = fk_column[:-3] if fk_column.endswith('_id') else fk_column
+
+        issues.append(
+            f"Manual FK query detected: Bean::find('{child_table}', '{fk_column} = ?'). "
+            f"Consider using associations: $parent->own{child_table.title()}List (lazy loads, auto-cached). "
+            f"See CLAUDE.md for examples."
+        )
+        break  # Only report once
+
+    return issues
+
+
 def validate_php_code(content):
-    """Run all validations on PHP content."""
-    all_issues = []
+    """
+    Run all validations on PHP content.
+
+    Returns tuple: (blocking_issues, warning_issues)
+    - blocking_issues: Will block the operation (critical errors)
+    - warning_issues: Will warn but allow (suggestions/best practices)
+    """
+    blocking_issues = []
+    warning_issues = []
 
     # Skip if not PHP
     if '<?php' not in content and '<?=' not in content:
         # Check if it contains PHP-like RedBean code even without <?php tag
-        if 'R::' not in content:
-            return []
+        if 'R::' not in content and 'Bean::' not in content:
+            return [], []
 
-    all_issues.extend(find_underscore_properties(content))
-    all_issues.extend(find_underscore_table_names(content))
-    all_issues.extend(find_exec_usage(content))
+    # Blocking issues - these will cause runtime errors
+    blocking_issues.extend(find_underscore_properties(content))
+    blocking_issues.extend(find_underscore_table_names(content))
 
-    return all_issues
+    # Warning issues - suggestions for better practices
+    warning_issues.extend(find_exec_usage(content))
+    warning_issues.extend(find_manual_fk_assignments(content))
+
+    return blocking_issues, warning_issues
 
 
 def main():
@@ -149,19 +229,35 @@ def main():
             sys.exit(0)
 
         # Run validations
-        issues = validate_php_code(content)
+        blocking_issues, warning_issues = validate_php_code(content)
 
-        if issues:
-            # Format feedback message
-            feedback = "TIKNIX CODE STANDARDS VIOLATION:\n\n"
-            for i, issue in enumerate(issues, 1):
+        # Blocking issues - will prevent the operation
+        if blocking_issues:
+            feedback = "TIKNIX CODE STANDARDS VIOLATION (BLOCKING):\n\n"
+            for i, issue in enumerate(blocking_issues, 1):
                 feedback += f"{i}. {issue}\n"
-            feedback += "\nSee CLAUDE.md for Tiknix coding standards.\n"
-            feedback += "RedBeanPHP docs: https://redbeanphp.com/"
+            feedback += "\nThese issues will cause runtime errors. Fix before proceeding.\n"
+            feedback += "See CLAUDE.md for Tiknix coding standards."
 
-            # Return JSON with block decision
             output = {
                 "decision": "block",
+                "reason": feedback
+            }
+            print(json.dumps(output))
+            sys.exit(0)
+
+        # Warning issues - allow but inform
+        if warning_issues:
+            feedback = "TIKNIX BEST PRACTICES SUGGESTION:\n\n"
+            for i, issue in enumerate(warning_issues, 1):
+                feedback += f"{i}. {issue}\n"
+            feedback += "\nThese are suggestions for better code. Operation allowed.\n"
+            feedback += "See CLAUDE.md for RedBeanPHP association patterns."
+
+            # Use "report" decision to show message but allow operation
+            # If "report" isn't supported, this will just pass through
+            output = {
+                "decision": "allow",  # Allow but with message
                 "reason": feedback
             }
             print(json.dumps(output))

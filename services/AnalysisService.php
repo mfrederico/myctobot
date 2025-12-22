@@ -440,19 +440,22 @@ class AnalysisService {
         // Generate unique job ID
         $jobId = bin2hex(random_bytes(16));
 
-        // Create digest job record
+        // Create digest job record via member association
+        // Uses RedBeanPHP associations: member->ownDigestjobsList
         $digestJob = R::dispense('digestjobs');
         $digestJob->job_id = $jobId;
-        $digestJob->member_id = $this->memberId;
-        $digestJob->board_id = $boardId;
-        $digestJob->shard_id = $shard['id'];
+        $digestJob->board_id = $boardId;  // Cross-DB reference to user's SQLite
+        $digestJob->shard_id = $shard['id'];  // External shard ID
         $digestJob->status = 'queued';
         $digestJob->send_email = $sendEmail ? 1 : 0;
         $digestJob->board_name = $board['board_name'];
         $digestJob->project_key = $board['project_key'];
         $digestJob->digest_cc = $board['digest_cc'] ?? null;
         $digestJob->created_at = date('Y-m-d H:i:s');
-        R::store($digestJob);
+
+        // Add to member's ownDigestjobsList (sets member_id automatically)
+        $this->member->ownDigestjobsList[] = $digestJob;
+        R::store($this->member);
 
         $this->log("Created digest job {$jobId} for board {$board['board_name']}");
 

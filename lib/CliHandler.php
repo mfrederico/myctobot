@@ -80,7 +80,6 @@ class CliHandler {
             "json:",       // JSON parameters
             "cron",        // Cron mode (suppress output)
             "verbose",     // Verbose output
-            "script",      // Standalone script mode (skip controller routing)
         ];
         
         // Try getopt first
@@ -103,8 +102,6 @@ class CliHandler {
                     $options['cron'] = true;
                 } elseif ($arg === '--verbose') {
                     $options['verbose'] = true;
-                } elseif ($arg === '--script') {
-                    $options['script'] = true;
                 }
             }
         }
@@ -213,9 +210,12 @@ class CliHandler {
 
     /**
      * Check if running in script mode (standalone scripts, skip controller routing)
+     * Uses php_sapi_name() to detect CLI execution
      */
     public function isScriptMode() {
-        return isset($this->options['script']);
+        // If we're running from CLI and not explicitly routing to a controller,
+        // treat it as a standalone script
+        return php_sapi_name() === 'cli' && !isset($this->options['control']);
     }
     
     /**

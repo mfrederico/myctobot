@@ -339,31 +339,45 @@ Flight::map('isOff', function($val) {
 
 /**
  * Setting management helpers
+ * Uses RedBeanPHP associations: member->ownSettingsList
  * Note: getSetting/setSetting now only use the current user's ID from session
- * Use getSystemSetting/setSystemSetting for system-wide settings (member_id = 0)
+ * Use getSystemSetting/setSystemSetting for system-wide settings (member_id = NULL)
  */
 Flight::map('getSetting', function($key) {
     $member = Flight::getMember();
-    $memberId = $member->id;
 
-    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [$memberId, $key]);
-    return $setting ? $setting->setting_value : null;
+    // Use association to find setting (lazy loads all member settings)
+    foreach ($member->ownSettingsList as $setting) {
+        if ($setting->setting_key === $key) {
+            return $setting->setting_value;
+        }
+    }
+    return null;
 });
 
 Flight::map('setSetting', function($key, $value) {
     $member = Flight::getMember();
-    $memberId = $member->id;
 
-    $setting = R::findOne('settings', 'member_id = ? AND setting_key = ?', [$memberId, $key]);
-    if (!$setting) {
-        $setting = R::dispense('settings');
-        $setting->member_id = $memberId;
-        $setting->setting_key = $key;
+    // Find existing setting in member's list
+    $setting = null;
+    foreach ($member->ownSettingsList as $existingSetting) {
+        if ($existingSetting->setting_key === $key) {
+            $setting = $existingSetting;
+            break;
+        }
     }
+
+    if (!$setting) {
+        // Create new setting via association
+        $setting = R::dispense('settings');
+        $setting->setting_key = $key;
+        $member->ownSettingsList[] = $setting;
+    }
+
     $setting->setting_value = $value;
     $setting->updated_at = date('Y-m-d H:i:s');
 
-    return R::store($setting);
+    return R::store($member);
 });
 
 /**

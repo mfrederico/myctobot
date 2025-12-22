@@ -28,6 +28,7 @@ require_once __DIR__ . '/../services/AnalysisService.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
 require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
 require_once __DIR__ . '/../services/ShopifyClient.php';
+require_once __DIR__ . '/../services/AIDevAgentOrchestrator.php';
 
 use \app\services\AnalysisService;
 use \app\services\ShopifyClient;
@@ -939,8 +940,16 @@ PROMPT;
             $issueData = $this->preprocessAttachmentImages($issueData, $jiraOAuthToken, $homeDir);
         }
 
+        // Check if using the new agent orchestrator pattern
+        $useOrchestrator = !empty($input['use_orchestrator']);
+
         // Build the prompt
-        $prompt = $this->buildAIDevPrompt($issueKey, $issueData, $repoConfig, $jiraHost, $jiraSiteUrl, $action, $existingBranch);
+        if ($useOrchestrator) {
+            $prompt = $this->buildOrchestratorPrompt($issueKey, $issueData, $repoConfig, $jiraSiteUrl, $shopifySettings);
+            $this->logger->info("Using agent orchestrator pattern for {$issueKey}");
+        } else {
+            $prompt = $this->buildAIDevPrompt($issueKey, $issueData, $repoConfig, $jiraHost, $jiraSiteUrl, $action, $existingBranch);
+        }
 
         // Run Claude Code
         $this->runClaudeAIDev(
@@ -1095,6 +1104,97 @@ If you encounter issues or need clarification, output:
 
 Now, implement {$issueKey}!
 PROMPT;
+    }
+
+    /**
+     * Build orchestrator prompt that uses specialized agents
+     *
+     * This pattern spawns focused agents (impl-agent, verify-agent, fix-agent)
+     * instead of accumulating context in a single session.
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $issueData Issue data from Jira
+     * @param array $repoConfig Repository configuration
+     * @param string $jiraSiteUrl Jira site URL
+     * @param array $shopifySettings Shopify settings if applicable
+     * @return string The orchestrator prompt
+     */
+    private function buildOrchestratorPrompt($issueKey, $issueData, $repoConfig, $jiraSiteUrl, $shopifySettings = []) {
+        // Build ticket data structure
+        $ticket = [
+            'key' => $issueKey,
+            'summary' => $issueData['summary'] ?? '',
+            'description' => $issueData['description'] ?? '',
+            'requirements' => $this->extractRequirements($issueData),
+            'acceptance_criteria' => $this->extractAcceptanceCriteria($issueData),
+            'type' => $issueData['type'] ?? 'Task',
+            'priority' => $issueData['priority'] ?? 'Medium',
+            'comments' => $issueData['comments'] ?? ''
+        ];
+
+        // Build repo data structure
+        $repo = [
+            'path' => './repo', // Claude Code will clone here
+            'clone_url' => $repoConfig['clone_url'] ?? '',
+            'default_branch' => $repoConfig['default_branch'] ?? 'main',
+            'owner' => $repoConfig['repo_owner'] ?? '',
+            'name' => $repoConfig['repo_name'] ?? ''
+        ];
+
+        // Determine preview URL (for Shopify themes)
+        $previewUrl = null;
+        if (!empty($shopifySettings['store_url'])) {
+            // Will be set after impl-agent creates the theme
+            $previewUrl = null; // Orchestrator will set this after Shopify sync
+        }
+
+        // Create orchestrator and build prompt
+        $orchestrator = new \app\services\AIDevAgentOrchestrator($ticket, $repo, $previewUrl, 3);
+        return $orchestrator->buildOrchestratorPrompt();
+    }
+
+    /**
+     * Extract requirements from issue data
+     */
+    private function extractRequirements($issueData) {
+        $requirements = [];
+
+        // Try to parse requirements from description
+        $description = $issueData['description'] ?? '';
+        if (preg_match_all('/(?:^|\n)\s*[-*]\s*(.+)$/m', $description, $matches)) {
+            $requirements = array_merge($requirements, $matches[1]);
+        }
+
+        // If no bullet points found, use the description as a single requirement
+        if (empty($requirements) && !empty($description)) {
+            $requirements[] = $description;
+        }
+
+        return $requirements;
+    }
+
+    /**
+     * Extract acceptance criteria from issue data
+     */
+    private function extractAcceptanceCriteria($issueData) {
+        $criteria = [];
+
+        $description = $issueData['description'] ?? '';
+
+        // Look for "Acceptance Criteria" section
+        if (preg_match('/acceptance\s+criteria[:\s]*\n([\s\S]*?)(?:\n\n|\z)/i', $description, $matches)) {
+            if (preg_match_all('/(?:^|\n)\s*[-*]\s*(.+)$/m', $matches[1], $subMatches)) {
+                $criteria = $subMatches[1];
+            }
+        }
+
+        // Default criteria if none found
+        if (empty($criteria)) {
+            $criteria[] = 'Verify the implementation matches the requirements in the description';
+            $criteria[] = 'Check for any visual regressions';
+        }
+
+        return $criteria;
     }
 
     /**

@@ -40,10 +40,14 @@ class AIDevJobManager {
     /**
      * Get or create a job for an issue
      *
+     * Uses RedBeanPHP associations:
+     * - jiraboards owns aidevjobs (board->ownAidevjobsList)
+     * - aidevjobs belongs to repoconnections (job->repoconnections)
+     *
      * @param string $issueKey Jira issue key (e.g., "PROJ-123")
      * @param int $boardId Board ID
      * @param int|null $repoConnectionId Repository connection ID
-     * @param string|null $cloudId Atlassian cloud ID
+     * @param string|null $cloudId Atlassian cloud ID (external ID, not a FK)
      * @return \RedBeanPHP\OODBBean
      */
     public function getOrCreate(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null) {
@@ -52,16 +56,25 @@ class AIDevJobManager {
             $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
 
             if (!$job) {
+                // Load parent beans for associations
+                $board = Bean::load('jiraboards', $boardId);
+
                 // Create new job
                 $job = Bean::dispense('aidevjobs');
                 $job->issue_key = $issueKey;
-                $job->board_id = $boardId;
-                $job->repo_connection_id = $repoConnectionId;
-                $job->cloud_id = $cloudId;
+                $job->cloud_id = $cloudId;  // External Atlassian ID, not a local FK
                 $job->status = self::STATUS_PENDING;
                 $job->run_count = 0;
                 $job->created_at = date('Y-m-d H:i:s');
-                Bean::store($job);
+
+                // Set repo connection via association if provided
+                if ($repoConnectionId) {
+                    $job->repoconnections = Bean::load('repoconnections', $repoConnectionId);
+                }
+
+                // Add job to board's ownAidevjobsList (sets board_id automatically)
+                $board->ownAidevjobsList[] = $job;
+                Bean::store($board);
             }
 
             return $job;

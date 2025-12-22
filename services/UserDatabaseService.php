@@ -401,7 +401,8 @@ class UserDatabaseService {
             'last_analysis_at', 'last_digest_at',
             // AI Developer status transition settings
             'aidev_status_working', 'aidev_status_pr_created',
-            'aidev_status_clarification', 'aidev_status_failed'
+            'aidev_status_clarification', 'aidev_status_failed',
+            'aidev_status_complete'
         ];
 
         foreach ($data as $key => $value) {

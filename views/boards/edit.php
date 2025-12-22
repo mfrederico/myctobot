@@ -252,6 +252,24 @@
                                         </div>
                                     </div>
 
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="aidev_status_complete" class="form-label">
+                                                <i class="bi bi-check2-circle text-info"></i> <strong>When Task Complete</strong>
+                                            </label>
+                                            <select class="form-select" id="aidev_status_complete" name="aidev_status_complete" <?= $isEnterprise ? '' : 'disabled' ?>>
+                                                <option value="">-- Select a status --</option>
+                                                <?php foreach ($jiraStatuses ?? [] as $status): ?>
+                                                <option value="<?= htmlspecialchars($status['name']) ?>"
+                                                    <?= ($board['aidev_status_complete'] ?? '') === $status['name'] ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($status['name']) ?>
+                                                </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <small class="text-muted">When ticket moves to this status, the AI Developer session will close. Set this to your "Done" or "Accepted" status.</small>
+                                        </div>
+                                    </div>
+
                                     <div class="alert alert-info small py-2">
                                         <i class="bi bi-info-circle"></i>
                                         <strong>Tip:</strong> The bot will also add a <code>myctobot-working</code> label while processing,

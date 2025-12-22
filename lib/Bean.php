@@ -160,4 +160,35 @@ class Bean {
     public static function getAll(string $sql, array $params = []) {
         return R::getAll($sql, $params);
     }
+
+    /**
+     * Add a database connection
+     *
+     * @param string $key Database key
+     * @param string $dsn DSN string
+     * @param string|null $user Username
+     * @param string|null $pass Password
+     * @param bool $frozen Freeze mode
+     */
+    public static function addDatabase(string $key, string $dsn, ?string $user = null, ?string $pass = null, bool $frozen = false) {
+        return R::addDatabase($key, $dsn, $user, $pass, $frozen);
+    }
+
+    /**
+     * Select a database connection
+     *
+     * @param string $key Database key
+     */
+    public static function selectDatabase(string $key) {
+        return R::selectDatabase($key);
+    }
+
+    /**
+     * Set freeze mode
+     *
+     * @param bool $frozen Freeze mode
+     */
+    public static function freeze(bool $frozen = true) {
+        return R::freeze($frozen);
+    }
 }

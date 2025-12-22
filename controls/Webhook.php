@@ -145,6 +145,12 @@ class Webhook extends BaseControls\Control {
         $changelog = $data['changelog'] ?? [];
         $items = $changelog['items'] ?? [];
 
+        $this->logger->debug('handleIssueUpdated: changelog items', [
+            'issue_key' => $issueKey,
+            'items_count' => count($items),
+            'items' => array_map(fn($i) => ['field' => $i['field'] ?? '', 'to' => $i['toString'] ?? ''], $items)
+        ]);
+
         // Check current labels on the issue
         $issue = $data['issue'] ?? [];
         $currentLabels = [];
@@ -183,7 +189,17 @@ class Webhook extends BaseControls\Control {
         }
 
         // Check if this status transition should close the AI Developer session
+        $this->logger->debug('Status transition check', [
+            'issue_key' => $issueKey,
+            'new_status' => $newStatusName,
+            'current_labels' => $currentLabels,
+            'has_aidev_label' => in_array('ai-dev', $currentLabels)
+        ]);
         if ($newStatusName && in_array('ai-dev', $currentLabels)) {
+            $this->logger->debug('Calling checkCompleteStatusTransition', [
+                'issue_key' => $issueKey,
+                'new_status' => $newStatusName
+            ]);
             $this->checkCompleteStatusTransition($issueKey, $cloudId, $newStatusName);
         }
 

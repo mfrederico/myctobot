@@ -1,14 +1,14 @@
 <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2 mb-0">
-            <i class="bi bi-hdd-network"></i> Claude Code Shards
+            <i class="bi bi-pc-display-horizontal"></i> Workstation Shards
         </h1>
         <div>
             <button class="btn btn-outline-secondary me-2" onclick="healthCheckAll()">
                 <i class="bi bi-heart-pulse"></i> Health Check All
             </button>
             <a href="/admin/createshard" class="btn btn-primary">
-                <i class="bi bi-plus-lg"></i> Add Shard
+                <i class="bi bi-plus-lg"></i> Add Workstation
             </a>
         </div>
     </div>
@@ -16,9 +16,9 @@
     <?php if (empty($shards)): ?>
     <div class="card">
         <div class="card-body text-center py-5">
-            <i class="bi bi-hdd-network display-4 text-muted"></i>
-            <p class="text-muted mt-3">No shards configured yet.</p>
-            <a href="/admin/createshard" class="btn btn-primary">Add Your First Shard</a>
+            <i class="bi bi-pc-display-horizontal display-4 text-muted"></i>
+            <p class="text-muted mt-3">No workstations configured yet.</p>
+            <a href="/admin/createshard" class="btn btn-primary">Add Your First Workstation</a>
         </div>
     </div>
     <?php else: ?>
@@ -40,8 +40,28 @@
 
                     <table class="table table-sm table-borderless mb-3">
                         <tr>
-                            <td class="text-muted" style="width: 40%">Host:</td>
-                            <td><code><?= htmlspecialchars($shard['host']) ?>:<?= $shard['port'] ?></code></td>
+                            <td class="text-muted" style="width: 40%">Mode:</td>
+                            <td>
+                                <?php $mode = $shard['execution_mode'] ?? 'http_api'; ?>
+                                <?php if ($mode === 'ssh_tmux'): ?>
+                                <span class="badge bg-primary"><i class="bi bi-terminal"></i> SSH+Tmux</span>
+                                <?php if (!empty($shard['ssh_validated'])): ?>
+                                <span class="badge bg-success"><i class="bi bi-check"></i></span>
+                                <?php endif; ?>
+                                <?php else: ?>
+                                <span class="badge bg-secondary"><i class="bi bi-cloud"></i> HTTP API</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Host:</td>
+                            <td>
+                                <?php if ($mode === 'ssh_tmux'): ?>
+                                <code><?= htmlspecialchars($shard['ssh_user'] ?? 'claudeuser') ?>@<?= htmlspecialchars($shard['host']) ?></code>
+                                <?php else: ?>
+                                <code><?= htmlspecialchars($shard['host']) ?>:<?= $shard['port'] ?></code>
+                                <?php endif; ?>
+                            </td>
                         </tr>
                         <tr>
                             <td class="text-muted">Type:</td>
@@ -83,7 +103,7 @@
 
                     <?php if ($shard['is_default']): ?>
                     <div class="mt-2">
-                        <span class="badge bg-primary"><i class="bi bi-star-fill"></i> Default Shard</span>
+                        <span class="badge bg-primary"><i class="bi bi-globe"></i> Public</span>
                     </div>
                     <?php endif; ?>
                 </div>
@@ -141,16 +161,32 @@ async function testShard(shardId) {
         const data = await response.json();
 
         if (data.success) {
+            const d = data.data || {};
+            const isSSH = d.execution_mode === 'ssh_tmux';
+
+            let details = '';
+            if (isSSH) {
+                details = `
+                    <tr><td>Mode:</td><td><span class="badge bg-primary">SSH + Tmux</span></td></tr>
+                    <tr><td>Host:</td><td><code>${d.ssh_user || 'claudeuser'}@${d.host || 'N/A'}</code></td></tr>
+                    <tr><td>Response Time:</td><td>${d.time_ms || 0}ms</td></tr>
+                `;
+            } else {
+                details = `
+                    <tr><td>Mode:</td><td><span class="badge bg-secondary">HTTP API</span></td></tr>
+                    <tr><td>Host:</td><td><code>${d.host || 'N/A'}:${d.port || 3500}</code></td></tr>
+                    <tr><td>Type:</td><td>${d.shard_type || 'general'}</td></tr>
+                    <tr><td>Max Jobs:</td><td>${d.max_concurrent_jobs || 'N/A'}</td></tr>
+                    <tr><td>Capabilities:</td><td>${(d.capabilities || []).join(', ') || 'None'}</td></tr>
+                `;
+            }
+
             content.innerHTML = `
                 <div class="alert alert-success">
                     <i class="bi bi-check-circle"></i> <strong>Connection Successful!</strong>
                 </div>
                 <table class="table table-sm">
-                    <tr><td>Shard ID:</td><td>${data.data?.shard_id || 'N/A'}</td></tr>
-                    <tr><td>Type:</td><td>${data.data?.shard_type || 'N/A'}</td></tr>
-                    <tr><td>Running Jobs:</td><td>${data.data?.jobs?.running || 0}</td></tr>
-                    <tr><td>Max Jobs:</td><td>${data.data?.max_concurrent_jobs || 'N/A'}</td></tr>
-                    <tr><td>Capabilities:</td><td>${(data.data?.capabilities || []).join(', ') || 'None'}</td></tr>
+                    ${details}
                 </table>
             `;
         } else {

@@ -588,8 +588,11 @@ Follow the prompt in prompt.txt to implement the ticket.
 MD;
 file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 
-// Create .mcp.json for MCP servers (env vars inherited from wrapper script)
-$mcpServerPath = $baseDir . '/scripts/mcp-jira-server.php';
+// Create .mcp.json for MCP servers
+// Use HTTP transport for Jira (persistent, no timeout issues)
+// Use stdio for Playwright (local browser automation)
+$mcpHttpUrl = 'https://myctobot.ai/mcp/jira';
+$mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
 $mcpConfig = [
     'mcpServers' => [
         'playwright' => [
@@ -599,17 +602,16 @@ $mcpConfig = [
             'env' => new \stdClass()
         ],
         'jira' => [
-            'type' => 'stdio',
-            'command' => 'php',
-            'args' => [$mcpServerPath],
-            'env' => [
-                'JIRA_MEMBER_ID' => (string)$memberId,
-                'JIRA_CLOUD_ID' => $cloudId
+            'type' => 'http',
+            'url' => $mcpHttpUrl,
+            'headers' => [
+                'Authorization' => "Basic {$mcpCredentials}"
             ]
         ]
     ]
 ];
 file_put_contents("{$workDir}/.mcp.json", json_encode($mcpConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+echo "  MCP Jira: HTTP transport ({$mcpHttpUrl})\n";
 
 // Pre-approve MCP servers in ~/.claude.json so Claude doesn't prompt
 $claudeConfigPath = getenv('HOME') . '/.claude.json';

@@ -17,7 +17,7 @@ require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 class ShardRouter {
 
     /**
-     * Find the best available shard for a job
+     * Find the best available shard for a job (least-loaded routing)
      *
      * @param int $memberId Member ID
      * @param array $requiredCapabilities Required MCP capabilities
@@ -27,12 +27,14 @@ class ShardRouter {
         // First, check member-specific shard assignments
         $memberShards = ShardService::getMemberShards($memberId);
 
-        // If no specific assignments, use default shards
+        // If no specific assignments, use default (public) shards
         if (empty($memberShards)) {
             $memberShards = ShardService::getDefaultShards();
         }
 
-        // Filter by capabilities and availability
+        // Collect all eligible shards with their load info
+        $candidates = [];
+
         foreach ($memberShards as $shard) {
             // Check capabilities
             if (!empty($requiredCapabilities)) {
@@ -43,25 +45,61 @@ class ShardRouter {
                 }
             }
 
-            // Check health
+            // Check health status
             if ($shard['health_status'] === 'unhealthy') {
                 continue;
             }
 
-            // Check capacity (local tracking)
+            // Get running job count
             $runningJobs = ShardService::getRunningJobCount($shard['id']);
-            if ($runningJobs >= $shard['max_concurrent_jobs']) {
+            $maxJobs = (int)$shard['max_concurrent_jobs'];
+
+            // Skip if at capacity
+            if ($runningJobs >= $maxJobs) {
                 continue;
             }
 
-            // Optionally verify with live health check
-            $health = self::quickHealthCheck($shard);
-            if ($health && $health['jobs']['running'] < $shard['max_concurrent_jobs']) {
-                return $shard;
+            // For SSH mode, we trust local job tracking
+            // For HTTP mode, optionally verify with live health check
+            $executionMode = $shard['execution_mode'] ?? 'http_api';
+
+            if ($executionMode === 'ssh_tmux') {
+                // SSH mode - trust local tracking, add to candidates
+                $candidates[] = [
+                    'shard' => $shard,
+                    'running' => $runningJobs,
+                    'max' => $maxJobs,
+                    'load' => $maxJobs > 0 ? ($runningJobs / $maxJobs) : 1
+                ];
+            } else {
+                // HTTP mode - verify with live health check
+                $health = self::quickHealthCheck($shard);
+                if ($health && isset($health['jobs']['running'])) {
+                    $liveRunning = $health['jobs']['running'];
+                    if ($liveRunning < $maxJobs) {
+                        $candidates[] = [
+                            'shard' => $shard,
+                            'running' => $liveRunning,
+                            'max' => $maxJobs,
+                            'load' => $maxJobs > 0 ? ($liveRunning / $maxJobs) : 1
+                        ];
+                    }
+                }
             }
         }
 
-        return null;
+        // No candidates available
+        if (empty($candidates)) {
+            return null;
+        }
+
+        // Sort by load (ascending) - least loaded first
+        usort($candidates, function($a, $b) {
+            return $a['load'] <=> $b['load'];
+        });
+
+        // Return the least-loaded shard
+        return $candidates[0]['shard'];
     }
 
     /**
@@ -247,54 +285,53 @@ class ShardRouter {
      * Record a job in local database
      */
     private static function recordJob(string $jobId, int $memberId, int $shardId, array $payload): void {
-        R::exec("
-            INSERT INTO shardjobs (job_id, member_id, shard_id, issue_key, status, request_payload, created_at)
-            VALUES (?, ?, ?, ?, 'queued', ?, NOW())
-        ", [
-            $jobId,
-            $memberId,
-            $shardId,
-            $payload['task']['issue_key'] ?? null,
-            json_encode($payload)
-        ]);
+        $job = R::dispense('shardjobs');
+        $job->job_id = $jobId;
+        $job->member_id = $memberId;
+        $job->shard_id = $shardId;
+        $job->issue_key = $payload['task']['issue_key'] ?? null;
+        $job->status = 'queued';
+        $job->request_payload = json_encode($payload);
+        $job->created_at = date('Y-m-d H:i:s');
+        R::store($job);
     }
 
     /**
      * Update job status in local database
      */
     public static function updateJobStatus(string $jobId, string $status, ?string $error = null): void {
-        $updates = ["status = ?", "updated_at = NOW()"];
-        $params = [$status];
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        if (!$job) return;
 
-        if ($status === 'running') {
-            $updates[] = "started_at = COALESCE(started_at, NOW())";
+        $job->status = $status;
+        $job->updated_at = date('Y-m-d H:i:s');
+
+        if ($status === 'running' && empty($job->started_at)) {
+            $job->started_at = date('Y-m-d H:i:s');
         }
 
         if (in_array($status, ['completed', 'failed', 'cancelled'])) {
-            $updates[] = "completed_at = NOW()";
+            $job->completed_at = date('Y-m-d H:i:s');
         }
 
         if ($error) {
-            $updates[] = "error_message = ?";
-            $params[] = $error;
+            $job->error_message = $error;
         }
 
-        $params[] = $jobId;
-
-        R::exec(
-            "UPDATE shardjobs SET " . implode(', ', $updates) . " WHERE job_id = ?",
-            $params
-        );
+        R::store($job);
     }
 
     /**
      * Update job result
      */
     public static function updateJobResult(string $jobId, array $result): void {
-        R::exec(
-            "UPDATE shardjobs SET result_payload = ?, status = 'completed', completed_at = NOW() WHERE job_id = ?",
-            [json_encode($result), $jobId]
-        );
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        if (!$job) return;
+
+        $job->result_payload = json_encode($result);
+        $job->status = 'completed';
+        $job->completed_at = date('Y-m-d H:i:s');
+        R::store($job);
     }
 
     /**

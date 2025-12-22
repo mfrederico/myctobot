@@ -618,6 +618,9 @@ class Admin extends Control {
                 return;
             }
 
+            // Get execution mode
+            $executionMode = $request->data->execution_mode ?? 'ssh_tmux';
+
             $data = [
                 'name' => $request->data->name ?? '',
                 'description' => $request->data->description ?? '',
@@ -625,16 +628,31 @@ class Admin extends Control {
                 'port' => (int)($request->data->port ?? 3500),
                 'api_key' => $request->data->api_key ?? '',
                 'shard_type' => $request->data->shard_type ?? 'general',
-                'capabilities' => array_filter(array_map('trim', explode(',', $request->data->capabilities ?? ''))),
+                'capabilities' => is_array($request->data->capabilities) ? $request->data->capabilities : [],
                 'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
                 'is_active' => isset($request->data->is_active) ? 1 : 0,
-                'is_default' => isset($request->data->is_default) ? 1 : 0
+                'is_default' => isset($request->data->is_default) ? 1 : 0,
+                // SSH fields
+                'execution_mode' => $executionMode,
+                'ssh_user' => trim($request->data->ssh_user ?? 'claudeuser'),
+                'ssh_port' => (int)($request->data->ssh_port ?? 22),
+                'ssh_key_path' => trim($request->data->ssh_key_path ?? '') ?: null,
+                'ssh_validated' => 0
             ];
 
-            if (empty($data['name']) || empty($data['host']) || empty($data['api_key'])) {
-                $this->flash('error', 'Name, host, and API key are required');
-                Flight::redirect('/admin/createshard');
-                return;
+            // Validation depends on execution mode
+            if ($executionMode === 'ssh_tmux') {
+                if (empty($data['name']) || empty($data['host']) || empty($data['ssh_user'])) {
+                    $this->flash('error', 'Name, host, and SSH user are required for SSH mode');
+                    Flight::redirect('/admin/createshard');
+                    return;
+                }
+            } else {
+                if (empty($data['name']) || empty($data['host']) || empty($data['api_key'])) {
+                    $this->flash('error', 'Name, host, and API key are required for HTTP mode');
+                    Flight::redirect('/admin/createshard');
+                    return;
+                }
             }
 
             try {
@@ -681,16 +699,24 @@ class Admin extends Control {
                 return;
             }
 
+            // Get execution mode
+            $executionMode = $request->data->execution_mode ?? ($shard['execution_mode'] ?? 'ssh_tmux');
+
             $data = [
                 'name' => $request->data->name ?? '',
                 'description' => $request->data->description ?? '',
                 'host' => $request->data->host ?? '',
                 'port' => (int)($request->data->port ?? 3500),
                 'shard_type' => $request->data->shard_type ?? 'general',
-                'capabilities' => array_filter(array_map('trim', explode(',', $request->data->capabilities ?? ''))),
+                'capabilities' => is_array($request->data->capabilities) ? $request->data->capabilities : [],
                 'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
                 'is_active' => isset($request->data->is_active) ? 1 : 0,
-                'is_default' => isset($request->data->is_default) ? 1 : 0
+                'is_default' => isset($request->data->is_default) ? 1 : 0,
+                // SSH fields
+                'execution_mode' => $executionMode,
+                'ssh_user' => trim($request->data->ssh_user ?? 'claudeuser'),
+                'ssh_port' => (int)($request->data->ssh_port ?? 22),
+                'ssh_key_path' => trim($request->data->ssh_key_path ?? '') ?: null
             ];
 
             // Only update API key if provided
@@ -698,7 +724,16 @@ class Admin extends Control {
                 $data['api_key'] = $request->data->api_key;
             }
 
+            // Reset validation if SSH settings changed
+            $sshChanged = ($data['host'] !== $shard['host'] ||
+                          $data['ssh_user'] !== ($shard['ssh_user'] ?? 'claudeuser') ||
+                          $data['ssh_port'] !== ($shard['ssh_port'] ?? 22));
+            if ($sshChanged) {
+                $data['ssh_validated'] = 0;
+            }
+
             try {
+                $this->logger->info('Updating shard', ['shard_id' => $shardId, 'data' => $data]);
                 \app\services\ShardService::updateShard($shardId, $data);
                 $this->logger->info('Shard updated', ['shard_id' => $shardId]);
                 $this->flash('success', 'Shard updated successfully');
@@ -740,10 +775,11 @@ class Admin extends Control {
     }
 
     /**
-     * Test shard connectivity
+     * Test shard connectivity (routes to HTTP or SSH based on execution_mode)
      */
     public function testshard($params = []) {
         require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
         $shardId = (int)($params['operation']->name ?? 0);
         if (!$shardId) {
@@ -751,13 +787,95 @@ class Admin extends Control {
             return;
         }
 
-        $result = \app\services\ShardService::healthCheck($shardId);
+        $shard = \app\services\ShardService::getShard($shardId);
+        if (!$shard) {
+            $this->json(['success' => false, 'error' => 'Shard not found']);
+            return;
+        }
 
-        $this->json([
-            'success' => $result['healthy'],
-            'data' => $result['data'] ?? null,
-            'error' => $result['error'] ?? null
-        ]);
+        // Route based on execution mode
+        $executionMode = $shard['execution_mode'] ?? 'http_api';
+
+        if ($executionMode === 'ssh_tmux') {
+            // Use SSH diagnostic for quick check
+            $diagnostic = new \app\services\ShardDiagnosticService($shard);
+            $result = $diagnostic->quickCheck();
+
+            // Update health status in database
+            $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
+            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean->health_status = $healthStatus;
+            $shardBean->last_health_check = date('Y-m-d H:i:s');
+            R::store($shardBean);
+
+            $this->json([
+                'success' => $result['connected'],
+                'data' => [
+                    'execution_mode' => 'ssh_tmux',
+                    'ssh_user' => $shard['ssh_user'] ?? 'claudeuser',
+                    'host' => $shard['host'],
+                    'time_ms' => $result['time_ms'],
+                    'health_status' => $healthStatus
+                ],
+                'error' => $result['error'] ?? null
+            ]);
+        } else {
+            // Use HTTP health check
+            $result = \app\services\ShardService::healthCheck($shardId);
+
+            // Include shard info from DB alongside remote health data
+            $this->json([
+                'success' => $result['healthy'],
+                'data' => [
+                    'execution_mode' => 'http_api',
+                    'host' => $shard['host'],
+                    'port' => $shard['port'],
+                    'shard_type' => $shard['shard_type'] ?? 'general',
+                    'max_concurrent_jobs' => $shard['max_concurrent_jobs'] ?? 2,
+                    'capabilities' => json_decode($shard['capabilities'] ?? '[]', true),
+                    'remote_health' => $result['data'] ?? null
+                ],
+                'error' => $result['error'] ?? null
+            ]);
+        }
+    }
+
+    /**
+     * Run full SSH diagnostic on a shard
+     */
+    public function diagnoseshard($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
+
+        $shardId = (int)($params['operation']->name ?? 0);
+        if (!$shardId) {
+            $this->json(['success' => false, 'error' => 'Shard ID required']);
+            return;
+        }
+
+        $shard = \app\services\ShardService::getShard($shardId);
+        if (!$shard) {
+            $this->json(['success' => false, 'error' => 'Shard not found']);
+            return;
+        }
+
+        $diagnostic = new \app\services\ShardDiagnosticService($shard);
+        $result = $diagnostic->runDiagnostic();
+
+        // Save diagnostic result to database using bean (auto-creates columns if needed)
+        $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
+        $shardBean = R::load('claudeshards', $shardId);
+        $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
+        $shardBean->health_status = $healthStatus;
+        $shardBean->last_health_check = date('Y-m-d H:i:s');
+        R::store($shardBean);
+
+        // If ready, also get install commands for anything missing
+        if (!$result['ready']) {
+            $result['install_commands'] = $diagnostic->getInstallCommands();
+        }
+
+        $this->json($result);
     }
 
     /**
@@ -792,7 +910,18 @@ class Admin extends Control {
             exit;
         }
 
-        // Get current MCP config from shard
+        $executionMode = $shard['execution_mode'] ?? 'http_api';
+
+        // For SSH mode, MCP is configured via .mcp.json when jobs start
+        if ($executionMode === 'ssh_tmux') {
+            $this->viewData['title'] = 'MCP Servers - ' . $shard['name'];
+            $this->viewData['shard'] = $shard;
+            $this->viewData['ssh_mode'] = true;
+            $this->render('admin/shard_mcp');
+            return;
+        }
+
+        // HTTP mode - get config from remote API
         $mcpServers = [];
         $availableServers = [];
 
@@ -860,11 +989,9 @@ class Admin extends Control {
 
                 $result = json_decode($response->getBody()->getContents(), true);
 
-                // Update database
-                R::exec(
-                    "UPDATE claudeshards SET mcp_servers = ? WHERE id = ?",
-                    [json_encode($newConfig), $shardId]
-                );
+                // Update database using bean
+                $shardBean = R::load('claudeshards', $shardId);
+                $shardBean->mcp_servers = json_encode($newConfig);
 
                 // Update capabilities based on enabled MCP servers
                 $capabilities = ['git', 'filesystem'];
@@ -873,10 +1000,8 @@ class Admin extends Control {
                         $capabilities[] = $mcpName;
                     }
                 }
-                R::exec(
-                    "UPDATE claudeshards SET capabilities = ? WHERE id = ?",
-                    [json_encode($capabilities), $shardId]
-                );
+                $shardBean->capabilities = json_encode($capabilities);
+                R::store($shardBean);
 
                 $this->viewData['success'] = 'MCP configuration updated successfully';
                 $mcpServers = $result['mcp_servers'] ?? $newConfig;

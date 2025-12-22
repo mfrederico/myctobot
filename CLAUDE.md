@@ -308,8 +308,117 @@ ssh claudeuser@173.231.12.84
 - `POST /analysis/shardaidev` - Run AI Developer job
 - `GET /health` - Health check
 
+## AI Developer Agent Types
+
+The following specialized agent types are available for the Task tool when running AI Developer jobs.
+Each agent has a focused purpose and starts with fresh context.
+
+### impl-agent (Implementation Specialist)
+
+Use this agent to implement code changes for a ticket.
+
+**Capabilities**: Read, Write, Edit, Bash, Glob, Grep
+**Model**: sonnet (for complex code generation)
+
+**When to use**: After requirements are understood, spawn this agent to:
+- Explore the codebase and understand architecture
+- Plan the implementation approach
+- Write the code changes
+- Commit and push to a feature branch
+
+**Returns JSON**:
+```json
+{
+  "success": true,
+  "branch_name": "fix/ISSUE-123-description",
+  "files_changed": ["path/to/file1.js", "path/to/file2.liquid"],
+  "commit_sha": "abc123def",
+  "summary": "Brief description of what was implemented"
+}
+```
+
+### verify-agent (QA Specialist)
+
+Use this agent to verify implementation with browser testing.
+
+**Capabilities**: Read, Bash, browser automation (Playwright/Puppeteer)
+**Model**: sonnet (needs vision for screenshot analysis)
+
+**When to use**: After impl-agent completes, spawn this agent to:
+- Navigate to preview URL
+- Test specific acceptance criteria
+- Capture screenshots as evidence
+- Report pass/fail with detailed issues
+
+**Returns JSON**:
+```json
+{
+  "passed": true,
+  "issues": [],
+  "screenshots": ["proof-1.png", "proof-2.png"]
+}
+```
+Or if issues found:
+```json
+{
+  "passed": false,
+  "issues": [
+    {
+      "severity": "critical",
+      "description": "Loyalty points not showing",
+      "location": "PLP product cards",
+      "expected": "Show 'Earn X points'",
+      "actual": "Shows '+ loyalty points'",
+      "screenshot": "issue-plp.png",
+      "fix_hint": "LoyaltyLion SDK not rescanning after dynamic load"
+    }
+  ]
+}
+```
+
+### fix-agent (Bug Fix Specialist)
+
+Use this agent to fix specific issues found during verification.
+
+**Capabilities**: Read, Edit, Bash
+**Model**: haiku (simple, targeted fixes from clear descriptions)
+
+**When to use**: After verify-agent reports issues, spawn this agent with:
+- Specific issue descriptions (not full history)
+- Files to modify
+- Fix hints from verification
+
+**Returns JSON**:
+```json
+{
+  "success": true,
+  "files_modified": ["assets/loyalty.js"],
+  "changes_summary": "Added 500ms delay for SDK initialization"
+}
+```
+
+### Orchestrator Pattern
+
+The main session acts as an orchestrator:
+
+```
+1. Parse ticket requirements
+2. Task(impl-agent) → get files_changed
+3. Task(verify-agent) → get issues
+4. If issues: Task(fix-agent) → apply fixes
+5. Loop verify→fix (max 3 iterations)
+6. Create PR with results
+```
+
+**Benefits**:
+- Each agent has fresh, focused context
+- Failed attempts don't pollute future iterations
+- Can use cheaper/faster models for simple tasks
+- Easier debugging (isolated transcripts)
+
 ## See Also
 
 - `REDBEAN_README.md` - Detailed RedBeanPHP reference
 - `FLIGHTPHP_README.md` - Detailed FlightPHP reference
 - https://redbeanphp.com/ - Official RedBeanPHP documentation
+- `docs/AGENT_ARCHITECTURE.md` - Full agent architecture documentation

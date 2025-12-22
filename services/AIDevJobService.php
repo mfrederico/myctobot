@@ -39,7 +39,7 @@ class AIDevJobService {
      * @param int|null $repoId Repository connection ID (optional, will use first enabled)
      * @return array Result with 'success', 'job_id', 'error' keys
      */
-    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null): array {
+    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, bool $useOrchestrator = false): array {
         try {
             // Validate member has enterprise tier
             $member = R::load('member', $memberId);
@@ -222,7 +222,9 @@ class AIDevJobService {
                 'existing_branch' => $existingBranch,
                 // Shopify integration
                 'shopify' => $shopifySettings,
-                'existing_shopify_theme_id' => $existingThemeId
+                'existing_shopify_theme_id' => $existingThemeId,
+                // Agent orchestrator pattern
+                'use_orchestrator' => $useOrchestrator
             ];
 
             // Call shard endpoint

@@ -90,6 +90,7 @@ CREATE TABLE "jiraboards" (
     aidev_status_pr_created TEXT DEFAULT NULL,   -- Status when PR is created (e.g., "Ready for QA")
     aidev_status_clarification TEXT DEFAULT NULL, -- Status when clarification needed (e.g., "Blocked")
     aidev_status_failed TEXT DEFAULT NULL,       -- Status on failure (null = don't change)
+    aidev_status_complete TEXT DEFAULT NULL,     -- Status that triggers session closure (e.g., "Done")
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
     UNIQUE(board_id, cloud_id)

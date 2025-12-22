@@ -15,14 +15,17 @@ use \app\services\UserDatabase;
 use \app\services\EncryptionService;
 use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
+use \app\services\TmuxService;
 
 require_once __DIR__ . '/../lib/Bean.php';
+require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/UserDatabase.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/MailgunService.php';
+require_once __DIR__ . '/../services/TmuxService.php';
 
 class Webhook extends BaseControls\Control {
 
@@ -118,6 +121,9 @@ class Webhook extends BaseControls\Control {
             }
         }
 
+        // First, check if there's a local tmux session to augment
+        $this->augmentLocalSession($issueKey, $cloudId, $data);
+
         switch ($event) {
             case 'jira:issue_updated':
                 $this->handleIssueUpdated($data, $issueKey, $cloudId);
@@ -151,6 +157,7 @@ class Webhook extends BaseControls\Control {
         $hasLabelChange = false;
         $hasBotLabelChange = false;
         $isDoneTransition = false;
+        $newStatusName = null;
 
         foreach ($items as $item) {
             if ($item['field'] === 'labels') {
@@ -164,14 +171,20 @@ class Webhook extends BaseControls\Control {
                     $hasBotLabelChange = true;
                 }
             } elseif ($item['field'] === 'status') {
-                // Check for "Done" transition
-                $toStatus = strtolower($item['toString'] ?? '');
+                // Track the new status name
+                $newStatusName = $item['toString'] ?? null;
+                $toStatus = strtolower($newStatusName ?? '');
                 if (in_array($toStatus, ['done', 'closed', 'resolved', 'complete', 'completed'])) {
                     $isDoneTransition = true;
                 }
             } else {
                 $hasOnlyStatusChange = false;
             }
+        }
+
+        // Check if this status transition should close the AI Developer session
+        if ($newStatusName && in_array('ai-dev', $currentLabels)) {
+            $this->checkCompleteStatusTransition($issueKey, $cloudId, $newStatusName);
         }
 
         // Handle "Done" transition - cleanup Shopify themes and branches
@@ -220,8 +233,23 @@ class Webhook extends BaseControls\Control {
                 // Check if ai-dev label was ADDED
                 $aiDevWasAdded = in_array('ai-dev', $newLabels) && !in_array('ai-dev', $oldLabels);
 
+                // Check if ai-dev label was REMOVED
+                $aiDevWasRemoved = in_array('ai-dev', $oldLabels) && !in_array('ai-dev', $newLabels);
+
                 if ($aiDevWasAdded && in_array('ai-dev', $currentLabels)) {
                     $this->triggerAIDevJob($issueKey, $cloudId);
+                    return;
+                }
+
+                if ($aiDevWasRemoved) {
+                    $memberId = $this->findMemberByCloudId($cloudId);
+                    if ($memberId) {
+                        $this->logger->info('ai-dev label removed, closing local session if exists', [
+                            'issue_key' => $issueKey,
+                            'member_id' => $memberId
+                        ]);
+                        $this->closeLocalTmuxSession($issueKey, $memberId);
+                    }
                     return;
                 }
             }
@@ -318,6 +346,14 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Check if local runner is enabled
+        $useLocalRunner = Flight::get('aidev.use_local_runner') ?? false;
+
+        if ($useLocalRunner) {
+            $this->spawnLocalRunner($issueKey, $memberId, $cloudId);
+            return;
+        }
+
         // Use the shared AIDevJobService to trigger the job on a shard
         $jobService = new AIDevJobService();
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId);
@@ -334,6 +370,39 @@ class Webhook extends BaseControls\Control {
                 'member_id' => $memberId,
                 'issue_key' => $issueKey,
                 'error' => $result['error'] ?? 'Unknown error'
+            ]);
+        }
+    }
+
+    /**
+     * Spawn local AI Developer runner in a tmux session
+     * Uses YOUR Claude subscription instead of API credits
+     */
+    private function spawnLocalRunner(string $issueKey, int $memberId, string $cloudId): void {
+        $tmux = new TmuxService($memberId, $issueKey);
+
+        if ($tmux->exists()) {
+            $this->logger->info('Local tmux session already exists', ['issue_key' => $issueKey, 'member_id' => $memberId]);
+            return;
+        }
+
+        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+
+        if (!file_exists($scriptPath)) {
+            $this->logger->error('Local runner script not found', ['path' => $scriptPath]);
+            return;
+        }
+
+        if ($tmux->spawn($scriptPath, true)) {
+            $this->logger->info('Local AI Developer spawned in tmux', [
+                'issue_key' => $issueKey,
+                'session' => $tmux->getSessionName(),
+                'member_id' => $memberId
+            ]);
+        } else {
+            $this->logger->error('Failed to spawn local AI Developer', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
             ]);
         }
     }
@@ -360,6 +429,308 @@ class Webhook extends BaseControls\Control {
             'member_id' => $memberId,
             'issue_key' => $issueKey
         ]);
+    }
+
+    // =========================================
+    // Local tmux Session Augmentation
+    // =========================================
+
+    /**
+     * Close local tmux session when ai-dev label is removed
+     */
+    private function closeLocalTmuxSession(string $issueKey, int $memberId): void {
+        $tmux = new TmuxService($memberId, $issueKey);
+
+        if (!$tmux->exists()) {
+            $this->logger->debug('No local tmux session to close', ['issue_key' => $issueKey, 'member_id' => $memberId]);
+            return;
+        }
+
+        $killed = $tmux->kill();
+        $this->logger->info('Local tmux session closed', [
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'success' => $killed
+        ]);
+    }
+
+    /**
+     * Check if status transition matches the configured "complete" status for the board
+     * If so, close the AI Developer tmux session
+     */
+    private function checkCompleteStatusTransition(string $issueKey, string $cloudId, string $newStatus): void {
+        $memberId = $this->findMemberByCloudId($cloudId);
+        if (!$memberId) {
+            return;
+        }
+
+        // Extract project key from issue key (e.g., "SSI-1893" -> "SSI")
+        $projectKey = explode('-', $issueKey)[0] ?? '';
+        if (empty($projectKey)) {
+            return;
+        }
+
+        // Find the board for this project
+        $board = R::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
+        if (!$board) {
+            return;
+        }
+
+        $completeStatus = $board->aidev_status_complete ?? null;
+        if (empty($completeStatus)) {
+            return;
+        }
+
+        // Check if the new status matches the configured complete status (case-insensitive)
+        if (strcasecmp($newStatus, $completeStatus) === 0) {
+            $this->logger->info('Ticket transitioned to complete status, closing AI Developer session', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId,
+                'status' => $newStatus,
+                'configured_complete_status' => $completeStatus
+            ]);
+            $this->closeLocalTmuxSession($issueKey, $memberId);
+        }
+    }
+
+    /**
+     * Download a Jira attachment to the local work directory
+     */
+    private function downloadJiraAttachment(string $issueKey, int $memberId, string $attachmentUrl, string $filename, string $oauthToken): ?string {
+        $tmux = new TmuxService($memberId, $issueKey);
+        $attachmentsDir = $tmux->getWorkDir() . '/attachments';
+
+        if (!is_dir($attachmentsDir)) {
+            @mkdir($attachmentsDir, 0755, true);
+        }
+
+        $localPath = "{$attachmentsDir}/{$filename}";
+
+        // Skip if already downloaded
+        if (file_exists($localPath)) {
+            return $localPath;
+        }
+
+        // Download using curl
+        $cmd = sprintf(
+            'curl -s -L -H "Authorization: Bearer %s" -o %s %s 2>/dev/null',
+            escapeshellarg($oauthToken),
+            escapeshellarg($localPath),
+            escapeshellarg($attachmentUrl)
+        );
+
+        exec($cmd, $output, $exitCode);
+
+        if ($exitCode === 0 && file_exists($localPath)) {
+            return $localPath;
+        }
+
+        return null;
+    }
+
+    /**
+     * Augment a running local Claude session with new Jira data
+     *
+     * NOTE: This only works if the webhook is received on the same machine
+     * where the tmux session is running. For production webhooks going to
+     * a remote server, the tmux session won't be found.
+     *
+     * For local development, use ngrok or similar to tunnel webhooks to localhost.
+     */
+    private function augmentLocalSession(string $issueKey, string $cloudId, array $data): void {
+        // Get memberId from cloudId
+        $memberId = $this->findMemberByCloudId($cloudId);
+        if (!$memberId) {
+            return;
+        }
+
+        $tmux = new TmuxService($memberId, $issueKey);
+
+        $this->logger->debug('Local session check', [
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'has_tmux_session' => $tmux->exists(),
+            'claude_running' => $tmux->isClaudeRunning()
+        ]);
+
+        // Only process if there's a local session with Claude running
+        if (!$tmux->exists() || !$tmux->isClaudeRunning()) {
+            return;
+        }
+
+        $event = $data['webhookEvent'] ?? '';
+        $this->logger->info('Augmenting local Claude session', [
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'event' => $event
+        ]);
+
+        // Handle different event types
+        switch ($event) {
+            case 'comment_created':
+                $this->augmentWithComment($issueKey, $memberId, $tmux, $data);
+                break;
+
+            case 'jira:issue_updated':
+                $this->augmentWithUpdate($issueKey, $memberId, $tmux, $data);
+                break;
+        }
+    }
+
+    /**
+     * Augment session with a new comment
+     */
+    private function augmentWithComment(string $issueKey, int $memberId, TmuxService $tmux, array $data): void {
+        $comment = $data['comment'] ?? [];
+        $author = $comment['author']['displayName'] ?? 'Unknown';
+        $body = $this->extractTextFromCommentBody($comment['body'] ?? []);
+
+        // Check if comment is from our bot (skip)
+        $authorAccountId = $comment['author']['accountId'] ?? '';
+        if (strpos($authorAccountId, 'app_') === 0 || strpos($body, 'MyCTOBot') !== false) {
+            return;
+        }
+
+        // Build message for Claude
+        $message = "[JIRA UPDATE] New comment from {$author}: {$body}";
+
+        // Send to session
+        if ($tmux->sendMessage($message)) {
+            $this->logger->info('Sent comment to local Claude session', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId,
+                'author' => $author
+            ]);
+        }
+    }
+
+    /**
+     * Augment session with an update (status change, attachment, etc.)
+     */
+    private function augmentWithUpdate(string $issueKey, int $memberId, TmuxService $tmux, array $data): void {
+        $changelog = $data['changelog'] ?? [];
+        $items = $changelog['items'] ?? [];
+
+        foreach ($items as $item) {
+            $field = $item['field'] ?? '';
+
+            if ($field === 'status') {
+                $newStatus = $item['toString'] ?? '';
+
+                // Check for "Done" status - kill the session
+                $doneStatuses = ['done', 'closed', 'resolved', 'complete', 'completed', 'cancelled'];
+                if (in_array(strtolower($newStatus), $doneStatuses)) {
+                    $this->logger->info('Ticket closed, killing local Claude session', [
+                        'issue_key' => $issueKey,
+                        'member_id' => $memberId,
+                        'status' => $newStatus
+                    ]);
+                    $tmux->kill();
+                    return;
+                }
+
+                // Notify of status change
+                $message = "[JIRA UPDATE] Ticket status changed to: {$newStatus}";
+                $tmux->sendMessage($message);
+            }
+
+            if ($field === 'Attachment') {
+                // New attachment added - try to download it
+                $this->handleNewAttachment($issueKey, $memberId, $tmux, $data);
+            }
+
+            if ($field === 'description') {
+                $newDesc = $item['toString'] ?? '';
+                $message = "[JIRA UPDATE] Ticket description was updated. New description excerpt: " . substr($newDesc, 0, 500);
+                $tmux->sendMessage($message);
+            }
+        }
+    }
+
+    /**
+     * Handle a new attachment being added
+     */
+    private function handleNewAttachment(string $issueKey, int $memberId, TmuxService $tmux, array $data): void {
+        $issue = $data['issue'] ?? [];
+        $attachments = $issue['fields']['attachment'] ?? [];
+
+        if (empty($attachments)) {
+            return;
+        }
+
+        // Get cloudId from data for OAuth
+        $cloudId = $data['cloudId'] ?? '';
+        if (empty($cloudId)) {
+            return;
+        }
+
+        try {
+            $oauthToken = \app\plugins\AtlassianAuth::getValidToken($memberId, $cloudId);
+        } catch (\Exception $e) {
+            $this->logger->warning('Could not get OAuth token for attachment download', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+            return;
+        }
+
+        // Download the latest attachment (likely the one just added)
+        $latest = end($attachments);
+        $filename = $latest['filename'] ?? '';
+        $contentUrl = $latest['content'] ?? '';
+        $mimeType = $latest['mimeType'] ?? '';
+
+        if (empty($contentUrl) || empty($filename)) {
+            return;
+        }
+
+        // Only download images
+        if (strpos($mimeType, 'image/') !== 0) {
+            $message = "[JIRA UPDATE] New attachment added: {$filename} ({$mimeType})";
+            $tmux->sendMessage($message);
+            return;
+        }
+
+        // Download the image
+        $localPath = $this->downloadJiraAttachment($issueKey, $memberId, $contentUrl, $filename, $oauthToken);
+
+        if ($localPath) {
+            $message = "[JIRA UPDATE] New image attachment '{$filename}' downloaded to {$localPath} - please view it with the Read tool";
+            $tmux->sendMessage($message);
+            $this->logger->info('Downloaded attachment for local Claude session', [
+                'issue_key' => $issueKey,
+                'filename' => $filename,
+                'local_path' => $localPath
+            ]);
+        }
+    }
+
+    /**
+     * Extract text from Jira ADF comment body
+     */
+    private function extractTextFromCommentBody($body): string {
+        if (is_string($body)) {
+            return $body;
+        }
+
+        if (!is_array($body)) {
+            return '';
+        }
+
+        $text = '';
+        $extractText = function($node) use (&$extractText, &$text) {
+            if (isset($node['text'])) {
+                $text .= $node['text'] . ' ';
+            }
+            if (isset($node['content']) && is_array($node['content'])) {
+                foreach ($node['content'] as $child) {
+                    $extractText($child);
+                }
+            }
+        };
+
+        $extractText($body);
+        return trim($text);
     }
 
     /**
@@ -863,6 +1234,15 @@ class Webhook extends BaseControls\Control {
                     $result['branch_name'] ?? null,
                     $result['raw_output'] ?? null,
                     $result
+                );
+
+                // Also update JSON status file (was missing - caused "running" status to persist)
+                \app\services\AIDevStatusService::prCreated(
+                    $memberId,
+                    $jobId,
+                    $result['pr_url'],
+                    $result['pr_number'] ?? null,
+                    $result['branch_name'] ?? null
                 );
 
                 $this->logger->info('AIdev job PR created', [

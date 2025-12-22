@@ -631,6 +631,39 @@ class JiraClient {
         return $data['transitions'] ?? [];
     }
 
+    /**
+     * Upload a file as an attachment to an issue
+     *
+     * @param string $issueKey Issue key
+     * @param string $filePath Path to the file to upload
+     * @return array Attachment data from Jira
+     * @throws \Exception If upload fails
+     */
+    public function uploadAttachment(string $issueKey, string $filePath): array {
+        if (!file_exists($filePath)) {
+            throw new \Exception("File not found: {$filePath}");
+        }
+
+        $response = $this->client->post(
+            $this->baseUrl . "/issue/{$issueKey}/attachments",
+            [
+                'headers' => [
+                    'X-Atlassian-Token' => 'no-check'
+                ],
+                'multipart' => [
+                    [
+                        'name' => 'file',
+                        'contents' => fopen($filePath, 'r'),
+                        'filename' => basename($filePath)
+                    ]
+                ]
+            ]
+        );
+
+        $data = json_decode($response->getBody()->getContents(), true);
+        return $data[0] ?? $data;
+    }
+
     // ========================================
     // ADF Helper Methods
     // ========================================

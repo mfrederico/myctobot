@@ -58,22 +58,25 @@ class StripeService {
 
     /**
      * Get or create Stripe customer for a member
+     *
+     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     public static function getOrCreateCustomer(int $memberId): string {
         self::init();
 
-        // Check if member already has a Stripe customer ID
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        // Get member and their subscriptions via association
+        $member = R::load('member', $memberId);
+        if (!$member->id) {
+            throw new \Exception('Member not found');
+        }
+
+        // Check for existing subscription with valid Stripe customer ID
+        $subscriptions = $member->ownSubscriptionList;
+        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
 
         if ($subscription && !empty($subscription->stripe_customer_id) &&
             strpos($subscription->stripe_customer_id, 'stub_') !== 0) {
             return $subscription->stripe_customer_id;
-        }
-
-        // Get member details
-        $member = R::load('member', $memberId);
-        if (!$member->id) {
-            throw new \Exception('Member not found');
         }
 
         // Create new Stripe customer
@@ -85,17 +88,17 @@ class StripeService {
             ]
         ]);
 
-        // Save customer ID
+        // Save customer ID via association
         if (!$subscription) {
             $subscription = R::dispense('subscription');
-            $subscription->member_id = $memberId;
             $subscription->tier = 'free';
             $subscription->status = 'active';
             $subscription->created_at = date('Y-m-d H:i:s');
+            $member->ownSubscriptionList[] = $subscription;
         }
         $subscription->stripe_customer_id = $customer->id;
         $subscription->updated_at = date('Y-m-d H:i:s');
-        R::store($subscription);
+        R::store($member);
 
         return $customer->id;
     }
@@ -113,9 +116,13 @@ class StripeService {
 
     /**
      * Check if member has already used a trial
+     *
+     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     public static function hasUsedTrial(int $memberId): bool {
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
+        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
         return $subscription && !empty($subscription->trial_used);
     }
 
@@ -250,16 +257,18 @@ class StripeService {
 
     /**
      * Handle subscription created/updated
+     *
+     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     private static function handleSubscriptionUpdate($stripeSubscription): void {
         $customerId = $stripeSubscription->customer;
         $memberId = $stripeSubscription->metadata->member_id ?? null;
 
-        // Find member by customer ID if not in metadata
+        // Find member by customer ID if not in metadata (query by external Stripe ID)
         if (!$memberId) {
-            $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
-            if ($subscription) {
-                $memberId = $subscription->member_id;
+            $existingSub = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
+            if ($existingSub) {
+                $memberId = $existingSub->member_id;
             }
         }
 
@@ -274,12 +283,15 @@ class StripeService {
         // Determine tier from price ID
         $tier = self::getTierFromPriceId($stripeSubscription->items->data[0]->price->id ?? '');
 
-        // Update local subscription
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        // Get member and subscription via association
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
+        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+
         if (!$subscription) {
             $subscription = R::dispense('subscription');
-            $subscription->member_id = $memberId;
             $subscription->created_at = date('Y-m-d H:i:s');
+            $member->ownSubscriptionList[] = $subscription;
         }
 
         $subscription->tier = $tier;
@@ -306,7 +318,7 @@ class StripeService {
             $subscription->cancelled_at = null;
         }
 
-        R::store($subscription);
+        R::store($member);
 
         Flight::get('log')->info('Subscription updated', [
             'member_id' => $memberId,
@@ -402,11 +414,16 @@ class StripeService {
 
     /**
      * Cancel subscription at period end
+     *
+     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     public static function cancelSubscription(int $memberId): bool {
         self::init();
 
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
+        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+
         if (!$subscription || empty($subscription->stripe_subscription_id)) {
             return false;
         }
@@ -433,11 +450,16 @@ class StripeService {
 
     /**
      * Reactivate canceled subscription
+     *
+     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     public static function reactivateSubscription(int $memberId): bool {
         self::init();
 
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
+        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+
         if (!$subscription || empty($subscription->stripe_subscription_id)) {
             return false;
         }

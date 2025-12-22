@@ -52,6 +52,7 @@ class Contact extends BaseControls\Control {
         }
         
         // Save to database
+        // Uses RedBeanPHP associations: member->ownContactList
         try {
             $contact = R::dispense('contact');
             $contact->name = $name;
@@ -62,14 +63,16 @@ class Contact extends BaseControls\Control {
             $contact->status = 'new';
             $contact->ip_address = $_SERVER['REMOTE_ADDR'] ?? '';
             $contact->user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-            
-            // If user is logged in, link to their account
-            if (isset($_SESSION['member']['id'])) {
-                $contact->member_id = $_SESSION['member']['id'];
-            }
-            
             $contact->created_at = date('Y-m-d H:i:s');
-            R::store($contact);
+
+            // If user is logged in, link via association
+            if (isset($_SESSION['member']['id'])) {
+                $member = R::load('member', $_SESSION['member']['id']);
+                $member->ownContactList[] = $contact;
+                R::store($member);
+            } else {
+                R::store($contact);
+            }
             
             // Log the submission
             Flight::get('log')->info('Contact form submitted', [
@@ -157,17 +160,12 @@ class Contact extends BaseControls\Control {
             R::store($message);
         }
         
-        // Get member info if linked
-        $member = null;
-        if ($message->member_id) {
-            $member = R::load('member', $message->member_id);
-        }
-        
-        // Get responses
-        $responses = R::find('contactresponse', 
-            'contact_id = ? ORDER BY created_at DESC', 
-            [$message->id]
-        );
+        // Get member info if linked (via association access)
+        $member = $message->member;  // RedBeanPHP auto-loads related member
+
+        // Get responses via association (lazy loading)
+        // Uses RedBeanPHP associations: contact->ownContactresponseList
+        $responses = $message->ownContactresponseList;
         
         $this->render('contact/view', [
             'title' => 'View Message',
@@ -203,14 +201,19 @@ class Contact extends BaseControls\Control {
         }
         
         try {
-            // Save response
+            // Save response via association
+            // Uses RedBeanPHP associations: contact->ownContactresponseList
             $response = R::dispense('contactresponse');
-            $response->contact_id = $messageId;
-            $response->admin_id = $_SESSION['member']['id'];
             $response->response = $responseText;
             $response->created_at = date('Y-m-d H:i:s');
-            R::store($response);
-            
+
+            // Link to admin via association
+            $admin = R::load('member', $_SESSION['member']['id']);
+            $response->member = $admin;  // Sets admin_id automatically
+
+            // Add response to contact's list (sets contact_id automatically)
+            $message->ownContactresponseList[] = $response;
+
             // Update message status
             $message->status = $status;
             $message->responded_at = date('Y-m-d H:i:s');
@@ -275,10 +278,12 @@ class Contact extends BaseControls\Control {
             Flight::redirect('/contact/admin');
             return;
         }
-        
-        // Delete related responses first
-        R::exec('DELETE FROM contactresponse WHERE contact_id = ?', [$id]);
-        
+
+        // Use xownContactresponseList for cascade delete
+        // xown prefix ensures all responses are deleted when message is trashed
+        $message->xownContactresponseList = [];
+        R::store($message);
+
         // Delete message
         R::trash($message);
         

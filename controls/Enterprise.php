@@ -508,6 +508,9 @@ class Enterprise extends BaseControls\Control {
 
     /**
      * Disconnect a repository
+     *
+     * Uses RedBeanPHP associations:
+     * - repoconnections owns boardrepomapping (repo->xownBoardrepomappingList for cascade delete)
      */
     public function disconnectrepo($params = []) {
         if (!$this->requireEnterprise()) return;
@@ -521,15 +524,14 @@ class Enterprise extends BaseControls\Control {
         try {
             $this->connectUserDb();
 
-            // Delete repo connection
+            // Load repo and use xownBoardrepomappingList for cascade delete
             $repo = Bean::load('repoconnections', (int)$repoId);
             if ($repo->id) {
+                // Using xown prefix ensures cascade delete of related mappings
+                $repo->xownBoardrepomappingList = [];
+                Bean::store($repo);
                 Bean::trash($repo);
             }
-
-            // Delete board mappings for this repo
-            $mappings = Bean::find('boardrepomapping', 'repo_connection_id = ?', [(int)$repoId]);
-            Bean::trashAll($mappings);
 
             $this->disconnectUserDb();
 
@@ -550,6 +552,13 @@ class Enterprise extends BaseControls\Control {
 
     /**
      * Map a board to a repository
+     *
+     * Uses RedBeanPHP associations:
+     * - jiraboards owns boardrepomapping (board->ownBoardrepomappingList)
+     * - boardrepomapping belongs to repoconnections (mapping->repoconnections)
+     *
+     * Note: boardrepomapping is a link table with extra field (is_default),
+     * so we use explicit handling but still leverage associations for FK management.
      */
     public function mapboard() {
         if (!$this->requireEnterprise()) return;
@@ -574,26 +583,36 @@ class Enterprise extends BaseControls\Control {
         try {
             $this->connectUserDb();
 
-            // If setting as default, clear other defaults for this board
+            // Load parent beans for associations
+            $board = Bean::load('jiraboards', $boardId);
+            $repo = Bean::load('repoconnections', $repoId);
+
+            // If setting as default, clear other defaults for this board via association
             if ($isDefault) {
-                $existingMappings = Bean::find('boardrepomapping', 'board_id = ?', [$boardId]);
-                foreach ($existingMappings as $mapping) {
-                    $mapping->is_default = 0;
-                    Bean::store($mapping);
+                foreach ($board->ownBoardrepomappingList as $existingMapping) {
+                    $existingMapping->is_default = 0;
                 }
             }
 
-            // Find or create mapping
-            $mapping = Bean::findOne('boardrepomapping', 'board_id = ? AND repo_connection_id = ?',
-                [$boardId, $repoId]);
+            // Check if mapping already exists in board's mappings
+            $mapping = null;
+            foreach ($board->ownBoardrepomappingList as $existingMapping) {
+                if ($existingMapping->repoconnections_id == $repoId) {
+                    $mapping = $existingMapping;
+                    break;
+                }
+            }
+
             if (!$mapping) {
+                // Create new mapping via association
                 $mapping = Bean::dispense('boardrepomapping');
                 $mapping->created_at = date('Y-m-d H:i:s');
+                $mapping->repoconnections = $repo;  // Sets repoconnections_id automatically
+                $board->ownBoardrepomappingList[] = $mapping;  // Sets jiraboards_id automatically
             }
-            $mapping->board_id = $boardId;
-            $mapping->repo_connection_id = $repoId;
+
             $mapping->is_default = $isDefault;
-            Bean::store($mapping);
+            Bean::store($board);
 
             $this->disconnectUserDb();
             $this->flash('success', 'Board mapped to repository successfully.');
@@ -715,6 +734,7 @@ class Enterprise extends BaseControls\Control {
         $boardId = (int)(Flight::request()->data->board_id ?? 0);
         $repoId = (int)(Flight::request()->data->repo_id ?? 0);
         $cloudId = Flight::request()->data->cloud_id ?? '';
+        $useOrchestrator = !empty(Flight::request()->data->use_orchestrator);
 
         if (empty($issueKey) || empty($boardId) || empty($repoId) || empty($cloudId)) {
             $this->json(['success' => false, 'error' => 'Missing required parameters']);
@@ -836,7 +856,8 @@ class Enterprise extends BaseControls\Control {
                 'github_token' => $repoToken,
                 'callback_url' => Flight::get('baseurl') . '/webhook/aidev',
                 'callback_api_key' => Flight::get('cron.api_key'),
-                'action' => 'implement'
+                'action' => 'implement',
+                'use_orchestrator' => $useOrchestrator
             ];
 
             // Call shard endpoint
@@ -867,7 +888,8 @@ class Enterprise extends BaseControls\Control {
                 'issue_key' => $issueKey,
                 'shard_job_id' => $shardJobId,
                 'shard_id' => $shard['id'],
-                'shard_name' => $shard['name'] ?? $shard['host']
+                'shard_name' => $shard['name'] ?? $shard['host'],
+                'use_orchestrator' => $useOrchestrator
             ]);
 
             $this->json([
@@ -875,7 +897,8 @@ class Enterprise extends BaseControls\Control {
                 'issue_key' => $issueKey,
                 'shard_job_id' => $shardJobId,
                 'shard' => $shard['name'] ?? $shard['host'],
-                'message' => 'Job started on shard with Claude Code CLI'
+                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on shard with Claude Code CLI',
+                'use_orchestrator' => $useOrchestrator
             ]);
 
         } catch (\Exception $e) {

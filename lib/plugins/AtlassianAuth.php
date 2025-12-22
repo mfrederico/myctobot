@@ -187,6 +187,9 @@ class AtlassianAuth {
     /**
      * Store tokens for a member and cloud resource
      *
+     * Uses RedBeanPHP associations: member->ownAtlassiantokenList
+     * Note: cloud_id is an external Atlassian ID, not a local FK
+     *
      * @param int $memberId Member ID
      * @param array $tokens Token data from OAuth
      * @param array $resource Resource data (cloud ID, URL, name)
@@ -194,17 +197,23 @@ class AtlassianAuth {
     public static function storeTokens($memberId, $tokens, $resource) {
         $expiresAt = date('Y-m-d H:i:s', time() + ($tokens['expires_in'] ?? 3600));
 
-        // Check for existing token for this member/cloud
-        $existing = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
-            [$memberId, $resource['id']]
-        );
+        // Load member for association
+        $member = R::load('member', $memberId);
+
+        // Check for existing token for this member/cloud via association
+        $existing = null;
+        foreach ($member->ownAtlassiantokenList as $token) {
+            if ($token->cloud_id === $resource['id']) {
+                $existing = $token;
+                break;
+            }
+        }
 
         if (!$existing) {
             $existing = R::dispense('atlassiantoken');
-            $existing->member_id = $memberId;
-            $existing->cloud_id = $resource['id'];
+            $existing->cloud_id = $resource['id'];  // External Atlassian ID
             $existing->created_at = date('Y-m-d H:i:s');
+            $member->ownAtlassiantokenList[] = $existing;  // Sets member_id automatically
         }
 
         $existing->access_token = $tokens['access_token'];
@@ -216,7 +225,7 @@ class AtlassianAuth {
         $existing->scopes = $tokens['scope'] ?? self::$defaultScopes;
         $existing->updated_at = date('Y-m-d H:i:s');
 
-        R::store($existing);
+        R::store($member);
 
         Flight::get('log')->info('Stored Atlassian tokens', [
             'member_id' => $memberId,

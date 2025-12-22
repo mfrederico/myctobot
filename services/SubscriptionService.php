@@ -14,11 +14,23 @@ class SubscriptionService {
     /**
      * Get subscription tier for a member
      *
+     * Uses RedBeanPHP associations with filtering for active status.
+     *
      * @param int $memberId Member ID
      * @return string Tier name ('free', 'pro', 'enterprise')
      */
     public static function getTier(int $memberId): string {
-        $subscription = R::findOne('subscription', 'member_id = ? AND status = ?', [$memberId, 'active']);
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
+
+        // Find active subscription
+        $subscription = null;
+        foreach ($subscriptions as $sub) {
+            if ($sub->status === 'active') {
+                $subscription = $sub;
+                break;
+            }
+        }
 
         if ($subscription) {
             // Check if subscription is still valid
@@ -93,13 +105,17 @@ class SubscriptionService {
     /**
      * Get subscription details for a member
      *
+     * Uses RedBeanPHP associations for lazy loading.
+     *
      * @param int $memberId Member ID
      * @return array|null
      */
     public static function getSubscription(int $memberId): ?array {
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        $member = R::load('member', $memberId);
+        $subscriptions = $member->ownSubscriptionList;
 
-        if ($subscription) {
+        if (!empty($subscriptions)) {
+            $subscription = reset($subscriptions);
             return $subscription->export();
         }
 
@@ -109,20 +125,30 @@ class SubscriptionService {
     /**
      * Create or get subscription record for a member
      *
+     * Uses RedBeanPHP associations:
+     * - member owns subscription (member->ownSubscriptionList)
+     *
      * @param int $memberId Member ID
      * @return object RedBeanPHP bean
      */
     public static function ensureSubscription(int $memberId): object {
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+        // First check for existing subscription
+        $member = R::load('member', $memberId);
+        $existing = $member->ownSubscriptionList;
 
-        if (!$subscription) {
-            $subscription = R::dispense('subscription');
-            $subscription->member_id = $memberId;
-            $subscription->tier = 'free';
-            $subscription->status = 'active';
-            $subscription->created_at = date('Y-m-d H:i:s');
-            R::store($subscription);
+        if (!empty($existing)) {
+            return reset($existing);
         }
+
+        // Create new subscription via association
+        $subscription = R::dispense('subscription');
+        $subscription->tier = 'free';
+        $subscription->status = 'active';
+        $subscription->created_at = date('Y-m-d H:i:s');
+
+        // Add to member's ownSubscriptionList (sets member_id automatically)
+        $member->ownSubscriptionList[] = $subscription;
+        R::store($member);
 
         return $subscription;
     }

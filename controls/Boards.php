@@ -252,7 +252,8 @@ class Boards extends BaseControls\Control {
                 'aidev_status_working' => trim($this->getParam('aidev_status_working') ?? '') ?: null,
                 'aidev_status_pr_created' => trim($this->getParam('aidev_status_pr_created') ?? '') ?: null,
                 'aidev_status_clarification' => trim($this->getParam('aidev_status_clarification') ?? '') ?: null,
-                'aidev_status_failed' => trim($this->getParam('aidev_status_failed') ?? '') ?: null
+                'aidev_status_failed' => trim($this->getParam('aidev_status_failed') ?? '') ?: null,
+                'aidev_status_complete' => trim($this->getParam('aidev_status_complete') ?? '') ?: null
             ];
 
             // Handle priority weights (Pro feature)

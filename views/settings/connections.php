@@ -124,6 +124,19 @@
                     </a>
                 </div>
                 <?php endif; ?>
+                <?php if ($member->level <= 50): ?>
+                <div class="col-md-3">
+                    <a href="/admin/shards" class="text-decoration-none">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-pc-display-horizontal fs-4 text-secondary me-3"></i>
+                            <div>
+                                <strong>Workstation Shards</strong>
+                                <small class="d-block text-muted">Manage AI compute nodes</small>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>

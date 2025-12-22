@@ -53,13 +53,20 @@ class ShardService {
         $shard->description = $data['description'] ?? '';
         $shard->host = $data['host'];
         $shard->port = $data['port'] ?? 3500;
-        $shard->api_key = $data['api_key'];
+        $shard->api_key = $data['api_key'] ?? '';
         $shard->shard_type = $data['shard_type'] ?? 'general';
         $shard->capabilities = json_encode($data['capabilities'] ?? ['git', 'filesystem']);
         $shard->max_concurrent_jobs = $data['max_concurrent_jobs'] ?? 2;
         $shard->is_active = $data['is_active'] ?? 1;
         $shard->is_default = $data['is_default'] ?? 0;
         $shard->health_status = 'unknown';
+
+        // SSH execution mode fields
+        $shard->execution_mode = $data['execution_mode'] ?? 'ssh_tmux';
+        $shard->ssh_user = $data['ssh_user'] ?? 'claudeuser';
+        $shard->ssh_port = $data['ssh_port'] ?? 22;
+        $shard->ssh_key_path = $data['ssh_key_path'] ?? null;
+        $shard->ssh_validated = $data['ssh_validated'] ?? 0;
 
         return R::store($shard);
     }
@@ -73,8 +80,17 @@ class ShardService {
             return false;
         }
 
+        // List of allowed fields to update
+        $allowedFields = [
+            'name', 'description', 'host', 'port', 'api_key',
+            'shard_type', 'capabilities', 'max_concurrent_jobs',
+            'is_active', 'is_default', 'health_status',
+            'execution_mode', 'ssh_user', 'ssh_port', 'ssh_key_path',
+            'ssh_validated', 'ssh_last_diagnostic', 'ssh_last_check'
+        ];
+
         foreach ($data as $key => $value) {
-            if (property_exists($shard, $key)) {
+            if (in_array($key, $allowedFields)) {
                 if ($key === 'capabilities' && is_array($value)) {
                     $shard->$key = json_encode($value);
                 } else {
@@ -119,10 +135,10 @@ class ShardService {
             $data = json_decode($response->getBody()->getContents(), true);
 
             // Update health status
-            R::exec(
-                "UPDATE claudeshards SET health_status = 'healthy', last_health_check = NOW() WHERE id = ?",
-                [$shardId]
-            );
+            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean->health_status = 'healthy';
+            $shardBean->last_health_check = date('Y-m-d H:i:s');
+            R::store($shardBean);
 
             return [
                 'healthy' => true,
@@ -131,10 +147,10 @@ class ShardService {
 
         } catch (GuzzleException $e) {
             // Update health status
-            R::exec(
-                "UPDATE claudeshards SET health_status = 'unhealthy', last_health_check = NOW() WHERE id = ?",
-                [$shardId]
-            );
+            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean->health_status = 'unhealthy';
+            $shardBean->last_health_check = date('Y-m-d H:i:s');
+            R::store($shardBean);
 
             return [
                 'healthy' => false,
@@ -188,11 +204,21 @@ class ShardService {
      */
     public static function assignShard(int $memberId, int $shardId, int $priority = 0): bool {
         try {
-            R::exec("
-                INSERT INTO shardassignments (member_id, shard_id, priority)
-                VALUES (?, ?, ?)
-                ON DUPLICATE KEY UPDATE priority = ?
-            ", [$memberId, $shardId, $priority, $priority]);
+            // Check if assignment already exists
+            $assignment = R::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
+
+            if ($assignment) {
+                // Update existing
+                $assignment->priority = $priority;
+            } else {
+                // Create new
+                $assignment = R::dispense('shardassignments');
+                $assignment->member_id = $memberId;
+                $assignment->shard_id = $shardId;
+                $assignment->priority = $priority;
+            }
+
+            R::store($assignment);
             return true;
         } catch (\Exception $e) {
             return false;
@@ -203,10 +229,10 @@ class ShardService {
      * Remove shard assignment from member
      */
     public static function unassignShard(int $memberId, int $shardId): bool {
-        R::exec(
-            "DELETE FROM shardassignments WHERE member_id = ? AND shard_id = ?",
-            [$memberId, $shardId]
-        );
+        $assignment = R::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
+        if ($assignment) {
+            R::trash($assignment);
+        }
         return true;
     }
 

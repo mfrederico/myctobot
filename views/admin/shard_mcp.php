@@ -3,7 +3,7 @@
         <div>
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-1">
-                    <li class="breadcrumb-item"><a href="/admin/shards">Shards</a></li>
+                    <li class="breadcrumb-item"><a href="/admin/shards">Workstations</a></li>
                     <li class="breadcrumb-item"><a href="/admin/editshard/<?= $shard['id'] ?>"><?= htmlspecialchars($shard['name']) ?></a></li>
                     <li class="breadcrumb-item active">MCP Servers</li>
                 </ol>
@@ -13,7 +13,7 @@
             </h1>
         </div>
         <a href="/admin/editshard/<?= $shard['id'] ?>" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left"></i> Back to Shard
+            <i class="bi bi-arrow-left"></i> Back to Workstation
         </a>
     </div>
 
@@ -31,11 +31,19 @@
 
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0">Shard: <?= htmlspecialchars($shard['name']) ?></h5>
+            <h5 class="mb-0">Workstation: <?= htmlspecialchars($shard['name']) ?></h5>
         </div>
         <div class="card-body">
             <p class="text-muted mb-0">
+                <?php if (!empty($ssh_mode)): ?>
+                <strong>Mode:</strong> <span class="badge bg-primary"><i class="bi bi-terminal"></i> SSH + Tmux</span>
+                &nbsp;|&nbsp;
+                <strong>Host:</strong> <code><?= htmlspecialchars($shard['ssh_user'] ?? 'claudeuser') ?>@<?= htmlspecialchars($shard['host']) ?></code>
+                <?php else: ?>
+                <strong>Mode:</strong> <span class="badge bg-secondary"><i class="bi bi-cloud"></i> HTTP API</span>
+                &nbsp;|&nbsp;
                 <strong>Host:</strong> <code><?= htmlspecialchars($shard['host']) ?>:<?= $shard['port'] ?></code>
+                <?php endif; ?>
                 &nbsp;|&nbsp;
                 <strong>Type:</strong> <?= htmlspecialchars($shard['shard_type']) ?>
                 &nbsp;|&nbsp;
@@ -47,7 +55,153 @@
         </div>
     </div>
 
+    <?php if (!empty($ssh_mode)): ?>
+    <!-- SSH Mode: MCP is configured dynamically -->
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="bi bi-terminal"></i> SSH Mode - Dynamic MCP Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info mb-4">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>How MCP works in SSH mode:</strong>
+                        <p class="mb-0 mt-2">
+                            When a job starts on this workstation, the system automatically generates a
+                            <code>.mcp.json</code> file with the member's credentials. This ensures each job
+                            has proper access to Jira, GitHub, and other services without storing credentials
+                            on the workstation.
+                        </p>
+                    </div>
+
+                    <h6 class="mb-3">MCP Servers Configured Per-Job:</h6>
+
+                    <div class="card mb-3 border-success">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-check-circle text-success"></i>
+                                <strong>jira</strong>
+                                <span class="badge bg-success ms-2">Auto-configured</span>
+                            </div>
+                            <code class="small">mcp-jira-server.php</code>
+                        </div>
+                        <div class="card-body">
+                            <p class="small text-muted mb-2">Jira integration for reading/updating issues, adding comments, and transitioning statuses.</p>
+                            <p class="small mb-0">
+                                <strong>Credentials used:</strong> Member's OAuth token (auto-refreshed)
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card mb-3 border-success">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-check-circle text-success"></i>
+                                <strong>github</strong>
+                                <span class="badge bg-success ms-2">Auto-configured</span>
+                            </div>
+                            <code class="small">@modelcontextprotocol/server-github</code>
+                        </div>
+                        <div class="card-body">
+                            <p class="small text-muted mb-2">GitHub integration for repository operations, PR creation, and issue management.</p>
+                            <p class="small mb-0">
+                                <strong>Credentials used:</strong> Member's GitHub token from board settings
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="card mb-3 border-secondary">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <i class="bi bi-dash-circle text-secondary"></i>
+                                <strong>filesystem</strong>
+                                <span class="badge bg-secondary ms-2">Built-in</span>
+                            </div>
+                            <code class="small">Claude Code native</code>
+                        </div>
+                        <div class="card-body">
+                            <p class="small text-muted mb-0">File system access is built into Claude Code - no MCP server needed.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-code-slash"></i> Example .mcp.json Generated</h5>
+                </div>
+                <div class="card-body">
+                    <pre class="bg-dark text-light p-3 rounded mb-0"><code>{
+  "mcpServers": {
+    "jira": {
+      "command": "php",
+      "args": ["/path/to/mcp-jira-server.php"],
+      "env": {
+        "JIRA_CLOUD_ID": "[member's cloud ID]",
+        "JIRA_ACCESS_TOKEN": "[member's OAuth token]",
+        "JIRA_MEMBER_ID": "[member ID]"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "[from board settings]"
+      }
+    }
+  }
+}</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-lightbulb"></i> How It Works</h5>
+                </div>
+                <div class="card-body">
+                    <ol class="small mb-0">
+                        <li class="mb-2">Job is assigned to this workstation</li>
+                        <li class="mb-2">System SSHs in and clones the repository</li>
+                        <li class="mb-2"><code>.mcp.json</code> is generated with member's credentials</li>
+                        <li class="mb-2">Claude Code is launched in a tmux session</li>
+                        <li class="mb-2">Claude uses MCP servers to interact with Jira/GitHub</li>
+                        <li>Job completes and credentials are cleaned up</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-shield-check"></i> Security Benefits</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="small mb-0">
+                        <li class="mb-2">Credentials never stored on workstation</li>
+                        <li class="mb-2">OAuth tokens auto-refreshed per job</li>
+                        <li class="mb-2">Each job gets isolated credentials</li>
+                        <li>Credentials cleaned up after job completes</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="d-grid">
+                <a href="/admin/shards" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left"></i> Back to Workstations
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <?php else: ?>
+    <!-- HTTP Mode: Configure via remote API -->
     <form method="POST">
+        <?php foreach (Flight::csrf()->getFields() as $name => $value): ?>
+        <input type="hidden" name="<?= $name ?>" value="<?= htmlspecialchars($value) ?>">
+        <?php endforeach; ?>
+
         <div class="row">
             <!-- Available MCP Servers -->
             <div class="col-lg-8">
@@ -218,6 +372,7 @@
             </div>
         </div>
     </form>
+    <?php endif; ?>
 </div>
 
 <script>

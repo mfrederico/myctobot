@@ -454,7 +454,7 @@ class Webhook extends BaseControls\Control {
     /**
      * Close local tmux session when ai-dev label is removed
      */
-    private function closeLocalTmuxSession(string $issueKey, int $memberId): void {
+    private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null): void {
         $tmux = new TmuxService($memberId, $issueKey);
 
         if (!$tmux->exists()) {
@@ -468,6 +468,30 @@ class Webhook extends BaseControls\Control {
             'member_id' => $memberId,
             'success' => $killed
         ]);
+
+        // Remove ai-dev label from the ticket
+        if ($cloudId) {
+            $this->removeAiDevLabel($issueKey, $memberId, $cloudId);
+        }
+    }
+
+    /**
+     * Remove the ai-dev label from a Jira ticket
+     */
+    private function removeAiDevLabel(string $issueKey, int $memberId, string $cloudId): void {
+        try {
+            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
+            $jiraClient->removeLabel($issueKey, 'ai-dev');
+            $this->logger->info('Removed ai-dev label from ticket', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to remove ai-dev label', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 
     /**
@@ -475,7 +499,14 @@ class Webhook extends BaseControls\Control {
      * If so, close the AI Developer tmux session
      */
     private function checkCompleteStatusTransition(string $issueKey, string $cloudId, string $newStatus): void {
+        $this->logger->debug('checkCompleteStatusTransition: START', [
+            'issue_key' => $issueKey,
+            'cloud_id' => $cloudId,
+            'new_status' => $newStatus
+        ]);
+
         $memberId = $this->findMemberByCloudId($cloudId);
+        $this->logger->debug('checkCompleteStatusTransition: member lookup', ['member_id' => $memberId]);
         if (!$memberId) {
             $this->logger->debug('checkCompleteStatusTransition: No member found for cloud', ['cloud_id' => $cloudId]);
             return;
@@ -484,24 +515,42 @@ class Webhook extends BaseControls\Control {
         // Extract project key from issue key (e.g., "SSI-1893" -> "SSI")
         $projectKey = explode('-', $issueKey)[0] ?? '';
         if (empty($projectKey)) {
+            $this->logger->debug('checkCompleteStatusTransition: Empty project key');
             return;
         }
 
         // Switch to user database to find the board
-        $userDb = \app\services\UserDatabaseService::forMember($memberId);
-        if (!$userDb) {
-            $this->logger->debug('checkCompleteStatusTransition: No user database for member', ['member_id' => $memberId]);
+        $this->logger->debug('checkCompleteStatusTransition: Switching to user DB', ['member_id' => $memberId]);
+        try {
+            $userDb = new \app\services\UserDatabaseService($memberId);
+        } catch (\Exception $e) {
+            $this->logger->debug('checkCompleteStatusTransition: Failed to get user database', [
+                'member_id' => $memberId,
+                'error' => $e->getMessage()
+            ]);
             return;
         }
 
         // Find the board for this project in user database
-        $board = \app\Bean::findOne('jiraboards', 'project_key = ?', [$projectKey]);
+        $this->logger->debug('checkCompleteStatusTransition: Looking for board', ['project_key' => $projectKey]);
+        $board = $userDb->getBoards()[0] ?? null; // First try getting all boards
+        // Filter to find the matching project
+        foreach ($userDb->getBoards() as $b) {
+            if (($b['project_key'] ?? '') === $projectKey) {
+                $board = (object)$b;
+                break;
+            }
+        }
         if (!$board) {
             $this->logger->debug('checkCompleteStatusTransition: No board found', ['project_key' => $projectKey]);
             return;
         }
 
         $completeStatus = $board->aidev_status_complete ?? null;
+        $this->logger->debug('checkCompleteStatusTransition: Board found', [
+            'board_id' => $board->id,
+            'complete_status' => $completeStatus
+        ]);
         if (empty($completeStatus)) {
             $this->logger->debug('checkCompleteStatusTransition: No complete status configured', ['board_id' => $board->id]);
             return;
@@ -521,7 +570,7 @@ class Webhook extends BaseControls\Control {
                 'status' => $newStatus,
                 'configured_complete_status' => $completeStatus
             ]);
-            $this->closeLocalTmuxSession($issueKey, $memberId);
+            $this->closeLocalTmuxSession($issueKey, $memberId, $cloudId);
         }
     }
 

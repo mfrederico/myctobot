@@ -281,6 +281,15 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Check if ticket is already at "complete" status - prevents race condition
+        // where label removal hasn't propagated yet but status already indicates done
+        if ($this->isTicketAtCompleteStatus($issueKey, $memberId, $cloudId)) {
+            $this->logger->debug('Jira webhook: skipping trigger - ticket already at complete status', [
+                'issue_key' => $issueKey
+            ]);
+            return;
+        }
+
         // Check if there's already an active job for this issue
         $statusDir = __DIR__ . '/../storage/aidev_status/member_' . $memberId;
         if (is_dir($statusDir)) {
@@ -571,6 +580,62 @@ class Webhook extends BaseControls\Control {
                 'configured_complete_status' => $completeStatus
             ]);
             $this->closeLocalTmuxSession($issueKey, $memberId, $cloudId);
+        }
+    }
+
+    /**
+     * Check if a ticket is already at the configured "complete" status
+     * Used to prevent race condition where label removal hasn't propagated yet
+     */
+    private function isTicketAtCompleteStatus(string $issueKey, int $memberId, string $cloudId): bool {
+        try {
+            // Extract project key from issue key
+            $projectKey = explode('-', $issueKey)[0] ?? '';
+            if (empty($projectKey)) {
+                return false;
+            }
+
+            // Get board configuration from user database
+            $userDb = new \app\services\UserDatabaseService($memberId);
+            $board = null;
+            foreach ($userDb->getBoards() as $b) {
+                if (($b['project_key'] ?? '') === $projectKey) {
+                    $board = (object)$b;
+                    break;
+                }
+            }
+
+            if (!$board) {
+                return false;
+            }
+
+            $completeStatus = $board->aidev_status_complete ?? null;
+            if (empty($completeStatus)) {
+                return false;
+            }
+
+            // Fetch current ticket status from Jira
+            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
+            $issue = $jiraClient->getIssue($issueKey);
+            $currentStatus = $issue['fields']['status']['name'] ?? '';
+
+            $isComplete = strcasecmp($currentStatus, $completeStatus) === 0;
+
+            $this->logger->debug('isTicketAtCompleteStatus check', [
+                'issue_key' => $issueKey,
+                'current_status' => $currentStatus,
+                'complete_status' => $completeStatus,
+                'is_complete' => $isComplete
+            ]);
+
+            return $isComplete;
+
+        } catch (\Exception $e) {
+            $this->logger->warning('Error checking ticket complete status', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+            return false;
         }
     }
 

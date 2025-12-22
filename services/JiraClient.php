@@ -250,6 +250,39 @@ class JiraClient {
     }
 
     /**
+     * Get attachment metadata by ID
+     *
+     * @param string $attachmentId The attachment ID
+     * @return array|null Attachment metadata or null if not found
+     */
+    public function getAttachment(string $attachmentId): ?array {
+        try {
+            $response = $this->client->get(
+                $this->baseUrl . "/attachment/{$attachmentId}"
+            );
+            return json_decode($response->getBody()->getContents(), true);
+        } catch (\Exception $e) {
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to get Jira attachment', [
+                    'attachmentId' => $attachmentId,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Download attachment content from URL
+     *
+     * @param string $url Attachment content URL
+     * @return string|null Binary data or null on failure
+     */
+    public function downloadAttachmentContent(string $url): ?string {
+        return $this->downloadAttachment($url);
+    }
+
+    /**
      * Download an attachment from Jira
      *
      * @param string $url Attachment URL

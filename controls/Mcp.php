@@ -272,7 +272,7 @@ class Mcp extends Control {
                     ],
                     [
                         'name' => 'jira_get_issue',
-                        'description' => 'Get details of a Jira issue including summary, description, status, and assignee',
+                        'description' => 'Get details of a Jira issue including summary, description, status, assignee, and list of attachments',
                         'inputSchema' => [
                             'type' => 'object',
                             'properties' => [
@@ -282,6 +282,46 @@ class Mcp extends Control {
                                 ]
                             ],
                             'required' => ['issue_key']
+                        ]
+                    ],
+                    [
+                        'name' => 'jira_get_attachment',
+                        'description' => 'Download and view an image attachment from a Jira ticket. Returns the image for visual analysis.',
+                        'inputSchema' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'attachment_id' => [
+                                    'type' => 'string',
+                                    'description' => 'The attachment ID (get this from jira_get_issue attachments list)'
+                                ]
+                            ],
+                            'required' => ['attachment_id']
+                        ]
+                    ],
+                    [
+                        'name' => 'jira_upload_attachment',
+                        'description' => 'Upload an image (e.g., screenshot) to a Jira ticket as an attachment. Accepts base64-encoded image data.',
+                        'inputSchema' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'issue_key' => [
+                                    'type' => 'string',
+                                    'description' => 'The Jira issue key (e.g., SSI-1893)'
+                                ],
+                                'filename' => [
+                                    'type' => 'string',
+                                    'description' => 'Filename for the attachment (e.g., screenshot.png)'
+                                ],
+                                'image_data' => [
+                                    'type' => 'string',
+                                    'description' => 'Base64-encoded image data'
+                                ],
+                                'mime_type' => [
+                                    'type' => 'string',
+                                    'description' => 'MIME type (e.g., image/png, image/jpeg). Defaults to image/png'
+                                ]
+                            ],
+                            'required' => ['issue_key', 'filename', 'image_data']
                         ]
                     ]
                 ]
@@ -308,6 +348,12 @@ class Mcp extends Control {
 
             case 'jira_get_issue':
                 return $this->toolJiraGetIssue($id, $args);
+
+            case 'jira_get_attachment':
+                return $this->toolJiraGetAttachment($id, $args);
+
+            case 'jira_upload_attachment':
+                return $this->toolJiraUploadAttachment($id, $args);
 
             default:
                 return $this->toolErrorResponse($id, "Unknown tool: {$toolName}");
@@ -417,6 +463,18 @@ class Mcp extends Control {
             $client = $this->getJiraClient();
             $issue = $client->getIssue($issueKey);
 
+            // Format attachments with IDs for downloading
+            $attachments = [];
+            foreach ($issue['fields']['attachment'] ?? [] as $att) {
+                $attachments[] = [
+                    'id' => $att['id'],
+                    'filename' => $att['filename'],
+                    'mimeType' => $att['mimeType'],
+                    'size' => $att['size'],
+                    'created' => $att['created'] ?? ''
+                ];
+            }
+
             $formatted = [
                 'key' => $issue['key'] ?? $issueKey,
                 'summary' => $issue['fields']['summary'] ?? '',
@@ -426,6 +484,7 @@ class Mcp extends Control {
                 'priority' => $issue['fields']['priority']['name'] ?? 'None',
                 'description' => $this->extractDescription($issue['fields']['description'] ?? null),
                 'labels' => $issue['fields']['labels'] ?? [],
+                'attachments' => $attachments,
                 'created' => $issue['fields']['created'] ?? '',
                 'updated' => $issue['fields']['updated'] ?? ''
             ];
@@ -434,6 +493,110 @@ class Mcp extends Control {
 
         } catch (\Exception $e) {
             return $this->toolErrorResponse($id, "Failed to get issue: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Tool: Get attachment (image) from Jira
+     */
+    private function toolJiraGetAttachment($id, array $args): array {
+        $attachmentId = $args['attachment_id'] ?? '';
+
+        if (empty($attachmentId)) {
+            return $this->toolErrorResponse($id, "Missing attachment_id");
+        }
+
+        try {
+            $client = $this->getJiraClient();
+
+            // Get attachment metadata first
+            $attachment = $client->getAttachment($attachmentId);
+
+            if (empty($attachment)) {
+                return $this->toolErrorResponse($id, "Attachment not found");
+            }
+
+            $mimeType = $attachment['mimeType'] ?? 'application/octet-stream';
+            $filename = $attachment['filename'] ?? 'attachment';
+            $contentUrl = $attachment['content'] ?? null;
+
+            if (empty($contentUrl)) {
+                return $this->toolErrorResponse($id, "No content URL for attachment");
+            }
+
+            // Check if it's an image type
+            $isImage = str_starts_with($mimeType, 'image/');
+
+            if (!$isImage) {
+                // For non-images, just return metadata
+                return $this->toolSuccessResponse($id,
+                    "Attachment '{$filename}' is not an image (type: {$mimeType}). " .
+                    "Only image attachments can be displayed.");
+            }
+
+            // Download the image content
+            $imageData = $client->downloadAttachmentContent($contentUrl);
+
+            if (empty($imageData)) {
+                return $this->toolErrorResponse($id, "Failed to download attachment content");
+            }
+
+            // Return as image content type for MCP
+            return $this->toolImageResponse($id, $imageData, $mimeType, $filename);
+
+        } catch (\Exception $e) {
+            return $this->toolErrorResponse($id, "Failed to get attachment: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Tool: Upload an image attachment to Jira
+     */
+    private function toolJiraUploadAttachment($id, array $args): array {
+        $issueKey = $args['issue_key'] ?? '';
+        $filename = $args['filename'] ?? '';
+        $imageData = $args['image_data'] ?? '';
+        $mimeType = $args['mime_type'] ?? 'image/png';
+
+        if (empty($issueKey) || empty($filename) || empty($imageData)) {
+            return $this->toolErrorResponse($id, "Missing issue_key, filename, or image_data");
+        }
+
+        try {
+            // Decode base64 image data
+            $binaryData = base64_decode($imageData);
+            if ($binaryData === false) {
+                return $this->toolErrorResponse($id, "Invalid base64 image data");
+            }
+
+            // Create temp file
+            $tempFile = sys_get_temp_dir() . '/' . uniqid('jira_upload_') . '_' . $filename;
+            if (file_put_contents($tempFile, $binaryData) === false) {
+                return $this->toolErrorResponse($id, "Failed to create temporary file");
+            }
+
+            try {
+                $client = $this->getJiraClient();
+                $result = $client->uploadAttachment($issueKey, $tempFile);
+
+                // Clean up temp file
+                @unlink($tempFile);
+
+                $attachmentId = $result['id'] ?? 'unknown';
+                $attachmentFilename = $result['filename'] ?? $filename;
+
+                return $this->toolSuccessResponse($id,
+                    "Successfully uploaded '{$attachmentFilename}' to {$issueKey} (attachment ID: {$attachmentId})");
+
+            } finally {
+                // Ensure temp file is cleaned up even on error
+                if (file_exists($tempFile)) {
+                    @unlink($tempFile);
+                }
+            }
+
+        } catch (\Exception $e) {
+            return $this->toolErrorResponse($id, "Failed to upload attachment: " . $e->getMessage());
         }
     }
 
@@ -488,6 +651,31 @@ class Mcp extends Control {
                     [
                         'type' => 'text',
                         'text' => $text
+                    ]
+                ]
+            ]
+        ];
+    }
+
+    /**
+     * Build an image tool response
+     */
+    private function toolImageResponse($id, string $imageData, string $mimeType, string $filename): array {
+        $base64 = base64_encode($imageData);
+
+        return [
+            'jsonrpc' => '2.0',
+            'id' => $id,
+            'result' => [
+                'content' => [
+                    [
+                        'type' => 'text',
+                        'text' => "Image: {$filename}"
+                    ],
+                    [
+                        'type' => 'image',
+                        'data' => $base64,
+                        'mimeType' => $mimeType
                     ]
                 ]
             ]

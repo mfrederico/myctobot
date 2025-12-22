@@ -323,6 +323,32 @@ class Mcp extends Control {
                             ],
                             'required' => ['issue_key']
                         ]
+                    ],
+                    [
+                        'name' => 'jira_comment_with_image',
+                        'description' => 'Post a comment with an inline image. Either provide an existing attachment_id, or provide file_path to upload and embed in one step.',
+                        'inputSchema' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'issue_key' => [
+                                    'type' => 'string',
+                                    'description' => 'The Jira issue key (e.g., SSI-1893)'
+                                ],
+                                'message' => [
+                                    'type' => 'string',
+                                    'description' => 'The comment text'
+                                ],
+                                'attachment_id' => [
+                                    'type' => 'string',
+                                    'description' => 'Existing attachment ID to embed (use if already uploaded)'
+                                ],
+                                'file_path' => [
+                                    'type' => 'string',
+                                    'description' => 'Path to image file - will upload and embed in one step'
+                                ]
+                            ],
+                            'required' => ['issue_key', 'message']
+                        ]
                     ]
                 ]
             ]
@@ -354,6 +380,9 @@ class Mcp extends Control {
 
             case 'jira_upload_attachment':
                 return $this->toolJiraUploadAttachment($id, $args);
+
+            case 'jira_comment_with_image':
+                return $this->toolJiraCommentWithImage($id, $args);
 
             default:
                 return $this->toolErrorResponse($id, "Unknown tool: {$toolName}");
@@ -619,6 +648,52 @@ class Mcp extends Control {
 
         } catch (\Exception $e) {
             return $this->toolErrorResponse($id, "Failed to upload attachment: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Tool: Post a comment with an inline image
+     */
+    private function toolJiraCommentWithImage($id, array $args): array {
+        $issueKey = $args['issue_key'] ?? '';
+        $message = $args['message'] ?? '';
+        $attachmentId = $args['attachment_id'] ?? '';
+        $filePath = $args['file_path'] ?? '';
+
+        if (empty($issueKey) || empty($message)) {
+            return $this->toolErrorResponse($id, "Missing issue_key or message");
+        }
+
+        if (empty($attachmentId) && empty($filePath)) {
+            return $this->toolErrorResponse($id, "Must provide either attachment_id or file_path");
+        }
+
+        try {
+            $client = $this->getJiraClient();
+
+            // If file_path provided, upload first
+            if (!empty($filePath)) {
+                if (!file_exists($filePath)) {
+                    return $this->toolErrorResponse($id, "File not found: {$filePath}");
+                }
+
+                $uploadResult = $client->uploadAttachment($issueKey, $filePath);
+                $attachmentId = $uploadResult['id'] ?? '';
+
+                if (empty($attachmentId)) {
+                    return $this->toolErrorResponse($id, "Failed to upload attachment - no ID returned");
+                }
+            }
+
+            // Post comment with inline image
+            $result = $client->addCommentWithImage($issueKey, $message, $attachmentId);
+
+            $commentId = $result['id'] ?? 'unknown';
+            return $this->toolSuccessResponse($id,
+                "Comment posted to {$issueKey} with inline image (comment ID: {$commentId}, attachment ID: {$attachmentId})");
+
+        } catch (\Exception $e) {
+            return $this->toolErrorResponse($id, "Failed to post comment with image: " . $e->getMessage());
         }
     }
 

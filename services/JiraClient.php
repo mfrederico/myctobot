@@ -697,6 +697,139 @@ class JiraClient {
         return $data[0] ?? $data;
     }
 
+    /**
+     * Get the media UUID from an attachment's content URL
+     * Required for embedding images in ADF comments
+     *
+     * @param string $attachmentId The attachment ID
+     * @return string|null The media UUID or null if not found
+     */
+    public function getAttachmentMediaId(string $attachmentId): ?string {
+        try {
+            $attachment = $this->getAttachment($attachmentId);
+            if (empty($attachment['content'])) {
+                return null;
+            }
+
+            // Follow the content URL to get the redirect with media UUID
+            // The content URL redirects to a URL like: .../file/{uuid}/...
+            $response = $this->client->get($attachment['content'], [
+                'allow_redirects' => false
+            ]);
+
+            $locationHeader = $response->getHeader('Location');
+            if (!empty($locationHeader)) {
+                $location = $locationHeader[0];
+                // Extract UUID from URL like /file/12345678-1234-1234-1234-123456789abc/...
+                if (preg_match('/\/file\/([a-f0-9-]{36})\//i', $location, $matches)) {
+                    return $matches[1];
+                }
+            }
+
+            // Fallback: try to extract from content URL directly
+            if (preg_match('/\/file\/([a-f0-9-]{36})\//i', $attachment['content'], $matches)) {
+                return $matches[1];
+            }
+
+            return null;
+        } catch (\Exception $e) {
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to get media ID for attachment', [
+                    'attachmentId' => $attachmentId,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Add a comment with an inline image
+     *
+     * @param string $issueKey Issue key
+     * @param string $message Comment text
+     * @param string $attachmentId Attachment ID to embed
+     * @param int $width Image width (optional)
+     * @param int $height Image height (optional)
+     * @return array Comment data
+     */
+    public function addCommentWithImage(string $issueKey, string $message, string $attachmentId, int $width = 600, int $height = 400): array {
+        // Get attachment details
+        $attachment = $this->getAttachment($attachmentId);
+        if (empty($attachment)) {
+            throw new \Exception("Attachment not found: {$attachmentId}");
+        }
+
+        // Try to get media UUID
+        $mediaId = $this->getAttachmentMediaId($attachmentId);
+
+        // Build ADF content
+        $content = [];
+
+        // Add message paragraphs
+        $paragraphs = preg_split('/\n\n+/', $message);
+        foreach ($paragraphs as $para) {
+            if (empty(trim($para))) {
+                continue;
+            }
+            $lines = explode("\n", $para);
+            $paraContent = [];
+            foreach ($lines as $i => $line) {
+                if ($i > 0) {
+                    $paraContent[] = ['type' => 'hardBreak'];
+                }
+                $paraContent[] = ['type' => 'text', 'text' => $line];
+            }
+            $content[] = [
+                'type' => 'paragraph',
+                'content' => $paraContent
+            ];
+        }
+
+        // Add image - try media node first, fall back to external URL
+        if ($mediaId) {
+            $content[] = [
+                'type' => 'mediaSingle',
+                'attrs' => ['layout' => 'center'],
+                'content' => [
+                    [
+                        'type' => 'media',
+                        'attrs' => [
+                            'id' => $mediaId,
+                            'type' => 'file',
+                            'collection' => ''
+                        ]
+                    ]
+                ]
+            ];
+        } else {
+            // Fallback: reference attachment by filename in text
+            $filename = $attachment['filename'] ?? 'attachment';
+            $content[] = [
+                'type' => 'paragraph',
+                'content' => [
+                    ['type' => 'text', 'text' => '📎 See attached: '],
+                    ['type' => 'text', 'text' => $filename, 'marks' => [['type' => 'strong']]]
+                ]
+            ];
+        }
+
+        $adf = [
+            'type' => 'doc',
+            'version' => 1,
+            'content' => $content
+        ];
+
+        $response = $this->client->post(
+            $this->baseUrl . "/issue/{$issueKey}/comment",
+            [
+                'json' => ['body' => $adf]
+            ]
+        );
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
     // ========================================
     // ADF Helper Methods
     // ========================================

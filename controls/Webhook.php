@@ -461,6 +461,7 @@ class Webhook extends BaseControls\Control {
     private function checkCompleteStatusTransition(string $issueKey, string $cloudId, string $newStatus): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
+            $this->logger->debug('checkCompleteStatusTransition: No member found for cloud', ['cloud_id' => $cloudId]);
             return;
         }
 
@@ -470,16 +471,31 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Find the board for this project
-        $board = R::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
+        // Switch to user database to find the board
+        $userDb = \app\services\UserDatabaseService::forMember($memberId);
+        if (!$userDb) {
+            $this->logger->debug('checkCompleteStatusTransition: No user database for member', ['member_id' => $memberId]);
+            return;
+        }
+
+        // Find the board for this project in user database
+        $board = \app\Bean::findOne('jiraboards', 'project_key = ?', [$projectKey]);
         if (!$board) {
+            $this->logger->debug('checkCompleteStatusTransition: No board found', ['project_key' => $projectKey]);
             return;
         }
 
         $completeStatus = $board->aidev_status_complete ?? null;
         if (empty($completeStatus)) {
+            $this->logger->debug('checkCompleteStatusTransition: No complete status configured', ['board_id' => $board->id]);
             return;
         }
+
+        $this->logger->debug('checkCompleteStatusTransition: Comparing statuses', [
+            'new_status' => $newStatus,
+            'complete_status' => $completeStatus,
+            'match' => strcasecmp($newStatus, $completeStatus) === 0
+        ]);
 
         // Check if the new status matches the configured complete status (case-insensitive)
         if (strcasecmp($newStatus, $completeStatus) === 0) {

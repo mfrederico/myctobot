@@ -300,7 +300,7 @@ class Mcp extends Control {
                     ],
                     [
                         'name' => 'jira_upload_attachment',
-                        'description' => 'Upload an image (e.g., screenshot) to a Jira ticket as an attachment. Accepts base64-encoded image data.',
+                        'description' => 'Upload an image (e.g., screenshot) to a Jira ticket. Provide EITHER file_path (preferred) OR image_data (base64).',
                         'inputSchema' => [
                             'type' => 'object',
                             'properties' => [
@@ -308,20 +308,20 @@ class Mcp extends Control {
                                     'type' => 'string',
                                     'description' => 'The Jira issue key (e.g., SSI-1893)'
                                 ],
+                                'file_path' => [
+                                    'type' => 'string',
+                                    'description' => 'Path to the image file (preferred method, avoids base64 encoding)'
+                                ],
                                 'filename' => [
                                     'type' => 'string',
-                                    'description' => 'Filename for the attachment (e.g., screenshot.png)'
+                                    'description' => 'Filename for the attachment. Required if using image_data, optional for file_path'
                                 ],
                                 'image_data' => [
                                     'type' => 'string',
-                                    'description' => 'Base64-encoded image data'
-                                ],
-                                'mime_type' => [
-                                    'type' => 'string',
-                                    'description' => 'MIME type (e.g., image/png, image/jpeg). Defaults to image/png'
+                                    'description' => 'Base64-encoded image data (alternative to file_path)'
                                 ]
                             ],
-                            'required' => ['issue_key', 'filename', 'image_data']
+                            'required' => ['issue_key']
                         ]
                     ]
                 ]
@@ -551,18 +551,45 @@ class Mcp extends Control {
 
     /**
      * Tool: Upload an image attachment to Jira
+     * Supports either file_path (direct file) or image_data (base64)
      */
     private function toolJiraUploadAttachment($id, array $args): array {
         $issueKey = $args['issue_key'] ?? '';
+        $filePath = $args['file_path'] ?? '';
         $filename = $args['filename'] ?? '';
         $imageData = $args['image_data'] ?? '';
-        $mimeType = $args['mime_type'] ?? 'image/png';
 
-        if (empty($issueKey) || empty($filename) || empty($imageData)) {
-            return $this->toolErrorResponse($id, "Missing issue_key, filename, or image_data");
+        if (empty($issueKey)) {
+            return $this->toolErrorResponse($id, "Missing issue_key");
+        }
+
+        if (empty($filePath) && empty($imageData)) {
+            return $this->toolErrorResponse($id, "Must provide either file_path or image_data");
         }
 
         try {
+            $client = $this->getJiraClient();
+            $tempFile = null;
+
+            // Method 1: Direct file path (preferred)
+            if (!empty($filePath)) {
+                if (!file_exists($filePath)) {
+                    return $this->toolErrorResponse($id, "File not found: {$filePath}");
+                }
+
+                $result = $client->uploadAttachment($issueKey, $filePath);
+                $attachmentId = $result['id'] ?? 'unknown';
+                $attachmentFilename = $result['filename'] ?? basename($filePath);
+
+                return $this->toolSuccessResponse($id,
+                    "Successfully uploaded '{$attachmentFilename}' to {$issueKey} (attachment ID: {$attachmentId})");
+            }
+
+            // Method 2: Base64 image data
+            if (empty($filename)) {
+                return $this->toolErrorResponse($id, "filename is required when using image_data");
+            }
+
             // Decode base64 image data
             $binaryData = base64_decode($imageData);
             if ($binaryData === false) {
@@ -576,12 +603,7 @@ class Mcp extends Control {
             }
 
             try {
-                $client = $this->getJiraClient();
                 $result = $client->uploadAttachment($issueKey, $tempFile);
-
-                // Clean up temp file
-                @unlink($tempFile);
-
                 $attachmentId = $result['id'] ?? 'unknown';
                 $attachmentFilename = $result['filename'] ?? $filename;
 
@@ -589,8 +611,8 @@ class Mcp extends Control {
                     "Successfully uploaded '{$attachmentFilename}' to {$issueKey} (attachment ID: {$attachmentId})");
 
             } finally {
-                // Ensure temp file is cleaned up even on error
-                if (file_exists($tempFile)) {
+                // Ensure temp file is cleaned up
+                if ($tempFile && file_exists($tempFile)) {
                     @unlink($tempFile);
                 }
             }

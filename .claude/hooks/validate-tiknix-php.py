@@ -6,6 +6,7 @@ Validates PHP code against Tiknix/RedBeanPHP/FlightPHP coding standards:
 1. Bean type names must be all lowercase (no underscores) for R::dispense
 2. R::exec should almost NEVER be used - only in extreme situations
 3. Prefer RedBeanPHP associations (ownBeanList/sharedBeanList) over manual FK management
+4. Use with()/withCondition() for ordering and filtering associations
 """
 
 import json
@@ -149,6 +150,7 @@ def find_manual_fk_assignments(content):
                     f"Manual FK assignment detected: ${fk_column}. "
                     f"Consider using RedBeanPHP associations instead: "
                     f"$parent->ownChildList[] = $child (auto-sets FK, lazy loading, cascade delete with xown). "
+                    f"Use with(' ORDER BY col DESC ') for ordering, withCondition(' col = ? ', [$val]) for filtering. "
                     f"See CLAUDE.md for examples."
                 )
                 break  # Only report once per file to avoid spam
@@ -166,6 +168,8 @@ def find_manual_fk_assignments(content):
         issues.append(
             f"Manual FK query detected: Bean::find('{child_table}', '{fk_column} = ?'). "
             f"Consider using associations: $parent->own{child_table.title()}List (lazy loads, auto-cached). "
+            f"For ordering: $parent->with(' ORDER BY col DESC ')->own{child_table.title()}List. "
+            f"For filtering: $parent->withCondition(' col = ? ', [$val])->own{child_table.title()}List. "
             f"See CLAUDE.md for examples."
         )
         break  # Only report once

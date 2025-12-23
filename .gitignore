@@ -6,7 +6,10 @@ storage
 
 # But keep the example config
 !/conf/config.example.ini
-__pycache__
+
+# Python cache
+__pycache__/
+*.pyc
 
 # Vendor directory (Composer dependencies)
 /vendor/

@@ -132,8 +132,8 @@ class Member extends Control {
             $this->viewData['success'] = 'Settings saved successfully';
         }
         
-        // Get user settings
-        $this->viewData['settings'] = R::findAll('settings', 'member_id = ?', [$this->member->id]);
+        // Get user settings via association
+        $this->viewData['settings'] = $this->member->ownSettingsList;
         $this->viewData['title'] = 'Settings';
         $this->render('member/settings', $this->viewData);
     }

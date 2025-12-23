@@ -190,6 +190,8 @@ class Bootstrap {
                     $cachedAdapter = new \app\CachedDatabaseAdapter(R::getDatabaseAdapter()->getDatabase());
                     $toolbox = new \RedBeanPHP\ToolBox(R::getRedBean(), $cachedAdapter, R::getWriter());
                     R::configureFacadeWithToolbox($toolbox);
+                    // Store adapter in Flight so it survives R::selectDatabase() calls
+                    Flight::set('cachedDatabaseAdapter', $cachedAdapter);
                     $this->logger->info('CachedDatabaseAdapter initialized - all queries cached automatically');
                 }
                 // Fallback to old implementation if new one doesn't exist

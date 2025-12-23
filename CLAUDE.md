@@ -93,6 +93,19 @@ Bean::store($board);  // Saves both board and new result
 $board->xownAnalysisresultsList;  // Children deleted when board is trashed
 ```
 
+**Ordering and filtering associations with `with()` / `withCondition()`:**
+```php
+// Use with() for ORDER BY, LIMIT, etc.
+$results = $board->with(' ORDER BY created_at DESC ')->ownAnalysisresultsList;
+$recentJobs = $board->with(' ORDER BY created_at DESC LIMIT 10 ')->ownAidevjobsList;
+
+// Use withCondition() for WHERE + ORDER BY
+$pendingJobs = $board->withCondition(' status = ? ORDER BY created_at ASC ', ['pending'])->ownAidevjobsList;
+
+// Counting with conditions
+$activeCount = $board->withCondition(' status = ? ', ['running'])->countOwn('aidevjobs');
+```
+
 **Project examples:**
 ```php
 // Board has many analysis results

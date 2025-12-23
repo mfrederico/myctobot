@@ -506,9 +506,9 @@ class Admin extends Control {
                     \app\PermissionCache::clear();
 
                     // Clear query cache if available
-                    $dbAdapter = R::getDatabaseAdapter();
-                    if ($dbAdapter instanceof \app\CachedDatabaseAdapter) {
-                        $dbAdapter->clearAllCache();
+                    $cachedAdapter = Flight::get('cachedDatabaseAdapter');
+                    if ($cachedAdapter instanceof \app\CachedDatabaseAdapter) {
+                        $cachedAdapter->clearAllCache();
                         $this->flash('success', 'Permission and query caches cleared successfully');
                     } else {
                         $this->flash('success', 'Permission cache cleared successfully');
@@ -519,9 +519,9 @@ class Admin extends Control {
 
                 case 'clear_query':
                     // Clear only query cache
-                    $dbAdapter = R::getDatabaseAdapter();
-                    if ($dbAdapter instanceof \app\CachedDatabaseAdapter) {
-                        $dbAdapter->clearAllCache();
+                    $cachedAdapter = Flight::get('cachedDatabaseAdapter');
+                    if ($cachedAdapter instanceof \app\CachedDatabaseAdapter) {
+                        $cachedAdapter->clearAllCache();
                         $this->flash('success', 'Query cache cleared successfully');
                     } else {
                         $this->flash('error', 'Query cache not available');
@@ -548,9 +548,11 @@ class Admin extends Control {
         $this->viewData['permissions'] = \app\PermissionCache::getAll();
 
         // Get query cache statistics from CachedDatabaseAdapter
-        $dbAdapter = R::getDatabaseAdapter();
-        if ($dbAdapter instanceof \app\CachedDatabaseAdapter) {
-            $this->viewData['query_cache_stats'] = $dbAdapter->getCacheStats();
+        // Note: R::getDatabaseAdapter() may not return CachedDatabaseAdapter after R::selectDatabase() calls
+        // So we check Flight storage first, then fall back to checking the adapter directly
+        $cachedAdapter = Flight::get('cachedDatabaseAdapter');
+        if ($cachedAdapter instanceof \app\CachedDatabaseAdapter) {
+            $this->viewData['query_cache_stats'] = $cachedAdapter->getCacheStats();
         } else {
             $this->viewData['query_cache_stats'] = null;
         }

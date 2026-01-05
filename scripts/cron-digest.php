@@ -72,8 +72,13 @@ require_once $baseDir . '/services/AnalysisService.php';
 try {
     $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
 
+    // Set timezone from config
+    $configTimezone = Flight::get('config')['app']['timezone'] ?? 'America/New_York';
+    date_default_timezone_set($configTimezone);
+
     if ($verbose) {
-        echo "Application initialized\n\n";
+        echo "Application initialized\n";
+        echo "Timezone: {$configTimezone} (current time: " . date('H:i:s') . ")\n\n";
     }
 
     // Process all members
@@ -163,7 +168,8 @@ function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force)
     $errorCount = 0;
 
     foreach ($boards as $board) {
-        if (shouldSendDigest($board, $force)) {
+        $shouldSend = shouldSendDigest($board, $force, $verbose);
+        if ($shouldSend) {
             if ($verbose) {
                 echo "  -> Board: {$board['board_name']} ({$board['project_key']})\n";
             }
@@ -218,13 +224,15 @@ function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force)
 /**
  * Check if it's time to send digest for a board
  */
-function shouldSendDigest(array $board, bool $force): bool {
+function shouldSendDigest(array $board, bool $force, bool $verbose = false): bool {
     $digestTime = $board['digest_time'] ?? '08:00';
     $timezone = $board['timezone'] ?? 'UTC';
+    $boardName = $board['board_name'] ?? "Board {$board['id']}";
 
     try {
         $tz = new \DateTimeZone($timezone);
         $now = new \DateTime('now', $tz);
+        $currentTime = $now->format('H:i');
 
         // Check if already sent today (always check this, even with --force)
         $lastDigest = $board['last_digest_at'];
@@ -233,17 +241,22 @@ function shouldSendDigest(array $board, bool $force): bool {
             $today = $now->format('Y-m-d');
 
             if ($lastDigestDate === $today) {
-                return false; // Already sent today
+                if ($verbose) {
+                    echo "  [SKIP] {$boardName}: Already sent today ({$lastDigest})\n";
+                }
+                return false;
             }
         }
 
         // If force mode, skip time window check
         if ($force) {
+            if ($verbose) {
+                echo "  [FORCE] {$boardName}: Forcing digest (last: " . ($lastDigest ?? 'never') . ")\n";
+            }
             return true;
         }
 
         // Check if current time is within 15 minutes of digest time
-        $currentTime = $now->format('H:i');
         $digestParts = explode(':', $digestTime);
         $currentParts = explode(':', $currentTime);
 
@@ -253,9 +266,19 @@ function shouldSendDigest(array $board, bool $force): bool {
         $diff = abs($currentMinutes - $digestMinutes);
 
         // Within 15 minute window
-        return $diff <= 15;
+        if ($diff <= 15) {
+            return true;
+        }
+
+        if ($verbose) {
+            echo "  [SKIP] {$boardName}: Outside time window (now: {$currentTime} {$timezone}, digest: {$digestTime}, diff: {$diff} min)\n";
+        }
+        return false;
 
     } catch (\Exception $e) {
+        if ($verbose) {
+            echo "  [ERROR] {$boardName}: Timezone error - {$e->getMessage()}\n";
+        }
         Flight::get('log')->warning('Timezone error for board', [
             'board_id' => $board['id'],
             'timezone' => $timezone,

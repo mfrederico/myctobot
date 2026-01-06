@@ -88,8 +88,7 @@ class AIDevJobService {
                 }
             }
 
-            // Check for existing job and branch affinity
-            $existingBranch = null;
+            // Check for existing active job (prevent duplicates)
             $existingJob = AIDevStatusService::findJobByIssueKey($memberId, $issueKey);
             if ($existingJob) {
                 // Block if job is running or pending
@@ -104,15 +103,16 @@ class AIDevJobService {
                 if ($lastUpdated && (time() - $lastUpdated) < $cooldownSeconds) {
                     return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_id' => $existingJob['job_id']];
                 }
+            }
 
-                // Branch affinity: if previous job created a branch, reuse it
-                if (!empty($existingJob['branch_name'])) {
-                    $existingBranch = $existingJob['branch_name'];
-                    Flight::get('log')->info('Branch affinity: reusing existing branch', [
-                        'issue_key' => $issueKey,
-                        'branch' => $existingBranch
-                    ]);
-                }
+            // Branch affinity: find existing branch from ANY previous job (including completed ones)
+            // This ensures we reuse branches instead of creating duplicates
+            $existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
+            if ($existingBranch) {
+                Flight::get('log')->info('Branch affinity: reusing existing branch', [
+                    'issue_key' => $issueKey,
+                    'branch' => $existingBranch
+                ]);
             }
 
             // Check shard concurrency limits

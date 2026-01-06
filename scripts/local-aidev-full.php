@@ -49,6 +49,7 @@ require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
 require_once $baseDir . '/services/AIDevAgentOrchestrator.php';
+require_once $baseDir . '/services/AIDevStatusService.php';
 require_once $baseDir . '/services/ShopifyClient.php';
 
 use \Flight as Flight;
@@ -56,6 +57,7 @@ use \RedBeanPHP\R as R;
 use \app\services\JiraClient;
 use \app\services\EncryptionService;
 use \app\services\ShopifyClient;
+use \app\services\AIDevStatusService;
 use \app\plugins\AtlassianAuth;
 
 $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
@@ -403,6 +405,27 @@ SHOPIFY;
 }
 
 // ============================================
+// Check for Existing Branch (Branch Affinity)
+// ============================================
+$existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
+if ($existingBranch) {
+    echo "Found existing branch: {$existingBranch}\n";
+    $branchInstruction = <<<BRANCH
+5. **Checkout existing branch**: A branch already exists for this ticket. Checkout and pull the latest:
+   \`\`\`bash
+   git -C repo fetch origin
+   git -C repo checkout {$existingBranch}
+   git -C repo pull origin {$existingBranch}
+   \`\`\`
+   Continue the work from where the previous run left off. Do NOT create a new branch.
+BRANCH;
+} else {
+    echo "No existing branch found - will create new one\n";
+    $branchInstruction = "5. **Create a feature branch**: Use a descriptive name like `fix/{$issueKey}-description`.";
+}
+echo "\n";
+
+// ============================================
 // Build Prompt
 // ============================================
 echo "Building prompt...\n";
@@ -510,7 +533,7 @@ jira_comment_with_image(
 3. **Repository**: The repo is already cloned to `./repo` and checked out to `{$defaultBranch}`.
    **IMPORTANT: Do NOT `cd repo`** - stay in the current directory and reference files as `repo/path/to/file`. Use `git -C repo <command>` for git operations.
 4. **Analyze the codebase**: Find relevant files for the implementation.
-5. **Create a feature branch**: Use a descriptive name like `fix/{$issueKey}-description`.
+{$branchInstruction}
 6. **Implement the changes**: Write clean, well-tested code.
 7. **Verify your work**: If URLs were provided, check them to verify (if applicable).
 8. **Commit and push**: Write a good commit message referencing {$issueKey}.

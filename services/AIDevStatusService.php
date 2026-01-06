@@ -452,6 +452,35 @@ class AIDevStatusService {
     }
 
     /**
+     * Find existing branch for an issue key (checks ALL jobs including completed ones)
+     * Used for branch affinity - reuse existing branches instead of creating new ones
+     */
+    public static function findBranchForIssueKey(int $memberId, string $issueKey): ?string {
+        $dir = self::$statusDir . '/member_' . $memberId;
+        if (!is_dir($dir)) {
+            return null;
+        }
+
+        $files = glob($dir . '/*.json');
+        $latestBranch = null;
+        $latestTime = 0;
+
+        foreach ($files as $file) {
+            $data = json_decode(file_get_contents($file), true);
+            if ($data && $data['issue_key'] === $issueKey && !empty($data['branch_name'])) {
+                // Get the most recent branch (by updated_at time)
+                $updatedAt = strtotime($data['updated_at'] ?? $data['created_at'] ?? '');
+                if ($updatedAt > $latestTime) {
+                    $latestTime = $updatedAt;
+                    $latestBranch = $data['branch_name'];
+                }
+            }
+        }
+
+        return $latestBranch;
+    }
+
+    /**
      * Find all jobs for an issue key (including completed/PR states for cleanup)
      */
     public static function findAllJobsByIssueKey(int $memberId, string $issueKey): array {

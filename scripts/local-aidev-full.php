@@ -20,10 +20,12 @@ chdir($baseDir);
 $options = getopt('', [
     'issue:',
     'member:',
-    'orchestrator',
+    'job-id:',
     'attach',
     'repo-path:',
     'print',
+    'dry-run',
+    'skip-jira',
     'help'
 ]);
 
@@ -33,10 +35,12 @@ if (isset($options['help']) || empty($options['issue'])) {
     echo "Options:\n";
     echo "  --issue         Issue key (e.g., SSI-1883) [required]\n";
     echo "  --member        Member ID (default: 3)\n";
-    echo "  --orchestrator  Use agent orchestrator pattern\n";
+    echo "  --job-id        Job ID for status tracking (auto-generated if not provided)\n";
     echo "  --attach        Attach to tmux session immediately\n";
     echo "  --print         Use --print mode (non-interactive, outputs to log)\n";
     echo "  --repo-path     Path to existing repo clone\n";
+    echo "  --dry-run       Test database queries without spawning Claude\n";
+    echo "  --skip-jira     Skip Jira API calls (for DB testing only)\n";
     echo "  --help          Show this help\n\n";
     echo "This runs Claude Code using YOUR logged-in account,\n";
     echo "not the Anthropic API, saving API credits.\n";
@@ -46,6 +50,7 @@ if (isset($options['help']) || empty($options['issue'])) {
 require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/bootstrap.php';
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
+require_once $baseDir . '/lib/TmuxManager.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
 require_once $baseDir . '/services/AIDevAgentOrchestrator.php';
@@ -54,6 +59,7 @@ require_once $baseDir . '/services/ShopifyClient.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\TmuxManager;
 use \app\services\JiraClient;
 use \app\services\EncryptionService;
 use \app\services\ShopifyClient;
@@ -64,23 +70,33 @@ $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
 
 $issueKey = $options['issue'];
 $memberId = isset($options['member']) ? (int)$options['member'] : 3;
-$useOrchestrator = isset($options['orchestrator']);
+$jobId = $options['job-id'] ?? null;
 $autoAttach = isset($options['attach']);
 $usePrintMode = isset($options['print']);
+$dryRun = isset($options['dry-run']);
+$skipJira = isset($options['skip-jira']);
 $repoPath = $options['repo-path'] ?? null;
+
+// Get domain identifier and session names from TmuxManager (single source of truth)
+$domainId = TmuxManager::getDomainId();
 
 // Default cloudId - will be looked up from member's Atlassian connection
 $cloudId = 'cb1fabf7-9018-49bb-90c7-afa23343dbe5';
 
-$sessionName = "aidev-{$memberId}-{$issueKey}";
-$workDir = "/tmp/local-aidev-{$memberId}-{$issueKey}";
+// Use TmuxManager for consistent session naming across all components
+$sessionName = TmuxManager::buildLocalRunnerSessionName($memberId, $issueKey);
+$workDir = "/tmp/local-aidev-{$domainId}-{$memberId}-{$issueKey}";
 
 echo "===========================================\n";
 echo "Local AI Developer - Using YOUR Claude Account\n";
 echo "===========================================\n\n";
+echo "Domain: {$domainId}\n";
 echo "Issue: {$issueKey}\n";
-echo "Orchestrator: " . ($useOrchestrator ? "YES" : "NO") . "\n";
+echo "Member ID: {$memberId}\n";
+if ($jobId) echo "Job ID: {$jobId}\n";
 echo "Print Mode: " . ($usePrintMode ? "YES" : "NO") . "\n";
+if ($dryRun) echo "DRY RUN: YES (testing DB queries only)\n";
+echo "Session: {$sessionName}\n";
 echo "Work Dir: {$workDir}\n\n";
 
 // Create work directory structure (like shard does)
@@ -176,32 +192,29 @@ try {
 // ============================================
 echo "Getting repository configuration...\n";
 $member = R::load('member', $memberId);
-if (!$member || empty($member->ceobot_db)) {
-    echo "Error: Member database not found\n";
+if (!$member || !$member->id) {
+    echo "Error: Member not found\n";
     exit(1);
 }
 
-$dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-$dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-$db = new \SQLite3($dbFile);
-
-$repoResult = $db->querySingle("SELECT * FROM repoconnections WHERE enabled = 1 LIMIT 1", true);
-if (!$repoResult) {
+// Query repoconnections using RedBeanPHP (single MySQL database)
+$repoBean = R::findOne('repoconnections', 'member_id = ? AND enabled = 1', [$memberId]);
+if (!$repoBean) {
     echo "Error: No enabled repository found\n";
     exit(1);
 }
 
-$repoOwner = $repoResult['repo_owner'];
-$repoName = $repoResult['repo_name'];
-$defaultBranch = $repoResult['default_branch'] ?? 'main';
-$cloneUrl = $repoResult['clone_url'];
+$repoOwner = $repoBean->repo_owner;
+$repoName = $repoBean->repo_name;
+$defaultBranch = $repoBean->default_branch ?? 'main';
+$cloneUrl = $repoBean->clone_url;
 
 // Get GitHub token
 $githubToken = '';
-if (!empty($repoResult['access_token'])) {
+if (!empty($repoBean->access_token)) {
     try {
         $encryption = new EncryptionService();
-        $githubToken = $encryption->decrypt($repoResult['access_token']);
+        $githubToken = $encryption->decrypt($repoBean->access_token);
         echo "  GitHub Token: ****" . substr($githubToken, -4) . "\n";
     } catch (Exception $e) {
         echo "  Warning: Could not decrypt GitHub token\n";
@@ -274,19 +287,15 @@ $statusSettings = [
 ];
 
 if (!empty($projectKey)) {
-    $boardResult = $db->querySingle(
-        "SELECT aidev_status_working, aidev_status_pr_created, aidev_status_clarification,
-                aidev_status_failed, aidev_status_complete
-         FROM jiraboards WHERE project_key = " . $db->escapeString($projectKey),
-        true
-    );
-    if ($boardResult) {
+    // Query jiraboards using RedBeanPHP (single MySQL database)
+    $boardBean = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+    if ($boardBean) {
         $statusSettings = [
-            'working' => $boardResult['aidev_status_working'] ?? null,
-            'pr_created' => $boardResult['aidev_status_pr_created'] ?? null,
-            'clarification' => $boardResult['aidev_status_clarification'] ?? null,
-            'failed' => $boardResult['aidev_status_failed'] ?? null,
-            'complete' => $boardResult['aidev_status_complete'] ?? null
+            'working' => $boardBean->aidev_status_working ?? null,
+            'pr_created' => $boardBean->aidev_status_pr_created ?? null,
+            'clarification' => $boardBean->aidev_status_clarification ?? null,
+            'failed' => $boardBean->aidev_status_failed ?? null,
+            'complete' => $boardBean->aidev_status_complete ?? null
         ];
         echo "Board status settings found for project {$projectKey}:\n";
         foreach ($statusSettings as $key => $value) {
@@ -316,12 +325,10 @@ try {
         $shopifyDomain = $shopifyClient->getShop();
         $shopifyAccessToken = $shopifyClient->getAccessToken();
 
-        // Get storefront password from user database
-        $storefrontPwdResult = $db->querySingle(
-            "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'shopify_storefront_password'"
-        );
-        if ($storefrontPwdResult) {
-            $shopifyStorefrontPassword = EncryptionService::decrypt($storefrontPwdResult);
+        // Get storefront password from enterprisesettings using RedBeanPHP
+        $storefrontPwdSetting = R::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'shopify_storefront_password']);
+        if ($storefrontPwdSetting && $storefrontPwdSetting->setting_value) {
+            $shopifyStorefrontPassword = EncryptionService::decrypt($storefrontPwdSetting->setting_value);
         }
 
         echo "  Shopify Store: {$shopifyDomain}\n";
@@ -410,196 +417,61 @@ SHOPIFY;
 $existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
 if ($existingBranch) {
     echo "Found existing branch: {$existingBranch}\n";
-    $branchInstruction = <<<BRANCH
-5. **Checkout existing branch**: A branch already exists for this ticket. Checkout and pull the latest:
-   \`\`\`bash
-   git -C repo fetch origin
-   git -C repo checkout {$existingBranch}
-   git -C repo pull origin {$existingBranch}
-   \`\`\`
-   Continue the work from where the previous run left off. Do NOT create a new branch.
-BRANCH;
 } else {
     echo "No existing branch found - will create new one\n";
-    $branchInstruction = "5. **Create a feature branch**: Use a descriptive name like `fix/{$issueKey}-description`.";
 }
 echo "\n";
 
 // ============================================
-// Build Prompt
+// Build Prompt using AIDevAgentOrchestrator
 // ============================================
 echo "Building prompt...\n";
-if ($useOrchestrator) {
-    $ticket = [
-        'key' => $issueKey,
-        'summary' => $summary,
-        'description' => $description,
-        'requirements' => $description,
-        'acceptance_criteria' => extractAcceptanceCriteria($description),
-        'comments' => $commentText
-    ];
 
-    $repo = [
-        'path' => './repo',
-        'clone_url' => $cloneUrl,
-        'default_branch' => $defaultBranch,
-        'owner' => $repoOwner,
-        'name' => $repoName
-    ];
+// Build ticket data
+$ticket = [
+    'key' => $issueKey,
+    'summary' => $summary,
+    'description' => $description,
+    'requirements' => $description,
+    'acceptance_criteria' => extractAcceptanceCriteria($description),
+    'comments' => $commentText,
+    'attachments' => $attachmentInfo,
+    'linkedIssues' => $linkedIssuesInfo,
+    'issueType' => $issueType,
+    'priority' => $priority,
+    'status' => $status,
+    'ticketUrl' => $ticketUrl
+];
 
-    $orchestrator = new \app\services\AIDevAgentOrchestrator($ticket, $repo, null, 3, $statusSettings);
-    $prompt = $orchestrator->buildOrchestratorPrompt();
-} else {
-    // Build comprehensive prompt like the shard does
-    $prompt = <<<PROMPT
-You are an AI Developer implementing a Jira ticket. You have full access to:
-- Git and GitHub (clone, branch, commit, push, create PR)
-- Browser/web tools (to check URLs and verify your work)
-- Jira MCP tools (to post comments, upload screenshots, transition status)
-- Filesystem (to read and write code)
+// Build repo data
+$repo = [
+    'path' => './repo',
+    'clone_url' => $cloneUrl,
+    'default_branch' => $defaultBranch,
+    'owner' => $repoOwner,
+    'name' => $repoName
+];
 
-## Your Mission
-Implement the requirements from Jira ticket **{$issueKey}** and create a Pull Request.
+// Build Shopify config
+$shopifyConfig = [
+    'enabled' => $shopifyEnabled,
+    'domain' => $shopifyDomain
+];
 
-## Jira Ticket: {$issueKey}
-{$ticketLink}
-- Type: {$issueType}
-- Priority: {$priority}
-- Status: {$status}
+// Create orchestrator with all parameters
+$orchestrator = new \app\services\AIDevAgentOrchestrator(
+    $ticket,
+    $repo,
+    $shopifyPreviewUrl ?: null,  // previewUrl
+    3,                            // maxVerifyIterations
+    $statusSettings,
+    $shopifyConfig,
+    $existingBranch,
+    $urlsToCheck
+);
 
-### Summary
-{$summary}
-
-### Description
-{$description}
-
-### Comments/Clarifications
-{$commentText}
-
-{$attachmentInfo}
-{$linkedIssuesInfo}
-{$urlCheckInstructions}
-{$shopifyInstructions}
-
-## Repository
-- Owner: {$repoOwner}
-- Repo: {$repoName}
-- Default Branch: {$defaultBranch}
-- Clone URL: {$cloneUrl}
-
-## Environment Variables Available
-The following environment variables are set and ready to use:
-
-- **GITHUB_TOKEN** / **GH_TOKEN**: GitHub access token for git operations
-  ```bash
-  git clone https://\$GITHUB_TOKEN@github.com/{$repoOwner}/{$repoName}.git repo
-  ```
-
-## Jira MCP Tools
-
-You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operations:**
-
-- `jira_comment(issue_key, message)` - Post a comment to the ticket
-- `jira_transition(issue_key, status_name)` - Transition ticket to a new status
-- `jira_get_transitions(issue_key)` - Get available status transitions
-- `jira_get_issue(issue_key)` - Get issue details including attachments list
-- `jira_get_attachment(attachment_id)` - View an image attachment
-- `jira_upload_attachment(issue_key, file_path)` - Upload a screenshot or file
-- `jira_comment_with_image(issue_key, message, file_path)` - Post comment with inline screenshot
-
-**Examples:**
-```
-# Post a clarifying question
-jira_comment(issue_key="{$issueKey}", message="Could you clarify which element should be modified?")
-
-# Upload a Playwright screenshot
-jira_upload_attachment(issue_key="{$issueKey}", file_path=".playwright-mcp/screenshot.png")
-
-# Post completion comment with screenshot
-jira_comment_with_image(
-  issue_key="{$issueKey}",
-  message="Implementation complete. Screenshot attached showing the fix.",
-  file_path=".playwright-mcp/verification.png"
-)
-```
-
-## Your Workflow
-1. **Understand & Clarify**: Read the ticket carefully. Check any URLs mentioned to understand the current state.
-   - **IMPORTANT**: If requirements are unclear, ambiguous, or missing critical details, STOP and ask clarifying questions.
-   - Post questions using `jira_comment(issue_key, message)` before proceeding with implementation.
-   - Wait for a response (the user will send it via Jira and you'll receive updates).
-   - Example clarifying questions: "Which specific element should be modified?", "Should this apply to all pages or just X?", "What should happen when Y occurs?"
-2. **Fetch Attachments**: If there are image attachments, use `jira_get_issue` to list them, then `jira_get_attachment(attachment_id)` to view them.
-3. **Repository**: The repo is already cloned to `./repo` and checked out to `{$defaultBranch}`.
-   **IMPORTANT: Do NOT `cd repo`** - stay in the current directory and reference files as `repo/path/to/file`. Use `git -C repo <command>` for git operations.
-4. **Analyze the codebase**: Find relevant files for the implementation.
-{$branchInstruction}
-6. **Implement the changes**: Write clean, well-tested code.
-7. **Verify your work**: If URLs were provided, check them to verify (if applicable).
-8. **Commit and push**: Write a good commit message referencing {$issueKey}.
-9. **Create a PR**: Use the GitHub CLI (`gh pr create`). Include:
-   - Title: [{$issueKey}] Brief description
-   - Body: Summary of changes, link to ticket, testing notes
-
-## Important Guidelines
-- **Ask First**: If requirements are unclear or ambiguous, post a clarifying question to Jira BEFORE implementing.
-- **Check URLs**: If URLs are mentioned, visit them to understand current state.
-- **Download images**: If attachments exist, download and view them.
-- **Iterate**: Don't just write code blindly. Verify your understanding first.
-- **Be thorough**: Check your changes work correctly before creating the PR.
-
-## Post Status Updates to Jira
-
-**You MUST post comments to Jira at key milestones** so stakeholders can track progress:
-
-1. **When starting**: Post "🤖 AI Developer starting work on this ticket..."
-2. **If asking questions**: Post your clarifying questions
-3. **When PR is created**: Post the PR URL and summary of changes
-4. **If blocked/failed**: Post what went wrong and what's needed
-
-Use the `jira_comment` MCP tool:
-```
-jira_comment(issue_key="{$issueKey}", message="🤖 AI Developer starting work...")
-jira_comment(issue_key="{$issueKey}", message="PR created: https://github.com/.../pull/123")
-```
-
-For screenshots/verification, use `jira_comment_with_image`:
-```
-jira_comment_with_image(
-  issue_key="{$issueKey}",
-  message="Verification screenshot attached",
-  file_path=".playwright-mcp/screenshot.png"
-)
-```
-
-## Output Format
-When complete, output a JSON summary:
-```json
-{
-  "success": true,
-  "issue_key": "{$issueKey}",
-  "pr_url": "https://github.com/...",
-  "pr_number": 123,
-  "branch_name": "fix/...",
-  "files_changed": ["path/to/file1.php", "path/to/file2.css"],
-  "summary": "Brief description of what was implemented"
-}
-```
-
-If you encounter issues or need clarification, output:
-```json
-{
-  "success": false,
-  "issue_key": "{$issueKey}",
-  "needs_clarification": true,
-  "questions": ["Question 1?", "Question 2?"],
-  "reason": "Why clarification is needed"
-}
-```
-
-Now, implement {$issueKey}!
-PROMPT;
-}
+// Build prompt - always use orchestrator pattern for better verification
+$prompt = $orchestrator->buildOrchestratorPrompt();
 
 // Save prompt
 $promptFile = "{$workDir}/prompt.txt";
@@ -903,6 +775,31 @@ $envScriptPath = "{$workDir}/run-claude.sh";
 file_put_contents($envScriptPath, $envScript);
 chmod($envScriptPath, 0755);
 echo "  Run script saved to: {$envScriptPath}\n\n";
+
+// ============================================
+// Dry Run Exit Point
+// ============================================
+if ($dryRun) {
+    echo "===========================================\n";
+    echo "DRY RUN COMPLETE - All database queries successful!\n";
+    echo "===========================================\n\n";
+    echo "Summary:\n";
+    echo "  - Member: {$memberId} ({$member->email})\n";
+    echo "  - Domain: {$domainId}\n";
+    echo "  - Repository: {$repoOwner}/{$repoName}\n";
+    echo "  - Default Branch: {$defaultBranch}\n";
+    echo "  - GitHub Token: " . (!empty($githubToken) ? "****" . substr($githubToken, -4) : "NOT SET") . "\n";
+    echo "  - Jira Cloud ID: {$cloudId}\n";
+    echo "  - Session Name: {$sessionName}\n";
+    echo "  - Work Dir: {$workDir}\n";
+    echo "  - Prompt File: {$promptFile}\n";
+    echo "  - Prompt Length: " . strlen($prompt) . " chars\n";
+    if ($shopifyEnabled) {
+        echo "  - Shopify Store: {$shopifyDomain}\n";
+    }
+    echo "\nTo run for real, remove the --dry-run flag.\n";
+    exit(0);
+}
 
 // ============================================
 // Start Claude Session

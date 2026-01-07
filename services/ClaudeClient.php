@@ -18,9 +18,13 @@ class ClaudeClient {
     private string $model;
     private ?Logger $apiLogger = null;
 
-    public function __construct() {
-        $this->apiKey = Flight::get('anthropic.api_key');
-        $this->model = Flight::get('anthropic.model') ?? 'claude-sonnet-4-20250514';
+    /**
+     * @param string|null $apiKey Optional API key override (uses Flight config if null)
+     * @param string|null $model Optional model override (uses Flight config if null)
+     */
+    public function __construct(?string $apiKey = null, ?string $model = null) {
+        $this->apiKey = $apiKey ?? Flight::get('anthropic.api_key');
+        $this->model = $model ?? Flight::get('anthropic.model') ?? 'claude-sonnet-4-20250514';
 
         if (empty($this->apiKey)) {
             throw new \Exception('Anthropic API key not configured');

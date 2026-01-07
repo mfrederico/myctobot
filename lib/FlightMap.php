@@ -132,28 +132,6 @@ Flight::map('getMember', function() {
     $member = R::load('member', $_SESSION['member']['id']);
     if ($member->id) {
         $_SESSION['member'] = $member->export();
-
-        // Register user database if member has one (Enterprise feature)
-        // This allows R::selectDatabase('user_X') anywhere in the request
-        if (!empty($member->ceobot_db)) {
-            $dbKey = 'user_' . $member->id;
-            $dbDir = Flight::get('ceobot.user_db_path') ?? 'database/';
-            $dbPath = $dbDir . $member->ceobot_db . '.sqlite';
-
-            // Only add if file exists and not already registered
-            if (file_exists($dbPath)) {
-                try {
-                    R::selectDatabase($dbKey);
-                    // Already registered, switch back to default
-                    R::selectDatabase('default');
-                } catch (\Throwable $e) {
-                    // Not registered yet, add it
-                    R::addDatabase($dbKey, 'sqlite:' . $dbPath);
-                    R::selectDatabase('default');
-                }
-            }
-        }
-
         return $member;
     }
 

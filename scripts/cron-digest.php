@@ -81,18 +81,30 @@ try {
         echo "Timezone: {$configTimezone} (current time: " . date('H:i:s') . ")\n\n";
     }
 
-    // Process all members
-    $members = R::findAll('member', 'status = ?', ['active']);
+    // Process all boards with digests enabled across all members
+    // Single database now - query directly with member join
+    $boards = R::findAll('jiraboards', 'enabled = 1 AND digest_enabled = 1');
     $processedCount = 0;
     $errorCount = 0;
 
-    foreach ($members as $member) {
-        if (empty($member->ceobot_db)) {
-            continue; // Skip members without database
+    // Group boards by member for logging
+    $memberBoards = [];
+    foreach ($boards as $board) {
+        $memberId = $board->member_id;
+        if (!isset($memberBoards[$memberId])) {
+            $memberBoards[$memberId] = [];
+        }
+        $memberBoards[$memberId][] = $board;
+    }
+
+    foreach ($memberBoards as $memberId => $boards) {
+        $member = R::load('member', $memberId);
+        if (!$member->id || $member->status !== 'active') {
+            continue; // Skip inactive members
         }
 
         try {
-            $result = processMemberDigests($member, $verbose, $dryRun, $force);
+            $result = processMemberDigests($member, $boards, $verbose, $dryRun, $force);
             $processedCount += $result['processed'];
             $errorCount += $result['errors'];
         } catch (\Exception $e) {
@@ -138,24 +150,15 @@ try {
 
 /**
  * Process digests for a single member
+ *
+ * @param object $member Member bean
+ * @param array $boards Array of jiraboards beans (already filtered for digest_enabled)
+ * @param bool $verbose Show verbose output
+ * @param bool $dryRun Don't actually send digests
+ * @param bool $force Ignore time windows
+ * @return array ['processed' => int, 'errors' => int]
  */
-function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force): array {
-    $userDbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-    $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
-
-    if (!file_exists($dbPath)) {
-        return ['processed' => 0, 'errors' => 0];
-    }
-
-    $userDb = new \SQLite3($dbPath);
-    $result = $userDb->query("SELECT * FROM jiraboards WHERE enabled = 1 AND digest_enabled = 1");
-
-    $boards = [];
-    while ($board = $result->fetchArray(SQLITE3_ASSOC)) {
-        $boards[] = $board;
-    }
-    $userDb->close();
-
+function processMemberDigests($member, array $boards, bool $verbose, bool $dryRun, bool $force): array {
     if (empty($boards)) {
         return ['processed' => 0, 'errors' => 0];
     }
@@ -168,16 +171,19 @@ function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force)
     $errorCount = 0;
 
     foreach ($boards as $board) {
-        $shouldSend = shouldSendDigest($board, $force, $verbose);
+        // Convert bean to array for shouldSendDigest compatibility
+        $boardData = $board->export();
+        $shouldSend = shouldSendDigest($boardData, $force, $verbose);
+
         if ($shouldSend) {
             if ($verbose) {
-                echo "  -> Board: {$board['board_name']} ({$board['project_key']})\n";
+                echo "  -> Board: {$board->board_name} ({$board->project_key})\n";
             }
 
             if ($dryRun) {
-                echo "     [DRY RUN] Would send digest for {$board['board_name']}\n";
-                echo "     Digest Time: {$board['digest_time']} ({$board['timezone']})\n";
-                echo "     Last Digest: " . ($board['last_digest_at'] ?? 'Never') . "\n";
+                echo "     [DRY RUN] Would send digest for {$board->board_name}\n";
+                echo "     Digest Time: {$board->digest_time} ({$board->timezone})\n";
+                echo "     Last Digest: " . ($board->last_digest_at ?? 'Never') . "\n";
                 $processedCount++;
                 continue;
             }
@@ -185,14 +191,15 @@ function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force)
             try {
                 // Use the unified AnalysisService
                 $service = new AnalysisService($member->id, $verbose);
-                $analysisResult = $service->runAnalysis((int)$board['id'], [
+                $analysisResult = $service->runAnalysis((int)$board->id, [
                     'send_email' => true,
                     'analysis_type' => 'digest'
                 ]);
 
                 if ($analysisResult['success']) {
-                    // Update last_digest_at in the board
-                    updateLastDigestTime($member, $board['id']);
+                    // Update last_digest_at using RedBeanPHP
+                    $board->last_digest_at = date('Y-m-d H:i:s');
+                    R::store($board);
                     $processedCount++;
 
                     if ($verbose) {
@@ -211,7 +218,7 @@ function processMemberDigests($member, bool $verbose, bool $dryRun, bool $force)
                 }
                 Flight::get('log')->error('Board digest failed', [
                     'member_id' => $member->id,
-                    'board_id' => $board['id'],
+                    'board_id' => $board->id,
                     'error' => $e->getMessage()
                 ]);
             }
@@ -288,17 +295,3 @@ function shouldSendDigest(array $board, bool $force, bool $verbose = false): boo
     }
 }
 
-/**
- * Update the last_digest_at timestamp for a board
- */
-function updateLastDigestTime($member, int $boardId): void {
-    $userDbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-    $dbPath = $userDbPath . $member->ceobot_db . '.sqlite';
-
-    $userDb = new \SQLite3($dbPath);
-    $stmt = $userDb->prepare("UPDATE jiraboards SET last_digest_at = ? WHERE id = ?");
-    $stmt->bindValue(1, date('Y-m-d H:i:s'), SQLITE3_TEXT);
-    $stmt->bindValue(2, $boardId, SQLITE3_INTEGER);
-    $stmt->execute();
-    $userDb->close();
-}

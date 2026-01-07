@@ -12,11 +12,11 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R;
 
 require_once __DIR__ . '/EncryptionService.php';
-require_once __DIR__ . '/UserDatabaseService.php';
 require_once __DIR__ . '/JiraClient.php';
 require_once __DIR__ . '/AIDevStatusService.php';
 require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
+require_once __DIR__ . '/TmuxService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
 use \app\plugins\AtlassianAuth;
@@ -52,48 +52,48 @@ class AIDevJobService {
                 return ['success' => false, 'error' => 'Enterprise tier required'];
             }
 
-            // Get member's database
-            $db = $this->getMemberDb($memberId, $member);
-            if (!$db) {
-                return ['success' => false, 'error' => 'Member database not initialized'];
-            }
-
-            // Get Anthropic API key
-            $apiKeyResult = $db->querySingle(
-                "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'anthropic_api_key'"
-            );
-
-            if (empty($apiKeyResult)) {
-                return ['success' => false, 'error' => 'Anthropic API key not configured'];
-            }
-
-            $apiKey = EncryptionService::decrypt($apiKeyResult);
+            // API key and model will be determined per-board later (after boardId is resolved)
 
             // Auto-detect board ID from issue key if not provided
             if (!$boardId) {
                 $projectKey = explode('-', $issueKey)[0];
-                $boardId = $db->querySingle(
-                    "SELECT id FROM jiraboards WHERE project_key = '" . $db->escapeString($projectKey) . "' LIMIT 1"
-                );
-                if (!$boardId) {
+                $board = R::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
+                if (!$board) {
                     return ['success' => false, 'error' => "No board found for project: {$projectKey}"];
                 }
+                $boardId = $board->id;
             }
 
             // Auto-detect repo ID if not provided
             if (!$repoId) {
-                $repoId = $db->querySingle("SELECT id FROM repoconnections WHERE enabled = 1 LIMIT 1");
-                if (!$repoId) {
+                $repo = R::findOne('repoconnections', 'enabled = ? AND member_id = ?', [1, $memberId]);
+                if (!$repo) {
                     return ['success' => false, 'error' => 'No enabled repository connections'];
                 }
+                $repoId = $repo->id;
             }
 
             // Check for existing active job (prevent duplicates)
+            // Use TmuxService to verify actual tmux session exists (authoritative source)
+            $tmux = new TmuxService($memberId, $issueKey);
+            $tmuxSessionRunning = $tmux->exists() && $tmux->isClaudeRunning();
+
             $existingJob = AIDevStatusService::findJobByIssueKey($memberId, $issueKey);
             if ($existingJob) {
-                // Block if job is running or pending
+                // Status file says running/pending - verify with tmux
                 if (in_array($existingJob['status'], ['running', 'pending'])) {
-                    return ['success' => false, 'error' => 'Job already running for this issue', 'job_id' => $existingJob['job_id']];
+                    if ($tmuxSessionRunning) {
+                        // Tmux session exists - actually running
+                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_id' => $existingJob['job_id']];
+                    } else {
+                        // Stale status file - tmux session is gone, auto-cleanup
+                        $this->logger->info('Auto-cleanup stale job status (tmux gone)', [
+                            'issue_key' => $issueKey,
+                            'job_id' => $existingJob['job_id'],
+                            'stale_status' => $existingJob['status']
+                        ]);
+                        AIDevStatusService::fail($memberId, $existingJob['job_id'], 'Session ended unexpectedly');
+                    }
                 }
 
                 // Cooldown: if job completed/failed within last 2 minutes, skip
@@ -103,6 +103,13 @@ class AIDevJobService {
                 if ($lastUpdated && (time() - $lastUpdated) < $cooldownSeconds) {
                     return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_id' => $existingJob['job_id']];
                 }
+            } elseif ($tmuxSessionRunning) {
+                // No status file but tmux session exists (orphaned session)
+                $this->logger->info('Tmux session exists but no status file', [
+                    'issue_key' => $issueKey,
+                    'member_id' => $memberId
+                ]);
+                return ['success' => false, 'error' => 'Session exists for this issue (no status file)'];
             }
 
             // Branch affinity: find existing branch from ANY previous job (including completed ones)
@@ -114,6 +121,57 @@ class AIDevJobService {
                     'branch' => $existingBranch
                 ]);
             }
+
+            // Get board's API key setting: NULL = local runner, ID = use that key
+            $boardBean = R::load('jiraboards', $boardId);
+            $boardKeyId = $boardBean->aidev_anthropic_key_id;
+
+            // Determine execution mode: NULL key ID = local runner
+            $useLocalRunner = ($boardKeyId === null || $boardKeyId === '' || !$boardKeyId);
+
+            // Fall back to global config if board has no setting
+            if ($useLocalRunner) {
+                // Check if global config overrides to use API
+                $globalUseLocal = Flight::get('aidev.use_local_runner') ?? true;
+                $useLocalRunner = $globalUseLocal;
+            }
+
+            if ($useLocalRunner) {
+                $this->logger->info('Using local runner for AI Developer job', [
+                    'member_id' => $memberId,
+                    'issue_key' => $issueKey,
+                    'board_key_id' => $boardKeyId,
+                    'source' => 'local_runner'
+                ]);
+
+                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $useOrchestrator);
+
+                if ($result['success']) {
+                    // Add working label and transition status
+                    $this->onJobStarted($memberId, $cloudId, $issueKey, $boardId);
+                }
+
+                return $result;
+            }
+
+            // === API execution path - get key and model from anthropickeys table ===
+            $keyBean = R::load('anthropickeys', $boardKeyId);
+
+            if (!$keyBean || !$keyBean->id || empty($keyBean->api_key)) {
+                return ['success' => false, 'error' => 'Selected API key not found or invalid'];
+            }
+
+            $apiKey = EncryptionService::decrypt($keyBean->api_key);
+            $model = $keyBean->model ?? 'claude-sonnet-4-20250514';
+
+            $this->logger->info('Using API key for AI Developer job', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'board_key_id' => $boardKeyId,
+                'model' => $model
+            ]);
+
+            // === Shard execution path below ===
 
             // Check shard concurrency limits
             $concurrencyCheck = $this->checkShardConcurrency($memberId);
@@ -128,16 +186,13 @@ class AIDevJobService {
             }
 
             // Get repository details
-            $repoResult = $db->querySingle(
-                "SELECT * FROM repoconnections WHERE id = " . (int)$repoId,
-                true
-            );
+            $repoBean = R::load('repoconnections', $repoId);
 
-            if (!$repoResult) {
+            if (!$repoBean || !$repoBean->id) {
                 return ['success' => false, 'error' => 'Repository not found'];
             }
 
-            $repoToken = EncryptionService::decrypt($repoResult['access_token']);
+            $repoToken = EncryptionService::decrypt($repoBean->access_token);
 
             // Get issue details from Jira
             $jiraClient = new JiraClient($memberId, $cloudId);
@@ -191,6 +246,7 @@ class AIDevJobService {
             // Build payload for shard
             $payload = [
                 'anthropic_api_key' => $apiKey,
+                'anthropic_model' => $model,
                 'job_id' => $jobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
@@ -203,10 +259,10 @@ class AIDevJobService {
                     'urls_to_check' => $urlsToCheck
                 ],
                 'repo_config' => [
-                    'repo_owner' => $repoResult['repo_owner'],
-                    'repo_name' => $repoResult['repo_name'],
-                    'default_branch' => $repoResult['default_branch'] ?? 'main',
-                    'clone_url' => $repoResult['clone_url']
+                    'repo_owner' => $repoBean->repo_owner,
+                    'repo_name' => $repoBean->repo_name,
+                    'default_branch' => $repoBean->default_branch ?? 'main',
+                    'clone_url' => $repoBean->clone_url
                 ],
                 'jira_host' => $jiraHost,
                 'jira_email' => $jiraEmail,
@@ -292,16 +348,11 @@ class AIDevJobService {
      */
     public function checkShardConcurrency(int $memberId): array {
         // Get member's max concurrent jobs setting (default: 3)
-        $db = $this->getMemberDb($memberId);
         $maxConcurrent = 3; // Default
 
-        if ($db) {
-            $setting = $db->querySingle(
-                "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'max_concurrent_aidev_jobs'"
-            );
-            if ($setting) {
-                $maxConcurrent = (int)$setting;
-            }
+        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
+        if ($setting && $setting->setting_value) {
+            $maxConcurrent = (int)$setting->setting_value;
         }
 
         // Count running jobs for this member
@@ -502,14 +553,9 @@ class AIDevJobService {
         $accountId = $user['accountId'] ?? '';
 
         // Get the bot's Jira account ID for this member
-        $db = $this->getMemberDb($memberId);
-        if ($db) {
-            $botAccountId = $db->querySingle(
-                "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'jira_bot_account_id'"
-            );
-            if ($botAccountId && $accountId === $botAccountId) {
-                return true;
-            }
+        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['jira_bot_account_id', $memberId]);
+        if ($setting && $setting->setting_value && $accountId === $setting->setting_value) {
+            return true;
         }
 
         // Check for bot markers in comments
@@ -539,26 +585,81 @@ class AIDevJobService {
         return array_values($urls);
     }
 
+    // ========================================
+    // Local Runner Support
+    // ========================================
+
     /**
-     * Get member's SQLite database
+     * Spawn a local AI Developer runner in a tmux session
+     * Uses the user's Claude Code subscription instead of API credits
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param int $boardId Board ID
+     * @param string $cloudId Cloud ID
+     * @param bool $useOrchestrator Use orchestrator mode
+     * @return array Result with 'success', 'job_id', 'session_name' keys
      */
-    private function getMemberDb(int $memberId, $member = null): ?\SQLite3 {
-        if (!$member) {
-            $member = R::load('member', $memberId);
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, bool $useOrchestrator = true): array {
+        $tmux = new TmuxService($memberId, $issueKey);
+
+        // Check if session already exists
+        if ($tmux->exists()) {
+            $this->logger->info('Local tmux session already exists', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId,
+                'session' => $tmux->getSessionName()
+            ]);
+            return [
+                'success' => false,
+                'error' => 'Session already exists for this issue',
+                'session_name' => $tmux->getSessionName()
+            ];
         }
 
-        if (!$member || empty($member->ceobot_db)) {
-            return null;
+        // Create job record for tracking
+        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, null, $cloudId);
+
+        // Update status to running
+        AIDevStatusService::updateStatus(
+            $memberId,
+            $jobId,
+            'Running locally (Claude Code)',
+            5,
+            AIDevStatusService::STATUS_RUNNING
+        );
+
+        // Spawn the tmux session
+        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+
+        if (!file_exists($scriptPath)) {
+            $this->logger->error('Local runner script not found', ['path' => $scriptPath]);
+            return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId)) {
+            $this->logger->info('Local AI Developer spawned in tmux', [
+                'issue_key' => $issueKey,
+                'session' => $tmux->getSessionName(),
+                'member_id' => $memberId,
+                'job_id' => $jobId
+            ]);
 
-        if (!file_exists($dbFile)) {
-            return null;
+            return [
+                'success' => true,
+                'job_id' => $jobId,
+                'session_name' => $tmux->getSessionName(),
+                'message' => 'Job started locally (Claude Code)',
+                'board_id' => $boardId,
+                'local' => true
+            ];
+        } else {
+            $this->logger->error('Failed to spawn local AI Developer', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+            return ['success' => false, 'error' => 'Failed to spawn tmux session'];
         }
-
-        return new \SQLite3($dbFile);
     }
 
     // ========================================
@@ -575,18 +676,17 @@ class AIDevJobService {
      * @return array Status settings (working, pr_created, clarification, failed)
      */
     public function getBoardStatusSettings(int $memberId, int $boardId): array {
-        $db = $this->getMemberDb($memberId);
-        if (!$db) {
+        $board = R::load('jiraboards', $boardId);
+        if (!$board || !$board->id) {
             return [];
         }
 
-        $result = $db->querySingle(
-            "SELECT aidev_status_working, aidev_status_pr_created, aidev_status_clarification, aidev_status_failed
-             FROM jiraboards WHERE id = " . (int)$boardId,
-            true
-        );
-
-        return $result ?: [];
+        return [
+            'aidev_status_working' => $board->aidev_status_working,
+            'aidev_status_pr_created' => $board->aidev_status_pr_created,
+            'aidev_status_clarification' => $board->aidev_status_clarification,
+            'aidev_status_failed' => $board->aidev_status_failed
+        ];
     }
 
     /**
@@ -1085,22 +1185,16 @@ class AIDevJobService {
                 $settings['access_token'] = $shopifyClient->getAccessToken();
 
                 // Get additional settings from user database
-                $db = $this->getMemberDb($memberId);
-                if ($db) {
-                    // Storefront password
-                    $password = $db->querySingle(
-                        "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'shopify_storefront_password'"
-                    );
-                    if ($password) {
-                        $settings['storefront_password'] = EncryptionService::decrypt($password);
-                    }
-
-                    // Playwright verification setting
-                    $verifyEnabled = $db->querySingle(
-                        "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'shopify_verify_playwright'"
-                    );
-                    $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
+                // Storefront password
+                $passwordSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
+                if ($passwordSetting && $passwordSetting->setting_value) {
+                    $settings['storefront_password'] = EncryptionService::decrypt($passwordSetting->setting_value);
                 }
+
+                // Playwright verification setting
+                $verifySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
+                $verifyEnabled = $verifySetting ? $verifySetting->setting_value : null;
+                $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
             }
         } catch (\Exception $e) {
             $this->logger->warning('Could not get Shopify settings', [

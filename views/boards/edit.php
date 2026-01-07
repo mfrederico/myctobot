@@ -172,6 +172,41 @@
                             <!-- AI Developer Tab -->
                             <div class="tab-pane fade" id="aidev" role="tabpanel">
                                 <div class="<?= $isEnterprise ? '' : 'pro-feature-locked' ?>">
+
+                                    <!-- Execution Mode -->
+                                    <div class="card bg-light mb-4">
+                                        <div class="card-body">
+                                            <h6 class="card-title mb-3"><i class="bi bi-cpu"></i> Execution Mode</h6>
+                                            <select class="form-select" name="aidev_anthropic_key_id" id="aidev_anthropic_key_id" <?= $isEnterprise ? '' : 'disabled' ?>>
+                                                <option value="" <?= empty($board['aidev_anthropic_key_id']) ? 'selected' : '' ?>>
+                                                    🖥️ Local Runner (uses Claude Code subscription)
+                                                </option>
+                                                <?php if (!empty($anthropicKeys)): ?>
+                                                    <optgroup label="API Keys">
+                                                    <?php foreach ($anthropicKeys as $key):
+                                                        $modelBadge = match($key['model']) {
+                                                            'claude-haiku-3-5-20241022' => '⚡ Haiku',
+                                                            'claude-opus-4-20250514' => '🌟 Opus',
+                                                            default => '💎 Sonnet'
+                                                        };
+                                                    ?>
+                                                        <option value="<?= $key['id'] ?>" <?= ($board['aidev_anthropic_key_id'] ?? '') == $key['id'] ? 'selected' : '' ?>>
+                                                            🔑 <?= htmlspecialchars($key['name']) ?> (<?= $modelBadge ?>) - <?= htmlspecialchars($key['masked_key']) ?>
+                                                        </option>
+                                                    <?php endforeach; ?>
+                                                    </optgroup>
+                                                <?php endif; ?>
+                                            </select>
+                                            <div class="form-text">
+                                                <?php if (empty($anthropicKeys)): ?>
+                                                    <a href="/enterprise/settings">Add API keys</a> to use remote execution with different models.
+                                                <?php else: ?>
+                                                    Choose Local Runner for no API charges, or select an API key for remote shard execution.
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <p class="text-muted mb-3">
                                         Configure how MyCTOBot updates ticket statuses when working on AI Developer tasks.
                                         Select a status from your Jira workflow, or leave as "Don't change" to skip that transition.

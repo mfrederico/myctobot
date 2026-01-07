@@ -1,624 +1,311 @@
 <?php
 /**
  * User Database Service
- * Manages per-user SQLite databases for Jira board data and analysis results
+ *
+ * LEGACY COMPATIBILITY LAYER - All data is now in one MySQL database per tenant.
+ * connect() and restore() are no-ops. All methods query the single MySQL database.
+ *
+ * Usage remains the same:
+ *   UserDatabaseService::forMember($memberId, function() {
+ *       $boards = Bean::findAll('jiraboards', ' ORDER BY board_name ');
+ *       return $boards;
+ *   });
  */
 
 namespace app\services;
 
-use \Flight as Flight;
+use \Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class UserDatabaseService {
 
-    private $db;
-    private $dbPath;
-    private $memberId;
-    private $dbHash;
+    private static $currentMemberId = null;
 
     /**
-     * Constructor
+     * Execute a callback (legacy compatibility - no DB switching needed)
+     *
+     * @param int $memberId Member ID
+     * @param callable $callback Function to execute
+     * @return mixed Result of callback
+     */
+    public static function forMember(int $memberId, callable $callback) {
+        self::$currentMemberId = $memberId;
+        try {
+            return $callback();
+        } finally {
+            self::$currentMemberId = null;
+        }
+    }
+
+    /**
+     * Connect to member's database (no-op - all data in single MySQL DB)
      *
      * @param int $memberId Member ID
      */
-    public function __construct($memberId) {
-        $this->memberId = $memberId;
-        $member = R::load('member', $memberId);
-
-        if (!$member || !$member->id) {
-            throw new \Exception("Member not found: {$memberId}");
-        }
-
-        if (empty($member->ceobot_db)) {
-            throw new \Exception("User database not initialized for member: {$memberId}");
-        }
-
-        $this->dbHash = $member->ceobot_db;
-        $dbDir = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $this->dbPath = $dbDir . $this->dbHash . '.sqlite';
-
-        if (!file_exists($this->dbPath)) {
-            throw new \Exception("User database file not found: {$this->dbPath}");
-        }
-
-        $this->db = new \SQLite3($this->dbPath);
-        $this->db->busyTimeout(5000);
-
-        // Run migrations for new columns
-        $this->runMigrations();
+    public static function connect(int $memberId): void {
+        self::$currentMemberId = $memberId;
     }
 
     /**
-     * Run database migrations for schema updates
+     * Restore to default database (no-op)
      */
-    private function runMigrations() {
-        // Get current columns in jiraboards
-        $result = $this->db->query("PRAGMA table_info(jiraboards)");
-        $columns = [];
-        while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
-            $columns[$col['name']] = true;
-        }
-
-        // Add digest_cc column if it doesn't exist
-        if (!isset($columns['digest_cc'])) {
-            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN digest_cc TEXT DEFAULT ''");
-        }
-
-        // Add priority_weights column if it doesn't exist
-        if (!isset($columns['priority_weights'])) {
-            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN priority_weights TEXT");
-        }
-
-        // Add goals column if it doesn't exist
-        if (!isset($columns['goals'])) {
-            $this->db->exec("ALTER TABLE jiraboards ADD COLUMN goals TEXT");
-        }
-
-        // Create ticketanalysiscache table if it doesn't exist
-        $this->db->exec("
-            CREATE TABLE IF NOT EXISTS ticketanalysiscache (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_id INTEGER NOT NULL,
-                issue_key TEXT NOT NULL,
-                content_hash TEXT NOT NULL,
-                clarity_score INTEGER,
-                clarity_analysis TEXT,
-                reporter_name TEXT,
-                reporter_email TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT,
-                UNIQUE(board_id, issue_key),
-                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
-            )
-        ");
-
-        // Create indexes for ticketanalysiscache
-        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_board ON ticketanalysiscache(board_id)");
-        $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ticket_cache_hash ON ticketanalysiscache(content_hash)");
-
-        // Migrate aidevjobs to new schema (one record per issue_key)
-        $this->migrateAiDevJobs();
+    public static function restore(): void {
+        self::$currentMemberId = null;
     }
 
     /**
-     * Migrate aidevjobs table to new schema (one record per issue_key)
+     * Get the currently connected member ID
+     *
+     * @return int|null
      */
-    private function migrateAiDevJobs() {
-        // Check if table exists
-        $tableExists = $this->db->querySingle(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='aidevjobs'"
-        );
-
-        if (!$tableExists) {
-            // Create new table from scratch
-            $this->db->exec("
-                CREATE TABLE IF NOT EXISTS aidevjobs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    issue_key TEXT NOT NULL UNIQUE,
-                    board_id INTEGER NOT NULL,
-                    repo_connection_id INTEGER,
-                    cloud_id TEXT,
-                    status TEXT DEFAULT 'pending',
-                    current_shard_job_id TEXT,
-                    branch_name TEXT,
-                    pr_url TEXT,
-                    pr_number INTEGER,
-                    clarification_comment_id TEXT,
-                    clarification_questions TEXT,
-                    error_message TEXT,
-                    run_count INTEGER DEFAULT 0,
-                    last_output TEXT,
-                    last_result_json TEXT,
-                    files_changed TEXT,
-                    commit_sha TEXT,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
-                )
-            ");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
-            return;
-        }
-
-        // Check if we need to migrate (old schema has job_id column, new has current_shard_job_id)
-        $result = $this->db->query("PRAGMA table_info(aidevjobs)");
-        $columns = [];
-        while ($col = $result->fetchArray(SQLITE3_ASSOC)) {
-            $columns[$col['name']] = true;
-        }
-
-        // Already migrated
-        if (isset($columns['current_shard_job_id'])) {
-            return;
-        }
-
-        // Need to migrate - create new table, copy data, swap
-        $this->db->exec("BEGIN TRANSACTION");
-
-        try {
-            // Create new table
-            $this->db->exec("
-                CREATE TABLE aidevjobs_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    issue_key TEXT NOT NULL UNIQUE,
-                    board_id INTEGER NOT NULL,
-                    repo_connection_id INTEGER,
-                    cloud_id TEXT,
-                    status TEXT DEFAULT 'pending',
-                    current_shard_job_id TEXT,
-                    branch_name TEXT,
-                    pr_url TEXT,
-                    pr_number INTEGER,
-                    clarification_comment_id TEXT,
-                    clarification_questions TEXT,
-                    error_message TEXT,
-                    run_count INTEGER DEFAULT 0,
-                    last_output TEXT,
-                    last_result_json TEXT,
-                    files_changed TEXT,
-                    commit_sha TEXT,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
-                )
-            ");
-
-            // Migrate data - keep most recent job per issue_key
-            $this->db->exec("
-                INSERT OR REPLACE INTO aidevjobs_new (
-                    issue_key, board_id, repo_connection_id, status, current_shard_job_id,
-                    branch_name, pr_url, pr_number, clarification_comment_id,
-                    error_message, run_count, started_at, completed_at, created_at, updated_at
-                )
-                SELECT
-                    issue_key, board_id, repo_connection_id, status, job_id,
-                    branch_name, pr_url, pr_number, clarification_comment_id,
-                    error_message, 1, started_at, completed_at, created_at, updated_at
-                FROM aidevjobs
-                WHERE id IN (
-                    SELECT MAX(id) FROM aidevjobs GROUP BY issue_key
-                )
-            ");
-
-            // Drop old table and rename new
-            $this->db->exec("DROP TABLE aidevjobs");
-            $this->db->exec("ALTER TABLE aidevjobs_new RENAME TO aidevjobs");
-
-            // Recreate indexes
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
-            $this->db->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
-
-            $this->db->exec("COMMIT");
-        } catch (\Exception $e) {
-            $this->db->exec("ROLLBACK");
-            throw $e;
-        }
-    }
-
-    /**
-     * Destructor - close database connection
-     */
-    public function __destruct() {
-        if ($this->db) {
-            $this->db->close();
-        }
+    public static function getCurrentMemberId(): ?int {
+        return self::$currentMemberId;
     }
 
     // ==================== Board Management ====================
 
     /**
      * Get all boards
-     *
      * @return array
      */
-    public function getBoards() {
-        $result = $this->db->query("
-            SELECT * FROM jiraboards
-            ORDER BY board_name ASC
-        ");
-
-        $boards = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $boards[] = $row;
-        }
-
-        return $boards;
+    public static function getBoards(): array {
+        return array_values(R::findAll('jiraboards', ' ORDER BY board_name ASC '));
     }
 
     /**
      * Get boards by cloud ID
-     *
-     * @param string $cloudId Cloud ID
+     * @param string $cloudId
      * @return array
      */
-    public function getBoardsByCloudId($cloudId) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM jiraboards
-            WHERE cloud_id = :cloud_id
-            ORDER BY board_name ASC
-        ");
-        $stmt->bindValue(':cloud_id', $cloudId, SQLITE3_TEXT);
-        $result = $stmt->execute();
-
-        $boards = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $boards[] = $row;
-        }
-
-        return $boards;
+    public static function getBoardsByCloudId(string $cloudId): array {
+        return array_values(R::find('jiraboards', ' cloud_id = ? ORDER BY board_name ASC ', [$cloudId]));
     }
 
     /**
      * Get enabled boards
-     *
      * @return array
      */
-    public function getEnabledBoards() {
-        $result = $this->db->query("
-            SELECT * FROM jiraboards
-            WHERE enabled = 1
-            ORDER BY board_name ASC
-        ");
-
-        $boards = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $boards[] = $row;
-        }
-
-        return $boards;
+    public static function getEnabledBoards(): array {
+        return array_values(R::find('jiraboards', ' enabled = 1 ORDER BY board_name ASC '));
     }
 
     /**
      * Get boards with digest enabled
-     *
      * @return array
      */
-    public function getBoardsForDigest() {
-        $result = $this->db->query("
-            SELECT * FROM jiraboards
-            WHERE enabled = 1 AND digest_enabled = 1
-            ORDER BY digest_time ASC
-        ");
-
-        $boards = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $boards[] = $row;
-        }
-
-        return $boards;
+    public static function getBoardsForDigest(): array {
+        return array_values(R::find('jiraboards', ' enabled = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
     }
 
     /**
      * Get a single board
-     *
      * @param int $id Board ID
-     * @return array|null
+     * @return \RedBeanPHP\OODBBean|null
      */
-    public function getBoard($id) {
-        $stmt = $this->db->prepare("SELECT * FROM jiraboards WHERE id = :id");
-        $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        return $result->fetchArray(SQLITE3_ASSOC) ?: null;
+    public static function getBoard(int $id) {
+        $board = R::load('jiraboards', $id);
+        return $board->id ? $board : null;
     }
 
     /**
      * Get a board by Jira board ID and cloud ID
-     *
      * @param int $boardId Jira board ID
      * @param string $cloudId Cloud ID
-     * @return array|null
+     * @return \RedBeanPHP\OODBBean|null
      */
-    public function getBoardByJiraId($boardId, $cloudId) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM jiraboards
-            WHERE board_id = :board_id AND cloud_id = :cloud_id
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':cloud_id', $cloudId, SQLITE3_TEXT);
-        $result = $stmt->execute();
+    public static function getBoardByJiraId(int $boardId, string $cloudId) {
+        return R::findOne('jiraboards', ' board_id = ? AND cloud_id = ? ', [$boardId, $cloudId]);
+    }
 
-        return $result->fetchArray(SQLITE3_ASSOC) ?: null;
+    /**
+     * Get a board by project key
+     * @param string $projectKey Project key
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public static function getBoardByProjectKey(string $projectKey) {
+        return R::findOne('jiraboards', ' project_key = ? ', [$projectKey]);
     }
 
     /**
      * Add a board
-     *
      * @param array $data Board data
-     * @return int|false Board ID or false on failure
+     * @return int Board ID
      */
-    public function addBoard($data) {
-        $stmt = $this->db->prepare("
-            INSERT INTO jiraboards (
-                board_id, board_name, project_key, cloud_id, board_type,
-                enabled, digest_enabled, digest_time, timezone, status_filter
-            ) VALUES (
-                :board_id, :board_name, :project_key, :cloud_id, :board_type,
-                :enabled, :digest_enabled, :digest_time, :timezone, :status_filter
-            )
-        ");
-
-        $stmt->bindValue(':board_id', $data['board_id'], SQLITE3_INTEGER);
-        $stmt->bindValue(':board_name', $data['board_name'], SQLITE3_TEXT);
-        $stmt->bindValue(':project_key', $data['project_key'], SQLITE3_TEXT);
-        $stmt->bindValue(':cloud_id', $data['cloud_id'], SQLITE3_TEXT);
-        $stmt->bindValue(':board_type', $data['board_type'] ?? 'scrum', SQLITE3_TEXT);
-        $stmt->bindValue(':enabled', $data['enabled'] ?? 1, SQLITE3_INTEGER);
-        $stmt->bindValue(':digest_enabled', $data['digest_enabled'] ?? 0, SQLITE3_INTEGER);
-        $stmt->bindValue(':digest_time', $data['digest_time'] ?? '08:00', SQLITE3_TEXT);
-        $stmt->bindValue(':timezone', $data['timezone'] ?? 'UTC', SQLITE3_TEXT);
-        $stmt->bindValue(':status_filter', $data['status_filter'] ?? 'To Do', SQLITE3_TEXT);
-
-        if ($stmt->execute()) {
-            return $this->db->lastInsertRowID();
-        }
-
-        return false;
+    public static function addBoard(array $data): int {
+        $board = R::dispense('jiraboards');
+        $board->board_id = $data['board_id'];
+        $board->board_name = $data['board_name'];
+        $board->project_key = $data['project_key'];
+        $board->cloud_id = $data['cloud_id'];
+        $board->board_type = $data['board_type'] ?? 'scrum';
+        $board->enabled = $data['enabled'] ?? 1;
+        $board->digest_enabled = $data['digest_enabled'] ?? 0;
+        $board->digest_time = $data['digest_time'] ?? '08:00';
+        $board->timezone = $data['timezone'] ?? 'UTC';
+        $board->status_filter = $data['status_filter'] ?? 'To Do';
+        $board->created_at = date('Y-m-d H:i:s');
+        return R::store($board);
     }
 
     /**
      * Update a board
-     *
      * @param int $id Board ID
      * @param array $data Board data
      * @return bool
      */
-    public function updateBoard($id, $data) {
-        $fields = [];
-        $values = [':id' => $id];
+    public static function updateBoard(int $id, array $data): bool {
+        $board = R::load('jiraboards', $id);
+        if (!$board->id) {
+            return false;
+        }
 
         $allowedFields = [
             'board_name', 'project_key', 'board_type', 'enabled',
             'digest_enabled', 'digest_time', 'digest_cc', 'timezone', 'status_filter',
-            'priority_weights', 'goals',
-            'last_analysis_at', 'last_digest_at',
-            // AI Developer status transition settings
+            'priority_weights', 'goals', 'last_analysis_at', 'last_digest_at',
             'aidev_status_working', 'aidev_status_pr_created',
             'aidev_status_clarification', 'aidev_status_failed',
-            'aidev_status_complete'
+            'aidev_status_complete', 'aidev_anthropic_key_id'
         ];
 
         foreach ($data as $key => $value) {
             if (in_array($key, $allowedFields)) {
-                $fields[] = "{$key} = :{$key}";
-                $values[":{$key}"] = $value;
+                $board->$key = $value;
             }
         }
 
-        if (empty($fields)) {
-            return false;
-        }
-
-        $fields[] = "updated_at = :updated_at";
-        $values[':updated_at'] = date('Y-m-d H:i:s');
-
-        $sql = "UPDATE jiraboards SET " . implode(', ', $fields) . " WHERE id = :id";
-        $stmt = $this->db->prepare($sql);
-
-        foreach ($values as $key => $value) {
-            $type = is_int($value) ? SQLITE3_INTEGER : SQLITE3_TEXT;
-            $stmt->bindValue($key, $value, $type);
-        }
-
-        return $stmt->execute() !== false;
+        $board->updated_at = date('Y-m-d H:i:s');
+        R::store($board);
+        return true;
     }
 
     /**
-     * Remove a board
-     *
+     * Remove a board (cascades to related data)
      * @param int $id Board ID
      * @return bool
      */
-    public function removeBoard($id) {
-        // Delete associated analysis results first
-        $stmt = $this->db->prepare("DELETE FROM analysisresults WHERE board_id = :id");
-        $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
-        $stmt->execute();
+    public static function removeBoard(int $id): bool {
+        $board = R::load('jiraboards', $id);
+        if (!$board->id) {
+            return false;
+        }
 
-        // Delete digest history
-        $stmt = $this->db->prepare("DELETE FROM digesthistory WHERE board_id = :id");
-        $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
-        $stmt->execute();
+        // Delete related records
+        R::exec('DELETE FROM analysisresults WHERE board_id = ?', [$id]);
+        R::exec('DELETE FROM digesthistory WHERE board_id = ?', [$id]);
+        R::exec('DELETE FROM ticketanalysiscache WHERE board_id = ?', [$id]);
 
-        // Delete the board
-        $stmt = $this->db->prepare("DELETE FROM jiraboards WHERE id = :id");
-        $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
-
-        return $stmt->execute() !== false;
+        R::trash($board);
+        return true;
     }
 
     /**
      * Toggle board enabled status
-     *
      * @param int $id Board ID
-     * @return bool New status
+     * @return bool|null New status or null if not found
      */
-    public function toggleBoard($id) {
-        $board = $this->getBoard($id);
-        if (!$board) {
-            return false;
+    public static function toggleBoard(int $id): ?bool {
+        $board = R::load('jiraboards', $id);
+        if (!$board->id) {
+            return null;
         }
 
-        $newStatus = $board['enabled'] ? 0 : 1;
-        $this->updateBoard($id, ['enabled' => $newStatus]);
+        $board->enabled = $board->enabled ? 0 : 1;
+        $board->updated_at = date('Y-m-d H:i:s');
+        R::store($board);
 
-        return $newStatus;
+        return (bool) $board->enabled;
     }
 
     // ==================== Analysis Results ====================
 
     /**
      * Store analysis results
-     *
      * @param int $boardId Board ID
      * @param string $type Analysis type
      * @param array $results Analysis results
      * @param string|null $markdown Markdown content
-     * @return int|false Analysis ID or false on failure
+     * @return int Analysis ID
      */
-    public function storeAnalysis($boardId, $type, $results, $markdown = null) {
-        $stmt = $this->db->prepare("
-            INSERT INTO analysisresults (
-                board_id, analysis_type, content_json, content_markdown,
-                issue_count, status_filter
-            ) VALUES (
-                :board_id, :analysis_type, :content_json, :content_markdown,
-                :issue_count, :status_filter
-            )
-        ");
+    public static function storeAnalysis(int $boardId, string $type, array $results, ?string $markdown = null): int {
+        $analysis = R::dispense('analysisresults');
+        $analysis->board_id = $boardId;
+        $analysis->analysis_type = $type;
+        $analysis->content_json = json_encode($results, JSON_INVALID_UTF8_SUBSTITUTE);
+        $analysis->content_markdown = $markdown;
+        $analysis->issue_count = $results['issue_count'] ?? null;
+        $analysis->status_filter = $results['status_filter'] ?? null;
+        $analysis->created_at = date('Y-m-d H:i:s');
 
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':analysis_type', $type, SQLITE3_TEXT);
+        $id = R::store($analysis);
 
-        // Sanitize UTF-8 before encoding
-        $cleanResults = $this->sanitizeUtf8($results);
-        $jsonContent = json_encode($cleanResults, JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($jsonContent === false) {
-            throw new \Exception('json_encode error: ' . json_last_error_msg());
-        }
-        $stmt->bindValue(':content_json', $jsonContent, SQLITE3_TEXT);
-        $stmt->bindValue(':content_markdown', $markdown, SQLITE3_TEXT);
-        $stmt->bindValue(':issue_count', $results['issue_count'] ?? null, SQLITE3_INTEGER);
-        $stmt->bindValue(':status_filter', $results['status_filter'] ?? null, SQLITE3_TEXT);
+        // Update board's last_analysis_at
+        self::updateBoard($boardId, ['last_analysis_at' => date('Y-m-d H:i:s')]);
 
-        if ($stmt->execute()) {
-            $analysisId = $this->db->lastInsertRowID();
-
-            // Update board's last_analysis_at
-            $this->updateBoard($boardId, ['last_analysis_at' => date('Y-m-d H:i:s')]);
-
-            return $analysisId;
-        }
-
-        return false;
+        return $id;
     }
 
     /**
      * Get an analysis result
-     *
      * @param int $id Analysis ID
-     * @return array|null
+     * @return \RedBeanPHP\OODBBean|null
      */
-    public function getAnalysis($id) {
-        $stmt = $this->db->prepare("SELECT * FROM analysisresults WHERE id = :id");
-        $stmt->bindValue(':id', $id, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        if ($row) {
-            $row['content'] = json_decode($row['content_json'], true);
-        }
-
-        return $row ?: null;
+    public static function getAnalysis(int $id) {
+        $analysis = R::load('analysisresults', $id);
+        return $analysis->id ? $analysis : null;
     }
 
     /**
      * Get recent analyses for a board
-     *
      * @param int $boardId Board ID
      * @param int $limit Number of results
      * @return array
      */
-    public function getRecentAnalyses($boardId, $limit = 10) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM analysisresults
-            WHERE board_id = :board_id
-            ORDER BY created_at DESC
-            LIMIT :limit
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $analyses = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $row['content'] = json_decode($row['content_json'], true);
-            $analyses[] = $row;
-        }
-
-        return $analyses;
+    public static function getRecentAnalyses(int $boardId, int $limit = 10): array {
+        return array_values(R::find('analysisresults',
+            ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
+            [$boardId, $limit]
+        ));
     }
 
     /**
      * Get all recent analyses across all boards
-     *
      * @param int $limit Number of results
      * @return array
      */
-    public function getAllRecentAnalyses($limit = 20) {
-        $stmt = $this->db->prepare("
+    public static function getAllRecentAnalyses(int $limit = 20): array {
+        return R::getAll("
             SELECT a.*, b.board_name, b.project_key
             FROM analysisresults a
             JOIN jiraboards b ON a.board_id = b.id
             ORDER BY a.created_at DESC
-            LIMIT :limit
-        ");
-        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $analyses = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $row['content'] = json_decode($row['content_json'], true);
-            $analyses[] = $row;
-        }
-
-        return $analyses;
+            LIMIT ?
+        ", [$limit]);
     }
 
     /**
      * Delete old analyses (keep last N per board)
-     *
      * @param int $keepCount Number of analyses to keep per board
      * @return int Number of deleted records
      */
-    public function cleanupOldAnalyses($keepCount = 50) {
-        $boards = $this->getBoards();
+    public static function cleanupOldAnalyses(int $keepCount = 50): int {
+        $boards = self::getBoards();
         $deleted = 0;
 
         foreach ($boards as $board) {
-            $stmt = $this->db->prepare("
+            $boardId = $board->id ?? $board['id'];
+            $result = R::exec("
                 DELETE FROM analysisresults
-                WHERE board_id = :board_id
+                WHERE board_id = ?
                 AND id NOT IN (
                     SELECT id FROM analysisresults
-                    WHERE board_id = :board_id2
+                    WHERE board_id = ?
                     ORDER BY created_at DESC
-                    LIMIT :keep_count
+                    LIMIT ?
                 )
-            ");
-            $stmt->bindValue(':board_id', $board['id'], SQLITE3_INTEGER);
-            $stmt->bindValue(':board_id2', $board['id'], SQLITE3_INTEGER);
-            $stmt->bindValue(':keep_count', $keepCount, SQLITE3_INTEGER);
-            $stmt->execute();
-
-            $deleted += $this->db->changes();
+            ", [$boardId, $boardId, $keepCount]);
+            $deleted += $result;
         }
 
         return $deleted;
@@ -628,117 +315,87 @@ class UserDatabaseService {
 
     /**
      * Log a digest email
-     *
      * @param int $boardId Board ID
      * @param string $sentTo Email address
      * @param string $subject Email subject
      * @param string $contentPreview Content preview
      * @param string $status Status (sent, failed)
      * @param string|null $errorMessage Error message if failed
-     * @return int|false
+     * @return int
      */
-    public function logDigest($boardId, $sentTo, $subject, $contentPreview, $status = 'sent', $errorMessage = null) {
-        $stmt = $this->db->prepare("
-            INSERT INTO digesthistory (
-                board_id, sent_to, subject, content_preview, status, error_message
-            ) VALUES (
-                :board_id, :sent_to, :subject, :content_preview, :status, :error_message
-            )
-        ");
+    public static function logDigest(int $boardId, string $sentTo, string $subject, string $contentPreview, string $status = 'sent', ?string $errorMessage = null): int {
+        $digest = R::dispense('digesthistory');
+        $digest->board_id = $boardId;
+        $digest->sent_to = $sentTo;
+        $digest->subject = $subject;
+        $digest->content_preview = substr($contentPreview, 0, 500);
+        $digest->status = $status;
+        $digest->error_message = $errorMessage;
+        $digest->created_at = date('Y-m-d H:i:s');
 
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':sent_to', $sentTo, SQLITE3_TEXT);
-        $stmt->bindValue(':subject', $subject, SQLITE3_TEXT);
-        $stmt->bindValue(':content_preview', substr($contentPreview, 0, 500), SQLITE3_TEXT);
-        $stmt->bindValue(':status', $status, SQLITE3_TEXT);
-        $stmt->bindValue(':error_message', $errorMessage, SQLITE3_TEXT);
+        $id = R::store($digest);
 
-        if ($stmt->execute()) {
-            // Update board's last_digest_at
-            $this->updateBoard($boardId, ['last_digest_at' => date('Y-m-d H:i:s')]);
+        // Update board's last_digest_at
+        self::updateBoard($boardId, ['last_digest_at' => date('Y-m-d H:i:s')]);
 
-            return $this->db->lastInsertRowID();
-        }
-
-        return false;
+        return $id;
     }
 
     /**
      * Get digest history for a board
-     *
      * @param int $boardId Board ID
      * @param int $limit Number of results
      * @return array
      */
-    public function getDigestHistory($boardId, $limit = 20) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM digesthistory
-            WHERE board_id = :board_id
-            ORDER BY created_at DESC
-            LIMIT :limit
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $history = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $history[] = $row;
-        }
-
-        return $history;
+    public static function getDigestHistory(int $boardId, int $limit = 20): array {
+        return array_values(R::find('digesthistory',
+            ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
+            [$boardId, $limit]
+        ));
     }
 
-    // ==================== User Settings ====================
+    // ==================== Enterprise Settings ====================
 
     /**
      * Get a setting
-     *
      * @param string $key Setting key
      * @param mixed $default Default value
      * @return mixed
      */
-    public function getSetting($key, $default = null) {
-        $stmt = $this->db->prepare("SELECT value FROM usersettings WHERE key = :key");
-        $stmt->bindValue(':key', $key, SQLITE3_TEXT);
-        $result = $stmt->execute();
-
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        return $row ? $row['value'] : $default;
+    public static function getSetting(string $key, $default = null) {
+        $setting = R::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
+        return $setting ? $setting->setting_value : $default;
     }
 
     /**
      * Set a setting
-     *
      * @param string $key Setting key
      * @param mixed $value Setting value
      * @return bool
      */
-    public function setSetting($key, $value) {
-        $stmt = $this->db->prepare("
-            INSERT OR REPLACE INTO usersettings (key, value, updated_at)
-            VALUES (:key, :value, :updated_at)
-        ");
-        $stmt->bindValue(':key', $key, SQLITE3_TEXT);
-        $stmt->bindValue(':value', $value, SQLITE3_TEXT);
-        $stmt->bindValue(':updated_at', date('Y-m-d H:i:s'), SQLITE3_TEXT);
-
-        return $stmt->execute() !== false;
+    public static function setSetting(string $key, $value): bool {
+        $setting = R::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
+        if (!$setting) {
+            $setting = R::dispense('enterprisesettings');
+            $setting->setting_key = $key;
+            $setting->created_at = date('Y-m-d H:i:s');
+        }
+        $setting->setting_value = $value;
+        $setting->updated_at = date('Y-m-d H:i:s');
+        R::store($setting);
+        return true;
     }
 
     /**
      * Get all settings
-     *
-     * @return array
+     * @return array Key-value pairs
      */
-    public function getAllSettings() {
-        $result = $this->db->query("SELECT * FROM usersettings");
-
+    public static function getAllSettings(): array {
         $settings = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $settings[$row['key']] = $row['value'];
+        $beans = R::findAll('enterprisesettings');
+        foreach ($beans as $bean) {
+            $settings[$bean->setting_key] = $bean->setting_value;
         }
-
         return $settings;
     }
 
@@ -746,178 +403,90 @@ class UserDatabaseService {
 
     /**
      * Get dashboard statistics
-     *
      * @return array
      */
-    public function getStats() {
-        $stats = [
-            'total_boards' => 0,
-            'enabled_boards' => 0,
-            'digest_enabled_boards' => 0,
-            'total_analyses' => 0,
-            'total_digests' => 0,
-            'recent_analyses' => []
+    public static function getStats(): array {
+        return [
+            'total_boards' => R::count('jiraboards'),
+            'enabled_boards' => R::count('jiraboards', ' enabled = 1 '),
+            'digest_enabled_boards' => R::count('jiraboards', ' digest_enabled = 1 '),
+            'total_analyses' => R::count('analysisresults'),
+            'total_digests' => R::count('digesthistory', ' status = ? ', ['sent']),
+            'recent_analyses' => self::getAllRecentAnalyses(5)
         ];
-
-        // Board counts
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards");
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        $stats['total_boards'] = $row['count'];
-
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards WHERE enabled = 1");
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        $stats['enabled_boards'] = $row['count'];
-
-        $result = $this->db->query("SELECT COUNT(*) as count FROM jiraboards WHERE digest_enabled = 1");
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        $stats['digest_enabled_boards'] = $row['count'];
-
-        // Analysis count
-        $result = $this->db->query("SELECT COUNT(*) as count FROM analysisresults");
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        $stats['total_analyses'] = $row['count'];
-
-        // Digest count
-        $result = $this->db->query("SELECT COUNT(*) as count FROM digesthistory WHERE status = 'sent'");
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        $stats['total_digests'] = $row['count'];
-
-        // Recent analyses
-        $stats['recent_analyses'] = $this->getAllRecentAnalyses(5);
-
-        return $stats;
     }
 
     // ==================== Ticket Analysis Cache ====================
 
     /**
      * Get cached analysis for a ticket
-     *
      * @param int $boardId Board ID
-     * @param string $issueKey Issue key (e.g., "PROJ-123")
-     * @return array|null
+     * @param string $issueKey Issue key
+     * @return array|null Array with clarity_score, clarity_analysis, etc.
      */
-    public function getTicketAnalysisCache($boardId, $issueKey) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM ticketanalysiscache
-            WHERE board_id = :board_id AND issue_key = :issue_key
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        $result = $stmt->execute();
-
-        $row = $result->fetchArray(SQLITE3_ASSOC);
-        if ($row && $row['clarity_analysis']) {
-            $row['clarity_analysis'] = json_decode($row['clarity_analysis'], true);
+    public static function getTicketAnalysisCache(int $boardId, string $issueKey): ?array {
+        $bean = R::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        if (!$bean) {
+            return null;
         }
-
-        return $row ?: null;
+        return [
+            'clarity_score' => (int) $bean->clarity_score,
+            'clarity_analysis' => $bean->clarity_analysis ? json_decode($bean->clarity_analysis, true) : null,
+            'reporter_name' => $bean->reporter_name,
+            'reporter_email' => $bean->reporter_email,
+            'content_hash' => $bean->content_hash
+        ];
     }
 
     /**
      * Set cached analysis for a ticket
-     *
      * @param int $boardId Board ID
      * @param string $issueKey Issue key
      * @param string $contentHash Hash of ticket content
-     * @param array $data Analysis data (clarity_score, clarity_analysis, reporter_name, reporter_email)
+     * @param array $data Analysis data
      * @return bool
      */
-    public function setTicketAnalysisCache($boardId, $issueKey, $contentHash, $data) {
-        $stmt = $this->db->prepare("
-            INSERT OR REPLACE INTO ticketanalysiscache (
-                board_id, issue_key, content_hash, clarity_score, clarity_analysis,
-                reporter_name, reporter_email, updated_at
-            ) VALUES (
-                :board_id, :issue_key, :content_hash, :clarity_score, :clarity_analysis,
-                :reporter_name, :reporter_email, :updated_at
-            )
-        ");
+    public static function setTicketAnalysisCache(int $boardId, string $issueKey, string $contentHash, array $data): bool {
+        $cache = R::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        if (!$cache) {
+            $cache = R::dispense('ticketanalysiscache');
+            $cache->board_id = $boardId;
+            $cache->issue_key = $issueKey;
+            $cache->created_at = date('Y-m-d H:i:s');
+        }
 
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        $stmt->bindValue(':content_hash', $contentHash, SQLITE3_TEXT);
-        $stmt->bindValue(':clarity_score', $data['clarity_score'] ?? null, SQLITE3_INTEGER);
-        $stmt->bindValue(':clarity_analysis', isset($data['clarity_analysis']) ? json_encode($data['clarity_analysis']) : null, SQLITE3_TEXT);
-        $stmt->bindValue(':reporter_name', $data['reporter_name'] ?? null, SQLITE3_TEXT);
-        $stmt->bindValue(':reporter_email', $data['reporter_email'] ?? null, SQLITE3_TEXT);
-        $stmt->bindValue(':updated_at', date('Y-m-d H:i:s'), SQLITE3_TEXT);
+        $cache->content_hash = $contentHash;
+        $cache->clarity_score = $data['clarity_score'] ?? null;
+        $cache->clarity_analysis = isset($data['clarity_analysis']) ? json_encode($data['clarity_analysis']) : null;
+        $cache->reporter_name = $data['reporter_name'] ?? null;
+        $cache->reporter_email = $data['reporter_email'] ?? null;
+        $cache->updated_at = date('Y-m-d H:i:s');
 
-        return $stmt->execute() !== false;
+        R::store($cache);
+        return true;
     }
 
     /**
      * Check if ticket needs re-analysis based on content hash
-     *
      * @param int $boardId Board ID
      * @param string $issueKey Issue key
      * @param string $newHash New content hash
      * @return bool True if re-analysis needed
      */
-    public function shouldReanalyzeTicket($boardId, $issueKey, $newHash) {
-        $cached = $this->getTicketAnalysisCache($boardId, $issueKey);
-
+    public static function shouldReanalyzeTicket(int $boardId, string $issueKey, string $newHash): bool {
+        $cached = self::getTicketAnalysisCache($boardId, $issueKey);
         if (!$cached) {
-            return true; // No cache exists
+            return true;
         }
-
-        return $cached['content_hash'] !== $newHash;
-    }
-
-    /**
-     * Get all cached analyses for a board
-     *
-     * @param int $boardId Board ID
-     * @return array
-     */
-    public function getAllTicketAnalysisCache($boardId) {
-        $stmt = $this->db->prepare("
-            SELECT * FROM ticketanalysiscache
-            WHERE board_id = :board_id
-            ORDER BY issue_key ASC
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $caches = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            if ($row['clarity_analysis']) {
-                $row['clarity_analysis'] = json_decode($row['clarity_analysis'], true);
-            }
-            $caches[$row['issue_key']] = $row;
-        }
-
-        return $caches;
-    }
-
-    /**
-     * Clear old ticket analysis cache for a board
-     *
-     * @param int $boardId Board ID
-     * @param int $daysOld Delete entries older than this many days
-     * @return int Number of deleted records
-     */
-    public function clearOldTicketAnalysisCache($boardId, $daysOld = 30) {
-        $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
-
-        $stmt = $this->db->prepare("
-            DELETE FROM ticketanalysiscache
-            WHERE board_id = :board_id AND updated_at < :cutoff
-        ");
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':cutoff', $cutoff, SQLITE3_TEXT);
-        $stmt->execute();
-
-        return $this->db->changes();
+        return ($cached['content_hash'] ?? '') !== $newHash;
     }
 
     /**
      * Generate content hash for a ticket
-     *
      * @param array $issue Issue data from Jira
      * @return string SHA256 hash
      */
-    public static function generateTicketHash($issue) {
+    public static function generateTicketHash(array $issue): string {
         $fields = $issue['fields'] ?? [];
         $content = json_encode([
             'key' => $issue['key'] ?? '',
@@ -926,99 +495,59 @@ class UserDatabaseService {
             'status' => $fields['status']['name'] ?? '',
             'priority' => $fields['priority']['name'] ?? '',
         ]);
-
         return hash('sha256', $content);
-    }
-
-    // ==================== Helpers ====================
-
-    /**
-     * Recursively sanitize UTF-8 strings in an array
-     *
-     * @param mixed $data Data to sanitize
-     * @return mixed Sanitized data
-     */
-    private function sanitizeUtf8($data) {
-        if (is_string($data)) {
-            // Convert to UTF-8 and remove invalid sequences
-            $data = mb_convert_encoding($data, 'UTF-8', 'UTF-8');
-            // Remove any remaining invalid UTF-8 characters
-            return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $data);
-        }
-
-        if (is_array($data)) {
-            foreach ($data as $key => $value) {
-                $data[$key] = $this->sanitizeUtf8($value);
-            }
-        }
-
-        return $data;
     }
 
     // ==================== AI Developer Jobs ====================
 
     /**
      * Get or create a job record for an issue
-     *
      * @param string $issueKey Jira issue key
      * @param int $boardId Board ID
      * @param int|null $repoConnectionId Repository connection ID
      * @param string|null $cloudId Atlassian cloud ID
-     * @return array Job record
+     * @return \RedBeanPHP\OODBBean
      */
-    public function getOrCreateAiDevJob(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null): array {
-        $stmt = $this->db->prepare("SELECT * FROM aidevjobs WHERE issue_key = :issue_key");
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        $result = $stmt->execute();
-        $job = $result->fetchArray(SQLITE3_ASSOC);
-
+    public static function getOrCreateAiDevJob(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null) {
+        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if ($job) {
             return $job;
         }
 
-        // Create new job record
-        $stmt = $this->db->prepare("
-            INSERT INTO aidevjobs (issue_key, board_id, repo_connection_id, cloud_id, status, run_count, created_at)
-            VALUES (:issue_key, :board_id, :repo_id, :cloud_id, 'pending', 0, datetime('now'))
-        ");
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        $stmt->bindValue(':board_id', $boardId, SQLITE3_INTEGER);
-        $stmt->bindValue(':repo_id', $repoConnectionId, $repoConnectionId ? SQLITE3_INTEGER : SQLITE3_NULL);
-        $stmt->bindValue(':cloud_id', $cloudId, $cloudId ? SQLITE3_TEXT : SQLITE3_NULL);
-        $stmt->execute();
+        $job = R::dispense('aidevjobs');
+        $job->issue_key = $issueKey;
+        $job->board_id = $boardId;
+        $job->repo_connection_id = $repoConnectionId;
+        $job->cloud_id = $cloudId;
+        $job->status = 'pending';
+        $job->run_count = 0;
+        $job->created_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-        return $this->getAiDevJob($issueKey);
+        return $job;
     }
 
     /**
      * Get a job by issue key
-     *
      * @param string $issueKey Jira issue key
-     * @return array|null
+     * @return \RedBeanPHP\OODBBean|null
      */
-    public function getAiDevJob(string $issueKey): ?array {
-        $stmt = $this->db->prepare("SELECT * FROM aidevjobs WHERE issue_key = :issue_key");
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        $result = $stmt->execute();
-        $job = $result->fetchArray(SQLITE3_ASSOC);
-
-        if ($job) {
-            $job['clarification_questions'] = json_decode($job['clarification_questions'] ?? '[]', true);
-            $job['files_changed'] = json_decode($job['files_changed'] ?? '[]', true);
-            $job['last_result'] = json_decode($job['last_result_json'] ?? '{}', true);
-        }
-
-        return $job ?: null;
+    public static function getAiDevJob(string $issueKey) {
+        return R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
     }
 
     /**
      * Update a job's status and related fields
-     *
      * @param string $issueKey Jira issue key
      * @param array $data Fields to update
      * @return bool
      */
-    public function updateAiDevJob(string $issueKey, array $data): bool {
+    public static function updateAiDevJob(string $issueKey, array $data): bool {
+        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
+
         $allowedFields = [
             'status', 'current_shard_job_id', 'branch_name', 'pr_url', 'pr_number',
             'clarification_comment_id', 'clarification_questions', 'error_message',
@@ -1026,70 +555,47 @@ class UserDatabaseService {
             'commit_sha', 'started_at', 'completed_at', 'board_id', 'repo_connection_id', 'cloud_id'
         ];
 
-        $fields = [];
-        $values = [':issue_key' => $issueKey];
-
         foreach ($data as $key => $value) {
             if (in_array($key, $allowedFields)) {
                 // JSON encode arrays
-                if (in_array($key, ['clarification_questions', 'files_changed']) && is_array($value)) {
+                if (in_array($key, ['clarification_questions', 'files_changed', 'last_result_json']) && is_array($value)) {
                     $value = json_encode($value);
                 }
-                if ($key === 'last_result_json' && is_array($value)) {
-                    $value = json_encode($value);
-                }
-                $fields[] = "{$key} = :{$key}";
-                $values[":{$key}"] = $value;
+                $job->$key = $value;
             }
         }
 
-        if (empty($fields)) {
-            return false;
-        }
-
-        $fields[] = "updated_at = datetime('now')";
-
-        $sql = "UPDATE aidevjobs SET " . implode(', ', $fields) . " WHERE issue_key = :issue_key";
-        $stmt = $this->db->prepare($sql);
-
-        foreach ($values as $key => $value) {
-            if (is_null($value)) {
-                $stmt->bindValue($key, null, SQLITE3_NULL);
-            } elseif (is_int($value)) {
-                $stmt->bindValue($key, $value, SQLITE3_INTEGER);
-            } else {
-                $stmt->bindValue($key, $value, SQLITE3_TEXT);
-            }
-        }
-
-        return $stmt->execute() !== false;
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
+        return true;
     }
 
     /**
      * Start a new run on a job
-     *
      * @param string $issueKey Jira issue key
      * @param string $shardJobId The shard job ID for this run
      * @return bool
      */
-    public function startAiDevJobRun(string $issueKey, string $shardJobId): bool {
-        return $this->updateAiDevJob($issueKey, [
-            'status' => 'running',
-            'current_shard_job_id' => $shardJobId,
-            'started_at' => date('Y-m-d H:i:s'),
-            'error_message' => null,
-            'completed_at' => null
-        ]);
+    public static function startAiDevJobRun(string $issueKey, string $shardJobId): bool {
+        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-        // Also increment run_count
-        $this->db->exec("UPDATE aidevjobs SET run_count = run_count + 1 WHERE issue_key = '" . $this->db->escapeString($issueKey) . "'");
+        $job->status = 'running';
+        $job->current_shard_job_id = $shardJobId;
+        $job->started_at = date('Y-m-d H:i:s');
+        $job->error_message = null;
+        $job->completed_at = null;
+        $job->run_count = ($job->run_count ?? 0) + 1;
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
         return true;
     }
 
     /**
      * Complete a job run with PR info
-     *
      * @param string $issueKey Jira issue key
      * @param string $prUrl PR URL
      * @param int|null $prNumber PR number
@@ -1098,8 +604,8 @@ class UserDatabaseService {
      * @param array|null $result Result data
      * @return bool
      */
-    public function completeAiDevJob(string $issueKey, string $prUrl, ?int $prNumber, ?string $branchName = null, ?string $output = null, ?array $result = null): bool {
-        return $this->updateAiDevJob($issueKey, [
+    public static function completeAiDevJob(string $issueKey, string $prUrl, ?int $prNumber, ?string $branchName = null, ?string $output = null, ?array $result = null): bool {
+        return self::updateAiDevJob($issueKey, [
             'status' => 'pr_created',
             'pr_url' => $prUrl,
             'pr_number' => $prNumber,
@@ -1113,14 +619,13 @@ class UserDatabaseService {
 
     /**
      * Mark a job as failed
-     *
      * @param string $issueKey Jira issue key
      * @param string $error Error message
      * @param string|null $output Output log
      * @return bool
      */
-    public function failAiDevJob(string $issueKey, string $error, ?string $output = null): bool {
-        return $this->updateAiDevJob($issueKey, [
+    public static function failAiDevJob(string $issueKey, string $error, ?string $output = null): bool {
+        return self::updateAiDevJob($issueKey, [
             'status' => 'failed',
             'error_message' => $error,
             'last_output' => $output,
@@ -1130,14 +635,13 @@ class UserDatabaseService {
 
     /**
      * Mark a job as waiting for clarification
-     *
      * @param string $issueKey Jira issue key
      * @param string $commentId The Jira comment ID with questions
      * @param array $questions The clarification questions
      * @return bool
      */
-    public function setAiDevJobWaitingClarification(string $issueKey, string $commentId, array $questions): bool {
-        return $this->updateAiDevJob($issueKey, [
+    public static function setAiDevJobWaitingClarification(string $issueKey, string $commentId, array $questions): bool {
+        return self::updateAiDevJob($issueKey, [
             'status' => 'waiting_clarification',
             'clarification_comment_id' => $commentId,
             'clarification_questions' => $questions
@@ -1145,132 +649,144 @@ class UserDatabaseService {
     }
 
     /**
-     * Get all jobs (for listing)
-     *
+     * Get all jobs
      * @param int $limit Max number of jobs
      * @return array
      */
-    public function getAllAiDevJobs(int $limit = 50): array {
-        $stmt = $this->db->prepare("
-            SELECT * FROM aidevjobs
-            ORDER BY COALESCE(updated_at, created_at) DESC
-            LIMIT :limit
-        ");
-        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
-        $result = $stmt->execute();
-
-        $jobs = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $row['clarification_questions'] = json_decode($row['clarification_questions'] ?? '[]', true);
-            $row['files_changed'] = json_decode($row['files_changed'] ?? '[]', true);
-            $jobs[] = $row;
-        }
-
-        return $jobs;
+    public static function getAllAiDevJobs(int $limit = 50): array {
+        return array_values(R::find('aidevjobs',
+            ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? ',
+            [$limit]
+        ));
     }
 
     /**
      * Get active jobs (running, pending, or waiting_clarification)
-     *
      * @return array
      */
-    public function getActiveAiDevJobs(): array {
-        $result = $this->db->query("
-            SELECT * FROM aidevjobs
-            WHERE status IN ('pending', 'running', 'waiting_clarification')
-            ORDER BY started_at DESC
-        ");
-
-        $jobs = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $row['clarification_questions'] = json_decode($row['clarification_questions'] ?? '[]', true);
-            $row['files_changed'] = json_decode($row['files_changed'] ?? '[]', true);
-            $jobs[] = $row;
-        }
-
-        return $jobs;
+    public static function getActiveAiDevJobs(): array {
+        return array_values(R::find('aidevjobs',
+            " status IN ('pending', 'running', 'waiting_clarification') ORDER BY started_at DESC "
+        ));
     }
 
     /**
      * Check if a job is currently running for an issue
-     *
      * @param string $issueKey Jira issue key
      * @return bool
      */
-    public function isAiDevJobRunning(string $issueKey): bool {
-        $job = $this->getAiDevJob($issueKey);
-        return $job && $job['status'] === 'running';
+    public static function isAiDevJobRunning(string $issueKey): bool {
+        $job = self::getAiDevJob($issueKey);
+        return $job && $job->status === 'running';
     }
 
     /**
      * Delete a job record
-     *
      * @param string $issueKey Jira issue key
      * @return bool
      */
-    public function deleteAiDevJob(string $issueKey): bool {
-        $stmt = $this->db->prepare("DELETE FROM aidevjobs WHERE issue_key = :issue_key");
-        $stmt->bindValue(':issue_key', $issueKey, SQLITE3_TEXT);
-        return $stmt->execute() !== false;
+    public static function deleteAiDevJob(string $issueKey): bool {
+        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
+        R::trash($job);
+        return true;
     }
 
     /**
      * Add a log entry for a job
-     *
      * @param string $issueKey Jira issue key
      * @param string $level Log level
      * @param string $message Log message
      * @param array|null $context Context data
      * @return bool
      */
-    public function addAiDevJobLog(string $issueKey, string $level, string $message, ?array $context = null): bool {
-        // First get the current_shard_job_id for this issue
-        $job = $this->getAiDevJob($issueKey);
-        $jobId = $job['current_shard_job_id'] ?? $issueKey;
+    public static function addAiDevJobLog(string $issueKey, string $level, string $message, ?array $context = null): bool {
+        $job = self::getAiDevJob($issueKey);
+        $jobId = $job ? ($job->current_shard_job_id ?? $issueKey) : $issueKey;
 
-        $stmt = $this->db->prepare("
-            INSERT INTO aidevjoblogs (job_id, log_level, message, context_json, created_at)
-            VALUES (:job_id, :level, :message, :context, datetime('now'))
-        ");
-        $stmt->bindValue(':job_id', $jobId, SQLITE3_TEXT);
-        $stmt->bindValue(':level', $level, SQLITE3_TEXT);
-        $stmt->bindValue(':message', $message, SQLITE3_TEXT);
-        $stmt->bindValue(':context', $context ? json_encode($context) : null, $context ? SQLITE3_TEXT : SQLITE3_NULL);
+        $log = R::dispense('aidevjoblogs');
+        $log->job_id = $jobId;
+        $log->log_level = $level;
+        $log->message = $message;
+        $log->context_json = $context ? json_encode($context) : null;
+        $log->created_at = date('Y-m-d H:i:s');
+        R::store($log);
 
-        return $stmt->execute() !== false;
+        return true;
     }
 
     /**
      * Get logs for a job
-     *
      * @param string $issueKey Jira issue key
      * @param int $limit Max number of logs
      * @return array
      */
-    public function getAiDevJobLogs(string $issueKey, int $limit = 100): array {
-        $job = $this->getAiDevJob($issueKey);
+    public static function getAiDevJobLogs(string $issueKey, int $limit = 100): array {
+        $job = self::getAiDevJob($issueKey);
         if (!$job) {
             return [];
         }
 
-        $jobId = $job['current_shard_job_id'] ?? $issueKey;
+        $jobId = $job->current_shard_job_id ?? $issueKey;
+        return array_values(R::find('aidevjoblogs',
+            ' job_id = ? ORDER BY created_at ASC LIMIT ? ',
+            [$jobId, $limit]
+        ));
+    }
 
-        $stmt = $this->db->prepare("
-            SELECT * FROM aidevjoblogs
-            WHERE job_id = :job_id
-            ORDER BY created_at DESC
-            LIMIT :limit
-        ");
-        $stmt->bindValue(':job_id', $jobId, SQLITE3_TEXT);
-        $stmt->bindValue(':limit', $limit, SQLITE3_INTEGER);
-        $result = $stmt->execute();
+    // ==================== Anthropic Keys ====================
 
-        $logs = [];
-        while ($row = $result->fetchArray(SQLITE3_ASSOC)) {
-            $row['context'] = json_decode($row['context_json'] ?? '{}', true);
-            $logs[] = $row;
+    /**
+     * Get all Anthropic API keys
+     * @return array
+     */
+    public static function getAnthropicKeys(): array {
+        return array_values(R::findAll('anthropickeys', ' ORDER BY created_at DESC '));
+    }
+
+    /**
+     * Get an Anthropic key by ID
+     * @param int $id Key ID
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public static function getAnthropicKey(int $id) {
+        $key = R::load('anthropickeys', $id);
+        return $key->id ? $key : null;
+    }
+
+    /**
+     * Add an Anthropic API key
+     * @param string $name Name
+     * @param string $encryptedKey Encrypted API key
+     * @param string $model Model
+     * @return int Key ID
+     */
+    public static function addAnthropicKey(string $name, string $encryptedKey, string $model): int {
+        $key = R::dispense('anthropickeys');
+        $key->name = $name;
+        $key->api_key = $encryptedKey;
+        $key->model = $model;
+        $key->created_at = date('Y-m-d H:i:s');
+        return R::store($key);
+    }
+
+    /**
+     * Delete an Anthropic key
+     * @param int $id Key ID
+     * @return bool
+     */
+    public static function deleteAnthropicKey(int $id): bool {
+        $key = R::load('anthropickeys', $id);
+        if (!$key->id) {
+            return false;
         }
 
-        return array_reverse($logs); // Oldest first for display
+        // Reset boards using this key to NULL (local runner)
+        R::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$id]);
+
+        R::trash($key);
+        return true;
     }
 }

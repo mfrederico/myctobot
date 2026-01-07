@@ -46,6 +46,14 @@ CREATE TABLE "analysisresults" (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (board_id) REFERENCES "jiraboards"(id) ON DELETE CASCADE
 );
+CREATE TABLE "anthropickeys" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,                              -- User-friendly name (e.g., "Production - Sonnet")
+    api_key TEXT NOT NULL,                           -- Encrypted API key
+    model TEXT DEFAULT 'claude-sonnet-4-20250514',   -- Model to use with this key
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT
+);
 CREATE TABLE "boardrepomapping" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     board_id INTEGER NOT NULL,
@@ -91,6 +99,7 @@ CREATE TABLE "jiraboards" (
     aidev_status_clarification TEXT DEFAULT NULL, -- Status when clarification needed (e.g., "Blocked")
     aidev_status_failed TEXT DEFAULT NULL,       -- Status on failure (null = don't change)
     aidev_status_complete TEXT DEFAULT NULL,     -- Status that triggers session closure (e.g., "Done")
+    aidev_anthropic_key_id INTEGER DEFAULT NULL, -- NULL = local runner, else FK to anthropickeys.id
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT,
     UNIQUE(board_id, cloud_id)

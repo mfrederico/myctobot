@@ -1,7 +1,9 @@
 <?php
 /**
  * Member Model
- * Extends RedBeanPHP's member bean with custom methods
+ * FUSE model for member table
+ *
+ * All data is now in a single MySQL database per tenant.
  */
 
 use \RedBeanPHP\R as R;

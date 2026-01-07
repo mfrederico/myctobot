@@ -180,16 +180,20 @@ class ShardRouter {
      * Get job status from shard
      */
     public static function getJobStatus(string $jobId): ?array {
-        // Get job record
-        $job = R::getRow("SELECT * FROM shardjobs WHERE job_id = ?", [$jobId]);
+
+        // Get job record using bean operations
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return null;
         }
 
+        // Convert bean to array for return value
+        $jobData = $job->export();
+
         // Get shard
-        $shard = ShardService::getShard($job['shard_id']);
+        $shard = ShardService::getShard($job->shard_id);
         if (!$shard) {
-            return $job; // Return local record if shard unavailable
+            return $jobData; // Return local record if shard unavailable
         }
 
         try {
@@ -209,11 +213,11 @@ class ShardRouter {
                 self::updateJobStatus($jobId, $shardStatus['status']);
             }
 
-            return array_merge($job, ['shard_status' => $shardStatus]);
+            return array_merge($jobData, ['shard_status' => $shardStatus]);
 
         } catch (GuzzleException $e) {
             // Return local record if shard unavailable
-            return $job;
+            return $jobData;
         }
     }
 
@@ -221,12 +225,13 @@ class ShardRouter {
      * Get job output from shard
      */
     public static function getJobOutput(string $jobId): ?array {
-        $job = R::getRow("SELECT * FROM shardjobs WHERE job_id = ?", [$jobId]);
+
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return null;
         }
 
-        $shard = ShardService::getShard($job['shard_id']);
+        $shard = ShardService::getShard($job->shard_id);
         if (!$shard) {
             return null;
         }
@@ -252,12 +257,13 @@ class ShardRouter {
      * Cancel a job on shard
      */
     public static function cancelJob(string $jobId): bool {
-        $job = R::getRow("SELECT * FROM shardjobs WHERE job_id = ?", [$jobId]);
+
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return false;
         }
 
-        $shard = ShardService::getShard($job['shard_id']);
+        $shard = ShardService::getShard($job->shard_id);
         if (!$shard) {
             return false;
         }
@@ -285,6 +291,7 @@ class ShardRouter {
      * Record a job in local database
      */
     private static function recordJob(string $jobId, int $memberId, int $shardId, array $payload): void {
+
         $job = R::dispense('shardjobs');
         $job->job_id = $jobId;
         $job->member_id = $memberId;
@@ -300,6 +307,7 @@ class ShardRouter {
      * Update job status in local database
      */
     public static function updateJobStatus(string $jobId, string $status, ?string $error = null): void {
+
         $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) return;
 
@@ -325,6 +333,7 @@ class ShardRouter {
      * Update job result
      */
     public static function updateJobResult(string $jobId, array $result): void {
+
         $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) return;
 
@@ -338,6 +347,7 @@ class ShardRouter {
      * Get jobs for a member
      */
     public static function getMemberJobs(int $memberId, int $limit = 50): array {
+
         return R::getAll("
             SELECT sj.*, cs.name as shard_name
             FROM shardjobs sj
@@ -352,6 +362,7 @@ class ShardRouter {
      * Get active jobs for a member
      */
     public static function getMemberActiveJobs(int $memberId): array {
+
         return R::getAll("
             SELECT sj.*, cs.name as shard_name
             FROM shardjobs sj
@@ -416,37 +427,38 @@ class ShardRouter {
      * @return array Credentials array for buildAIDevPayload
      */
     public static function getMemberMcpCredentials(int $memberId, ?string $cloudId = null): array {
+
         $credentials = [];
 
-        // Get member email
-        $member = R::getRow("SELECT email FROM member WHERE id = ?", [$memberId]);
+        // Get member using bean operations
+        $member = R::load('member', $memberId);
 
-        // Get Atlassian/Jira token
-        $tokenQuery = "SELECT * FROM atlassiantoken WHERE member_id = ?";
+        // Get Atlassian/Jira token using bean operations
+        $whereClause = 'member_id = ?';
         $params = [$memberId];
 
         if ($cloudId) {
-            $tokenQuery .= " AND cloud_id = ?";
+            $whereClause .= ' AND cloud_id = ?';
             $params[] = $cloudId;
         }
 
-        $tokenQuery .= " ORDER BY updated_at DESC LIMIT 1";
-        $token = R::getRow($tokenQuery, $params);
+        $whereClause .= ' ORDER BY updated_at DESC LIMIT 1';
+        $token = R::findOne('atlassiantoken', $whereClause, $params);
 
         if ($token) {
             // For OAuth tokens, must use Atlassian API gateway URL (not site_url)
             // site_url is for browser links, API calls must go through api.atlassian.com
-            $jiraHost = AtlassianAuth::getApiBaseUrl($token['cloud_id']);
+            $jiraHost = AtlassianAuth::getApiBaseUrl($token->cloud_id);
             // Remove /rest/api/3 suffix - Claude will add the appropriate path
             $jiraHost = str_replace('/rest/api/3', '', $jiraHost);
 
             $credentials['jira_host'] = $jiraHost;
-            $credentials['jira_email'] = $member['email'] ?? '';
+            $credentials['jira_email'] = $member->email ?? '';
             // Also include site_url for display/links in reports
-            $credentials['jira_site_url'] = $token['site_url'] ?? '';
+            $credentials['jira_site_url'] = $token->site_url ?? '';
 
             // Get a valid access token (refreshes if expired)
-            $validToken = AtlassianAuth::getValidToken($memberId, $token['cloud_id']);
+            $validToken = AtlassianAuth::getValidToken($memberId, $token->cloud_id);
             $credentials['jira_api_token'] = $validToken;
         }
 
@@ -457,12 +469,13 @@ class ShardRouter {
      * Get SSE stream URL for a job
      */
     public static function getStreamUrl(string $jobId): ?string {
-        $job = R::getRow("SELECT * FROM shardjobs WHERE job_id = ?", [$jobId]);
+
+        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return null;
         }
 
-        $shard = ShardService::getShard($job['shard_id']);
+        $shard = ShardService::getShard($job->shard_id);
         if (!$shard) {
             return null;
         }

@@ -2,11 +2,8 @@
 /**
  * AI Developer Job Manager
  *
- * Manages AI Developer jobs using RedBeanPHP via Bean wrapper.
+ * Manages AI Developer jobs using RedBeanPHP.
  * One record per Jira issue (issue_key is unique).
- *
- * Bean type: aidevjobs (all lowercase, no underscores)
- * Uses Bean:: wrapper for automatic normalization.
  *
  * Usage:
  *   $manager = new AIDevJobManager($memberId);
@@ -17,9 +14,7 @@
 
 namespace app\services;
 
-use \app\Bean;
-
-require_once __DIR__ . '/../lib/Bean.php';
+use \RedBeanPHP\R as R;
 
 class AIDevJobManager {
 
@@ -40,10 +35,6 @@ class AIDevJobManager {
     /**
      * Get or create a job for an issue
      *
-     * Uses RedBeanPHP associations:
-     * - jiraboards owns aidevjobs (board->ownAidevjobsList)
-     * - aidevjobs belongs to repoconnections (job->repoconnections)
-     *
      * @param string $issueKey Jira issue key (e.g., "PROJ-123")
      * @param int $boardId Board ID
      * @param int|null $repoConnectionId Repository connection ID
@@ -51,34 +42,24 @@ class AIDevJobManager {
      * @return \RedBeanPHP\OODBBean
      */
     public function getOrCreate(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null) {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $boardId, $repoConnectionId, $cloudId) {
-            // Try to find existing job
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        // Try to find existing job
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
 
-            if (!$job) {
-                // Load parent beans for associations
-                $board = Bean::load('jiraboards', $boardId);
+        if (!$job) {
+            // Create new job
+            $job = R::dispense('aidevjobs');
+            $job->issue_key = $issueKey;
+            $job->board_id = $boardId;
+            $job->repo_connection_id = $repoConnectionId;
+            $job->cloud_id = $cloudId;
+            $job->member_id = $this->memberId;
+            $job->status = self::STATUS_PENDING;
+            $job->run_count = 0;
+            $job->created_at = date('Y-m-d H:i:s');
+            R::store($job);
+        }
 
-                // Create new job
-                $job = Bean::dispense('aidevjobs');
-                $job->issue_key = $issueKey;
-                $job->cloud_id = $cloudId;  // External Atlassian ID, not a local FK
-                $job->status = self::STATUS_PENDING;
-                $job->run_count = 0;
-                $job->created_at = date('Y-m-d H:i:s');
-
-                // Set repo connection via association if provided
-                if ($repoConnectionId) {
-                    $job->repoconnections = Bean::load('repoconnections', $repoConnectionId);
-                }
-
-                // Add job to board's ownAidevjobsList (sets board_id automatically)
-                $board->ownAidevjobsList[] = $job;
-                Bean::store($board);
-            }
-
-            return $job;
-        });
+        return $job;
     }
 
     /**
@@ -88,9 +69,7 @@ class AIDevJobManager {
      * @return \RedBeanPHP\OODBBean|null
      */
     public function get(string $issueKey) {
-        return UserDatabase::with($this->memberId, function() use ($issueKey) {
-            return Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-        });
+        return R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
     }
 
     /**
@@ -101,24 +80,22 @@ class AIDevJobManager {
      * @return bool
      */
     public function startRun(string $issueKey, string $shardJobId): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $shardJobId) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->status = self::STATUS_RUNNING;
-            $job->current_shard_job_id = $shardJobId;
-            $job->started_at = date('Y-m-d H:i:s');
-            $job->error_message = null;
-            $job->completed_at = null;
-            $job->run_count = ($job->run_count ?? 0) + 1;
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
+        $job->status = self::STATUS_RUNNING;
+        $job->current_shard_job_id = $shardJobId;
+        $job->started_at = date('Y-m-d H:i:s');
+        $job->error_message = null;
+        $job->completed_at = null;
+        $job->run_count = ($job->run_count ?? 0) + 1;
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-            $this->log($issueKey, 'info', 'Job run started', ['shard_job_id' => $shardJobId, 'run_count' => $job->run_count]);
-            return true;
-        });
+        $this->log($issueKey, 'info', 'Job run started', ['shard_job_id' => $shardJobId, 'run_count' => $job->run_count]);
+        return true;
     }
 
     /**
@@ -133,26 +110,24 @@ class AIDevJobManager {
      * @return bool
      */
     public function complete(string $issueKey, string $prUrl, ?int $prNumber = null, ?string $branchName = null, ?string $output = null, ?array $result = null): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $prUrl, $prNumber, $branchName, $output, $result) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->status = self::STATUS_PR_CREATED;
-            $job->pr_url = $prUrl;
-            $job->pr_number = $prNumber;
-            $job->branch_name = $branchName;
-            $job->last_output = $output;
-            $job->last_result_json = $result ? json_encode($result) : null;
-            $job->completed_at = date('Y-m-d H:i:s');
-            $job->error_message = null;
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
+        $job->status = self::STATUS_PR_CREATED;
+        $job->pr_url = $prUrl;
+        $job->pr_number = $prNumber;
+        $job->branch_name = $branchName;
+        $job->last_output = $output;
+        $job->last_result_json = $result ? json_encode($result) : null;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->error_message = null;
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-            $this->log($issueKey, 'info', 'PR created', ['pr_url' => $prUrl, 'pr_number' => $prNumber]);
-            return true;
-        });
+        $this->log($issueKey, 'info', 'PR created', ['pr_url' => $prUrl, 'pr_number' => $prNumber]);
+        return true;
     }
 
     /**
@@ -164,22 +139,20 @@ class AIDevJobManager {
      * @return bool
      */
     public function fail(string $issueKey, string $error, ?string $output = null): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $error, $output) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->status = self::STATUS_FAILED;
-            $job->error_message = $error;
-            $job->last_output = $output;
-            $job->completed_at = date('Y-m-d H:i:s');
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
+        $job->status = self::STATUS_FAILED;
+        $job->error_message = $error;
+        $job->last_output = $output;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-            $this->log($issueKey, 'error', 'Job failed', ['error' => $error]);
-            return true;
-        });
+        $this->log($issueKey, 'error', 'Job failed', ['error' => $error]);
+        return true;
     }
 
     /**
@@ -191,21 +164,19 @@ class AIDevJobManager {
      * @return bool
      */
     public function waitForClarification(string $issueKey, string $commentId, array $questions): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $commentId, $questions) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->status = self::STATUS_WAITING_CLARIFICATION;
-            $job->clarification_comment_id = $commentId;
-            $job->clarification_questions = json_encode($questions);
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
+        $job->status = self::STATUS_WAITING_CLARIFICATION;
+        $job->clarification_comment_id = $commentId;
+        $job->clarification_questions = json_encode($questions);
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-            $this->log($issueKey, 'info', 'Waiting for clarification', ['question_count' => count($questions)]);
-            return true;
-        });
+        $this->log($issueKey, 'info', 'Waiting for clarification', ['question_count' => count($questions)]);
+        return true;
     }
 
     /**
@@ -215,20 +186,18 @@ class AIDevJobManager {
      * @return bool
      */
     public function markComplete(string $issueKey): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->status = self::STATUS_COMPLETE;
-            $job->completed_at = date('Y-m-d H:i:s');
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
+        $job->status = self::STATUS_COMPLETE;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
 
-            $this->log($issueKey, 'info', 'Job marked as complete');
-            return true;
-        });
+        $this->log($issueKey, 'info', 'Job marked as complete');
+        return true;
     }
 
     /**
@@ -239,17 +208,15 @@ class AIDevJobManager {
      * @return bool
      */
     public function setBranch(string $issueKey, string $branchName): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $branchName) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if (!$job) {
-                return false;
-            }
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            return false;
+        }
 
-            $job->branch_name = $branchName;
-            $job->updated_at = date('Y-m-d H:i:s');
-            Bean::store($job);
-            return true;
-        });
+        $job->branch_name = $branchName;
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
+        return true;
     }
 
     /**
@@ -264,32 +231,29 @@ class AIDevJobManager {
     }
 
     /**
-     * Get all jobs
+     * Get all jobs for this member
      *
      * @param int $limit
      * @return array
      */
     public function getAll(int $limit = 50): array {
-        return UserDatabase::with($this->memberId, function() use ($limit) {
-            $jobs = Bean::find('aidevjobs', 'ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?', [$limit]);
-            return array_map(fn($job) => $this->formatJob($job), array_values($jobs));
-        });
+        $jobs = R::find('aidevjobs', 'member_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?', [$this->memberId, $limit]);
+        return array_map(fn($job) => $this->formatJob($job), array_values($jobs));
     }
 
     /**
-     * Get active jobs (running, pending, waiting)
+     * Get active jobs for this member (running, pending, waiting)
      *
      * @return array
      */
     public function getActive(): array {
-        return UserDatabase::with($this->memberId, function() {
-            $jobs = Bean::find('aidevjobs', 'status IN (?, ?, ?) ORDER BY started_at DESC', [
-                self::STATUS_PENDING,
-                self::STATUS_RUNNING,
-                self::STATUS_WAITING_CLARIFICATION
-            ]);
-            return array_map(fn($job) => $this->formatJob($job), array_values($jobs));
-        });
+        $jobs = R::find('aidevjobs', 'member_id = ? AND status IN (?, ?, ?) ORDER BY started_at DESC', [
+            $this->memberId,
+            self::STATUS_PENDING,
+            self::STATUS_RUNNING,
+            self::STATUS_WAITING_CLARIFICATION
+        ]);
+        return array_map(fn($job) => $this->formatJob($job), array_values($jobs));
     }
 
     /**
@@ -299,14 +263,12 @@ class AIDevJobManager {
      * @return bool
      */
     public function delete(string $issueKey): bool {
-        return UserDatabase::with($this->memberId, function() use ($issueKey) {
-            $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
-            if ($job) {
-                Bean::trash($job);
-                return true;
-            }
-            return false;
-        });
+        $job = R::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if ($job) {
+            R::trash($job);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -318,15 +280,13 @@ class AIDevJobManager {
      * @param array|null $context
      */
     public function log(string $issueKey, string $level, string $message, ?array $context = null): void {
-        UserDatabase::with($this->memberId, function() use ($issueKey, $level, $message, $context) {
-            $log = Bean::dispense('aidevjoblogs');
-            $log->issue_key = $issueKey;
-            $log->log_level = $level;
-            $log->message = $message;
-            $log->context_json = $context ? json_encode($context) : null;
-            $log->created_at = date('Y-m-d H:i:s');
-            Bean::store($log);
-        });
+        $log = R::dispense('aidevjoblogs');
+        $log->issue_key = $issueKey;
+        $log->log_level = $level;
+        $log->message = $message;
+        $log->context_json = $context ? json_encode($context) : null;
+        $log->created_at = date('Y-m-d H:i:s');
+        R::store($log);
     }
 
     /**
@@ -337,18 +297,16 @@ class AIDevJobManager {
      * @return array
      */
     public function getLogs(string $issueKey, int $limit = 100): array {
-        return UserDatabase::with($this->memberId, function() use ($issueKey, $limit) {
-            $logs = Bean::find('aidevjoblogs', 'issue_key = ? ORDER BY created_at ASC LIMIT ?', [$issueKey, $limit]);
-            return array_map(function($log) {
-                return [
-                    'id' => $log->id,
-                    'level' => $log->log_level,
-                    'message' => $log->message,
-                    'context' => $log->context_json ? json_decode($log->context_json, true) : null,
-                    'created_at' => $log->created_at
-                ];
-            }, array_values($logs));
-        });
+        $logs = R::find('aidevjoblogs', 'issue_key = ? ORDER BY created_at ASC LIMIT ?', [$issueKey, $limit]);
+        return array_map(function($log) {
+            return [
+                'id' => $log->id,
+                'level' => $log->log_level,
+                'message' => $log->message,
+                'context' => $log->context_json ? json_decode($log->context_json, true) : null,
+                'created_at' => $log->created_at
+            ];
+        }, array_values($logs));
     }
 
     /**

@@ -41,10 +41,26 @@ class AIDevStatusService {
     const STEP_COMPLETE = 'Complete';
 
     /**
-     * Initialize storage directory for a member
+     * Get domain identifier for multi-tenant isolation
+     */
+    private static function getDomainId(): string {
+        // Use TmuxManager if available, otherwise derive from Flight config
+        if (class_exists('\\app\\TmuxManager')) {
+            return \app\TmuxManager::getDomainId();
+        }
+        // Fallback: derive from baseurl
+        $baseUrl = \Flight::get('app.baseurl') ?? \Flight::get('baseurl') ?? 'localhost';
+        $domainId = preg_replace('/^https?:\/\//', '', $baseUrl);
+        $domainId = preg_replace('/[^a-zA-Z0-9]/', '-', $domainId);
+        return trim($domainId, '-') ?: 'default';
+    }
+
+    /**
+     * Initialize storage directory for a member (with domain isolation)
      */
     private static function ensureDir(int $memberId): string {
-        $dir = self::$statusDir . '/member_' . $memberId;
+        $domainId = self::getDomainId();
+        $dir = self::$statusDir . '/' . $domainId . '/member_' . $memberId;
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
         }

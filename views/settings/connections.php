@@ -249,7 +249,10 @@
                             <div class="mb-3">
                                 <code class="small"><?= htmlspecialchars($conn['details']['masked_key']) ?></code>
                                 <?php if ($conn['details']['has_credit_warning']): ?>
-                                    <br><small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Low credit balance</small>
+                                    <div class="alert alert-warning alert-dismissible py-1 px-2 mt-2 mb-0 small" role="alert" id="credit-warning">
+                                        <i class="bi bi-exclamation-triangle me-1"></i>Low credit balance detected
+                                        <button type="button" class="btn-close btn-close-sm p-2" aria-label="Dismiss" onclick="dismissCreditWarning()"></button>
+                                    </div>
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
@@ -348,6 +351,9 @@ function testConnection(type, url) {
             btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Success';
             btn.classList.remove('btn-outline-secondary');
             btn.classList.add('btn-success');
+            // Remove credit warning if present (backend already cleared it)
+            const warning = document.getElementById('credit-warning');
+            if (warning) warning.remove();
         } else {
             btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Failed';
             btn.classList.remove('btn-outline-secondary');
@@ -368,6 +374,18 @@ function testConnection(type, url) {
             btn.classList.remove('btn-success', 'btn-danger');
             btn.classList.add('btn-outline-secondary');
         }, 3000);
+    });
+}
+
+function dismissCreditWarning() {
+    const alert = document.getElementById('credit-warning');
+    fetch('/anthropic/clearWarning', {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    }).then(() => {
+        alert.remove();
+    }).catch(() => {
+        alert.remove(); // Remove visually even if request fails
     });
 }
 </script>

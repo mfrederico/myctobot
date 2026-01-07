@@ -31,16 +31,16 @@ class ClarityAnalyzer {
     /**
      * Analyze tickets for clarity, using cache when possible
      *
+     * IMPORTANT: Caller must have user database connected via UserDatabaseService::connect()
+     *
      * @param array $issues Jira issues to analyze
      * @param int $boardId Board ID for caching
-     * @param UserDatabaseService $userDb User database service
      * @param int $clarityThreshold Minimum clarity score (tickets below need clarification)
      * @return array Analysis results with clarifications_needed array
      */
     public function analyzeWithCache(
         array $issues,
         int $boardId,
-        UserDatabaseService $userDb,
         int $clarityThreshold = 6
     ): array {
         $results = [
@@ -57,10 +57,10 @@ class ClarityAnalyzer {
             $key = $issue['key'];
             $hash = UserDatabaseService::generateTicketHash($issue);
 
-            // Check if we need to re-analyze
-            if (!$userDb->shouldReanalyzeTicket($boardId, $key, $hash)) {
+            // Check if we need to re-analyze (uses static method)
+            if (!UserDatabaseService::shouldReanalyzeTicket($boardId, $key, $hash)) {
                 // Use cached result
-                $cached = $userDb->getTicketAnalysisCache($boardId, $key);
+                $cached = UserDatabaseService::getTicketAnalysisCache($boardId, $key);
                 if ($cached) {
                     $results['cached_count']++;
                     $results['all_scores'][$key] = [
@@ -113,7 +113,7 @@ class ClarityAnalyzer {
                     // Only cache successful results (not errors)
                     $assessment = $analysis['analysis']['assessment'] ?? '';
                     if (strpos($assessment, 'Analysis error:') === false && strpos($assessment, 'Unable to analyze') === false) {
-                        $userDb->setTicketAnalysisCache($boardId, $key, $hash, [
+                        UserDatabaseService::setTicketAnalysisCache($boardId, $key, $hash, [
                             'clarity_score' => $analysis['clarity_score'],
                             'clarity_analysis' => $analysis['analysis'],
                             'reporter_name' => $analysis['reporter_name'],

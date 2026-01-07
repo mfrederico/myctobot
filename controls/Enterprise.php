@@ -7,7 +7,7 @@
 namespace app;
 
 use \Flight as Flight;
-use \app\Bean;
+use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\TierFeatures;
@@ -15,20 +15,15 @@ use \app\services\EncryptionService;
 use \app\services\GitHubClient;
 use \app\services\AIDevAgent;
 use \app\services\AIDevJobManager;
-use \app\services\UserDatabase;
-use \app\services\UserDatabaseService;
 use \app\services\ShardService;
 use \app\services\ShardRouter;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/GitHubClient.php';
 require_once __DIR__ . '/../services/AIDevAgent.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
-require_once __DIR__ . '/../services/UserDatabase.php';
-require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
 
@@ -52,18 +47,17 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Connect to user's SQLite database via RedBean
-     * Call this at start of method, then use Bean:: methods directly
+     * Connect to user database (legacy no-op - all data now in single MySQL DB)
      */
     private function connectUserDb(): void {
-        UserDatabase::connect($this->member->id);
+        // No-op: All data is now in single MySQL database per tenant
     }
 
     /**
-     * Disconnect from user database (return to default)
+     * Disconnect from user database (legacy no-op)
      */
     private function disconnectUserDb(): void {
-        UserDatabase::disconnect();
+        // No-op: No database switching needed
     }
 
     // ========================================
@@ -76,44 +70,35 @@ class Enterprise extends BaseControls\Control {
     public function index() {
         if (!$this->requireEnterprise()) return;
 
-        // Use RedBean for user database queries via UserDatabase service
         $memberId = $this->member->id;
 
-        // Check setup status using RedBean
-        $apiKeySet = false;
-        $githubConnected = false;
-        $creditBalanceError = null;
+        // Check setup status
+        // Check API key
+        $apiKeySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+        $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
+
+        // Check GitHub connections
+        $githubCount = R::count('repoconnections', 'provider = ? AND enabled = ? AND member_id = ?', ['github', 1, $memberId]);
+        $githubConnected = $githubCount > 0;
+
+        // Check credit balance errors (within last 24 hours)
+        $creditSetting = R::findOne('enterprisesettings',
+            'setting_key = ? AND member_id = ? AND updated_at > ?',
+            ['credit_balance_error', $memberId, date('Y-m-d H:i:s', strtotime('-24 hours'))]
+        );
+        $creditBalanceError = $creditSetting ? $creditSetting->setting_value : null;
+
+        // Get boards
         $boards = [];
-
-        UserDatabase::with($memberId, function() use (&$apiKeySet, &$githubConnected, &$creditBalanceError, &$boards) {
-            // Check API key
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-            $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
-
-            // Check GitHub connections
-            $githubCount = Bean::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
-            $githubConnected = $githubCount > 0;
-
-            // Check credit balance errors (within last 24 hours)
-            $creditSetting = Bean::findOne('enterprisesettings',
-                'setting_key = ? AND updated_at > ?',
-                ['credit_balance_error', date('Y-m-d H:i:s', strtotime('-24 hours'))]
-            );
-            if ($creditSetting) {
-                $creditBalanceError = $creditSetting->setting_value;
-            }
-
-            // Get boards
-            $boardBeans = Bean::findAll('jiraboards', 'ORDER BY board_name ASC');
-            foreach ($boardBeans as $board) {
-                $boards[] = [
-                    'id' => $board->id,
-                    'board_name' => $board->board_name,
-                    'project_key' => $board->project_key,
-                    'cloud_id' => $board->cloud_id
-                ];
-            }
-        });
+        $boardBeans = R::findAll('jiraboards', 'member_id = ? ORDER BY board_name ASC', [$memberId]);
+        foreach ($boardBeans as $board) {
+            $boards[] = [
+                'id' => $board->id,
+                'board_name' => $board->board_name,
+                'project_key' => $board->project_key,
+                'cloud_id' => $board->cloud_id
+            ];
+        }
 
         // Get Jira write scope status
         $sites = AtlassianAuth::getConnectedSites($memberId);
@@ -158,55 +143,24 @@ class Enterprise extends BaseControls\Control {
 
         $this->connectUserDb();
         try {
-            // Handle form submission
-            if (Flight::request()->method === 'POST') {
-                if (!$this->validateCSRF()) {
-                    $this->disconnectUserDb();
-                    return;
-                }
-
-                $apiKey = Flight::request()->data->anthropic_api_key ?? '';
-
-                if (!empty($apiKey)) {
-                    // Validate API key format
-                    if (!preg_match('/^sk-ant-/', $apiKey)) {
-                        $this->flash('error', 'Invalid API key format. Should start with sk-ant-');
-                        $this->disconnectUserDb();
-                        Flight::redirect('/enterprise/settings');
-                        return;
-                    }
-
-                    // Encrypt and store
-                    $encrypted = EncryptionService::encrypt($apiKey);
-
-                    // Find or create setting bean
-                    $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-                    if (!$setting) {
-                        $setting = Bean::dispense('enterprisesettings');
-                        $setting->setting_key = 'anthropic_api_key';
-                    }
-                    $setting->setting_value = $encrypted;
-                    $setting->is_encrypted = 1;
-                    $setting->updated_at = date('Y-m-d H:i:s');
-                    Bean::store($setting);
-
-                    $this->flash('success', 'API key saved successfully.');
-                    $this->logger->info('Enterprise API key updated', ['member_id' => $this->member->id]);
-                }
-
-                $this->disconnectUserDb();
-                Flight::redirect('/enterprise/settings');
-                return;
+            // Fetch all API keys
+            $keys = Bean::findAll('anthropickeys', ' ORDER BY created_at DESC ');
+            $anthropicKeys = [];
+            foreach ($keys as $key) {
+                $decrypted = EncryptionService::decrypt($key->api_key);
+                $anthropicKeys[] = [
+                    'id' => $key->id,
+                    'name' => $key->name,
+                    'model' => $key->model,
+                    'masked_key' => $this->maskAnthropicKey($decrypted),
+                    'created_at' => $key->created_at
+                ];
             }
-
-            // Check if API key is set
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-            $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
             $this->disconnectUserDb();
             $this->render('enterprise/settings', [
                 'title' => 'Enterprise Settings',
-                'apiKeySet' => $apiKeySet,
+                'anthropicKeys' => $anthropicKeys,
                 'githubConfigured' => GitHubClient::isConfigured()
             ]);
         } catch (\Exception $e) {
@@ -216,25 +170,121 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Test API key (AJAX)
+     * Add a new API key
      */
-    public function testkey() {
+    public function addkey() {
         if (!$this->requireEnterprise()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            Flight::redirect('/enterprise/settings');
+            return;
+        }
+
+        if (!$this->validateCSRF()) return;
+
+        $name = trim(Flight::request()->data->key_name ?? '');
+        $apiKey = trim(Flight::request()->data->api_key ?? '');
+        $model = Flight::request()->data->key_model ?? 'claude-sonnet-4-20250514';
+
+        if (empty($name) || empty($apiKey)) {
+            $this->flash('error', 'Name and API key are required.');
+            Flight::redirect('/enterprise/settings');
+            return;
+        }
+
+        if (!preg_match('/^sk-ant-/', $apiKey)) {
+            $this->flash('error', 'Invalid API key format. Should start with sk-ant-');
+            Flight::redirect('/enterprise/settings');
+            return;
+        }
 
         $this->connectUserDb();
         try {
-            $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
+            $encrypted = EncryptionService::encrypt($apiKey);
 
-            if (!$setting || empty($setting->setting_value)) {
+            $key = Bean::dispense('anthropickeys');
+            $key->name = $name;
+            $key->api_key = $encrypted;
+            $key->model = $model;
+            $key->created_at = date('Y-m-d H:i:s');
+            Bean::store($key);
+
+            $this->flash('success', 'API key added successfully.');
+            $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name]);
+
+            $this->disconnectUserDb();
+        } catch (\Exception $e) {
+            $this->disconnectUserDb();
+            $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/enterprise/settings');
+    }
+
+    /**
+     * Delete an API key
+     */
+    public function deletekey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $params['operation']->name ?? null;
+        if (!$keyId) {
+            $this->flash('error', 'No key specified.');
+            Flight::redirect('/enterprise/settings');
+            return;
+        }
+
+        $this->connectUserDb();
+        try {
+            $key = Bean::load('anthropickeys', $keyId);
+            if ($key && $key->id) {
+                $keyName = $key->name;
+                Bean::trash($key);
+
+                // Reset any boards using this key to NULL (local runner)
+                Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
+
+                $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
+                $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);
+            } else {
+                $this->flash('error', 'Key not found.');
+            }
+            $this->disconnectUserDb();
+        } catch (\Exception $e) {
+            $this->disconnectUserDb();
+            $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/enterprise/settings');
+    }
+
+    /**
+     * Test an API key
+     */
+    public function testkey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $params['operation']->name ?? null;
+        if (!$keyId) {
+            Flight::json(['success' => false, 'error' => 'No key specified']);
+            return;
+        }
+
+        $this->connectUserDb();
+        try {
+            $key = Bean::load('anthropickeys', $keyId);
+            if (!$key || !$key->id) {
                 $this->disconnectUserDb();
-                $this->json(['success' => false, 'error' => 'No API key configured']);
+                Flight::json(['success' => false, 'error' => 'Key not found']);
                 return;
             }
 
-            $apiKey = EncryptionService::decrypt($setting->setting_value);
+            $apiKey = EncryptionService::decrypt($key->api_key);
+            $model = $key->model ?? 'claude-sonnet-4-20250514';
+
             $this->disconnectUserDb();
 
-            // Test the key with a simple request
+            // Test the key
             $client = new \GuzzleHttp\Client([
                 'base_uri' => 'https://api.anthropic.com',
                 'headers' => [
@@ -246,19 +296,38 @@ class Enterprise extends BaseControls\Control {
 
             $response = $client->post('/v1/messages', [
                 'json' => [
-                    'model' => 'claude-sonnet-4-20250514',
+                    'model' => $model,
                     'max_tokens' => 10,
-                    'messages' => [['role' => 'user', 'content' => 'Hello']]
+                    'messages' => [['role' => 'user', 'content' => 'Hi']]
                 ]
             ]);
 
-            $this->json(['success' => true, 'message' => 'API key is valid']);
+            Flight::json(['success' => true, 'message' => 'API key is valid!']);
 
-        } catch (Exception $e) {
+        } catch (\Exception $e) {
             $this->disconnectUserDb();
-            $this->logger->warning('API key test failed', ['error' => $e->getMessage()]);
-            $this->json(['success' => false, 'error' => 'API key validation failed: ' . $e->getMessage()]);
+            $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
+            Flight::json(['success' => false, 'error' => $e->getMessage()]);
         }
+    }
+
+    /**
+     * Mask an Anthropic API key for display
+     */
+    private function maskAnthropicKey(string $key): string {
+        if (empty($key)) return '(empty)';
+
+        if (preg_match('/^(sk-ant-api\d+-)(.+)$/', $key, $matches)) {
+            $prefix = $matches[1];
+            $secret = $matches[2];
+            $secretLen = strlen($secret);
+            if ($secretLen > 7) {
+                return $prefix . substr($secret, 0, 3) . '...' . substr($secret, -4);
+            }
+            return $prefix . '***';
+        }
+
+        return substr($key, 0, 10) . '...' . substr($key, -4);
     }
 
     // ========================================
@@ -374,11 +443,18 @@ class Enterprise extends BaseControls\Control {
 
         $repos = $this->getRepoConnections();
 
-        // Get boards for mapping
-        $userDb = new UserDatabaseService($this->member->id);
-        $boards = $userDb->getBoards();
-
+        // Get boards for mapping using static method
         $this->connectUserDb();
+        $boards = [];
+        $boardBeans = Bean::findAll('jiraboards', ' ORDER BY board_name ASC ');
+        foreach ($boardBeans as $bean) {
+            $boards[] = [
+                'id' => $bean->id,
+                'board_name' => $bean->board_name,
+                'project_key' => $bean->project_key,
+                'cloud_id' => $bean->cloud_id
+            ];
+        }
         try {
             // Get board-repo mappings
             $mappings = [];
@@ -633,24 +709,22 @@ class Enterprise extends BaseControls\Control {
         $memberId = $this->member->id;
         $repos = [];
 
-        UserDatabase::with($memberId, function() use (&$repos) {
-            $repoBeans = Bean::findAll('repoconnections', 'ORDER BY created_at DESC');
+        $repoBeans = R::findAll('repoconnections', 'member_id = ? ORDER BY created_at DESC', [$memberId]);
 
-            foreach ($repoBeans as $bean) {
-                $repos[] = [
-                    'id' => $bean->id,
-                    'provider' => $bean->provider,
-                    'repo_owner' => $bean->repo_owner,
-                    'repo_name' => $bean->repo_name,
-                    'default_branch' => $bean->default_branch,
-                    'clone_url' => $bean->clone_url,
-                    'access_token' => $bean->access_token,
-                    'enabled' => $bean->enabled,
-                    'created_at' => $bean->created_at,
-                    'updated_at' => $bean->updated_at
-                ];
-            }
-        });
+        foreach ($repoBeans as $bean) {
+            $repos[] = [
+                'id' => $bean->id,
+                'provider' => $bean->provider,
+                'repo_owner' => $bean->repo_owner,
+                'repo_name' => $bean->repo_name,
+                'default_branch' => $bean->default_branch,
+                'clone_url' => $bean->clone_url,
+                'access_token' => $bean->access_token,
+                'enabled' => $bean->enabled,
+                'created_at' => $bean->created_at,
+                'updated_at' => $bean->updated_at
+            ];
+        }
 
         return $repos;
     }

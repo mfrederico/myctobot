@@ -15,24 +15,28 @@ use \app\services\UserDatabaseService;
 // Load plugins and services
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
+require_once __DIR__ . '/../lib/Bean.php';
+
+use \app\Bean;
 
 class Boards extends BaseControls\Control {
 
-    private $userDb;
+    private $userDbConnected = false;
 
     /**
      * Initialize user database connection
      */
     private function initUserDb() {
-        if (!$this->userDb && $this->member && !empty($this->member->ceobot_db)) {
+        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
             try {
-                $this->userDb = new UserDatabaseService($this->member->id);
+                UserDatabaseService::connect($this->member->id);
+                $this->userDbConnected = true;
             } catch (Exception $e) {
                 $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
                 return false;
             }
         }
-        return $this->userDb !== null;
+        return $this->userDbConnected;
     }
 
     /**
@@ -47,8 +51,20 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        $boards = $this->userDb->getBoards();
+        $boards = UserDatabaseService::getBoards();
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
+
+        // Build cloud_id -> site_name lookup
+        $siteNames = [];
+        foreach ($sites as $site) {
+            $siteNames[$site->cloud_id] = $site->site_name ?? $site->site_url ?? null;
+        }
+
+        // Enrich boards with site_name
+        foreach ($boards as &$board) {
+            $board['site_name'] = $siteNames[$board['cloud_id']] ?? null;
+        }
+        unset($board); // break reference
 
         // Group boards by site
         $boardsBySite = [];
@@ -102,7 +118,7 @@ class Boards extends BaseControls\Control {
 
         // Fetch boards from each connected site
         $jiraBoards = [];
-        $existingBoards = $this->userDb->getBoards();
+        $existingBoards = UserDatabaseService::getBoards();
 
         foreach ($sites as $site) {
             $token = AtlassianAuth::getValidToken($this->member->id, $site->cloud_id);
@@ -154,7 +170,7 @@ class Boards extends BaseControls\Control {
             }
 
             // Check if already tracked
-            $existing = $this->userDb->getBoardByJiraId($boardId, $cloudId);
+            $existing = UserDatabaseService::getBoardByJiraId($boardId, $cloudId);
             if ($existing) {
                 if ($request->ajax) {
                     $this->jsonError('Board is already being tracked');
@@ -166,7 +182,7 @@ class Boards extends BaseControls\Control {
             }
 
             // Add the board
-            $id = $this->userDb->addBoard([
+            $id = UserDatabaseService::addBoard([
                 'board_id' => $boardId,
                 'board_name' => $boardName,
                 'project_key' => $projectKey,
@@ -225,11 +241,17 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        $board = $this->userDb->getBoard($id);
+        $board = UserDatabaseService::getBoard($id);
         if (!$board) {
             $this->flash('error', 'Board not found');
             Flight::redirect('/boards');
             return;
+        }
+
+        // Enrich board with site_name from Atlassian token
+        if (!empty($board['cloud_id'])) {
+            $site = AtlassianAuth::getSiteByCloudId($this->member->id, $board['cloud_id']);
+            $board['site_name'] = $site->site_name ?? $site->site_url ?? null;
         }
 
         $request = Flight::request();
@@ -253,7 +275,9 @@ class Boards extends BaseControls\Control {
                 'aidev_status_pr_created' => trim($this->getParam('aidev_status_pr_created') ?? '') ?: null,
                 'aidev_status_clarification' => trim($this->getParam('aidev_status_clarification') ?? '') ?: null,
                 'aidev_status_failed' => trim($this->getParam('aidev_status_failed') ?? '') ?: null,
-                'aidev_status_complete' => trim($this->getParam('aidev_status_complete') ?? '') ?: null
+                'aidev_status_complete' => trim($this->getParam('aidev_status_complete') ?? '') ?: null,
+                // Execution mode: NULL = local runner, integer = anthropickeys.id
+                'aidev_anthropic_key_id' => $this->getParam('aidev_anthropic_key_id') ?: null
             ];
 
             // Handle priority weights (Pro feature)
@@ -313,7 +337,7 @@ class Boards extends BaseControls\Control {
                 $data['goals'] = json_encode($goals);
             }
 
-            if ($this->userDb->updateBoard($id, $data)) {
+            if (UserDatabaseService::updateBoard($id, $data)) {
                 $this->flash('success', 'Board settings updated');
             } else {
                 $this->flash('error', 'Failed to update board settings');
@@ -327,7 +351,7 @@ class Boards extends BaseControls\Control {
         $timezones = \DateTimeZone::listIdentifiers();
 
         // Get recent analyses for this board
-        $analyses = $this->userDb->getRecentAnalyses($id, 5);
+        $analyses = UserDatabaseService::getRecentAnalyses($id, 5);
         $lastAnalysis = !empty($analyses) ? $analyses[0] : null;
 
         // Fetch Jira statuses for this board's project (for Status Filter and AI Developer dropdowns)
@@ -342,6 +366,30 @@ class Boards extends BaseControls\Control {
             }
         }
 
+        // Fetch API keys for execution mode dropdown (Enterprise feature)
+        $anthropicKeys = [];
+        if ($this->member->isEnterprise()) {
+            try {
+                require_once __DIR__ . '/../services/EncryptionService.php';
+                $keys = Bean::findAll('anthropickeys', ' ORDER BY name ASC ');
+                foreach ($keys as $key) {
+                    $decrypted = \app\services\EncryptionService::decrypt($key->api_key);
+                    // Mask the key for display
+                    $masked = preg_match('/^(sk-ant-api\d+-)(.+)$/', $decrypted, $m)
+                        ? $m[1] . substr($m[2], 0, 3) . '...' . substr($m[2], -4)
+                        : substr($decrypted, 0, 10) . '...';
+                    $anthropicKeys[] = [
+                        'id' => $key->id,
+                        'name' => $key->name,
+                        'model' => $key->model,
+                        'masked_key' => $masked
+                    ];
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to fetch API keys: ' . $e->getMessage());
+            }
+        }
+
         $this->render('boards/edit', [
             'title' => 'Edit Board - ' . $board['board_name'],
             'board' => $board,
@@ -351,7 +399,8 @@ class Boards extends BaseControls\Control {
             'isPro' => $this->member->isPro(),
             'tier' => $this->member->getTier(),
             'isEnterprise' => $this->member->isEnterprise(),
-            'jiraStatuses' => $jiraStatuses
+            'jiraStatuses' => $jiraStatuses,
+            'anthropicKeys' => $anthropicKeys
         ]);
     }
 
@@ -378,7 +427,7 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        $board = $this->userDb->getBoard($id);
+        $board = UserDatabaseService::getBoard($id);
         if (!$board) {
             if (Flight::request()->ajax) {
                 $this->jsonError('Board not found');
@@ -389,7 +438,7 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        if ($this->userDb->removeBoard($id)) {
+        if (UserDatabaseService::removeBoard($id)) {
             $this->logger->info('Board removed', [
                 'member_id' => $this->member->id,
                 'board_id' => $id,
@@ -430,7 +479,7 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        $newStatus = $this->userDb->toggleBoard($id);
+        $newStatus = UserDatabaseService::toggleBoard($id);
         if ($newStatus !== false) {
             $this->jsonSuccess([
                 'id' => $id,

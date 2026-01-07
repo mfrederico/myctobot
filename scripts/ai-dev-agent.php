@@ -28,7 +28,6 @@ require_once $baseDir . '/bootstrap.php';
 // Load required services
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/services/EncryptionService.php';
-require_once $baseDir . '/services/UserDatabaseService.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/ClaudeClient.php';
 require_once $baseDir . '/services/GitHubClient.php';
@@ -140,26 +139,14 @@ try {
         throw new \Exception("Member not found: {$memberId}");
     }
 
-    // Get member's database
-    $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-    $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
+    // Get API key using RedBeanPHP (single MySQL database)
+    $apiKeySetting = R::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'anthropic_api_key']);
 
-    if (!file_exists($dbFile)) {
-        throw new \Exception("Member database not found");
-    }
-
-    $userDb = new \SQLite3($dbFile);
-
-    // Get API key
-    $apiKeyResult = $userDb->querySingle(
-        "SELECT setting_value FROM enterprisesettings WHERE setting_key = 'anthropic_api_key'"
-    );
-
-    if (empty($apiKeyResult)) {
+    if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
         throw new \Exception("Anthropic API key not configured");
     }
 
-    $apiKey = EncryptionService::decrypt($apiKeyResult);
+    $apiKey = EncryptionService::decrypt($apiKeySetting->setting_value);
 
     // Handle action
     if ($action === 'process') {
@@ -209,12 +196,9 @@ try {
 
         // Get cloud_id if not in job data
         if (empty($cloudId)) {
-            // Try to find it from board
-            $boardResult = $userDb->querySingle(
-                "SELECT cloud_id FROM jiraboards WHERE id = " . (int)$job['board_id'],
-                true
-            );
-            $cloudId = $boardResult['cloud_id'] ?? '';
+            // Try to find it from board using RedBeanPHP
+            $boardBean = R::load('jiraboards', (int)$job['board_id']);
+            $cloudId = $boardBean->cloud_id ?? '';
         }
 
         if (empty($cloudId)) {
@@ -251,13 +235,10 @@ try {
             throw new \Exception("Branch name is required for retry action");
         }
 
-        // Get cloud_id if not in job data
+        // Get cloud_id if not in job data using RedBeanPHP
         if (empty($cloudId)) {
-            $boardResult = $userDb->querySingle(
-                "SELECT cloud_id FROM jiraboards WHERE id = " . (int)$job['board_id'],
-                true
-            );
-            $cloudId = $boardResult['cloud_id'] ?? '';
+            $boardBean = R::load('jiraboards', (int)$job['board_id']);
+            $cloudId = $boardBean->cloud_id ?? '';
         }
 
         if (empty($cloudId)) {
@@ -279,7 +260,6 @@ try {
         }
     }
 
-    $userDb->close();
     logMessage("AI Developer Agent completed");
 
 } catch (\Exception $e) {

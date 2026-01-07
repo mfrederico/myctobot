@@ -24,6 +24,7 @@ require_once __DIR__ . '/ShardService.php';
 require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
 require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
+require_once __DIR__ . '/EncryptionService.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -34,7 +35,7 @@ class AnalysisService {
     private $verbose;
     private $memberId;
     private $member;
-    private $userDb;
+    private $userDbConnected = false;
 
     public function __construct(int $memberId, bool $verbose = false) {
         $this->logger = Flight::get('log');
@@ -46,9 +47,22 @@ class AnalysisService {
         if (!$this->member->id) {
             throw new \Exception("Member not found: {$memberId}");
         }
+    }
 
-        // Initialize user database
-        $this->userDb = new UserDatabaseService($memberId);
+    /**
+     * Connect to user database (legacy no-op - all data now in single MySQL DB)
+     */
+    private function connectUserDb(): void {
+        // No-op: All data is now in single MySQL database per tenant
+        $this->userDbConnected = true;
+    }
+
+    /**
+     * Restore to default database (legacy no-op)
+     */
+    private function restoreDb(): void {
+        // No-op: No database switching needed
+        $this->userDbConnected = false;
     }
 
     /**
@@ -72,8 +86,9 @@ class AnalysisService {
             // Update status: Starting
             $this->updateProgress($jobId, 'Initializing analysis...', 5);
 
-            // Get board details
-            $board = $this->userDb->getBoard($boardId);
+            // Connect to user database and get board details
+            $this->connectUserDb();
+            $board = UserDatabaseService::getBoard($boardId);
             if (!$board) {
                 $this->failJob($jobId, 'Board not found');
                 throw new \Exception("Board not found: {$boardId}");
@@ -118,8 +133,20 @@ class AnalysisService {
             $isPro = SubscriptionService::isPro($this->memberId);
             $includeImages = $isPro; // Image analysis is a Pro feature
 
-            // Initialize Claude client and analyzers
-            $claudeClient = new ClaudeClient();
+            // Get board's API key/model if configured (Enterprise feature)
+            $boardApiKey = null;
+            $boardModel = null;
+            if (!empty($board['aidev_anthropic_key_id'])) {
+                $keyData = $this->getBoardAnthropicKey($board['aidev_anthropic_key_id']);
+                if ($keyData) {
+                    $boardApiKey = $keyData['api_key'];
+                    $boardModel = $keyData['model'];
+                    $this->log("Using board API key: " . substr($boardApiKey, 0, 15) . "... model: {$boardModel}");
+                }
+            }
+
+            // Initialize Claude client and analyzers (with optional per-board key/model)
+            $claudeClient = new ClaudeClient($boardApiKey, $boardModel);
             $priorityAnalyzer = new \app\analyzers\PriorityAnalyzer($claudeClient);
 
             // Pass JiraClient to ClarityAnalyzer for image fetching (Pro feature)
@@ -153,7 +180,6 @@ class AnalysisService {
                 $clarityResult = $clarityAnalyzer->analyzeWithCache(
                     $issues,
                     $boardId,
-                    $this->userDb,
                     $clarityThreshold
                 );
 
@@ -208,7 +234,7 @@ class AnalysisService {
 
             // Store results
             $priorityResult['status_filter'] = $statusFilter;
-            $analysisId = $this->userDb->storeAnalysis($boardId, $analysisType, $priorityResult, $markdown);
+            $analysisId = UserDatabaseService::storeAnalysis($boardId, $analysisType, $priorityResult, $markdown);
 
             $this->logger->info('Analysis completed', [
                 'member_id' => $this->memberId,
@@ -275,7 +301,7 @@ class AnalysisService {
 
         if ($success) {
             // Log successful digest
-            $this->userDb->logDigest(
+            UserDatabaseService::logDigest(
                 $board['id'],
                 $this->member->email,
                 $subject,
@@ -378,10 +404,13 @@ class AnalysisService {
     }
 
     /**
-     * Get the user database service
+     * Ensure user database is connected and return the member ID
+     * Callers should use UserDatabaseService static methods directly
+     * @deprecated Use UserDatabaseService static methods directly
      */
-    public function getUserDb(): UserDatabaseService {
-        return $this->userDb;
+    public function ensureUserDbConnected(): int {
+        $this->connectUserDb();
+        return $this->memberId;
     }
 
     /**
@@ -409,8 +438,9 @@ class AnalysisService {
         $sendEmail = $options['send_email'] ?? false;
         $useJiraMcp = $options['use_jira_mcp'] ?? true;
 
-        // Get board details
-        $board = $this->userDb->getBoard($boardId);
+        // Connect to user database and get board details
+        $this->connectUserDb();
+        $board = UserDatabaseService::getBoard($boardId);
         if (!$board) {
             throw new \Exception("Board not found: {$boardId}");
         }
@@ -444,7 +474,7 @@ class AnalysisService {
         // Uses RedBeanPHP associations: member->ownDigestjobsList
         $digestJob = R::dispense('digestjobs');
         $digestJob->job_id = $jobId;
-        $digestJob->board_id = $boardId;  // Cross-DB reference to user's SQLite
+        $digestJob->board_id = $boardId;
         $digestJob->shard_id = $shard['id'];  // External shard ID
         $digestJob->status = 'queued';
         $digestJob->send_email = $sendEmail ? 1 : 0;
@@ -619,13 +649,48 @@ class AnalysisService {
         }
 
         // Check member's enterprise settings (key-value pattern)
-        // Note: This requires connecting to the user's database first
-        $setting = R::findOne('enterpriseSetting', 'setting_key = ?', ['anthropic_api_key']);
-        if ($setting && !empty($setting->settingValue)) {
-            return $setting->settingValue;
+        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
+        if ($setting && !empty($setting->setting_value)) {
+            return $setting->setting_value;
         }
 
         // Fall back to system key (if configured)
         return Flight::get('anthropic.api_key');
+    }
+
+    /**
+     * Get API key and model from board's selected anthropickeys record
+     *
+     * @param int $keyId The anthropickeys.id from board's aidev_anthropic_key_id
+     * @return array|null ['api_key' => string, 'model' => string] or null if not found
+     */
+    private function getBoardAnthropicKey(int $keyId): ?array {
+        try {
+            $key = R::load('anthropickeys', $keyId);
+
+            if (!$key->id || empty($key->api_key)) {
+                $this->logger->warning('API key not found', [
+                    'member_id' => $this->memberId,
+                    'key_id' => $keyId
+                ]);
+                return null;
+            }
+
+            // Decrypt the API key
+            $decryptedKey = EncryptionService::decrypt($key->api_key);
+
+            return [
+                'api_key' => $decryptedKey,
+                'model' => $key->model ?? 'claude-sonnet-4-20250514'
+            ];
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to get board API key', [
+                'member_id' => $this->memberId,
+                'key_id' => $keyId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 }

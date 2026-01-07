@@ -8,7 +8,7 @@
  * Connection Flow:
  * 1. User generates an Admin API access token in Shopify Admin
  * 2. User enters their shop domain and access token in /shopify
- * 3. Token is stored encrypted in user's SQLite database
+ * 3. Token is stored encrypted in the database
  * 4. API calls use the token directly
  */
 
@@ -16,12 +16,10 @@ namespace app\services;
 
 use \Flight as Flight;
 use \GuzzleHttp\Client;
-use \app\Bean;
+use \RedBeanPHP\R as R;
 use \Exception;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/EncryptionService.php';
-require_once __DIR__ . '/UserDatabase.php';
 
 class ShopifyClient {
 
@@ -45,26 +43,24 @@ class ShopifyClient {
             'http_errors' => false
         ]);
 
-        // Load credentials from user's database
+        // Load credentials from database
         $this->loadCredentials();
     }
 
     /**
-     * Load Shopify credentials from user's database
+     * Load Shopify credentials from database
      */
     private function loadCredentials(): void {
         try {
-            UserDatabase::with($this->memberId, function() {
-                $shop = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_shop']);
-                $token = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_access_token']);
+            $shop = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $this->memberId]);
+            $token = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $this->memberId]);
 
-                if ($shop) {
-                    $this->shop = $shop->setting_value;
-                }
-                if ($token) {
-                    $this->accessToken = EncryptionService::decrypt($token->setting_value);
-                }
-            });
+            if ($shop) {
+                $this->shop = $shop->setting_value;
+            }
+            if ($token) {
+                $this->accessToken = EncryptionService::decrypt($token->setting_value);
+            }
         } catch (Exception $e) {
             // Credentials not available
         }
@@ -105,31 +101,31 @@ class ShopifyClient {
             throw new Exception('Invalid token format. Admin API access tokens start with shpat_');
         }
 
-        UserDatabase::with($this->memberId, function() use ($shop, $accessToken) {
-            // Store shop domain (not encrypted)
-            $shopBean = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_shop']);
-            if (!$shopBean) {
-                $shopBean = Bean::dispense('enterprisesettings');
-                $shopBean->setting_key = 'shopify_shop';
-                $shopBean->created_at = date('Y-m-d H:i:s');
-            }
-            $shopBean->setting_value = $shop;
-            $shopBean->is_encrypted = 0;
-            $shopBean->updated_at = date('Y-m-d H:i:s');
-            Bean::store($shopBean);
+        // Store shop domain (not encrypted)
+        $shopBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $this->memberId]);
+        if (!$shopBean) {
+            $shopBean = R::dispense('enterprisesettings');
+            $shopBean->setting_key = 'shopify_shop';
+            $shopBean->member_id = $this->memberId;
+            $shopBean->created_at = date('Y-m-d H:i:s');
+        }
+        $shopBean->setting_value = $shop;
+        $shopBean->is_encrypted = 0;
+        $shopBean->updated_at = date('Y-m-d H:i:s');
+        R::store($shopBean);
 
-            // Store encrypted access token
-            $tokenBean = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_access_token']);
-            if (!$tokenBean) {
-                $tokenBean = Bean::dispense('enterprisesettings');
-                $tokenBean->setting_key = 'shopify_access_token';
-                $tokenBean->created_at = date('Y-m-d H:i:s');
-            }
-            $tokenBean->setting_value = EncryptionService::encrypt($accessToken);
-            $tokenBean->is_encrypted = 1;
-            $tokenBean->updated_at = date('Y-m-d H:i:s');
-            Bean::store($tokenBean);
-        });
+        // Store encrypted access token
+        $tokenBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $this->memberId]);
+        if (!$tokenBean) {
+            $tokenBean = R::dispense('enterprisesettings');
+            $tokenBean->setting_key = 'shopify_access_token';
+            $tokenBean->member_id = $this->memberId;
+            $tokenBean->created_at = date('Y-m-d H:i:s');
+        }
+        $tokenBean->setting_value = EncryptionService::encrypt($accessToken);
+        $tokenBean->is_encrypted = 1;
+        $tokenBean->updated_at = date('Y-m-d H:i:s');
+        R::store($tokenBean);
 
         // Update local state
         $this->shop = $shop;
@@ -150,18 +146,17 @@ class ShopifyClient {
         $shopInfo = $this->getShopInfo();
 
         if (!empty($shopInfo)) {
-            UserDatabase::with($this->memberId, function() use ($shopInfo) {
-                $infoBean = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_shop_info']);
-                if (!$infoBean) {
-                    $infoBean = Bean::dispense('enterprisesettings');
-                    $infoBean->setting_key = 'shopify_shop_info';
-                    $infoBean->created_at = date('Y-m-d H:i:s');
-                }
-                $infoBean->setting_value = json_encode($shopInfo);
-                $infoBean->is_encrypted = 0;
-                $infoBean->updated_at = date('Y-m-d H:i:s');
-                Bean::store($infoBean);
-            });
+            $infoBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
+            if (!$infoBean) {
+                $infoBean = R::dispense('enterprisesettings');
+                $infoBean->setting_key = 'shopify_shop_info';
+                $infoBean->member_id = $this->memberId;
+                $infoBean->created_at = date('Y-m-d H:i:s');
+            }
+            $infoBean->setting_value = json_encode($shopInfo);
+            $infoBean->is_encrypted = 0;
+            $infoBean->updated_at = date('Y-m-d H:i:s');
+            R::store($infoBean);
         }
     }
 
@@ -206,13 +201,11 @@ class ShopifyClient {
         ];
 
         try {
-            UserDatabase::with($this->memberId, function() use (&$details) {
-                $shopInfo = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_shop_info']);
+            $shopInfo = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
 
-                if ($shopInfo) {
-                    $details['shop_info'] = json_decode($shopInfo->setting_value, true);
-                }
-            });
+            if ($shopInfo) {
+                $details['shop_info'] = json_decode($shopInfo->setting_value, true);
+            }
         } catch (Exception $e) {
             // Ignore
         }
@@ -704,12 +697,10 @@ class ShopifyClient {
      * Remove all Shopify configuration (full reset)
      */
     public function removeAllConfig(): void {
-        UserDatabase::with($this->memberId, function() {
-            $beans = Bean::find('enterprisesettings', 'setting_key LIKE ?', ['shopify_%']);
-            foreach ($beans as $bean) {
-                Bean::trash($bean);
-            }
-        });
+        $beans = R::find('enterprisesettings', 'setting_key LIKE ? AND member_id = ?', ['shopify_%', $this->memberId]);
+        foreach ($beans as $bean) {
+            R::trash($bean);
+        }
 
         $this->shop = null;
         $this->accessToken = null;

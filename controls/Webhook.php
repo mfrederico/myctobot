@@ -243,8 +243,11 @@ class Webhook extends BaseControls\Control {
         // Check changelog for ai-dev label being added
         foreach ($items as $item) {
             if ($item['field'] === 'labels') {
-                $oldLabels = explode(' ', $item['fromString'] ?? '');
-                $newLabels = explode(' ', $item['toString'] ?? '');
+                // Jira webhooks use 'from'/'to', but some formats use 'fromString'/'toString'
+                $oldLabelStr = $item['fromString'] ?? $item['from'] ?? '';
+                $newLabelStr = $item['toString'] ?? $item['to'] ?? '';
+                $oldLabels = explode(' ', $oldLabelStr);
+                $newLabels = explode(' ', $newLabelStr);
 
                 // Check if ai-dev label was ADDED
                 $aiDevWasAdded = in_array('ai-dev', $newLabels) && !in_array('ai-dev', $oldLabels);
@@ -291,7 +294,8 @@ class Webhook extends BaseControls\Control {
         }
 
         // Check if there's already an active job for this issue
-        $statusDir = __DIR__ . '/../storage/aidev_status/member_' . $memberId;
+        $domainId = \app\TmuxManager::getDomainId();
+        $statusDir = __DIR__ . '/../storage/aidev_status/' . $domainId . '/member_' . $memberId;
         if (is_dir($statusDir)) {
             $files = glob($statusDir . '/*.json');
             foreach ($files as $file) {
@@ -304,7 +308,8 @@ class Webhook extends BaseControls\Control {
                         if (in_array($status, ['pending', 'running', 'pr_created', 'waiting_clarification'])) {
                             $this->logger->debug('Jira webhook: job already exists for issue', [
                                 'issue_key' => $issueKey,
-                                'status' => $status
+                                'status' => $status,
+                                'lockfile' => $file
                             ]);
                             return;
                         }
@@ -363,6 +368,7 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Trigger a new AI Developer job from webhook
+     * AIDevJobService handles both local runner and shard execution
      */
     private function triggerAIDevJob(string $issueKey, string $cloudId): void {
         $memberId = $this->findMemberByCloudId($cloudId);
@@ -371,63 +377,23 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Check if local runner is enabled
-        $useLocalRunner = Flight::get('aidev.use_local_runner') ?? false;
-
-        if ($useLocalRunner) {
-            $this->spawnLocalRunner($issueKey, $memberId, $cloudId);
-            return;
-        }
-
-        // Use the shared AIDevJobService to trigger the job on a shard
+        // AIDevJobService handles local vs shard execution based on config
         $jobService = new AIDevJobService();
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId);
 
         if ($result['success']) {
-            $this->logger->info('AI Developer job triggered via webhook (shard)', [
+            $this->logger->info('AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
                 'job_id' => $result['job_id'],
                 'issue_key' => $issueKey,
-                'shard' => $result['shard'] ?? 'unknown'
+                'local' => $result['local'] ?? false,
+                'shard' => $result['shard'] ?? null
             ]);
         } else {
             $this->logger->warning('Failed to trigger AI Developer job via webhook', [
                 'member_id' => $memberId,
                 'issue_key' => $issueKey,
                 'error' => $result['error'] ?? 'Unknown error'
-            ]);
-        }
-    }
-
-    /**
-     * Spawn local AI Developer runner in a tmux session
-     * Uses YOUR Claude subscription instead of API credits
-     */
-    private function spawnLocalRunner(string $issueKey, int $memberId, string $cloudId): void {
-        $tmux = new TmuxService($memberId, $issueKey);
-
-        if ($tmux->exists()) {
-            $this->logger->info('Local tmux session already exists', ['issue_key' => $issueKey, 'member_id' => $memberId]);
-            return;
-        }
-
-        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
-
-        if (!file_exists($scriptPath)) {
-            $this->logger->error('Local runner script not found', ['path' => $scriptPath]);
-            return;
-        }
-
-        if ($tmux->spawn($scriptPath, true)) {
-            $this->logger->info('Local AI Developer spawned in tmux', [
-                'issue_key' => $issueKey,
-                'session' => $tmux->getSessionName(),
-                'member_id' => $memberId
-            ]);
-        } else {
-            $this->logger->error('Failed to spawn local AI Developer', [
-                'issue_key' => $issueKey,
-                'member_id' => $memberId
             ]);
         }
     }
@@ -461,10 +427,23 @@ class Webhook extends BaseControls\Control {
     // =========================================
 
     /**
-     * Close local tmux session when ai-dev label is removed
+     * Close local tmux session when ai-dev label is removed or complete status reached
      */
-    private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null): void {
+    private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null, string $reason = 'closed'): void {
         $tmux = new TmuxService($memberId, $issueKey);
+
+        // Clean up status file regardless of whether tmux session exists
+        $this->cleanupJobStatus($memberId, $issueKey, $reason);
+
+        // Get cloudId from issue if not provided (needed for label removal)
+        if (!$cloudId) {
+            $cloudId = $this->findCloudIdForIssue($issueKey, $memberId);
+        }
+
+        // Always remove the working label when session closes
+        if ($cloudId) {
+            $this->removeWorkingLabel($issueKey, $memberId, $cloudId);
+        }
 
         if (!$tmux->exists()) {
             $this->logger->debug('No local tmux session to close', ['issue_key' => $issueKey, 'member_id' => $memberId]);
@@ -475,12 +454,53 @@ class Webhook extends BaseControls\Control {
         $this->logger->info('Local tmux session closed', [
             'issue_key' => $issueKey,
             'member_id' => $memberId,
-            'success' => $killed
+            'success' => $killed,
+            'reason' => $reason
         ]);
 
-        // Remove ai-dev label from the ticket
-        if ($cloudId) {
+        // Remove ai-dev label from the ticket (only when label was explicitly removed, not on completion)
+        if ($cloudId && $reason === 'label_removed') {
             $this->removeAiDevLabel($issueKey, $memberId, $cloudId);
+        }
+    }
+
+    /**
+     * Clean up job status file when session is closed
+     */
+    private function cleanupJobStatus(int $memberId, string $issueKey, string $reason = 'closed'): void {
+        // Get domain ID for multi-tenant path
+        $domainId = \app\TmuxManager::getDomainId();
+
+        // Find and update the status file for this issue
+        $statusDir = __DIR__ . '/../storage/aidev_status/' . $domainId . '/member_' . $memberId;
+        if (!is_dir($statusDir)) {
+            return;
+        }
+
+        $files = glob($statusDir . '/*.json');
+        foreach ($files as $file) {
+            $content = @file_get_contents($file);
+            if ($content) {
+                $data = json_decode($content, true);
+                if ($data && ($data['issue_key'] ?? '') === $issueKey) {
+                    $status = $data['status'] ?? '';
+                    if (in_array($status, ['pending', 'running'])) {
+                        // Mark as complete/cancelled
+                        $data['status'] = ($reason === 'complete') ? 'complete' : 'cancelled';
+                        $data['updated_at'] = date('Y-m-d H:i:s');
+                        $data['close_reason'] = $reason;
+                        file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
+                        $this->logger->info('Job status file updated', [
+                            'issue_key' => $issueKey,
+                            'member_id' => $memberId,
+                            'old_status' => $status,
+                            'new_status' => $data['status'],
+                            'reason' => $reason
+                        ]);
+                    }
+                    break;
+                }
+            }
         }
     }
 
@@ -497,6 +517,25 @@ class Webhook extends BaseControls\Control {
             ]);
         } catch (\Exception $e) {
             $this->logger->warning('Failed to remove ai-dev label', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Remove the myctobot-working label from a Jira ticket
+     */
+    private function removeWorkingLabel(string $issueKey, int $memberId, string $cloudId): void {
+        try {
+            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
+            $jiraClient->removeLabel($issueKey, 'myctobot-working');
+            $this->logger->info('Removed myctobot-working label from ticket', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to remove myctobot-working label', [
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
@@ -531,7 +570,7 @@ class Webhook extends BaseControls\Control {
         // Switch to user database to find the board
         $this->logger->debug('checkCompleteStatusTransition: Switching to user DB', ['member_id' => $memberId]);
         try {
-            $userDb = new \app\services\UserDatabaseService($memberId);
+            UserDatabaseService::connect($memberId);
         } catch (\Exception $e) {
             $this->logger->debug('checkCompleteStatusTransition: Failed to get user database', [
                 'member_id' => $memberId,
@@ -542,14 +581,17 @@ class Webhook extends BaseControls\Control {
 
         // Find the board for this project in user database
         $this->logger->debug('checkCompleteStatusTransition: Looking for board', ['project_key' => $projectKey]);
-        $board = $userDb->getBoards()[0] ?? null; // First try getting all boards
+        $boards = UserDatabaseService::getBoards();
+        $board = $boards[0] ?? null; // First try getting all boards
         // Filter to find the matching project
-        foreach ($userDb->getBoards() as $b) {
-            if (($b['project_key'] ?? '') === $projectKey) {
-                $board = (object)$b;
+        foreach ($boards as $b) {
+            $bArray = is_object($b) ? (array)$b->export() : $b;
+            if (($bArray['project_key'] ?? '') === $projectKey) {
+                $board = (object)$bArray;
                 break;
             }
         }
+        UserDatabaseService::restore();
         if (!$board) {
             $this->logger->debug('checkCompleteStatusTransition: No board found', ['project_key' => $projectKey]);
             return;
@@ -596,11 +638,14 @@ class Webhook extends BaseControls\Control {
             }
 
             // Get board configuration from user database
-            $userDb = new \app\services\UserDatabaseService($memberId);
+            UserDatabaseService::connect($memberId);
+            $boards = UserDatabaseService::getBoards();
+            UserDatabaseService::restore();
             $board = null;
-            foreach ($userDb->getBoards() as $b) {
-                if (($b['project_key'] ?? '') === $projectKey) {
-                    $board = (object)$b;
+            foreach ($boards as $b) {
+                $bArray = is_object($b) ? (array)$b->export() : $b;
+                if (($bArray['project_key'] ?? '') === $projectKey) {
+                    $board = (object)$bArray;
                     break;
                 }
             }
@@ -761,17 +806,38 @@ class Webhook extends BaseControls\Control {
             $field = $item['field'] ?? '';
 
             if ($field === 'status') {
-                $newStatus = $item['toString'] ?? '';
+                // Jira uses 'toString' or 'to' for new status
+                $newStatus = $item['toString'] ?? $item['to'] ?? '';
 
-                // Check for "Done" status - kill the session
+                // Check for generic "Done" statuses
                 $doneStatuses = ['done', 'closed', 'resolved', 'complete', 'completed', 'cancelled'];
-                if (in_array(strtolower($newStatus), $doneStatuses)) {
+                $shouldClose = in_array(strtolower($newStatus), $doneStatuses);
+
+                // Also check board's configured complete status
+                if (!$shouldClose) {
+                    $projectKey = explode('-', $issueKey)[0] ?? '';
+                    $board = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+                    if ($board) {
+                        $boardCompleteStatus = $board->aidev_status_complete ?? null;
+                        if ($boardCompleteStatus && strcasecmp($newStatus, $boardCompleteStatus) === 0) {
+                            $shouldClose = true;
+                            $this->logger->debug('Board complete status matched', [
+                                'issue_key' => $issueKey,
+                                'new_status' => $newStatus,
+                                'board_complete_status' => $boardCompleteStatus
+                            ]);
+                        }
+                    }
+                }
+
+                if ($shouldClose) {
                     $this->logger->info('Ticket closed, killing local Claude session', [
                         'issue_key' => $issueKey,
                         'member_id' => $memberId,
                         'status' => $newStatus
                     ]);
-                    $tmux->kill();
+                    // Use closeLocalTmuxSession to also clean up status file
+                    $this->closeLocalTmuxSession($issueKey, $memberId, null, 'complete');
                     return;
                 }
 
@@ -1072,6 +1138,28 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
+     * Find cloud ID for a given issue key and member
+     */
+    private function findCloudIdForIssue(string $issueKey, int $memberId): ?string {
+        // Get the project key from the issue key
+        $projectKey = explode('-', $issueKey)[0] ?? '';
+
+        // Find the board for this project to get the cloud_id
+        $board = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+        if ($board && !empty($board->cloud_id)) {
+            return $board->cloud_id;
+        }
+
+        // Fall back to first token for member
+        $token = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+        if ($token) {
+            return $token->cloud_id;
+        }
+
+        return null;
+    }
+
+    /**
      * Find member ID by Atlassian cloud ID
      */
     private function findMemberByCloudId(string $cloudId): ?int {
@@ -1264,12 +1352,16 @@ class Webhook extends BaseControls\Control {
         }
 
         // Store the analysis
-        $userDb = new UserDatabaseService($memberId);
-        $analysisId = $userDb->storeAnalysis($boardId, 'digest', [
+        UserDatabaseService::connect($memberId);
+        $analysisId = UserDatabaseService::storeAnalysis($boardId, 'digest', [
             'success' => true,
             'analysis' => $analysis,
             'shard_job_id' => $digestJob->job_id
         ], $markdown);
+
+        // Update last_digest_at for the board
+        UserDatabaseService::updateBoard($boardId, ['last_digest_at' => date('Y-m-d H:i:s')]);
+        UserDatabaseService::restore();
 
         $this->logger->info('Digest analysis stored', [
             'member_id' => $memberId,
@@ -1281,9 +1373,6 @@ class Webhook extends BaseControls\Control {
         if ($digestJob->send_email) {
             $this->sendDigestEmail($digestJob, $markdown);
         }
-
-        // Update last_digest_at for the board
-        $userDb->updateBoard($boardId, ['last_digest_at' => date('Y-m-d H:i:s')]);
     }
 
     /**
@@ -1520,32 +1609,18 @@ class Webhook extends BaseControls\Control {
         }
 
         // Fallback: search database for jobs with matching current_shard_job_id
-        $members = R::find('member', 'ceobot_db IS NOT NULL AND ceobot_db != ?', ['']);
+        $job = R::findOne('aidevjobs', 'current_shard_job_id = ?', [$shardJobId]);
 
-        foreach ($members as $member) {
-            try {
-                $job = UserDatabase::with($member->id, function() use ($shardJobId) {
-                    return Bean::findOne('aidevjobs', 'current_shard_job_id = ?', [$shardJobId]);
-                });
-
-                if ($job) {
-                    return [
-                        'member_id' => (int) $member->id,
-                        'job_id' => $shardJobId,
-                        'issue_key' => $job->issue_key,
-                        'cloud_id' => $job->cloud_id,
-                        'board_id' => (int) $job->board_id,
-                        'status' => $job->status,
-                        'repo_connection_id' => $job->repo_connection_id
-                    ];
-                }
-            } catch (\Exception $e) {
-                // Skip members with database issues
-                $this->logger->debug('Error checking member database', [
-                    'member_id' => $member->id,
-                    'error' => $e->getMessage()
-                ]);
-            }
+        if ($job) {
+            return [
+                'member_id' => (int) $job->member_id,
+                'job_id' => $shardJobId,
+                'issue_key' => $job->issue_key,
+                'cloud_id' => $job->cloud_id,
+                'board_id' => (int) $job->board_id,
+                'status' => $job->status,
+                'repo_connection_id' => $job->repo_connection_id
+            ];
         }
 
         return null;

@@ -18,28 +18,41 @@ class AIDevAgentOrchestrator {
     private ?string $previewUrl;
     private int $maxVerifyIterations;
     private array $statusSettings;
+    private array $shopify;
+    private ?string $existingBranch;
+    private array $urls;
 
     /**
      * Create orchestrator for a ticket
      *
-     * @param array $ticket Ticket data with keys: key, summary, description, requirements, acceptance_criteria
+     * @param array $ticket Ticket data with keys: key, summary, description, requirements, acceptance_criteria,
+     *                      comments, attachments, linkedIssues, issueType, priority, status, ticketUrl
      * @param array $repo Repository data with keys: path, clone_url, default_branch, owner, name
      * @param string|null $previewUrl Shopify preview URL if applicable
      * @param int $maxVerifyIterations Max verify→fix loops (default 3)
      * @param array $statusSettings Status transition settings (working, pr_created, clarification, failed, complete)
+     * @param array $shopify Shopify config with keys: enabled, domain, storefront_password
+     * @param string|null $existingBranch Existing branch name for branch affinity
+     * @param array $urls URLs found in ticket to check
      */
     public function __construct(
         array $ticket,
         array $repo,
         ?string $previewUrl = null,
         int $maxVerifyIterations = 3,
-        array $statusSettings = []
+        array $statusSettings = [],
+        array $shopify = [],
+        ?string $existingBranch = null,
+        array $urls = []
     ) {
         $this->ticket = $ticket;
         $this->repo = $repo;
         $this->previewUrl = $previewUrl;
         $this->maxVerifyIterations = $maxVerifyIterations;
         $this->statusSettings = $statusSettings;
+        $this->shopify = $shopify;
+        $this->existingBranch = $existingBranch;
+        $this->urls = $urls;
     }
 
     /**
@@ -181,7 +194,7 @@ RESULT_EOF
 ```
 
 2. **Post final summary to Jira** - Use the MCP tool:
-   `jira_comment("{$issueKey}", "🤖 AI Developer completed work.\n\nPR: [your PR URL]\nSummary: [what was done]")`
+   `jira_comment("{$issueKey}", "AI Developer completed work.\n\nPR: [your PR URL]\nSummary: [what was done]")`
 
 ## Jira MCP Tools
 
@@ -196,7 +209,7 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 
 **You MUST post comments at key milestones** using `jira_comment`:
 
-1. **When starting**: "🤖 AI Developer starting work on this ticket..."
+1. **When starting**: "AI Developer starting work on this ticket..."
 2. **After implementation**: "Implementation complete, running verification..."
 3. **When PR is created**: Include PR URL, branch name, and summary
 4. **If blocked/failed**: Explain what went wrong and what's needed
@@ -217,6 +230,7 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 2. **Don't repeat history** - Don't include previous agent outputs in new agent prompts.
 3. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 4. **Output JSON** - Final output must be valid JSON for parsing.
+5. **No emojis** - Do NOT use emojis in Jira comments or any communication. Keep messages professional and plain text.
 
 ## Start Now
 
@@ -507,6 +521,262 @@ PROMPT;
 - **Preview URL**: {$this->previewUrl}
 - Use this URL for visual verification testing
 SECTION;
+    }
+
+    /**
+     * Build a direct prompt for Claude (non-orchestrator mode)
+     *
+     * This prompt is for direct interaction where Claude implements the ticket
+     * without spawning subagents.
+     *
+     * @return string The direct implementation prompt
+     */
+    public function buildDirectPrompt(): string {
+        $issueKey = $this->ticket['key'];
+        $summary = $this->ticket['summary'];
+        $description = $this->ticket['description'] ?? '';
+        $comments = $this->ticket['comments'] ?? '';
+        $attachments = $this->ticket['attachments'] ?? '';
+        $linkedIssues = $this->ticket['linkedIssues'] ?? '';
+        $issueType = $this->ticket['issueType'] ?? 'Task';
+        $priority = $this->ticket['priority'] ?? 'Medium';
+        $status = $this->ticket['status'] ?? 'Unknown';
+        $ticketUrl = $this->ticket['ticketUrl'] ?? '';
+        $repoPath = $this->repo['path'];
+        $defaultBranch = $this->repo['default_branch'] ?? 'main';
+
+        // Build ticket link
+        $ticketLink = $ticketUrl ? "- Ticket URL: {$ticketUrl}" : '';
+
+        // Build comments section
+        $commentsSection = '';
+        if (!empty($comments)) {
+            $commentsSection = "### Comments/Clarifications\n{$comments}\n";
+        }
+
+        // Build URL check section
+        $urlSection = '';
+        if (!empty($this->urls)) {
+            $urlList = implode("\n", array_map(fn($u) => "- {$u}", $this->urls));
+            $urlSection = <<<URLS
+
+## URLs to Check
+The following URLs were mentioned in the ticket. Check these to understand the current state:
+{$urlList}
+
+Use web fetch or browser tools to visit these URLs and analyze what you see.
+URLS;
+        }
+
+        // Build Shopify section
+        $shopifySection = '';
+        if (!empty($this->shopify['enabled'])) {
+            $domain = $this->shopify['domain'] ?? '';
+            $shopifySection = <<<SHOPIFY
+
+## Shopify Theme Development
+
+This repository is connected to a Shopify store. You can push changes and preview them.
+
+**Store**: {$domain}
+
+### Environment Variables
+- **SHOPIFY_CLI_THEME_TOKEN**: Access token for Shopify CLI
+- **SHOPIFY_FLAG_STORE**: Store domain ({$domain})
+- **SHOPIFY_STOREFRONT_PASSWORD**: Password for preview access (if store is password-protected)
+
+### Pushing Theme Changes
+After making changes to Liquid/CSS/JS files, push to create a development theme:
+```bash
+cd repo
+shopify theme push --development --json
+```
+
+This creates an unpublished development theme and returns a preview URL.
+
+### Getting Preview URL
+To get the preview URL for an existing development theme:
+```bash
+shopify theme list --json
+```
+
+Look for the theme with role "development" and construct the URL:
+`https://{$domain}/?preview_theme_id=<THEME_ID>`
+
+### Verifying Changes
+1. Push the theme with `shopify theme push --development`
+2. Note the theme ID from the output
+3. Visit the preview URL to verify your changes
+4. If the store is password-protected, use the storefront password
+
+SHOPIFY;
+        }
+
+        // Build branch instruction
+        $branchInstruction = '';
+        if ($this->existingBranch) {
+            $branchInstruction = <<<BRANCH
+5. **Checkout existing branch**: A branch already exists for this ticket. Checkout and pull the latest:
+   ```bash
+   git -C {$repoPath} fetch origin
+   git -C {$repoPath} checkout {$this->existingBranch}
+   git -C {$repoPath} pull origin {$this->existingBranch}
+   ```
+   Continue the work from where the previous run left off. Do NOT create a new branch.
+BRANCH;
+        } else {
+            $branchInstruction = "5. **Create a feature branch**: Use a descriptive name like `fix/{$issueKey}-description`.";
+        }
+
+        return <<<PROMPT
+You are an AI Developer implementing a Jira ticket. You have full access to:
+- Git and GitHub (clone, branch, commit, push, create PR)
+- Browser/web tools (to check URLs and verify your work)
+- Jira MCP tools (to post comments, upload screenshots, transition status)
+- Filesystem (to read and write code)
+
+## Your Mission
+Implement the requirements from Jira ticket **{$issueKey}** and create a Pull Request.
+
+## Jira Ticket: {$issueKey}
+{$ticketLink}
+- Type: {$issueType}
+- Priority: {$priority}
+- Status: {$status}
+
+### Summary
+{$summary}
+
+### Description
+{$description}
+
+{$commentsSection}
+{$attachments}
+{$linkedIssues}
+{$urlSection}
+{$shopifySection}
+
+## Repository
+- Owner: {$this->repo['owner']}
+- Repo: {$this->repo['name']}
+- Default Branch: {$defaultBranch}
+- Clone URL: {$this->repo['clone_url']}
+
+## Environment Variables Available
+The following environment variables are set and ready to use:
+
+- **GITHUB_TOKEN** / **GH_TOKEN**: GitHub access token for git operations
+  ```bash
+  git clone https://\$GITHUB_TOKEN@github.com/{$this->repo['owner']}/{$this->repo['name']}.git repo
+  ```
+
+## Jira MCP Tools
+
+You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operations:**
+
+- `jira_comment(issue_key, message)` - Post a comment to the ticket
+- `jira_transition(issue_key, status_name)` - Transition ticket to a new status
+- `jira_get_transitions(issue_key)` - Get available status transitions
+- `jira_get_issue(issue_key)` - Get issue details including attachments list
+- `jira_get_attachment(attachment_id)` - View an image attachment
+- `jira_upload_attachment(issue_key, file_path)` - Upload a screenshot or file
+- `jira_comment_with_image(issue_key, message, file_path)` - Post comment with inline screenshot
+
+**Examples:**
+```
+# Post a clarifying question
+jira_comment(issue_key="{$issueKey}", message="Could you clarify which element should be modified?")
+
+# Upload a Playwright screenshot
+jira_upload_attachment(issue_key="{$issueKey}", file_path=".playwright-mcp/screenshot.png")
+
+# Post completion comment with screenshot
+jira_comment_with_image(
+  issue_key="{$issueKey}",
+  message="Implementation complete. Screenshot attached showing the fix.",
+  file_path=".playwright-mcp/verification.png"
+)
+```
+
+## Your Workflow
+1. **Understand & Clarify**: Read the ticket carefully. Check any URLs mentioned to understand the current state.
+   - **IMPORTANT**: If requirements are unclear, ambiguous, or missing critical details, STOP and ask clarifying questions.
+   - Post questions using `jira_comment(issue_key, message)` before proceeding with implementation.
+   - Wait for a response (the user will send it via Jira and you'll receive updates).
+   - Example clarifying questions: "Which specific element should be modified?", "Should this apply to all pages or just X?", "What should happen when Y occurs?"
+2. **Fetch Attachments**: If there are image attachments, use `jira_get_issue` to list them, then `jira_get_attachment(attachment_id)` to view them.
+3. **Repository**: The repo is already cloned to `{$repoPath}` and checked out to `{$defaultBranch}`.
+   **IMPORTANT: Do NOT `cd {$repoPath}`** - stay in the current directory and reference files as `{$repoPath}/path/to/file`. Use `git -C {$repoPath} <command>` for git operations.
+4. **Analyze the codebase**: Find relevant files for the implementation.
+{$branchInstruction}
+6. **Implement the changes**: Write clean, well-tested code.
+7. **Verify your work**: If URLs were provided, check them to verify (if applicable).
+8. **Commit and push**: Write a good commit message referencing {$issueKey}.
+9. **Create a PR**: Use the GitHub CLI (`gh pr create`). Include:
+   - Title: [{$issueKey}] Brief description
+   - Body: Summary of changes, link to ticket, testing notes
+
+## Important Guidelines
+- **Ask First**: If requirements are unclear or ambiguous, post a clarifying question to Jira BEFORE implementing.
+- **Check URLs**: If URLs are mentioned, visit them to understand current state.
+- **Download images**: If attachments exist, download and view them.
+- **Iterate**: Don't just write code blindly. Verify your understanding first.
+- **Be thorough**: Check your changes work correctly before creating the PR.
+- **No emojis**: Do NOT use emojis in Jira comments or any communication. Keep messages professional and plain text.
+
+## Post Status Updates to Jira
+
+**You MUST post comments to Jira at key milestones** so stakeholders can track progress:
+
+1. **When starting**: Post "AI Developer starting work on this ticket..."
+2. **If asking questions**: Post your clarifying questions
+3. **When PR is created**: Post the PR URL and summary of changes
+4. **If blocked/failed**: Post what went wrong and what's needed
+
+Use the `jira_comment` MCP tool:
+```
+jira_comment(issue_key="{$issueKey}", message="AI Developer starting work...")
+jira_comment(issue_key="{$issueKey}", message="PR created: https://github.com/.../pull/123")
+```
+
+For screenshots/verification, use `jira_comment_with_image`:
+```
+jira_comment_with_image(
+  issue_key="{$issueKey}",
+  message="Verification screenshot attached",
+  file_path=".playwright-mcp/screenshot.png"
+)
+```
+
+{$this->buildStatusTransitionSection($issueKey)}
+
+## Output Format
+When complete, output a JSON summary:
+```json
+{
+  "success": true,
+  "issue_key": "{$issueKey}",
+  "pr_url": "https://github.com/...",
+  "pr_number": 123,
+  "branch_name": "fix/...",
+  "files_changed": ["path/to/file1.php", "path/to/file2.css"],
+  "summary": "Brief description of what was implemented"
+}
+```
+
+If you encounter issues or need clarification, output:
+```json
+{
+  "success": false,
+  "issue_key": "{$issueKey}",
+  "needs_clarification": true,
+  "questions": ["Question 1?", "Question 2?"],
+  "reason": "Why clarification is needed"
+}
+```
+
+Now, implement {$issueKey}!
+PROMPT;
     }
 
     /**

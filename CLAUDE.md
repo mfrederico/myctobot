@@ -429,6 +429,28 @@ The main session acts as an orchestrator:
 - Can use cheaper/faster models for simple tasks
 - Easier debugging (isolated transcripts)
 
+## Debugging
+
+### ALWAYS Check Logs First
+
+When debugging issues (404s, 500s, unexpected behavior), **check the application logs FIRST** before trying other diagnostic approaches:
+
+```bash
+# Check recent app logs for errors
+tail -50 log/app*.log | grep -i "error\|exception\|fatal"
+
+# Or search for specific controller/feature
+tail -100 log/app*.log | grep -i "boards\|edit"
+```
+
+The logs will usually show the exact error (e.g., `Class "app\Bean" not found`) immediately, saving time compared to:
+- SSH commands to remote servers
+- Cache clearing attempts
+- Permission/route debugging
+- Database queries
+
+**Log location**: `log/app-YYYY-MM-DD.log`
+
 ## See Also
 
 - `REDBEAN_README.md` - Detailed RedBeanPHP reference

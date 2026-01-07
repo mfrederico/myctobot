@@ -18,6 +18,7 @@ use \RedBeanPHP\R as R;
 class AtlassianAuth {
 
     private static $authUrl = 'https://auth.atlassian.com/authorize';
+
     private static $tokenUrl = 'https://auth.atlassian.com/oauth/token';
     private static $resourcesUrl = 'https://api.atlassian.com/oauth/token/accessible-resources';
 
@@ -195,6 +196,7 @@ class AtlassianAuth {
      * @param array $resource Resource data (cloud ID, URL, name)
      */
     public static function storeTokens($memberId, $tokens, $resource) {
+
         $expiresAt = date('Y-m-d H:i:s', time() + ($tokens['expires_in'] ?? 3600));
 
         // Load member for association
@@ -319,6 +321,7 @@ class AtlassianAuth {
      * @return string|null Access token or null if unavailable
      */
     public static function getValidToken($memberId, $cloudId) {
+
         $token = R::findOne('atlassiantoken',
             'member_id = ? AND cloud_id = ?',
             [$memberId, $cloudId]
@@ -353,6 +356,17 @@ class AtlassianAuth {
     }
 
     /**
+     * Get a specific connected site by cloud ID
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Cloud ID
+     * @return object|null Token bean with site_name, site_url, etc.
+     */
+    public static function getSiteByCloudId($memberId, $cloudId) {
+        return R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?', [$memberId, $cloudId]);
+    }
+
+    /**
      * Disconnect an Atlassian site
      *
      * @param int $memberId Member ID
@@ -360,6 +374,7 @@ class AtlassianAuth {
      * @return bool Success status
      */
     public static function disconnect($memberId, $cloudId) {
+
         $token = R::findOne('atlassiantoken',
             'member_id = ? AND cloud_id = ?',
             [$memberId, $cloudId]
@@ -387,6 +402,7 @@ class AtlassianAuth {
      * @return int Number of sites disconnected
      */
     public static function disconnectAll($memberId) {
+
         $tokens = R::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
         $count = count($tokens);
 
@@ -427,6 +443,7 @@ class AtlassianAuth {
      * @return string|null Site URL (e.g., https://yoursite.atlassian.net) or null if not found
      */
     public static function getSiteUrl($memberId, $cloudId) {
+
         $token = R::findOne('atlassiantoken',
             'member_id = ? AND cloud_id = ?',
             [$memberId, $cloudId]
@@ -500,6 +517,7 @@ class AtlassianAuth {
      * @return bool True if write scopes are available
      */
     public static function hasWriteScopes($memberId, $cloudId) {
+
         $token = R::findOne('atlassiantoken',
             'member_id = ? AND cloud_id = ?',
             [$memberId, $cloudId]

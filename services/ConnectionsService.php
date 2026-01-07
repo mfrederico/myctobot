@@ -14,11 +14,9 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
-use \app\Bean;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/EncryptionService.php';
-require_once __DIR__ . '/UserDatabase.php';
+require_once __DIR__ . '/SubscriptionService.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
@@ -72,8 +70,11 @@ class ConnectionsService {
 
     public function __construct(int $memberId) {
         $this->memberId = $memberId;
+
         $this->member = R::load('member', $memberId);
-        $this->tier = $this->member->getTier();
+        // Use SubscriptionService directly instead of FUSE model
+        // to avoid dependency on Model_Member being loaded
+        $this->tier = SubscriptionService::getTier($memberId);
     }
 
     /**
@@ -204,41 +205,39 @@ class ConnectionsService {
         ];
 
         try {
-            UserDatabase::with($this->memberId, function() use (&$result) {
-                // Check for GitHub token
-                $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            // Check for GitHub token
+            $tokenSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['github_token', $this->memberId]);
 
-                if (!$tokenSetting || empty($tokenSetting->setting_value)) {
-                    return;
-                }
+            if (!$tokenSetting || empty($tokenSetting->setting_value)) {
+                return $result;
+            }
 
-                // Get user info
-                $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_user']);
-                $user = $userSetting ? json_decode($userSetting->setting_value, true) : null;
+            // Get user info
+            $userSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['github_user', $this->memberId]);
+            $user = $userSetting ? json_decode($userSetting->setting_value, true) : null;
 
-                // Get connected repositories
-                $repos = Bean::find('repoconnections', 'enabled = ?', [1]);
-                $repoList = [];
-                foreach ($repos as $repo) {
-                    $repoList[] = $repo->export();
-                }
+            // Get connected repositories
+            $repos = R::find('repoconnections', 'enabled = ? AND member_id = ?', [1, $this->memberId]);
+            $repoList = [];
+            foreach ($repos as $repo) {
+                $repoList[] = $repo->export();
+            }
 
-                $result = [
-                    'connected' => true,
-                    'status' => ($user['login'] ?? 'Connected') . ' - ' . count($repoList) . ' repo(s)',
-                    'details' => [
-                        'user' => $user,
-                        'repos' => $repoList,
-                        'repo_count' => count($repoList)
-                    ],
-                    'actions' => [
-                        ['label' => 'Manage Repos', 'url' => '/enterprise/repos', 'class' => 'btn-outline-dark'],
-                        ['label' => 'Disconnect', 'url' => '/enterprise/github/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect GitHub?']
-                    ]
-                ];
-            });
+            $result = [
+                'connected' => true,
+                'status' => ($user['login'] ?? 'Connected') . ' - ' . count($repoList) . ' repo(s)',
+                'details' => [
+                    'user' => $user,
+                    'repos' => $repoList,
+                    'repo_count' => count($repoList)
+                ],
+                'actions' => [
+                    ['label' => 'Manage Repos', 'url' => '/enterprise/repos', 'class' => 'btn-outline-dark'],
+                    ['label' => 'Disconnect', 'url' => '/enterprise/github/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect GitHub?']
+                ]
+            ];
         } catch (\Exception $e) {
-            // User database not available
+            // Database error
         }
 
         return $result;
@@ -258,42 +257,41 @@ class ConnectionsService {
         ];
 
         try {
-            UserDatabase::with($this->memberId, function() use (&$result) {
-                $keySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
+            $keySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
 
-                if (!$keySetting || empty($keySetting->setting_value)) {
-                    return;
-                }
+            if (!$keySetting || empty($keySetting->setting_value)) {
+                return $result;
+            }
 
-                // Key is encrypted, just show it's configured
-                $maskedKey = 'sk-ant-****' . substr($keySetting->setting_value, -4);
+            // Decrypt the key and mask it like Anthropic console: sk-ant-api03-XXX...YYYY
+            $decryptedKey = EncryptionService::decrypt($keySetting->setting_value);
+            $maskedKey = $this->maskAnthropicKey($decryptedKey);
 
-                // Check for credit balance errors
-                $creditSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['credit_balance_error']);
+            // Check for credit balance errors
+            $creditSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $this->memberId]);
 
-                $status = 'Configured';
-                $statusClass = 'success';
-                if ($creditSetting && !empty($creditSetting->setting_value)) {
-                    $status = 'Low Credits Warning';
-                    $statusClass = 'warning';
-                }
+            $status = 'Configured';
+            $statusClass = 'success';
+            if ($creditSetting && !empty($creditSetting->setting_value)) {
+                $status = 'Low Credits Warning';
+                $statusClass = 'warning';
+            }
 
-                $result = [
-                    'connected' => true,
-                    'status' => $status,
-                    'status_class' => $statusClass,
-                    'details' => [
-                        'masked_key' => $maskedKey,
-                        'has_credit_warning' => $creditSetting && !empty($creditSetting->setting_value)
-                    ],
-                    'actions' => [
-                        ['label' => 'Update Key', 'url' => '/anthropic', 'class' => 'btn-outline-warning'],
-                        ['label' => 'Test Key', 'url' => '/anthropic/test', 'class' => 'btn-outline-secondary', 'ajax' => true]
-                    ]
-                ];
-            });
+            $result = [
+                'connected' => true,
+                'status' => $status,
+                'status_class' => $statusClass,
+                'details' => [
+                    'masked_key' => $maskedKey,
+                    'has_credit_warning' => $creditSetting && !empty($creditSetting->setting_value)
+                ],
+                'actions' => [
+                    ['label' => 'Update Key', 'url' => '/anthropic', 'class' => 'btn-outline-warning'],
+                    ['label' => 'Test Key', 'url' => '/anthropic/test', 'class' => 'btn-outline-secondary', 'ajax' => true]
+                ]
+            ];
         } catch (\Exception $e) {
-            // User database not available
+            // Database error
         }
 
         return $result;
@@ -408,5 +406,43 @@ class ConnectionsService {
             'ready' => empty($missing),
             'missing' => $missing
         ];
+    }
+
+    /**
+     * Mask an Anthropic API key to match their console display format
+     * Example: sk-ant-api03-3Wd...ZwAA
+     *
+     * @param string $key The decrypted API key
+     * @return string Masked key
+     */
+    private function maskAnthropicKey(string $key): string {
+        if (empty($key)) {
+            return '(not configured)';
+        }
+
+        // Anthropic keys typically look like: sk-ant-api03-XXXXXXXXXXXXXXXXXXXXXXXXXX
+        // Show prefix + first 3 chars of secret + ... + last 4 chars
+        $len = strlen($key);
+
+        if ($len < 20) {
+            // Key seems malformed, just show generic mask
+            return 'sk-ant-****...****';
+        }
+
+        // Find where the actual secret starts (after sk-ant-api0X-)
+        if (preg_match('/^(sk-ant-api\d+-)(.+)$/', $key, $matches)) {
+            $prefix = $matches[1];  // e.g., "sk-ant-api03-"
+            $secret = $matches[2];  // the rest
+
+            $secretLen = strlen($secret);
+            if ($secretLen > 7) {
+                return $prefix . substr($secret, 0, 3) . '...' . substr($secret, -4);
+            } else {
+                return $prefix . '***';
+            }
+        }
+
+        // Fallback for unexpected format
+        return substr($key, 0, 10) . '...' . substr($key, -4);
     }
 }

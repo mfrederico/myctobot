@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest", "--headless"]
+    },
+    "mantic": {
+      "command": "node",
+      "args": ["/home/mfrederico/development/Mantic.sh/dist/mcp-server.js"]
+    }
+  }
+}

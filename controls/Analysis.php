@@ -35,18 +35,19 @@ use \app\services\ShopifyClient;
 
 class Analysis extends BaseControls\Control {
 
-    private $userDb;
+    private $userDbConnected = false;
 
     private function initUserDb() {
-        if (!$this->userDb && $this->member && !empty($this->member->ceobot_db)) {
+        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
             try {
-                $this->userDb = new UserDatabaseService($this->member->id);
+                UserDatabaseService::connect($this->member->id);
+                $this->userDbConnected = true;
             } catch (Exception $e) {
                 $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
                 return false;
             }
         }
-        return $this->userDb !== null;
+        return $this->userDbConnected;
     }
 
     /**
@@ -61,8 +62,8 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $boards = $this->userDb->getEnabledBoards();
-        $recentAnalyses = $this->userDb->getAllRecentAnalyses(20);
+        $boards = UserDatabaseService::getEnabledBoards();
+        $recentAnalyses = UserDatabaseService::getAllRecentAnalyses(20);
 
         $this->render('analysis/index', [
             'title' => 'Sprint Analysis',
@@ -90,7 +91,7 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $board = $this->userDb->getBoard($boardId);
+        $board = UserDatabaseService::getBoard($boardId);
         if (!$board) {
             $this->flash('error', 'Board not found');
             Flight::redirect('/analysis');
@@ -248,7 +249,7 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $analysis = $this->userDb->getAnalysis($analysisId);
+        $analysis = UserDatabaseService::getAnalysis($analysisId);
         if (!$analysis) {
             $this->flash('error', 'Analysis not found');
             Flight::redirect('/analysis');
@@ -256,7 +257,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Get board info
-        $board = $this->userDb->getBoard($analysis['board_id']);
+        $board = UserDatabaseService::getBoard($analysis['board_id']);
 
         // Convert markdown to HTML for the view
         $markdownHtml = $this->markdownToHtml($analysis['content_markdown'] ?? '');
@@ -301,7 +302,7 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $analysis = $this->userDb->getAnalysis($analysisId);
+        $analysis = UserDatabaseService::getAnalysis($analysisId);
         if (!$analysis) {
             if ($isAjax) {
                 $this->jsonError('Analysis not found');
@@ -312,7 +313,7 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $board = $this->userDb->getBoard($analysis['board_id']);
+        $board = UserDatabaseService::getBoard($analysis['board_id']);
         $email = $this->getParam('email') ?? $this->member->email;
         $ccEmails = !empty($board['digest_cc']) ? $board['digest_cc'] : null;
 
@@ -328,7 +329,7 @@ class Analysis extends BaseControls\Control {
             if ($success) {
                 // Log the email
                 $recipients = $email . ($ccEmails ? ", {$ccEmails}" : '');
-                $this->userDb->logDigest(
+                UserDatabaseService::logDigest(
                     $analysis['board_id'],
                     $recipients,
                     $subject,
@@ -376,7 +377,7 @@ class Analysis extends BaseControls\Control {
         }
 
         $limit = (int) ($this->getParam('limit') ?? 10);
-        $analyses = $this->userDb->getRecentAnalyses($boardId, $limit);
+        $analyses = UserDatabaseService::getRecentAnalyses($boardId, $limit);
 
         $this->jsonSuccess(['analyses' => $analyses]);
     }
@@ -402,7 +403,7 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        $board = $this->userDb->getBoard($boardId);
+        $board = UserDatabaseService::getBoard($boardId);
         if (!$board) {
             $this->flash('error', 'Board not found');
             Flight::redirect('/analysis');
@@ -489,7 +490,7 @@ class Analysis extends BaseControls\Control {
             }
 
             // Find the most recent analysis for this board
-            $analysis = $this->userDb->getRecentAnalyses($job->board_id, 1);
+            $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
             if (!empty($analysis)) {
                 $this->flash('success', 'Shard analysis completed successfully!');
                 Flight::redirect('/analysis/view/' . $analysis[0]['id']);
@@ -558,7 +559,7 @@ class Analysis extends BaseControls\Control {
 
         // If completed, include analysis_id if we can find it
         if ($job->status === 'completed' && $this->initUserDb()) {
-            $analysis = $this->userDb->getRecentAnalyses($job->board_id, 1);
+            $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
             if (!empty($analysis)) {
                 $response['analysis_id'] = $analysis[0]['id'];
             }

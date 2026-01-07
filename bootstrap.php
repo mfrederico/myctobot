@@ -22,7 +22,10 @@ class Bootstrap {
     public function __construct($configFile = 'conf/config.ini') {
         // Initialize autoloader first - this must come before any framework usage
         $this->initAutoloader();
-        
+
+        // Resolve tenant from subdomain and load tenant-specific config
+        $configFile = $this->resolveConfigFile($configFile);
+
         // Now load configuration (after autoloader so Flight class is available)
         $this->loadConfig($configFile);
         
@@ -175,7 +178,10 @@ class Bootstrap {
             R::freeze($freeze);
 
             // Load RedBean FUSE models
+            // FUSE models automatically switch to correct database in open()/update() hooks
             require_once __DIR__ . '/models/Model_Member.php';
+            require_once __DIR__ . '/models/Model_Subscription.php';
+            require_once __DIR__ . '/models/Model_Jiraboards.php';
             
             // Enable query logging in debug mode
             if ($this->config['app']['debug'] ?? false) {
@@ -303,6 +309,43 @@ class Bootstrap {
         return $this->logger;
     }
     
+    /**
+     * Resolve config file based on subdomain
+     *
+     * greenworks.myctobot.ai → conf/config.greenworks.ini
+     * myctobot.ai → conf/config.ini (default)
+     * localhost → conf/config.ini (default)
+     *
+     * @param string $defaultConfigFile Fallback config path
+     * @return string Config file to use
+     */
+    private function resolveConfigFile(string $defaultConfigFile): string {
+        // Get host without port
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $host = explode(':', $host)[0];
+        $host = strtolower($host);
+
+        // Skip localhost and IP addresses - use default config
+        if ($host === 'localhost' || filter_var($host, FILTER_VALIDATE_IP)) {
+            return $defaultConfigFile;
+        }
+
+        // Extract subdomain (first part if 3+ parts)
+        // greenworks.myctobot.ai → greenworks
+        // myctobot.ai → null (no subdomain)
+        $parts = explode('.', $host);
+        if (count($parts) >= 3) {
+            $subdomain = $parts[0];
+            $subdomainConfig = "conf/config.{$subdomain}.ini";
+            if (file_exists($subdomainConfig)) {
+                return $subdomainConfig;
+            }
+        }
+
+        // Fallback to default
+        return $defaultConfigFile;
+    }
+
     /**
      * Get configuration
      */

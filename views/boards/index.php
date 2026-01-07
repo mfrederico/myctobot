@@ -61,7 +61,9 @@
                                 <?php foreach ($boards as $board): ?>
                                 <tr>
                                     <td>
-                                        <strong><?= htmlspecialchars($board['board_name']) ?></strong>
+                                        <a href="/boards/edit/<?= $board['id'] ?>">
+                                            <strong><?= htmlspecialchars($board['board_name']) ?></strong>
+                                        </a>
                                     </td>
                                     <td><code><?= htmlspecialchars($board['project_key']) ?></code></td>
                                     <td>

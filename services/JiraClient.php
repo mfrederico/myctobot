@@ -362,6 +362,9 @@ class JiraClient {
      * @return array Comment data
      */
     public function addComment(string $issueKey, string $body): array {
+        // Strip emojis for cleaner, professional messages
+        $body = self::stripEmojis($body);
+
         // Convert plain text to ADF format
         $adfBody = self::textToAdf($body);
 
@@ -833,6 +836,44 @@ class JiraClient {
     // ========================================
     // ADF Helper Methods
     // ========================================
+
+    /**
+     * Strip emojis from text
+     * Removes Unicode emoji characters for cleaner, professional messages
+     *
+     * @param string $text Input text
+     * @return string Text with emojis removed
+     */
+    public static function stripEmojis(string $text): string {
+        // Remove common emoji ranges:
+        // - Emoticons (1F600-1F64F)
+        // - Miscellaneous Symbols and Pictographs (1F300-1F5FF)
+        // - Transport and Map Symbols (1F680-1F6FF)
+        // - Supplemental Symbols and Pictographs (1F900-1F9FF)
+        // - Symbols and Pictographs Extended-A (1FA00-1FA6F)
+        // - Various other emoji blocks
+        $pattern = '/[\x{1F600}-\x{1F64F}' .  // Emoticons
+                   '\x{1F300}-\x{1F5FF}' .    // Misc Symbols and Pictographs
+                   '\x{1F680}-\x{1F6FF}' .    // Transport and Map
+                   '\x{1F700}-\x{1F77F}' .    // Alchemical Symbols
+                   '\x{1F780}-\x{1F7FF}' .    // Geometric Shapes Extended
+                   '\x{1F800}-\x{1F8FF}' .    // Supplemental Arrows-C
+                   '\x{1F900}-\x{1F9FF}' .    // Supplemental Symbols and Pictographs
+                   '\x{1FA00}-\x{1FA6F}' .    // Chess Symbols
+                   '\x{1FA70}-\x{1FAFF}' .    // Symbols and Pictographs Extended-A
+                   '\x{2600}-\x{26FF}' .      // Misc symbols
+                   '\x{2700}-\x{27BF}' .      // Dingbats
+                   '\x{FE00}-\x{FE0F}' .      // Variation Selectors
+                   '\x{1F1E0}-\x{1F1FF}' .    // Flags
+                   ']+/u';
+
+        $cleaned = preg_replace($pattern, '', $text);
+
+        // Clean up any double spaces left behind
+        $cleaned = preg_replace('/  +/', ' ', $cleaned);
+
+        return trim($cleaned);
+    }
 
     /**
      * Convert plain text to Atlassian Document Format (ADF)

@@ -22,18 +22,19 @@ use \app\services\ConnectionsService;
 
 class Settings extends BaseControls\Control {
 
-    private $userDb;
+    private $userDbConnected = false;
 
     private function initUserDb() {
-        if (!$this->userDb && $this->member && !empty($this->member->ceobot_db)) {
+        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
             try {
-                $this->userDb = new UserDatabaseService($this->member->id);
+                UserDatabaseService::connect($this->member->id);
+                $this->userDbConnected = true;
             } catch (Exception $e) {
                 $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
                 return false;
             }
         }
-        return $this->userDb !== null;
+        return $this->userDbConnected;
     }
 
     /**
@@ -93,7 +94,7 @@ class Settings extends BaseControls\Control {
 
         $digestEnabled = $this->getParam('digest_enabled') === 'true' || $this->getParam('digest_enabled') === '1';
 
-        $this->userDb->setSetting('digest_enabled', $digestEnabled ? '1' : '0');
+        UserDatabaseService::setSetting('digest_enabled', $digestEnabled ? '1' : '0');
 
         $this->jsonSuccess([], 'Notification preferences updated');
     }
@@ -130,7 +131,7 @@ class Settings extends BaseControls\Control {
         // Get board count for context
         $boardCount = 0;
         if ($this->initUserDb()) {
-            $boards = $this->userDb->getBoards();
+            $boards = UserDatabaseService::getBoards();
             $boardCount = count($boards);
         }
 
@@ -170,19 +171,19 @@ class Settings extends BaseControls\Control {
         // Get user stats
         $stats = [];
         if ($this->initUserDb()) {
-            $stats = $this->userDb->getStats();
+            $stats = UserDatabaseService::getStats();
         }
 
-        // Get subscription info
-        $currentTier = SubscriptionService::getTier($this->member->id);
-        $tierInfo = SubscriptionService::getTierInfo($currentTier);
+        // Get subscription info - use SubscriptionService directly for reliability
+        $tier = SubscriptionService::getTier($this->member->id);
+        $tierInfo = SubscriptionService::getTierInfo($tier);
 
         $this->render('settings/connections', [
             'title' => 'Settings',
             'connections' => $connections,
             'summary' => $summary,
             'aiDevReady' => $aiDevReady,
-            'tier' => $summary['tier'],
+            'tier' => $tier,
             'member' => $this->member,
             'sites' => $sites,
             'stats' => $stats,
@@ -221,8 +222,8 @@ class Settings extends BaseControls\Control {
 
         // Get boards and analyses
         if ($this->initUserDb()) {
-            $data['boards'] = $this->userDb->getBoards();
-            $data['analyses'] = $this->userDb->getAllRecentAnalyses(100);
+            $data['boards'] = UserDatabaseService::getBoards();
+            $data['analyses'] = UserDatabaseService::getAllRecentAnalyses(100);
         }
 
         // Output as JSON download

@@ -7,16 +7,13 @@
 namespace app;
 
 use \Flight as Flight;
-use \app\Bean;
+use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\services\TierFeatures;
 use \app\services\EncryptionService;
-use \app\services\UserDatabase;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
-require_once __DIR__ . '/../services/UserDatabase.php';
 
 class Anthropic extends BaseControls\Control {
 
@@ -61,27 +58,26 @@ class Anthropic extends BaseControls\Control {
                 }
 
                 try {
-                    UserDatabase::with($memberId, function() use ($apiKey) {
-                        // Encrypt and store
-                        $encrypted = EncryptionService::encrypt($apiKey);
+                    // Encrypt and store
+                    $encrypted = EncryptionService::encrypt($apiKey);
 
-                        // Find or create setting bean
-                        $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-                        if (!$setting) {
-                            $setting = Bean::dispense('enterprisesettings');
-                            $setting->setting_key = 'anthropic_api_key';
-                        }
-                        $setting->setting_value = $encrypted;
-                        $setting->is_encrypted = 1;
-                        $setting->updated_at = date('Y-m-d H:i:s');
-                        Bean::store($setting);
+                    // Find or create setting bean
+                    $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+                    if (!$setting) {
+                        $setting = R::dispense('enterprisesettings');
+                        $setting->setting_key = 'anthropic_api_key';
+                        $setting->member_id = $memberId;
+                    }
+                    $setting->setting_value = $encrypted;
+                    $setting->is_encrypted = 1;
+                    $setting->updated_at = date('Y-m-d H:i:s');
+                    R::store($setting);
 
-                        // Clear any credit balance error
-                        $creditError = Bean::findOne('enterprisesettings', 'setting_key = ?', ['credit_balance_error']);
-                        if ($creditError) {
-                            Bean::trash($creditError);
-                        }
-                    });
+                    // Clear any credit balance error
+                    $creditError = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $memberId]);
+                    if ($creditError) {
+                        R::trash($creditError);
+                    }
 
                     $this->flash('success', 'API key saved successfully.');
                     $this->logger->info('Anthropic API key updated', ['member_id' => $memberId]);
@@ -96,19 +92,17 @@ class Anthropic extends BaseControls\Control {
         }
 
         // Get current status
-        UserDatabase::with($memberId, function() use (&$apiKeySet, &$creditBalanceError) {
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-            $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
+        $apiKeySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+        $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
-            // Check for credit balance warnings
-            $creditSetting = Bean::findOne('enterprisesettings',
-                'setting_key = ? AND updated_at > ?',
-                ['credit_balance_error', date('Y-m-d H:i:s', strtotime('-24 hours'))]
-            );
-            if ($creditSetting) {
-                $creditBalanceError = $creditSetting->setting_value;
-            }
-        });
+        // Check for credit balance warnings
+        $creditSetting = R::findOne('enterprisesettings',
+            'setting_key = ? AND member_id = ? AND updated_at > ?',
+            ['credit_balance_error', $memberId, date('Y-m-d H:i:s', strtotime('-24 hours'))]
+        );
+        if ($creditSetting) {
+            $creditBalanceError = $creditSetting->setting_value;
+        }
 
         $this->render('anthropic/index', [
             'title' => 'Anthropic API Configuration',
@@ -127,15 +121,14 @@ class Anthropic extends BaseControls\Control {
         $apiKey = null;
 
         try {
-            UserDatabase::with($memberId, function() use (&$apiKey) {
-                $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
+            $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
 
-                if (!$setting || empty($setting->setting_value)) {
-                    throw new Exception('No API key configured');
-                }
+            if (!$setting || empty($setting->setting_value)) {
+                $this->json(['success' => false, 'error' => 'No API key configured']);
+                return;
+            }
 
-                $apiKey = EncryptionService::decrypt($setting->setting_value);
-            });
+            $apiKey = EncryptionService::decrypt($setting->setting_value);
 
             if (!$apiKey) {
                 $this->json(['success' => false, 'error' => 'No API key configured']);
@@ -160,6 +153,12 @@ class Anthropic extends BaseControls\Control {
                 ]
             ]);
 
+            // Clear any credit balance warning since the key works
+            $creditError = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $memberId]);
+            if ($creditError) {
+                R::trash($creditError);
+            }
+
             $this->json(['success' => true, 'message' => 'API key is valid and working!']);
 
         } catch (Exception $e) {
@@ -174,22 +173,22 @@ class Anthropic extends BaseControls\Control {
     public function remove() {
         if (!$this->requireEnterprise()) return;
 
-        try {
-            UserDatabase::with($this->member->id, function() {
-                $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-                if ($setting) {
-                    Bean::trash($setting);
-                }
+        $memberId = $this->member->id;
 
-                // Also remove credit balance error
-                $creditError = Bean::findOne('enterprisesettings', 'setting_key = ?', ['credit_balance_error']);
-                if ($creditError) {
-                    Bean::trash($creditError);
-                }
-            });
+        try {
+            $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+            if ($setting) {
+                R::trash($setting);
+            }
+
+            // Also remove credit balance error
+            $creditError = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $memberId]);
+            if ($creditError) {
+                R::trash($creditError);
+            }
 
             $this->flash('success', 'Anthropic API key removed.');
-            $this->logger->info('Anthropic API key removed', ['member_id' => $this->member->id]);
+            $this->logger->info('Anthropic API key removed', ['member_id' => $memberId]);
 
         } catch (Exception $e) {
             $this->logger->error('Failed to remove Anthropic API key', ['error' => $e->getMessage()]);
@@ -197,5 +196,25 @@ class Anthropic extends BaseControls\Control {
         }
 
         Flight::redirect('/anthropic');
+    }
+
+    /**
+     * Clear credit balance warning (AJAX)
+     */
+    public function clearWarning() {
+        if (!$this->requireLogin()) return;
+
+        $memberId = $this->member->id;
+
+        try {
+            $creditError = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $memberId]);
+            if ($creditError) {
+                R::trash($creditError);
+            }
+
+            Flight::json(['success' => true]);
+        } catch (\Exception $e) {
+            Flight::json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
     }
 }

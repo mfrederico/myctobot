@@ -4,6 +4,9 @@
             <i class="bi bi-pc-display-horizontal"></i> Workstation Shards
         </h1>
         <div>
+            <a href="/agents" class="btn btn-outline-info me-2">
+                <i class="bi bi-robot"></i> Agent Profiles
+            </a>
             <button class="btn btn-outline-secondary me-2" onclick="healthCheckAll()">
                 <i class="bi bi-heart-pulse"></i> Health Check All
             </button>

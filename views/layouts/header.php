@@ -94,7 +94,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/settings">
+                                <a class="dropdown-item" href="/settings/connections">
                                     <i class="bi bi-gear"></i> Settings
                                 </a>
                             </li>

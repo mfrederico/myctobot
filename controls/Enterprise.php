@@ -554,13 +554,27 @@ class Enterprise extends BaseControls\Control {
                 }
             }
 
+            // Get agents for dropdown
+            $agents = [];
+            $agentBeans = R::findAll('aiagents', 'member_id = ? AND is_active = 1 ORDER BY name ASC', [$this->member->id]);
+            foreach ($agentBeans as $agentBean) {
+                $agents[] = [
+                    'id' => $agentBean->id,
+                    'name' => $agentBean->name,
+                    'runner_type' => $agentBean->runner_type,
+                    'runner_type_label' => $this->getRunnerTypeLabel($agentBean->runner_type),
+                    'is_default' => (bool) $agentBean->is_default
+                ];
+            }
+
             $this->render('enterprise/repos', [
                 'title' => 'Repository Connections',
                 'repos' => $repos,
                 'boards' => $boards,
                 'mappings' => $mappings,
                 'availableRepos' => $availableRepos,
-                'githubConnected' => !empty($githubToken)
+                'githubConnected' => !empty($githubToken),
+                'agents' => $agents
             ]);
         } catch (\Exception $e) {
             $this->disconnectUserDb();
@@ -815,12 +829,22 @@ class Enterprise extends BaseControls\Control {
      * Helper: Get repository connections
      */
     private function getRepoConnections(): array {
-        $memberId = $this->member->id;
         $repos = [];
 
-        $repoBeans = R::findAll('repoconnections', 'member_id = ? ORDER BY created_at DESC', [$memberId]);
+        // repoconnections is in user SQLite database, use Bean::
+        $this->connectUserDb();
+        $repoBeans = Bean::findAll('repoconnections', ' ORDER BY created_at DESC ');
 
         foreach ($repoBeans as $bean) {
+            // Get agent name if assigned (aiagents is in MySQL)
+            $agentName = null;
+            if ($bean->agent_id) {
+                $agent = R::load('aiagents', $bean->agent_id);
+                if ($agent->id) {
+                    $agentName = $agent->name;
+                }
+            }
+
             $repos[] = [
                 'id' => $bean->id,
                 'provider' => $bean->provider,
@@ -830,11 +854,14 @@ class Enterprise extends BaseControls\Control {
                 'clone_url' => $bean->clone_url,
                 'access_token' => $bean->access_token,
                 'enabled' => $bean->enabled,
+                'agent_id' => $bean->agent_id,
+                'agent_name' => $agentName,
                 'created_at' => $bean->created_at,
                 'updated_at' => $bean->updated_at
             ];
         }
 
+        $this->disconnectUserDb();
         return $repos;
     }
 
@@ -1496,5 +1523,69 @@ class Enterprise extends BaseControls\Control {
 
         $loginUrl = AtlassianAuth::getLoginUrlWithWriteScopes();
         Flight::redirect($loginUrl);
+    }
+
+    // ========================================
+    // Agent Assignment
+    // ========================================
+
+    /**
+     * Assign an agent to a repository
+     */
+    public function assignagent() {
+        if (!$this->requireEnterprise()) return;
+
+        $memberId = $this->member->id;
+
+        // Get JSON body
+        $input = json_decode(file_get_contents('php://input'), true);
+        $repoId = (int) ($input['repo_id'] ?? 0);
+        $agentId = $input['agent_id'] ? (int) $input['agent_id'] : null;
+
+        if (!$repoId) {
+            Flight::jsonError('Repository ID required', 400);
+            return;
+        }
+
+        // repoconnections is in user SQLite database
+        $this->connectUserDb();
+
+        // Verify repo exists (no member_id filter - database is already per-tenant)
+        $repo = Bean::findOne('repoconnections', 'id = ?', [$repoId]);
+        if (!$repo) {
+            $this->disconnectUserDb();
+            Flight::jsonError('Repository not found', 404);
+            return;
+        }
+
+        // If agent_id provided, verify it belongs to this member (aiagents is in MySQL)
+        if ($agentId) {
+            $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+            if (!$agent) {
+                $this->disconnectUserDb();
+                Flight::jsonError('Agent not found', 404);
+                return;
+            }
+        }
+
+        // Update repo
+        $repo->agent_id = $agentId;
+        $repo->updated_at = date('Y-m-d H:i:s');
+        Bean::store($repo);
+
+        $this->disconnectUserDb();
+        Flight::jsonSuccess(['message' => 'Agent assigned successfully']);
+    }
+
+    /**
+     * Helper: Get runner type label
+     */
+    private function getRunnerTypeLabel(string $runnerType): string {
+        $labels = [
+            'claude_cli' => 'Claude CLI',
+            'anthropic_api' => 'Anthropic API',
+            'ollama' => 'Ollama'
+        ];
+        return $labels[$runnerType] ?? $runnerType;
     }
 }

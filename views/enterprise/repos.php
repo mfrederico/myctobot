@@ -40,7 +40,7 @@
                 <div class="list-group list-group-flush">
                     <?php foreach ($repos as $repo): ?>
                     <div class="list-group-item">
-                        <div class="d-flex justify-content-between align-items-center">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
                             <div>
                                 <i class="bi bi-<?= $repo['provider'] === 'github' ? 'github' : 'git' ?>"></i>
                                 <strong><?= htmlspecialchars($repo['repo_owner'] . '/' . $repo['repo_name']) ?></strong>
@@ -60,6 +60,32 @@
                                     <i class="bi bi-x-lg"></i> Disconnect
                                 </a>
                             </div>
+                        </div>
+                        <!-- Agent Assignment -->
+                        <div class="d-flex align-items-center gap-2 pt-2 border-top">
+                            <label class="text-muted small mb-0" style="min-width: 60px;">
+                                <i class="bi bi-robot"></i> Agent:
+                            </label>
+                            <select class="form-select form-select-sm" style="max-width: 250px;"
+                                    onchange="assignAgent(<?= $repo['id'] ?>, this.value, this)">
+                                <option value="">-- Use Default --</option>
+                                <?php foreach ($agents ?? [] as $agent): ?>
+                                <option value="<?= $agent['id'] ?>"
+                                        <?= ($repo['agent_id'] ?? null) == $agent['id'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($agent['name']) ?>
+                                    (<?= htmlspecialchars($agent['runner_type_label'] ?? $agent['runner_type']) ?>)
+                                    <?= $agent['is_default'] ? '[Default]' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (!empty($repo['agent_name'])): ?>
+                            <small class="text-muted">
+                                <i class="bi bi-check-circle text-success"></i>
+                            </small>
+                            <?php endif; ?>
+                            <a href="/agents" class="btn btn-sm btn-link text-muted p-0 ms-auto">
+                                <i class="bi bi-gear"></i> Manage Agents
+                            </a>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -116,7 +142,7 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-4">
-                        Map repositories to boards. Use the Jira label shown to trigger AI Developer for that specific repo.
+                        Map repositories to boards. Add both labels to a Jira ticket: <code>ai-dev</code> triggers the job, <code>repo-{id}</code> specifies which repository.
                     </p>
 
                     <?php foreach ($boards as $board):
@@ -142,8 +168,8 @@
                                     <thead class="table-light">
                                         <tr>
                                             <th>Repository</th>
-                                            <th style="width: 180px;">Jira Label</th>
-                                            <th style="width: 100px;">Actions</th>
+                                            <th style="width: 240px;">Jira Labels</th>
+                                            <th style="width: 80px;">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -156,7 +182,8 @@
                                                 }
                                             }
                                             if (!$repo) continue;
-                                            $label = 'ai-dev-' . $repo['id'];
+                                            $repoLabel = 'repo-' . $repo['id'];
+                                            $fullLabels = 'ai-dev ' . $repoLabel;
                                         ?>
                                         <tr>
                                             <td>
@@ -166,11 +193,11 @@
                                                 <small class="text-muted">Branch: <?= htmlspecialchars($repo['default_branch']) ?></small>
                                             </td>
                                             <td>
-                                                <div class="input-group input-group-sm">
-                                                    <input type="text" class="form-control form-control-sm font-monospace"
-                                                           value="<?= $label ?>" readonly id="label-<?= $repo['id'] ?>">
-                                                    <button class="btn btn-outline-secondary" type="button"
-                                                            onclick="copyLabel('<?= $label ?>', this)" title="Copy label">
+                                                <div class="d-flex gap-1 align-items-center">
+                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
+                                                    <code class="bg-secondary text-white px-2 py-1 rounded"><?= $repoLabel ?></code>
+                                                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                                                            onclick="copyLabel('<?= $fullLabels ?>', this)" title="Copy both labels">
                                                         <i class="bi bi-clipboard"></i>
                                                     </button>
                                                 </div>
@@ -293,6 +320,35 @@ function copyLabel(label, btn) {
             btn.classList.remove('btn-success');
             btn.classList.add('btn-outline-secondary');
         }, 1500);
+    });
+}
+
+function assignAgent(repoId, agentId, selectEl) {
+    fetch('/enterprise/assignagent', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            repo_id: repoId,
+            agent_id: agentId || null
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show brief success indicator
+            selectEl.style.borderColor = '#198754';
+            setTimeout(() => {
+                selectEl.style.borderColor = '';
+            }, 1500);
+        } else {
+            alert('Error: ' + (data.message || 'Failed to assign agent'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
     });
 }
 </script>

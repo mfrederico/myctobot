@@ -136,3 +136,20 @@ INSERT INTO authcontrol (control, method, level, description) VALUES
 ('api', 'crondigest', 1, 'Cron digest endpoint'),
 ('analysis', 'sharddigest', 1, 'Shard digest analysis endpoint')
 ON DUPLICATE KEY UPDATE level = VALUES(level);
+
+-- Pending signups (for email verification before provisioning)
+CREATE TABLE IF NOT EXISTS pendingsignup (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    subdomain VARCHAR(32) NOT NULL UNIQUE,
+    business_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    verification_token VARCHAR(64) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    resend_count INT DEFAULT 0,
+    last_resend_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_token (verification_token),
+    INDEX idx_expires (expires_at),
+    INDEX idx_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -46,6 +46,49 @@ class Mcp extends Control {
     }
 
     /**
+     * Tenant-aware MCP endpoint - handles JSON-RPC requests with tenant context
+     * POST /mcp/{tenant}/jira
+     *
+     * The tenant parameter is the domain ID (e.g., gwt-myctobot-ai)
+     * This allows using a fixed URL regardless of which subdomain is active.
+     *
+     * @param string $tenant Domain ID from the URL
+     */
+    public function jiraWithTenant(string $tenant) {
+        // Store tenant for logging purposes
+        $this->logger->debug('MCP Jira request with tenant', ['tenant' => $tenant]);
+
+        // Load tenant config and switch database context
+        $configFile = "conf/config.{$tenant}.ini";
+        if (file_exists($configFile)) {
+            $tenantConfig = parse_ini_file($configFile, true);
+            if ($tenantConfig && !empty($tenantConfig['database'])) {
+                // Switch to tenant database for token lookup
+                $dbConfig = $tenantConfig['database'];
+                $type = $dbConfig['type'] ?? 'mysql';
+                if ($type === 'sqlite') {
+                    $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                    $dsn = "sqlite:{$dbPath}";
+                    R::addDatabase($tenant, $dsn);
+                } else {
+                    $host = $dbConfig['host'] ?? 'localhost';
+                    $port = $dbConfig['port'] ?? 3306;
+                    $name = $dbConfig['name'] ?? $tenant;
+                    $user = $dbConfig['user'] ?? 'root';
+                    $pass = $dbConfig['pass'] ?? '';
+                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                    R::addDatabase($tenant, $dsn, $user, $pass);
+                }
+                R::selectDatabase($tenant);
+                $this->logger->debug('MCP switched to tenant database', ['tenant' => $tenant]);
+            }
+        }
+
+        // Call the main jira handler
+        $this->jira(['tenant' => $tenant]);
+    }
+
+    /**
      * Main MCP endpoint - handles all JSON-RPC requests
      * POST /mcp/jira
      */
@@ -125,11 +168,17 @@ class Mcp extends Control {
 
         // Method 1: Basic Auth (preferred for Claude Code)
         $authHeader = $request->getHeader('Authorization') ?? '';
+        $this->logger->debug('MCP authenticate', [
+            'authHeader' => substr($authHeader, 0, 20) . '...',
+            'method' => $request->method
+        ]);
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
+            $this->logger->debug('MCP Basic Auth decoded', ['decoded' => $decoded]);
             if ($decoded && strpos($decoded, ':') !== false) {
                 list($this->memberId, $this->cloudId) = explode(':', $decoded, 2);
                 $this->memberId = (int)$this->memberId;
+                $this->logger->debug('MCP credentials parsed', ['memberId' => $this->memberId, 'cloudId' => $this->cloudId]);
             }
         }
         // Method 2: Bearer token containing member:cloud
@@ -145,6 +194,7 @@ class Mcp extends Control {
 
         // Validate member exists and has access to this cloud
         if (!$this->memberId || !$this->cloudId) {
+            $this->logger->debug('MCP auth failed: missing credentials', ['memberId' => $this->memberId, 'cloudId' => $this->cloudId]);
             return false;
         }
 
@@ -152,6 +202,7 @@ class Mcp extends Control {
         $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?',
             [$this->memberId, $this->cloudId]);
 
+        $this->logger->debug('MCP auth token lookup', ['found' => !empty($token)]);
         return !empty($token);
     }
 

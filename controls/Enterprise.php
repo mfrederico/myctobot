@@ -142,34 +142,8 @@ class Enterprise extends BaseControls\Control {
      * Enterprise settings page
      */
     public function settings() {
-        if (!$this->requireEnterprise()) return;
-
-        $this->connectUserDb();
-        try {
-            // Fetch all API keys
-            $keys = Bean::findAll('anthropickeys', ' ORDER BY created_at DESC ');
-            $anthropicKeys = [];
-            foreach ($keys as $key) {
-                $decrypted = EncryptionService::decrypt($key->api_key);
-                $anthropicKeys[] = [
-                    'id' => $key->id,
-                    'name' => $key->name,
-                    'model' => $key->model,
-                    'masked_key' => $this->maskAnthropicKey($decrypted),
-                    'created_at' => $key->created_at
-                ];
-            }
-
-            $this->disconnectUserDb();
-            $this->render('enterprise/settings', [
-                'title' => 'Enterprise Settings',
-                'anthropicKeys' => $anthropicKeys,
-                'githubConfigured' => GitHubClient::isConfigured()
-            ]);
-        } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            throw $e;
-        }
+        // Redirect to unified settings page
+        Flight::redirect('/settings/connections');
     }
 
     /**
@@ -910,9 +884,10 @@ class Enterprise extends BaseControls\Control {
     public function jobs() {
         if (!$this->requireEnterprise()) return;
 
-        $jobManager = new AIDevJobManager($this->member->id);
-        $jobs = $jobManager->getAll(50);
-        $activeJobs = $jobManager->getActive();
+        // Use AIDevStatusService for JSON-based job tracking
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::getAllJobs($this->member->id, 50);
+        $activeJobs = \app\services\AIDevStatusService::getActiveJobs($this->member->id);
 
         $this->render('enterprise/jobs', [
             'title' => 'AI Developer Jobs',
@@ -1255,8 +1230,11 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AIDevJobManager($this->member->id);
-        $job = $jobManager->get($issueKey);
+        // Use AIDevStatusService for JSON-based job tracking
+        // findAllJobsByIssueKey returns all jobs (including completed) sorted by updated_at DESC
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;  // Get the most recent job
 
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
@@ -1265,7 +1243,7 @@ class Enterprise extends BaseControls\Control {
 
         $this->json([
             'success' => true,
-            'status' => $jobManager->formatJob($job)
+            'status' => $job
         ]);
     }
 
@@ -1282,20 +1260,42 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AIDevJobManager($this->member->id);
+        // Use AIDevStatusService for JSON-based job tracking
+        // findAllJobsByIssueKey returns all jobs (including completed) sorted by updated_at DESC
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;  // Get the most recent job
 
-        // Verify job exists
-        $job = $jobManager->get($issueKey);
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
             return;
         }
 
-        $logs = $jobManager->getLogs($issueKey);
+        // Convert steps_completed to log format
+        $logs = [];
+        foreach ($job['steps_completed'] ?? [] as $step) {
+            $logs[] = [
+                'level' => 'info',
+                'message' => $step['step'],
+                'context' => ['progress' => $step['progress'] ?? 0],
+                'created_at' => $step['timestamp'] ?? null
+            ];
+        }
+
+        // Add error if present
+        if (!empty($job['error'])) {
+            $logs[] = [
+                'level' => 'error',
+                'message' => $job['error'],
+                'context' => null,
+                'created_at' => $job['updated_at'] ?? null
+            ];
+        }
 
         $this->json([
             'success' => true,
-            'logs' => $logs
+            'logs' => $logs,
+            'job' => $job
         ]);
     }
 

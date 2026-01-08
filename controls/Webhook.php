@@ -31,9 +31,25 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Handle Jira webhook
-     * Endpoint: POST /webhook/jira
+     * Endpoint: POST /webhook/jira or POST /webhook/jira/{tenant}
+     *
+     * For multi-tenancy, use /webhook/jira/{tenant} where tenant matches
+     * the config file name (e.g., /webhook/jira/gwt loads conf/config.gwt.ini)
      */
-    public function jira() {
+    public function jira($params = []) {
+        // Check for tenant parameter (from URL: /webhook/jira/{tenant})
+        $tenant = $params['operation']->name ?? null;
+
+        // If tenant specified, switch to tenant database
+        if ($tenant) {
+            if (!$this->switchToTenantForWebhook($tenant)) {
+                Flight::response()->status(400);
+                echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
+                return;
+            }
+            $this->logger->info("Webhook using tenant: {$tenant}");
+        }
+
         // Get raw payload
         $payload = file_get_contents('php://input');
 
@@ -65,7 +81,8 @@ class Webhook extends BaseControls\Control {
         }
 
         $this->logger->info('Jira webhook received', [
-            'event' => $data['webhookEvent'] ?? 'unknown'
+            'event' => $data['webhookEvent'] ?? 'unknown',
+            'tenant' => $tenant ?? 'default'
         ]);
 
         try {
@@ -75,6 +92,60 @@ class Webhook extends BaseControls\Control {
             $this->logger->error('Jira webhook processing failed', ['error' => $e->getMessage()]);
             Flight::response()->status(500);
             echo json_encode(['error' => 'Processing failed']);
+        }
+    }
+
+    /**
+     * Switch to tenant database for webhook processing
+     */
+    private function switchToTenantForWebhook(string $tenant): bool {
+        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            $this->logger->warning("Webhook tenant config not found: {$configFile}");
+            return false;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $this->logger->warning("Invalid tenant config: {$configFile}");
+            return false;
+        }
+
+        // Override config values
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        // Add and switch to tenant database
+        try {
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                R::addDatabase($tenant, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $tenant;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                R::addDatabase($tenant, $dsn, $user, $pass);
+            }
+
+            R::selectDatabase($tenant);
+            Flight::set('tenant.slug', $tenant);
+            Flight::set('tenant.active', true);
+            return true;
+        } catch (\Exception $e) {
+            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
+            return false;
         }
     }
 
@@ -158,6 +229,10 @@ class Webhook extends BaseControls\Control {
             $currentLabels[] = is_string($label) ? $label : ($label['name'] ?? '');
         }
 
+        // Find any ai-dev label (ai-dev or ai-dev-{repo_id})
+        $currentAiDevLabel = $this->findAiDevLabel($currentLabels);
+        $hasAiDevLabel = $currentAiDevLabel !== null;
+
         // Check what changed
         $hasOnlyStatusChange = true;
         $hasLabelChange = false;
@@ -193,9 +268,10 @@ class Webhook extends BaseControls\Control {
             'issue_key' => $issueKey,
             'new_status' => $newStatusName,
             'current_labels' => $currentLabels,
-            'has_aidev_label' => in_array('ai-dev', $currentLabels)
+            'has_aidev_label' => $hasAiDevLabel,
+            'aidev_label' => $currentAiDevLabel
         ]);
-        if ($newStatusName && in_array('ai-dev', $currentLabels)) {
+        if ($newStatusName && $hasAiDevLabel) {
             $this->logger->debug('Calling checkCompleteStatusTransition', [
                 'issue_key' => $issueKey,
                 'new_status' => $newStatusName
@@ -231,16 +307,20 @@ class Webhook extends BaseControls\Control {
         // Skip status-only changes UNLESS the issue has ai-dev label (then check if job needed)
         if ($hasOnlyStatusChange && !$hasLabelChange) {
             // Even for status-only changes, check if ai-dev label is present and no job running
-            if (in_array('ai-dev', $currentLabels)) {
-                $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', ['issue_key' => $issueKey]);
-                $this->triggerAIDevJobIfNeeded($issueKey, $cloudId);
+            if ($hasAiDevLabel) {
+                $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', [
+                    'issue_key' => $issueKey,
+                    'label' => $currentAiDevLabel
+                ]);
+                $repoId = $this->extractRepoIdFromLabel($currentAiDevLabel);
+                $this->triggerAIDevJobIfNeeded($issueKey, $cloudId, $repoId);
             } else {
                 $this->logger->debug('Jira webhook: ignoring status-only change', ['issue_key' => $issueKey]);
             }
             return;
         }
 
-        // Check changelog for ai-dev label being added
+        // Check changelog for ai-dev label being added or removed
         foreach ($items as $item) {
             if ($item['field'] === 'labels') {
                 // Jira webhooks use 'from'/'to', but some formats use 'fromString'/'toString'
@@ -249,14 +329,36 @@ class Webhook extends BaseControls\Control {
                 $oldLabels = explode(' ', $oldLabelStr);
                 $newLabels = explode(' ', $newLabelStr);
 
-                // Check if ai-dev label was ADDED
-                $aiDevWasAdded = in_array('ai-dev', $newLabels) && !in_array('ai-dev', $oldLabels);
+                // Find ai-dev labels in old and new
+                $oldAiDevLabel = null;
+                $newAiDevLabel = null;
+                foreach ($oldLabels as $l) {
+                    if ($this->isAiDevLabel($l)) {
+                        $oldAiDevLabel = $l;
+                        break;
+                    }
+                }
+                foreach ($newLabels as $l) {
+                    if ($this->isAiDevLabel($l)) {
+                        $newAiDevLabel = $l;
+                        break;
+                    }
+                }
 
-                // Check if ai-dev label was REMOVED
-                $aiDevWasRemoved = in_array('ai-dev', $oldLabels) && !in_array('ai-dev', $newLabels);
+                // Check if ai-dev label was ADDED (any form)
+                $aiDevWasAdded = $newAiDevLabel !== null && $oldAiDevLabel === null;
 
-                if ($aiDevWasAdded && in_array('ai-dev', $currentLabels)) {
-                    $this->triggerAIDevJob($issueKey, $cloudId);
+                // Check if ai-dev label was REMOVED (any form)
+                $aiDevWasRemoved = $oldAiDevLabel !== null && $newAiDevLabel === null;
+
+                if ($aiDevWasAdded && $hasAiDevLabel) {
+                    $repoId = $this->extractRepoIdFromLabel($currentAiDevLabel);
+                    $this->logger->info('AI-dev label added, triggering job', [
+                        'issue_key' => $issueKey,
+                        'label' => $currentAiDevLabel,
+                        'repo_id' => $repoId
+                    ]);
+                    $this->triggerAIDevJob($issueKey, $cloudId, $repoId);
                     return;
                 }
 
@@ -265,7 +367,8 @@ class Webhook extends BaseControls\Control {
                     if ($memberId) {
                         $this->logger->info('ai-dev label removed, closing local session if exists', [
                             'issue_key' => $issueKey,
-                            'member_id' => $memberId
+                            'member_id' => $memberId,
+                            'removed_label' => $oldAiDevLabel
                         ]);
                         $this->closeLocalTmuxSession($issueKey, $memberId);
                     }
@@ -278,7 +381,7 @@ class Webhook extends BaseControls\Control {
     /**
      * Trigger AI Dev job only if not already running/completed
      */
-    private function triggerAIDevJobIfNeeded(string $issueKey, string $cloudId): void {
+    private function triggerAIDevJobIfNeeded(string $issueKey, string $cloudId, ?int $repoId = null): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
             return;
@@ -319,7 +422,7 @@ class Webhook extends BaseControls\Control {
         }
 
         // No active job found, trigger new one
-        $this->triggerAIDevJob($issueKey, $cloudId);
+        $this->triggerAIDevJob($issueKey, $cloudId, $repoId);
     }
 
     /**
@@ -369,8 +472,12 @@ class Webhook extends BaseControls\Control {
     /**
      * Trigger a new AI Developer job from webhook
      * AIDevJobService handles both local runner and shard execution
+     *
+     * @param string $issueKey Jira issue key (e.g., SSI-1234)
+     * @param string $cloudId Atlassian cloud ID
+     * @param int|null $repoId Optional repo connection ID from ai-dev-{id} label
      */
-    private function triggerAIDevJob(string $issueKey, string $cloudId): void {
+    private function triggerAIDevJob(string $issueKey, string $cloudId, ?int $repoId = null): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
             $this->logger->debug('No member found for cloud', ['cloud_id' => $cloudId]);
@@ -378,14 +485,16 @@ class Webhook extends BaseControls\Control {
         }
 
         // AIDevJobService handles local vs shard execution based on config
+        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId)
         $jobService = new AIDevJobService();
-        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId);
+        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId);
 
         if ($result['success']) {
             $this->logger->info('AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
                 'job_id' => $result['job_id'],
                 'issue_key' => $issueKey,
+                'repo_id' => $repoId,
                 'local' => $result['local'] ?? false,
                 'shard' => $result['shard'] ?? null
             ]);
@@ -393,6 +502,7 @@ class Webhook extends BaseControls\Control {
             $this->logger->warning('Failed to trigger AI Developer job via webhook', [
                 'member_id' => $memberId,
                 'issue_key' => $issueKey,
+                'repo_id' => $repoId,
                 'error' => $result['error'] ?? 'Unknown error'
             ]);
         }
@@ -1073,6 +1183,37 @@ class Webhook extends BaseControls\Control {
     // ========================================
     // Helper Methods
     // ========================================
+
+    /**
+     * Check if any label matches the ai-dev pattern (ai-dev or ai-dev-{repo_id})
+     * Returns the matching label or null
+     */
+    private function findAiDevLabel(array $labels): ?string {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if ($labelName === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $labelName)) {
+                return $labelName;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a label matches the ai-dev pattern
+     */
+    private function isAiDevLabel(string $label): bool {
+        return $label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label);
+    }
+
+    /**
+     * Extract repo ID from ai-dev-{repo_id} label, returns null for plain 'ai-dev'
+     */
+    private function extractRepoIdFromLabel(string $label): ?int {
+        if (preg_match('/^ai-dev-(\d+)$/', $label, $matches)) {
+            return (int) $matches[1];
+        }
+        return null;
+    }
 
     /**
      * Validate Jira webhook signature

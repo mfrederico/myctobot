@@ -26,6 +26,9 @@ require_once __DIR__ . '/../services/AIDevAgent.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
+require_once __DIR__ . '/../lib/Bean.php';
+
+use \app\Bean;
 
 class Enterprise extends BaseControls\Control {
 
@@ -166,6 +169,50 @@ class Enterprise extends BaseControls\Control {
         } catch (\Exception $e) {
             $this->disconnectUserDb();
             throw $e;
+        }
+    }
+
+    /**
+     * Re-register Jira webhook with correct tenant URL
+     * POST /enterprise/reregisterwebhook
+     */
+    public function reregisterwebhook() {
+        if (!$this->requireEnterprise()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
+
+        $cloudId = $this->getParam('cloud_id');
+        if (empty($cloudId)) {
+            // Try to get from member's first Atlassian token
+            $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            if ($token) {
+                $cloudId = $token->cloud_id;
+            }
+        }
+
+        if (empty($cloudId)) {
+            $this->json(['success' => false, 'error' => 'No Atlassian connection found']);
+            return;
+        }
+
+        try {
+            $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
+
+            if ($result) {
+                $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+                $this->json([
+                    'success' => true,
+                    'message' => "Webhook re-registered with tenant: {$tenantSlug}"
+                ]);
+            } else {
+                $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Webhook re-registration failed', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
         }
     }
 
@@ -457,13 +504,33 @@ class Enterprise extends BaseControls\Control {
         }
         try {
             // Get board-repo mappings
+            // Note: mapboard() uses RedBeanPHP associations which create jiraboards_id and repoconnections_id
+            // Support both old schema (board_id, repo_connection_id) and new association columns
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                $mappings[$bean->board_id][] = [
+                // Use association column names (jiraboards_id, repoconnections_id) with fallback to old schema
+                $boardId = $bean->jiraboards_id ?? $bean->board_id;
+                $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
+
+                if (!$boardId || !$repoId) continue; // Skip invalid mappings
+
+                // Dedupe: skip if this exact mapping already exists
+                $isDupe = false;
+                if (isset($mappings[$boardId])) {
+                    foreach ($mappings[$boardId] as $existing) {
+                        if ($existing['repo_connection_id'] == $repoId) {
+                            $isDupe = true;
+                            break;
+                        }
+                    }
+                }
+                if ($isDupe) continue;
+
+                $mappings[$boardId][] = [
                     'id' => $bean->id,
-                    'board_id' => $bean->board_id,
-                    'repo_connection_id' => $bean->repo_connection_id,
+                    'board_id' => $boardId,
+                    'repo_connection_id' => $repoId,
                     'is_default' => $bean->is_default,
                     'created_at' => $bean->created_at
                 ];
@@ -697,6 +764,48 @@ class Enterprise extends BaseControls\Control {
             $this->disconnectUserDb();
             $this->logger->error('Failed to map board', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to map board to repository.');
+        }
+
+        Flight::redirect('/enterprise/repos');
+    }
+
+    /**
+     * Remove a board-to-repository mapping
+     */
+    public function unmapboard() {
+        if (!$this->requireEnterprise()) return;
+
+        $boardId = (int)$this->getParam('board_id');
+        $repoId = (int)$this->getParam('repo_id');
+
+        if (empty($boardId) || empty($repoId)) {
+            $this->flash('error', 'Invalid board or repository.');
+            Flight::redirect('/enterprise/repos');
+            return;
+        }
+
+        try {
+            $this->connectUserDb();
+
+            // Find and delete the mapping
+            $mapping = Bean::findOne('boardrepomapping',
+                '(jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
+                [$boardId, $boardId, $repoId, $repoId]
+            );
+
+            if ($mapping) {
+                Bean::trash($mapping);
+                $this->flash('success', 'Repository mapping removed.');
+            } else {
+                $this->flash('warning', 'Mapping not found.');
+            }
+
+            $this->disconnectUserDb();
+
+        } catch (Exception $e) {
+            $this->disconnectUserDb();
+            $this->logger->error('Failed to unmap board', ['error' => $e->getMessage()]);
+            $this->flash('error', 'Failed to remove mapping.');
         }
 
         Flight::redirect('/enterprise/repos');
@@ -1193,12 +1302,20 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
+            // Get tenant slug for multi-tenancy support
+            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
+                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+                : '';
+
             $cmd = sprintf(
-                'php %s --script --secret=%s --member=%d --issue=%s --action=resume > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=resume%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
-                escapeshellarg($issueKey)
+                escapeshellarg($job->id),
+                escapeshellarg($issueKey),
+                $tenantParam
             );
 
             exec($cmd);
@@ -1283,14 +1400,22 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
+            // Get tenant slug for multi-tenancy support
+            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
+                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+                : '';
+
             $cmd = sprintf(
-                'php %s --script --secret=%s --member=%d --issue=%s --action=retry --branch=%s --pr=%d > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=retry --branch=%s --pr=%d%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
+                escapeshellarg($shardJobId),
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
-                $job->prNumber ?? 0
+                $job->prNumber ?? 0,
+                $tenantParam
             );
 
             exec($cmd);
@@ -1298,7 +1423,8 @@ class Enterprise extends BaseControls\Control {
             $this->logger->info('AI Developer retry job started', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'branch' => $job->branchName
+                'branch' => $job->branchName,
+                'tenant' => $tenantSlug ?? 'default'
             ]);
 
             $this->json([

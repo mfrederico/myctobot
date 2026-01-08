@@ -89,6 +89,29 @@
         </div>
     </div>
 
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="btn-group w-100" role="group">
+                <a href="/enterprise/repos" class="btn btn-outline-primary">
+                    <i class="bi bi-folder"></i> Repositories
+                </a>
+                <a href="/enterprise/jobs" class="btn btn-outline-primary">
+                    <i class="bi bi-list-task"></i> Jobs
+                </a>
+                <a href="/agents" class="btn btn-outline-primary">
+                    <i class="bi bi-robot"></i> Agent Profiles
+                </a>
+                <a href="/admin/shards" class="btn btn-outline-primary">
+                    <i class="bi bi-pc-display-horizontal"></i> Workstations
+                </a>
+                <a href="/enterprise/settings" class="btn btn-outline-primary">
+                    <i class="bi bi-gear"></i> Settings
+                </a>
+            </div>
+        </div>
+    </div>
+
     <!-- Active Jobs -->
     <?php if (!empty($activeJobs)): ?>
     <div class="card mb-4">

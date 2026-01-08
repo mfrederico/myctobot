@@ -164,13 +164,16 @@ $hooksConfig = $agent['hooks_config'] ?? [];
     <?php elseif ($activeTab === 'mcp'): ?>
     <!-- MCP Servers Tab -->
     <div class="card">
-        <div class="card-header">
-            <i class="bi bi-plug"></i> MCP Servers Configuration
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-plug"></i> MCP Servers Configuration</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadDefaultMcp()">
+                <i class="bi bi-arrow-repeat"></i> Load Defaults
+            </button>
         </div>
         <div class="card-body">
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
-                Configure MCP servers that will be available to this agent. This generates the <code>.mcp.json</code> file.
+                Configure MCP servers that will be available to this agent. These are merged with built-in defaults (Jira, Playwright) at runtime.
             </div>
 
             <form method="POST" action="/agents/update/<?= $agentId ?>">
@@ -179,21 +182,7 @@ $hooksConfig = $agent['hooks_config'] ?? [];
 
                 <div class="mb-3">
                     <label class="form-label">MCP Servers (JSON)</label>
-                    <textarea class="form-control font-monospace" name="mcp_servers" rows="15"
-                              placeholder='[
-  {
-    "name": "jira",
-    "type": "http",
-    "url": "https://myctobot.ai/mcp-jira/message",
-    "headers": {"Authorization": "Basic xxx"}
-  },
-  {
-    "name": "playwright",
-    "type": "stdio",
-    "command": "npx",
-    "args": ["@playwright/mcp@latest", "--headless"]
-  }
-]'><?= htmlspecialchars(json_encode($mcpServers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '[]') ?></textarea>
+                    <textarea class="form-control font-monospace" id="mcp_servers" name="mcp_servers" rows="18"><?= htmlspecialchars(json_encode($mcpServers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '[]') ?></textarea>
                     <div class="form-text">
                         Each server needs: <code>name</code>, <code>type</code> (http or stdio), and either <code>url</code>+<code>headers</code> or <code>command</code>+<code>args</code>
                     </div>
@@ -207,6 +196,33 @@ $hooksConfig = $agent['hooks_config'] ?? [];
             </form>
         </div>
     </div>
+
+<script>
+function loadDefaultMcp() {
+    const defaultConfig = [
+        {
+            "name": "playwright",
+            "type": "stdio",
+            "command": "npx",
+            "args": ["@playwright/mcp@latest", "--headless"]
+        },
+        {
+            "name": "github",
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}
+        },
+        {
+            "name": "fetch",
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-fetch"]
+        }
+    ];
+    document.getElementById('mcp_servers').value = JSON.stringify(defaultConfig, null, 2);
+}
+</script>
 
     <?php elseif ($activeTab === 'hooks'): ?>
     <!-- Hooks Tab -->

@@ -239,8 +239,10 @@ CREATE TABLE IF NOT EXISTS `repoconnections` (
     `clone_url` VARCHAR(500),
     `access_token` TEXT,
     `enabled` TINYINT(1) DEFAULT 1,
+    `agent_id` INT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_agent` (`agent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Board to repo mapping

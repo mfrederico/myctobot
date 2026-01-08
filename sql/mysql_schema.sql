@@ -137,6 +137,26 @@ INSERT INTO authcontrol (control, method, level, description) VALUES
 ('analysis', 'sharddigest', 1, 'Shard digest analysis endpoint')
 ON DUPLICATE KEY UPDATE level = VALUES(level);
 
+-- AI Agent profiles (runner configurations for AI Developer)
+CREATE TABLE IF NOT EXISTS aiagents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    runner_type VARCHAR(50) NOT NULL DEFAULT 'claude_cli',
+    runner_config JSON,
+    mcp_servers JSON,
+    hooks_config JSON,
+    is_active TINYINT(1) DEFAULT 1,
+    is_default TINYINT(1) DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES member(id) ON DELETE CASCADE,
+    INDEX idx_member_id (member_id),
+    INDEX idx_active (is_active),
+    INDEX idx_default (is_default)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Pending signups (for email verification before provisioning)
 CREATE TABLE IF NOT EXISTS pendingsignup (
     id INT AUTO_INCREMENT PRIMARY KEY,

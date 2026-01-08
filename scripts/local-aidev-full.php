@@ -598,19 +598,24 @@ file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 // Create .mcp.json for MCP servers
 // ============================================
 // Start with defaults (Jira HTTP + Playwright stdio)
-$mcpHttpUrl = 'https://myctobot.ai/mcp/jira';
+// Use fixed main domain with tenant slug in URL path
+// This ensures MCP works regardless of which subdomain context we're in
+// URL pattern: https://myctobot.ai/mcp/{tenant}/jira
+// Tenant comes from --tenant flag (e.g., 'gwt'), fall back to 'default' if not set
+$mcpTenant = $tenant ?? 'default';
+$mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
 $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
-$mcpServers = [
-    'playwright' => [
+$mcpServers = (object) [
+    'playwright' => (object) [
         'type' => 'stdio',
         'command' => 'npx',
         'args' => ['@playwright/mcp@latest'],
         'env' => new \stdClass()
     ],
-    'jira' => [
+    'jira' => (object) [
         'type' => 'http',
         'url' => $mcpHttpUrl,
-        'headers' => [
+        'headers' => (object) [
             'Authorization' => "Basic {$mcpCredentials}"
         ]
     ]
@@ -625,14 +630,14 @@ if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
         $serverType = $server['type'] ?? 'stdio';
 
         if ($serverType === 'http') {
-            $mcpServers[$serverName] = [
+            $mcpServers->$serverName = (object) [
                 'type' => 'http',
                 'url' => $server['url'] ?? '',
-                'headers' => $server['headers'] ?? []
+                'headers' => (object) ($server['headers'] ?? [])
             ];
         } else {
             // stdio type
-            $mcpServers[$serverName] = [
+            $mcpServers->$serverName = (object) [
                 'type' => 'stdio',
                 'command' => $server['command'] ?? '',
                 'args' => $server['args'] ?? [],

@@ -556,14 +556,22 @@ $mcpConfig = [
     ]
 ];
 file_put_contents("{$workDir}/.mcp.json", json_encode($mcpConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+// Also copy to repo directory since Claude runs from there (after cd repo)
+if (is_dir($repoDir)) {
+    copy("{$workDir}/.mcp.json", "{$repoDir}/.mcp.json");
+    echo "  MCP config copied to repo directory\n";
+}
 echo "  MCP Jira: HTTP transport ({$mcpHttpUrl})\n";
 
 // Pre-approve MCP servers in ~/.claude.json so Claude doesn't prompt
+// Use $repoDir since Claude runs from there (after cd repo in the prompt)
 $claudeConfigPath = getenv('HOME') . '/.claude.json';
 if (file_exists($claudeConfigPath)) {
     $claudeConfig = json_decode(file_get_contents($claudeConfigPath), true);
     if ($claudeConfig && isset($claudeConfig['projects'])) {
-        $claudeConfig['projects'][$workDir] = [
+        // Register both workDir and repoDir to cover both paths
+        $projectConfig = [
             'allowedTools' => [],
             'dontCrawlDirectory' => false,
             'mcpContextUris' => [],
@@ -576,6 +584,10 @@ if (file_exists($claudeConfigPath)) {
             'hasClaudeMdExternalIncludesApproved' => false,
             'hasClaudeMdExternalIncludesWarningShown' => false
         ];
+        $claudeConfig['projects'][$workDir] = $projectConfig;
+        if (is_dir($repoDir)) {
+            $claudeConfig['projects'][$repoDir] = $projectConfig;
+        }
         file_put_contents($claudeConfigPath, json_encode($claudeConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         echo "Pre-approved MCP servers for this session\n";
     }

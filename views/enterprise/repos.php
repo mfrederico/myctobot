@@ -19,7 +19,7 @@
         <div class="col-lg-8">
             <!-- Connected Repositories -->
             <div class="card mb-4">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Connected Repositories</h5>
                 </div>
                 <?php if (empty($repos)): ?>
@@ -28,7 +28,7 @@
                         <i class="bi bi-folder2-open display-4 text-muted"></i>
                         <p class="text-muted mt-2">No repositories connected yet.</p>
                         <?php if ($githubConnected): ?>
-                        <p>Add a repository from the list below.</p>
+                        <p>Add a repository below to get started.</p>
                         <?php else: ?>
                         <a href="/enterprise/github" class="btn btn-dark">
                             <i class="bi bi-github"></i> Connect GitHub First
@@ -108,81 +108,125 @@
             </div>
             <?php endif; ?>
 
-            <!-- Board Mappings -->
-            <?php if (!empty($repos) && !empty($boards)): ?>
+            <!-- Board Repository Mappings (Board-Centric) -->
+            <?php if (!empty($boards)): ?>
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">Board to Repository Mappings</h5>
+                    <h5 class="card-title mb-0">Board Repository Mappings</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted">Map your Jira boards to repositories for AI Developer.</p>
+                    <p class="text-muted mb-4">
+                        Map repositories to boards. Use the Jira label shown to trigger AI Developer for that specific repo.
+                    </p>
 
-                    <form method="POST" action="/enterprise/mapboard">
-                        <?php if (!empty($csrf) && is_array($csrf)): ?>
-                            <?php foreach ($csrf as $name => $value): ?>
-                                <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-
-                        <div class="row">
-                            <div class="col-md-5">
-                                <label for="board_id" class="form-label">Board</label>
-                                <select class="form-select" name="board_id" id="board_id" required>
-                                    <option value="">Select board...</option>
-                                    <?php foreach ($boards as $board): ?>
-                                    <option value="<?= $board['id'] ?>">
-                                        <?= htmlspecialchars($board['board_name']) ?> (<?= htmlspecialchars($board['project_key']) ?>)
-                                    </option>
-                                    <?php endforeach; ?>
-                                </select>
+                    <?php foreach ($boards as $board):
+                        $boardMappings = $mappings[$board['id']] ?? [];
+                    ?>
+                    <div class="card mb-3 bg-light">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <div>
+                                    <h6 class="mb-1">
+                                        <i class="bi bi-kanban"></i>
+                                        <?= htmlspecialchars($board['board_name']) ?>
+                                    </h6>
+                                    <small class="text-muted"><?= htmlspecialchars($board['project_key']) ?></small>
+                                </div>
                             </div>
-                            <div class="col-md-5">
-                                <label for="repo_id" class="form-label">Repository</label>
-                                <select class="form-select" name="repo_id" id="repo_id" required>
-                                    <option value="">Select repository...</option>
-                                    <?php foreach ($repos as $repo): ?>
+
+                            <?php if (empty($boardMappings)): ?>
+                            <p class="text-muted mb-3"><em>No repositories mapped</em></p>
+                            <?php else: ?>
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm table-bordered bg-white mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Repository</th>
+                                            <th style="width: 180px;">Jira Label</th>
+                                            <th style="width: 100px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($boardMappings as $mapping):
+                                            $repo = null;
+                                            foreach ($repos as $r) {
+                                                if ($r['id'] == $mapping['repo_connection_id']) {
+                                                    $repo = $r;
+                                                    break;
+                                                }
+                                            }
+                                            if (!$repo) continue;
+                                            $label = 'ai-dev-' . $repo['id'];
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <i class="bi bi-github"></i>
+                                                <?= htmlspecialchars($repo['repo_owner'] . '/' . $repo['repo_name']) ?>
+                                                <br>
+                                                <small class="text-muted">Branch: <?= htmlspecialchars($repo['default_branch']) ?></small>
+                                            </td>
+                                            <td>
+                                                <div class="input-group input-group-sm">
+                                                    <input type="text" class="form-control form-control-sm font-monospace"
+                                                           value="<?= $label ?>" readonly id="label-<?= $repo['id'] ?>">
+                                                    <button class="btn btn-outline-secondary" type="button"
+                                                            onclick="copyLabel('<?= $label ?>', this)" title="Copy label">
+                                                        <i class="bi bi-clipboard"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <a href="/enterprise/unmapboard?board_id=<?= $board['id'] ?>&repo_id=<?= $repo['id'] ?>"
+                                                   class="btn btn-sm btn-outline-danger"
+                                                   onclick="return confirm('Remove this mapping?')">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php endif; ?>
+
+                            <!-- Add repo to this board -->
+                            <?php if (!empty($repos)): ?>
+                            <?php
+                            // Find repos not yet mapped to this board
+                            $mappedRepoIds = array_map(fn($m) => $m['repo_connection_id'], $boardMappings);
+                            $unmappedRepos = array_filter($repos, fn($r) => !in_array($r['id'], $mappedRepoIds));
+                            ?>
+                            <?php if (!empty($unmappedRepos)): ?>
+                            <form method="POST" action="/enterprise/mapboard" class="d-flex gap-2">
+                                <?php if (!empty($csrf) && is_array($csrf)): ?>
+                                    <?php foreach ($csrf as $name => $value): ?>
+                                        <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                                <input type="hidden" name="board_id" value="<?= $board['id'] ?>">
+                                <select class="form-select form-select-sm" name="repo_id" required style="max-width: 300px;">
+                                    <option value="">Add repository...</option>
+                                    <?php foreach ($unmappedRepos as $repo): ?>
                                     <option value="<?= $repo['id'] ?>">
                                         <?= htmlspecialchars($repo['repo_owner'] . '/' . $repo['repo_name']) ?>
                                     </option>
                                     <?php endforeach; ?>
                                 </select>
-                            </div>
-                            <div class="col-md-2 d-flex align-items-end">
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="bi bi-link"></i> Map
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    <i class="bi bi-plus-lg"></i> Add
                                 </button>
-                            </div>
+                            </form>
+                            <?php endif; ?>
+                            <?php endif; ?>
                         </div>
-                    </form>
+                    </div>
+                    <?php endforeach; ?>
 
-                    <?php if (!empty($mappings)): ?>
-                    <hr>
-                    <h6>Current Mappings</h6>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Board</th>
-                                <th>Repository</th>
-                                <th>Default</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($mappings as $boardId => $boardMappings):
-                                $board = array_filter($boards, fn($b) => $b['id'] == $boardId);
-                                $board = reset($board);
-                                foreach ($boardMappings as $mapping):
-                                    $repo = array_filter($repos, fn($r) => $r['id'] == $mapping['repo_connection_id']);
-                                    $repo = reset($repo);
-                            ?>
-                            <tr>
-                                <td><?= htmlspecialchars($board['board_name'] ?? 'Unknown') ?></td>
-                                <td><?= htmlspecialchars(($repo['repo_owner'] ?? '') . '/' . ($repo['repo_name'] ?? '')) ?></td>
-                                <td><?= $mapping['is_default'] ? '<span class="badge bg-primary">Default</span>' : '' ?></td>
-                            </tr>
-                            <?php endforeach; endforeach; ?>
-                        </tbody>
-                    </table>
-                    <?php endif; ?>
+                    <div class="alert alert-info mt-3 mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>How it works:</strong> Add the Jira label (e.g., <code>ai-dev-42</code>) to a ticket to trigger
+                        AI Developer for that specific repository. The label tells the system exactly which repo to use.
+                    </div>
                 </div>
             </div>
             <?php endif; ?>
@@ -198,8 +242,22 @@
                     <ul class="small">
                         <li>OAuth tokens are securely encrypted</li>
                         <li>Only repositories you have push access to are shown</li>
-                        <li>Map boards to specific repositories for automatic PR creation</li>
+                        <li>Each repo gets a unique label for AI Developer</li>
                     </ul>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h5 class="card-title">Using Labels</h5>
+                    <p class="text-muted small">
+                        Each repository has a unique label like <code>ai-dev-42</code>.
+                        Add this label to a Jira ticket to trigger AI Developer for that specific repo.
+                    </p>
+                    <p class="text-muted small mb-0">
+                        <strong>Example:</strong> If your frontend repo has label <code>ai-dev-5</code> and backend
+                        has <code>ai-dev-8</code>, use the appropriate label based on which codebase the ticket affects.
+                    </p>
                 </div>
             </div>
 
@@ -222,3 +280,19 @@
         </div>
     </div>
 </div>
+
+<script>
+function copyLabel(label, btn) {
+    navigator.clipboard.writeText(label).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'bi bi-check';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+            icon.className = 'bi bi-clipboard';
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-secondary');
+        }, 1500);
+    });
+}
+</script>

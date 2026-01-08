@@ -21,6 +21,8 @@ $options = getopt('', [
     'issue:',
     'member:',
     'job-id:',
+    'tenant:',
+    'repo:',
     'attach',
     'repo-path:',
     'print',
@@ -35,7 +37,9 @@ if (isset($options['help']) || empty($options['issue'])) {
     echo "Options:\n";
     echo "  --issue         Issue key (e.g., SSI-1883) [required]\n";
     echo "  --member        Member ID (default: 3)\n";
+    echo "  --tenant        Tenant slug for multi-tenancy (e.g., gwt)\n";
     echo "  --job-id        Job ID for status tracking (auto-generated if not provided)\n";
+    echo "  --repo          Repository connection ID (from ai-dev-{id} label)\n";
     echo "  --attach        Attach to tmux session immediately\n";
     echo "  --print         Use --print mode (non-interactive, outputs to log)\n";
     echo "  --repo-path     Path to existing repo clone\n";
@@ -66,11 +70,24 @@ use \app\services\ShopifyClient;
 use \app\services\AIDevStatusService;
 use \app\plugins\AtlassianAuth;
 
-$bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
+// Determine config file based on tenant parameter
+$tenant = $options['tenant'] ?? null;
+if ($tenant) {
+    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    if (!file_exists($configFile)) {
+        echo "Error: Tenant config not found: {$configFile}\n";
+        exit(1);
+    }
+} else {
+    $configFile = $baseDir . '/conf/config.ini';
+}
+
+$bootstrap = new \app\Bootstrap($configFile);
 
 $issueKey = $options['issue'];
 $memberId = isset($options['member']) ? (int)$options['member'] : 3;
 $jobId = $options['job-id'] ?? null;
+$repoIdParam = isset($options['repo']) ? (int)$options['repo'] : null;
 $autoAttach = isset($options['attach']);
 $usePrintMode = isset($options['print']);
 $dryRun = isset($options['dry-run']);
@@ -91,6 +108,7 @@ echo "===========================================\n";
 echo "Local AI Developer - Using YOUR Claude Account\n";
 echo "===========================================\n\n";
 echo "Domain: {$domainId}\n";
+if ($tenant) echo "Tenant: {$tenant}\n";
 echo "Issue: {$issueKey}\n";
 echo "Member ID: {$memberId}\n";
 if ($jobId) echo "Job ID: {$jobId}\n";
@@ -198,10 +216,20 @@ if (!$member || !$member->id) {
 }
 
 // Query repoconnections using RedBeanPHP (single MySQL database)
-$repoBean = R::findOne('repoconnections', 'member_id = ? AND enabled = 1', [$memberId]);
-if (!$repoBean) {
-    echo "Error: No enabled repository found\n";
-    exit(1);
+// Use specific repo ID if provided (from ai-dev-{id} label), otherwise use first enabled
+if ($repoIdParam) {
+    echo "  Using specific repo ID: {$repoIdParam}\n";
+    $repoBean = R::load('repoconnections', $repoIdParam);
+    if (!$repoBean || !$repoBean->id || $repoBean->member_id != $memberId) {
+        echo "Error: Repository not found or does not belong to this member\n";
+        exit(1);
+    }
+} else {
+    $repoBean = R::findOne('repoconnections', 'member_id = ? AND enabled = 1', [$memberId]);
+    if (!$repoBean) {
+        echo "Error: No enabled repository found\n";
+        exit(1);
+    }
 }
 
 $repoOwner = $repoBean->repo_owner;

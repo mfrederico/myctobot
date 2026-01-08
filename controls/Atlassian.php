@@ -24,10 +24,20 @@ class Atlassian extends BaseControls\Control {
 
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
+        // Fetch registered webhooks for each site
+        $webhooksPerSite = [];
+        foreach ($sites as $site) {
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $site->cloud_id);
+            if ($accessToken) {
+                $webhooksPerSite[$site->cloud_id] = AtlassianAuth::getRegisteredWebhooks($site->cloud_id, $accessToken);
+            }
+        }
+
         $this->render('atlassian/index', [
             'title' => 'Atlassian Connection',
             'sites' => $sites,
-            'atlassianConfigured' => AtlassianAuth::isConfigured()
+            'atlassianConfigured' => AtlassianAuth::isConfigured(),
+            'webhooksPerSite' => $webhooksPerSite
         ]);
     }
 

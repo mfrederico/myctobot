@@ -1,7 +1,14 @@
 <div class="container-fluid">
     <div class="row">
         <div class="col-md-12">
-            <h1 class="mb-4">Dashboard</h1>
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1 class="mb-0">Dashboard</h1>
+                <?php if (!empty($tenantSlug) && $tenantSlug !== 'default'): ?>
+                <span class="badge bg-primary fs-6">
+                    <i class="bi bi-building"></i> Workspace: <?= htmlspecialchars($tenantSlug) ?>
+                </span>
+                <?php endif; ?>
+            </div>
 
             <?php if (!$hasAtlassian): ?>
             <div class="alert alert-warning alert-dismissible fade show" role="alert">

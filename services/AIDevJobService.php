@@ -144,7 +144,7 @@ class AIDevJobService {
                     'source' => 'local_runner'
                 ]);
 
-                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $useOrchestrator);
+                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $useOrchestrator);
 
                 if ($result['success']) {
                     // Add working label and transition status
@@ -597,10 +597,11 @@ class AIDevJobService {
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
      * @param string $cloudId Cloud ID
+     * @param int|null $repoId Repository connection ID
      * @param bool $useOrchestrator Use orchestrator mode
      * @return array Result with 'success', 'job_id', 'session_name' keys
      */
-    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, bool $useOrchestrator = true): array {
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, bool $useOrchestrator = true): array {
         $tmux = new TmuxService($memberId, $issueKey);
 
         // Check if session already exists
@@ -617,8 +618,8 @@ class AIDevJobService {
             ];
         }
 
-        // Create job record for tracking
-        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, null, $cloudId);
+        // Create job record for tracking (include repoId)
+        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, $repoId, $cloudId);
 
         // Update status to running
         AIDevStatusService::updateStatus(
@@ -637,7 +638,7 @@ class AIDevJobService {
             return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
-        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId)) {
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId)) {
             $this->logger->info('Local AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),

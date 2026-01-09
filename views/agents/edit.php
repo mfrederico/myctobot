@@ -365,6 +365,7 @@ function loadDefaultMcp() {
                 </div>
             </div>
 
+
             <form method="POST" action="/agents/update/<?= $agentId ?>">
                 <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
                 <input type="hidden" name="tab" value="hooks">
@@ -539,6 +540,7 @@ function loadAllHooks() {
     document.getElementById('hook_capture_response').checked = true;
     updateHooksFromCheckboxes();
 }
+
 
 // Initialize checkboxes from existing config on page load
 document.addEventListener('DOMContentLoaded', function() {

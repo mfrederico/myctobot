@@ -36,6 +36,7 @@ class Bootstrap {
         $this->initLogging();
         $this->initDatabase();
         $this->initSession();
+        $this->initTenantFromSession();  // Check for session-based tenancy after session starts
         $this->initFlight();
         $this->initCORS();
         
@@ -173,9 +174,9 @@ class Bootstrap {
                 R::setup($dsn, $user, $pass);
             }
             
-            // Set freeze mode based on environment
-            $freeze = $this->config['app']['environment'] === 'production';
-            R::freeze($freeze);
+            // Keep fluid mode on - RedBean auto-manages schema
+            // No significant performance hit and simplifies migrations
+            R::freeze(false);
 
             // Load RedBean FUSE models
             // FUSE models automatically switch to correct database in open()/update() hooks
@@ -252,7 +253,78 @@ class Bootstrap {
             $this->logger->debug('Session started', ['id' => session_id()]);
         }
     }
-    
+
+    /**
+     * Initialize tenant from session (session-based multi-tenancy)
+     *
+     * If user logged in with a workspace code, their session stores the tenant slug.
+     * This method switches to that tenant's database for subsequent requests.
+     */
+    private function initTenantFromSession() {
+        // Skip in CLI mode (no session)
+        if (php_sapi_name() === 'cli') {
+            return;
+        }
+
+        // Check for session tenant
+        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+        if (empty($tenantSlug) || $tenantSlug === 'default') {
+            return;
+        }
+
+        // Load tenant config file
+        $configFile = "conf/config.{$tenantSlug}.ini";
+        if (!file_exists($configFile)) {
+            $this->logger->warning("Tenant config not found: {$configFile}, clearing session tenant");
+            unset($_SESSION['tenant_slug']);
+            return;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $this->logger->warning("Invalid tenant config: {$configFile}");
+            unset($_SESSION['tenant_slug']);
+            return;
+        }
+
+        // Override current config with tenant config (keep any non-overlapping settings)
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        // Add and switch to tenant database
+        try {
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                R::addDatabase($tenantSlug, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $tenantSlug;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                R::addDatabase($tenantSlug, $dsn, $user, $pass);
+            }
+
+            R::selectDatabase($tenantSlug);
+            Flight::set('tenant.slug', $tenantSlug);
+            Flight::set('tenant.active', true);
+            $this->logger->info("Switched to tenant database: {$tenantSlug}");
+        } catch (\Exception $e) {
+            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
+            unset($_SESSION['tenant_slug']);
+        }
+    }
+
     /**
      * Initialize Flight framework settings
      */

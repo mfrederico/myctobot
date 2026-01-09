@@ -187,30 +187,40 @@ CREATE TABLE IF NOT EXISTS `ticketanalysiscache` (
 -- AI Developer jobs
 CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `issue_key` VARCHAR(50) NOT NULL UNIQUE,
+    `job_id` VARCHAR(64) NOT NULL UNIQUE,
+    `member_id` INT NOT NULL,
+    `issue_key` VARCHAR(50) NOT NULL,
     `board_id` INT NOT NULL,
     `repo_connection_id` INT,
     `cloud_id` VARCHAR(100),
     `status` VARCHAR(30) DEFAULT 'pending',
+    `progress` INT DEFAULT 0,
+    `current_step` VARCHAR(100) DEFAULT 'Initializing',
+    `steps_completed` JSON,
     `current_shard_job_id` VARCHAR(64),
     `branch_name` VARCHAR(255),
     `pr_url` VARCHAR(500),
     `pr_number` INT,
+    `pr_created_at` DATETIME,
     `clarification_comment_id` VARCHAR(50),
-    `clarification_questions` TEXT,
+    `clarification_questions` JSON,
     `error_message` TEXT,
     `run_count` INT DEFAULT 0,
-    `last_output` LONGTEXT,
-    `last_result_json` LONGTEXT,
-    `files_changed` TEXT,
+    `files_changed` JSON,
     `commit_sha` VARCHAR(64),
+    `shopify_theme_id` INT,
+    `shopify_preview_url` VARCHAR(500),
+    `playwright_results` JSON,
+    `preserve_branch` TINYINT(1) DEFAULT 1,
     `started_at` DATETIME,
     `completed_at` DATETIME,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_member` (`member_id`),
     INDEX `idx_board` (`board_id`),
     INDEX `idx_status` (`status`),
-    INDEX `idx_issue` (`issue_key`)
+    INDEX `idx_issue` (`issue_key`),
+    INDEX `idx_member_issue` (`member_id`, `issue_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- AI Developer job logs
@@ -239,8 +249,10 @@ CREATE TABLE IF NOT EXISTS `repoconnections` (
     `clone_url` VARCHAR(500),
     `access_token` TEXT,
     `enabled` TINYINT(1) DEFAULT 1,
+    `agent_id` INT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_agent` (`agent_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Board to repo mapping
@@ -301,7 +313,6 @@ CREATE TABLE IF NOT EXISTS `claudeshards` (
     `api_key` VARCHAR(255) NOT NULL,
     `shard_type` ENUM('general', 'playwright', 'database', 'full', 'custom') DEFAULT 'general',
     `capabilities` JSON,
-    `mcp_servers` JSON,
     `max_concurrent_jobs` INT DEFAULT 2,
     `is_active` TINYINT(1) DEFAULT 1,
     `is_default` TINYINT(1) DEFAULT 0,

@@ -28,6 +28,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\services\ImageService;
 use app\BaseControls\Control;
 use app\services\JiraClient;
 
@@ -43,6 +44,49 @@ class Mcp extends Control {
     public function __construct() {
         // Don't call parent - MCP requests don't have sessions
         $this->logger = Flight::get('log');
+    }
+
+    /**
+     * Tenant-aware MCP endpoint - handles JSON-RPC requests with tenant context
+     * POST /mcp/{tenant}/jira
+     *
+     * The tenant parameter is the domain ID (e.g., gwt-myctobot-ai)
+     * This allows using a fixed URL regardless of which subdomain is active.
+     *
+     * @param string $tenant Domain ID from the URL
+     */
+    public function jiraWithTenant(string $tenant) {
+        // Store tenant for logging purposes
+        $this->logger->debug('MCP Jira request with tenant', ['tenant' => $tenant]);
+
+        // Load tenant config and switch database context
+        $configFile = "conf/config.{$tenant}.ini";
+        if (file_exists($configFile)) {
+            $tenantConfig = parse_ini_file($configFile, true);
+            if ($tenantConfig && !empty($tenantConfig['database'])) {
+                // Switch to tenant database for token lookup
+                $dbConfig = $tenantConfig['database'];
+                $type = $dbConfig['type'] ?? 'mysql';
+                if ($type === 'sqlite') {
+                    $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                    $dsn = "sqlite:{$dbPath}";
+                    R::addDatabase($tenant, $dsn);
+                } else {
+                    $host = $dbConfig['host'] ?? 'localhost';
+                    $port = $dbConfig['port'] ?? 3306;
+                    $name = $dbConfig['name'] ?? $tenant;
+                    $user = $dbConfig['user'] ?? 'root';
+                    $pass = $dbConfig['pass'] ?? '';
+                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                    R::addDatabase($tenant, $dsn, $user, $pass);
+                }
+                R::selectDatabase($tenant);
+                $this->logger->debug('MCP switched to tenant database', ['tenant' => $tenant]);
+            }
+        }
+
+        // Call the main jira handler
+        $this->jira(['tenant' => $tenant]);
     }
 
     /**
@@ -125,11 +169,17 @@ class Mcp extends Control {
 
         // Method 1: Basic Auth (preferred for Claude Code)
         $authHeader = $request->getHeader('Authorization') ?? '';
+        $this->logger->debug('MCP authenticate', [
+            'authHeader' => substr($authHeader, 0, 20) . '...',
+            'method' => $request->method
+        ]);
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
+            $this->logger->debug('MCP Basic Auth decoded', ['decoded' => $decoded]);
             if ($decoded && strpos($decoded, ':') !== false) {
                 list($this->memberId, $this->cloudId) = explode(':', $decoded, 2);
                 $this->memberId = (int)$this->memberId;
+                $this->logger->debug('MCP credentials parsed', ['memberId' => $this->memberId, 'cloudId' => $this->cloudId]);
             }
         }
         // Method 2: Bearer token containing member:cloud
@@ -145,6 +195,7 @@ class Mcp extends Control {
 
         // Validate member exists and has access to this cloud
         if (!$this->memberId || !$this->cloudId) {
+            $this->logger->debug('MCP auth failed: missing credentials', ['memberId' => $this->memberId, 'cloudId' => $this->cloudId]);
             return false;
         }
 
@@ -152,6 +203,7 @@ class Mcp extends Control {
         $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?',
             [$this->memberId, $this->cloudId]);
 
+        $this->logger->debug('MCP auth token lookup', ['found' => !empty($token)]);
         return !empty($token);
     }
 
@@ -756,8 +808,51 @@ class Mcp extends Control {
 
     /**
      * Build an image tool response
+     * Automatically resizes images to fit within context window
+     *
+     * @param mixed $id Request ID
+     * @param string $imageData Raw binary image data
+     * @param string $mimeType Original MIME type
+     * @param string $filename Original filename
+     * @param int $maxWidth Maximum width for resizing (default 1200)
+     * @param int $maxHeight Maximum height for resizing (default 1200)
+     * @return array JSON-RPC response
      */
-    private function toolImageResponse($id, string $imageData, string $mimeType, string $filename): array {
+    private function toolImageResponse(
+        $id,
+        string $imageData,
+        string $mimeType,
+        string $filename,
+        int $maxWidth = 1200,
+        int $maxHeight = 1200
+    ): array {
+        $resizeInfo = '';
+
+        // Resize image for context window optimization
+        try {
+            $result = ImageService::resizeForContext($imageData, $maxWidth, $maxHeight);
+            $imageData = $result['data'];
+            $mimeType = $result['mimeType'];
+
+            if ($result['resized']) {
+                $resizeInfo = sprintf(
+                    ' (resized from %dx%d to %dx%d)',
+                    $result['originalWidth'],
+                    $result['originalHeight'],
+                    $result['width'],
+                    $result['height']
+                );
+            }
+        } catch (\Exception $e) {
+            // If resize fails, use original image
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to resize image for MCP response', [
+                    'filename' => $filename,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
         $base64 = base64_encode($imageData);
 
         return [
@@ -767,7 +862,7 @@ class Mcp extends Control {
                 'content' => [
                     [
                         'type' => 'text',
-                        'text' => "Image: {$filename}"
+                        'text' => "Image: {$filename}{$resizeInfo}"
                     ],
                     [
                         'type' => 'image',

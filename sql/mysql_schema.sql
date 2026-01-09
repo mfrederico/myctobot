@@ -137,6 +137,69 @@ INSERT INTO authcontrol (control, method, level, description) VALUES
 ('analysis', 'sharddigest', 1, 'Shard digest analysis endpoint')
 ON DUPLICATE KEY UPDATE level = VALUES(level);
 
+-- AI Agent profiles (runner configurations for AI Developer)
+CREATE TABLE IF NOT EXISTS aiagents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    runner_type VARCHAR(50) NOT NULL DEFAULT 'claude_cli',
+    runner_config JSON,
+    mcp_servers JSON,
+    hooks_config JSON,
+    is_active TINYINT(1) DEFAULT 1,
+    is_default TINYINT(1) DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES member(id) ON DELETE CASCADE,
+    INDEX idx_member_id (member_id),
+    INDEX idx_active (is_active),
+    INDEX idx_default (is_default)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI Developer jobs (tracks Jira ticket implementation jobs)
+CREATE TABLE IF NOT EXISTS aidevjobs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL,
+    issue_key VARCHAR(50) NOT NULL UNIQUE,
+    board_id INT NOT NULL,
+    repo_connection_id INT,
+    cloud_id VARCHAR(100),
+    status VARCHAR(30) DEFAULT 'pending',
+    current_shard_job_id VARCHAR(64),
+    branch_name VARCHAR(255),
+    pr_url VARCHAR(500),
+    pr_number INT,
+    clarification_comment_id VARCHAR(50),
+    clarification_questions TEXT,
+    error_message TEXT,
+    run_count INT DEFAULT 0,
+    last_output LONGTEXT,
+    last_result_json LONGTEXT,
+    files_changed TEXT,
+    commit_sha VARCHAR(64),
+    started_at DATETIME,
+    completed_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (member_id) REFERENCES member(id) ON DELETE CASCADE,
+    INDEX idx_member (member_id),
+    INDEX idx_board (board_id),
+    INDEX idx_status (status),
+    INDEX idx_issue (issue_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- AI Developer job logs
+CREATE TABLE IF NOT EXISTS aidevjoblogs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    issue_key VARCHAR(50) NOT NULL,
+    log_level VARCHAR(20) DEFAULT 'info',
+    message TEXT NOT NULL,
+    context_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_issue (issue_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Pending signups (for email verification before provisioning)
 CREATE TABLE IF NOT EXISTS pendingsignup (
     id INT AUTO_INCREMENT PRIMARY KEY,

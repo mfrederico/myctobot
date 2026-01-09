@@ -15,7 +15,13 @@ class Index extends BaseControls\Control {
      * Home page
      */
     public function index() {
-        // Check if Google OAuth is configured
+        // On public site, redirect to signup
+        if (TenantResolver::isDefault()) {
+            Flight::redirect('/signup');
+            return;
+        }
+
+        // On tenant sites, show normal homepage
         $googleEnabled = !empty(Flight::get('social.google_client_id'));
 
         $this->render('index/index', [

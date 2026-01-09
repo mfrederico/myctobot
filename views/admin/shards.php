@@ -4,6 +4,9 @@
             <i class="bi bi-pc-display-horizontal"></i> Workstation Shards
         </h1>
         <div>
+            <a href="/agents" class="btn btn-outline-info me-2">
+                <i class="bi bi-robot"></i> Agent Profiles
+            </a>
             <button class="btn btn-outline-secondary me-2" onclick="healthCheckAll()">
                 <i class="bi bi-heart-pulse"></i> Health Check All
             </button>
@@ -112,9 +115,6 @@
                         <button class="btn btn-outline-secondary btn-sm" onclick="testShard(<?= $shard['id'] ?>)" title="Test Connection">
                             <i class="bi bi-plug"></i> Test
                         </button>
-                        <a href="/admin/shardmcp/<?= $shard['id'] ?>" class="btn btn-outline-info btn-sm" title="MCP Servers">
-                            <i class="bi bi-box-seam"></i> MCP
-                        </a>
                         <a href="/admin/editshard/<?= $shard['id'] ?>" class="btn btn-outline-primary btn-sm" title="Edit">
                             <i class="bi bi-pencil"></i> Edit
                         </a>

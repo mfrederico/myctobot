@@ -37,20 +37,18 @@ class AIDevJobService {
      * @param string $cloudId Atlassian cloud ID
      * @param int|null $boardId Board ID (optional, will be auto-detected from issue key)
      * @param int|null $repoId Repository connection ID (optional, will use first enabled)
+     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @param bool $useOrchestrator Whether to use orchestrator mode
      * @return array Result with 'success', 'job_id', 'error' keys
      */
-    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, bool $useOrchestrator = false): array {
+    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false): array {
         try {
-            // Validate member has enterprise tier
+            // Validate member exists
             $member = R::load('member', $memberId);
             if (!$member || !$member->id) {
                 return ['success' => false, 'error' => 'Member not found'];
             }
-
-            $tier = $member->getTier();
-            if ($tier !== 'enterprise') {
-                return ['success' => false, 'error' => 'Enterprise tier required'];
-            }
+            // All features now available to all tiers
 
             // API key and model will be determined per-board later (after boardId is resolved)
 
@@ -144,7 +142,7 @@ class AIDevJobService {
                     'source' => 'local_runner'
                 ]);
 
-                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $useOrchestrator);
+                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator);
 
                 if ($result['success']) {
                     // Add working label and transition status
@@ -586,6 +584,153 @@ class AIDevJobService {
     }
 
     // ========================================
+    // GitHub Issues Support
+    // ========================================
+
+    /**
+     * Trigger an AI Developer job for a GitHub issue
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey GitHub issue key (e.g., "owner/repo#123")
+     * @param int $repoId Repository connection ID
+     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @return array Result with 'success', 'job_id', 'error' keys
+     */
+    public function triggerGitHubJob(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
+        try {
+            // Validate member exists
+            $member = R::load('member', $memberId);
+            if (!$member || !$member->id) {
+                return ['success' => false, 'error' => 'Member not found'];
+            }
+
+            // Parse issue key: owner/repo#123
+            if (!preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches)) {
+                return ['success' => false, 'error' => 'Invalid GitHub issue key format'];
+            }
+            $owner = $matches[1];
+            $repoName = $matches[2];
+            $issueNumber = (int)$matches[3];
+
+            // Use TmuxService to check for existing session
+            $tmux = new TmuxService($memberId, $issueKey);
+            $tmuxSessionRunning = $tmux->exists() && $tmux->isClaudeRunning();
+
+            // Check for existing active job
+            $existingJob = AIDevStatusService::findJobByIssueKey($memberId, $issueKey);
+            if ($existingJob) {
+                if (in_array($existingJob['status'], ['running', 'pending'])) {
+                    if ($tmuxSessionRunning) {
+                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_id' => $existingJob['job_id']];
+                    } else {
+                        // Stale status file - auto cleanup
+                        $this->logger->info('Auto-cleanup stale GitHub job status', [
+                            'issue_key' => $issueKey,
+                            'job_id' => $existingJob['job_id']
+                        ]);
+                        AIDevStatusService::fail($memberId, $existingJob['job_id'], 'Session ended unexpectedly');
+                    }
+                }
+
+                // Cooldown check
+                $lastUpdated = strtotime($existingJob['updated_at'] ?? $existingJob['created_at'] ?? '');
+                if ($lastUpdated && (time() - $lastUpdated) < 120) {
+                    return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_id' => $existingJob['job_id']];
+                }
+            } elseif ($tmuxSessionRunning) {
+                return ['success' => false, 'error' => 'Session exists for this issue (no status file)'];
+            }
+
+            // Branch affinity
+            $existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
+            if ($existingBranch) {
+                $this->logger->info('Branch affinity: reusing existing branch', [
+                    'issue_key' => $issueKey,
+                    'branch' => $existingBranch
+                ]);
+            }
+
+            // Spawn local runner for GitHub (always local for now)
+            return $this->spawnGitHubLocalRunner($memberId, $issueKey, $repoId, $tenant);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to trigger GitHub AI Dev job', [
+                'error' => $e->getMessage(),
+                'member_id' => $memberId,
+                'issue_key' => $issueKey
+            ]);
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Spawn a local AI Developer runner for GitHub issue
+     */
+    private function spawnGitHubLocalRunner(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
+        $tmux = new TmuxService($memberId, $issueKey);
+
+        if ($tmux->exists()) {
+            return [
+                'success' => false,
+                'error' => 'Session already exists for this issue',
+                'session_name' => $tmux->getSessionName()
+            ];
+        }
+
+        // Create job record (use 0 for boardId since GitHub doesn't have boards)
+        $jobId = AIDevStatusService::createJob($memberId, 0, $issueKey, $repoId, 'github');
+
+        // Update status to running
+        AIDevStatusService::updateStatus(
+            $memberId,
+            $jobId,
+            'Running locally (Claude Code)',
+            5,
+            AIDevStatusService::STATUS_RUNNING
+        );
+
+        // Spawn the tmux session with GitHub-specific script
+        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-github.php';
+
+        // Fall back to generic script if GitHub-specific doesn't exist
+        if (!file_exists($scriptPath)) {
+            $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+        }
+
+        if (!file_exists($scriptPath)) {
+            $this->logger->error('Local runner script not found', ['path' => $scriptPath]);
+            AIDevStatusService::fail($memberId, $jobId, 'Local runner script not found');
+            return ['success' => false, 'error' => 'Local runner script not found'];
+        }
+
+        // GitHub jobs use the standard spawner but with provider=github
+        if ($tmux->spawnWithScript($scriptPath, true, $jobId, $repoId, $tenant, 'github')) {
+            $this->logger->info('Local GitHub AI Developer spawned in tmux', [
+                'issue_key' => $issueKey,
+                'session' => $tmux->getSessionName(),
+                'member_id' => $memberId,
+                'job_id' => $jobId
+            ]);
+
+            return [
+                'success' => true,
+                'job_id' => $jobId,
+                'session_name' => $tmux->getSessionName(),
+                'message' => 'Job started locally (Claude Code)',
+                'local' => true,
+                'provider' => 'github'
+            ];
+        } else {
+            $this->logger->error('Failed to spawn local GitHub AI Developer', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+            AIDevStatusService::fail($memberId, $jobId, 'Failed to spawn tmux session');
+            return ['success' => false, 'error' => 'Failed to spawn tmux session'];
+        }
+    }
+
+    // ========================================
     // Local Runner Support
     // ========================================
 
@@ -597,10 +742,12 @@ class AIDevJobService {
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
      * @param string $cloudId Cloud ID
+     * @param int|null $repoId Repository connection ID
+     * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Use orchestrator mode
      * @return array Result with 'success', 'job_id', 'session_name' keys
      */
-    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, bool $useOrchestrator = true): array {
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true): array {
         $tmux = new TmuxService($memberId, $issueKey);
 
         // Check if session already exists
@@ -617,8 +764,8 @@ class AIDevJobService {
             ];
         }
 
-        // Create job record for tracking
-        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, null, $cloudId);
+        // Create job record for tracking (include repoId)
+        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, $repoId, $cloudId);
 
         // Update status to running
         AIDevStatusService::updateStatus(
@@ -637,7 +784,7 @@ class AIDevJobService {
             return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
-        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId)) {
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $tenant)) {
             $this->logger->info('Local AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),

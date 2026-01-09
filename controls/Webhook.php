@@ -31,9 +31,25 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Handle Jira webhook
-     * Endpoint: POST /webhook/jira
+     * Endpoint: POST /webhook/jira or POST /webhook/jira/{tenant}
+     *
+     * For multi-tenancy, use /webhook/jira/{tenant} where tenant matches
+     * the config file name (e.g., /webhook/jira/gwt loads conf/config.gwt.ini)
      */
-    public function jira() {
+    public function jira($params = []) {
+        // Check for tenant parameter (from URL: /webhook/jira/{tenant})
+        $tenant = $params['operation']->name ?? null;
+
+        // If tenant specified, switch to tenant database
+        if ($tenant) {
+            if (!$this->switchToTenantForWebhook($tenant)) {
+                Flight::response()->status(400);
+                echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
+                return;
+            }
+            $this->logger->info("Webhook using tenant: {$tenant}");
+        }
+
         // Get raw payload
         $payload = file_get_contents('php://input');
 
@@ -65,7 +81,8 @@ class Webhook extends BaseControls\Control {
         }
 
         $this->logger->info('Jira webhook received', [
-            'event' => $data['webhookEvent'] ?? 'unknown'
+            'event' => $data['webhookEvent'] ?? 'unknown',
+            'tenant' => $tenant ?? 'default'
         ]);
 
         try {
@@ -75,6 +92,60 @@ class Webhook extends BaseControls\Control {
             $this->logger->error('Jira webhook processing failed', ['error' => $e->getMessage()]);
             Flight::response()->status(500);
             echo json_encode(['error' => 'Processing failed']);
+        }
+    }
+
+    /**
+     * Switch to tenant database for webhook processing
+     */
+    private function switchToTenantForWebhook(string $tenant): bool {
+        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            $this->logger->warning("Webhook tenant config not found: {$configFile}");
+            return false;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $this->logger->warning("Invalid tenant config: {$configFile}");
+            return false;
+        }
+
+        // Override config values
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        // Add and switch to tenant database
+        try {
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                R::addDatabase($tenant, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $tenant;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                R::addDatabase($tenant, $dsn, $user, $pass);
+            }
+
+            R::selectDatabase($tenant);
+            Flight::set('tenant.slug', $tenant);
+            Flight::set('tenant.active', true);
+            return true;
+        } catch (\Exception $e) {
+            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
+            return false;
         }
     }
 
@@ -158,6 +229,10 @@ class Webhook extends BaseControls\Control {
             $currentLabels[] = is_string($label) ? $label : ($label['name'] ?? '');
         }
 
+        // Find any ai-dev label (ai-dev or ai-dev-{repo_id})
+        $currentAiDevLabel = $this->findAiDevLabel($currentLabels);
+        $hasAiDevLabel = $currentAiDevLabel !== null;
+
         // Check what changed
         $hasOnlyStatusChange = true;
         $hasLabelChange = false;
@@ -170,8 +245,9 @@ class Webhook extends BaseControls\Control {
                 $hasLabelChange = true;
                 $hasOnlyStatusChange = false;
                 // Check if this is our bot's label change
-                $oldLabels = explode(' ', $item['fromString'] ?? '');
-                $newLabels = explode(' ', $item['toString'] ?? '');
+                // Jira webhooks use 'from'/'to', but some formats use 'fromString'/'toString'
+                $oldLabels = explode(' ', $item['fromString'] ?? $item['from'] ?? '');
+                $newLabels = explode(' ', $item['toString'] ?? $item['to'] ?? '');
                 if ((in_array('myctobot-working', $newLabels) && !in_array('myctobot-working', $oldLabels)) ||
                     (!in_array('myctobot-working', $newLabels) && in_array('myctobot-working', $oldLabels))) {
                     $hasBotLabelChange = true;
@@ -193,9 +269,10 @@ class Webhook extends BaseControls\Control {
             'issue_key' => $issueKey,
             'new_status' => $newStatusName,
             'current_labels' => $currentLabels,
-            'has_aidev_label' => in_array('ai-dev', $currentLabels)
+            'has_aidev_label' => $hasAiDevLabel,
+            'aidev_label' => $currentAiDevLabel
         ]);
-        if ($newStatusName && in_array('ai-dev', $currentLabels)) {
+        if ($newStatusName && $hasAiDevLabel) {
             $this->logger->debug('Calling checkCompleteStatusTransition', [
                 'issue_key' => $issueKey,
                 'new_status' => $newStatusName
@@ -231,16 +308,22 @@ class Webhook extends BaseControls\Control {
         // Skip status-only changes UNLESS the issue has ai-dev label (then check if job needed)
         if ($hasOnlyStatusChange && !$hasLabelChange) {
             // Even for status-only changes, check if ai-dev label is present and no job running
-            if (in_array('ai-dev', $currentLabels)) {
-                $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', ['issue_key' => $issueKey]);
-                $this->triggerAIDevJobIfNeeded($issueKey, $cloudId);
+            if ($hasAiDevLabel) {
+                // Extract repo ID from labels (repo-{id} or ai-dev-{id})
+                $repoId = $this->extractRepoIdFromLabels($currentLabels);
+                $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', [
+                    'issue_key' => $issueKey,
+                    'label' => $currentAiDevLabel,
+                    'repo_id' => $repoId
+                ]);
+                $this->triggerAIDevJobIfNeeded($issueKey, $cloudId, $repoId);
             } else {
                 $this->logger->debug('Jira webhook: ignoring status-only change', ['issue_key' => $issueKey]);
             }
             return;
         }
 
-        // Check changelog for ai-dev label being added
+        // Check changelog for ai-dev label being added or removed
         foreach ($items as $item) {
             if ($item['field'] === 'labels') {
                 // Jira webhooks use 'from'/'to', but some formats use 'fromString'/'toString'
@@ -249,14 +332,37 @@ class Webhook extends BaseControls\Control {
                 $oldLabels = explode(' ', $oldLabelStr);
                 $newLabels = explode(' ', $newLabelStr);
 
-                // Check if ai-dev label was ADDED
-                $aiDevWasAdded = in_array('ai-dev', $newLabels) && !in_array('ai-dev', $oldLabels);
+                // Find ai-dev labels in old and new
+                $oldAiDevLabel = null;
+                $newAiDevLabel = null;
+                foreach ($oldLabels as $l) {
+                    if ($this->isAiDevLabel($l)) {
+                        $oldAiDevLabel = $l;
+                        break;
+                    }
+                }
+                foreach ($newLabels as $l) {
+                    if ($this->isAiDevLabel($l)) {
+                        $newAiDevLabel = $l;
+                        break;
+                    }
+                }
 
-                // Check if ai-dev label was REMOVED
-                $aiDevWasRemoved = in_array('ai-dev', $oldLabels) && !in_array('ai-dev', $newLabels);
+                // Check if ai-dev label was ADDED (any form)
+                $aiDevWasAdded = $newAiDevLabel !== null && $oldAiDevLabel === null;
 
-                if ($aiDevWasAdded && in_array('ai-dev', $currentLabels)) {
-                    $this->triggerAIDevJob($issueKey, $cloudId);
+                // Check if ai-dev label was REMOVED (any form)
+                $aiDevWasRemoved = $oldAiDevLabel !== null && $newAiDevLabel === null;
+
+                if ($aiDevWasAdded && $hasAiDevLabel) {
+                    // Extract repo ID from labels (repo-{id} or ai-dev-{id}), null = use default
+                    $repoId = $this->extractRepoIdFromLabels($currentLabels);
+                    $this->logger->info('AI-dev label added, triggering job', [
+                        'issue_key' => $issueKey,
+                        'label' => $currentAiDevLabel,
+                        'repo_id' => $repoId ?? 'default'
+                    ]);
+                    $this->triggerAIDevJob($issueKey, $cloudId, $repoId);
                     return;
                 }
 
@@ -265,7 +371,8 @@ class Webhook extends BaseControls\Control {
                     if ($memberId) {
                         $this->logger->info('ai-dev label removed, closing local session if exists', [
                             'issue_key' => $issueKey,
-                            'member_id' => $memberId
+                            'member_id' => $memberId,
+                            'removed_label' => $oldAiDevLabel
                         ]);
                         $this->closeLocalTmuxSession($issueKey, $memberId);
                     }
@@ -278,7 +385,7 @@ class Webhook extends BaseControls\Control {
     /**
      * Trigger AI Dev job only if not already running/completed
      */
-    private function triggerAIDevJobIfNeeded(string $issueKey, string $cloudId): void {
+    private function triggerAIDevJobIfNeeded(string $issueKey, string $cloudId, ?int $repoId = null): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
             return;
@@ -319,7 +426,7 @@ class Webhook extends BaseControls\Control {
         }
 
         // No active job found, trigger new one
-        $this->triggerAIDevJob($issueKey, $cloudId);
+        $this->triggerAIDevJob($issueKey, $cloudId, $repoId);
     }
 
     /**
@@ -369,23 +476,32 @@ class Webhook extends BaseControls\Control {
     /**
      * Trigger a new AI Developer job from webhook
      * AIDevJobService handles both local runner and shard execution
+     *
+     * @param string $issueKey Jira issue key (e.g., SSI-1234)
+     * @param string $cloudId Atlassian cloud ID
+     * @param int|null $repoId Optional repo connection ID from ai-dev-{id} label
      */
-    private function triggerAIDevJob(string $issueKey, string $cloudId): void {
+    private function triggerAIDevJob(string $issueKey, string $cloudId, ?int $repoId = null): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
             $this->logger->debug('No member found for cloud', ['cloud_id' => $cloudId]);
             return;
         }
 
+        // Get tenant slug for multi-tenancy support
+        $tenant = Flight::get('tenant.slug');
+
         // AIDevJobService handles local vs shard execution based on config
+        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId, tenant)
         $jobService = new AIDevJobService();
-        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId);
+        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
 
         if ($result['success']) {
             $this->logger->info('AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
                 'job_id' => $result['job_id'],
                 'issue_key' => $issueKey,
+                'repo_id' => $repoId,
                 'local' => $result['local'] ?? false,
                 'shard' => $result['shard'] ?? null
             ]);
@@ -393,6 +509,7 @@ class Webhook extends BaseControls\Control {
             $this->logger->warning('Failed to trigger AI Developer job via webhook', [
                 'member_id' => $memberId,
                 'issue_key' => $issueKey,
+                'repo_id' => $repoId,
                 'error' => $result['error'] ?? 'Unknown error'
             ]);
         }
@@ -948,6 +1065,9 @@ class Webhook extends BaseControls\Control {
     /**
      * Handle GitHub webhook
      * Endpoint: POST /webhook/github
+     *
+     * Validates webhook signature against repo-specific secret,
+     * then processes issues/comments to trigger AI Dev jobs.
      */
     public function github() {
         $payload = file_get_contents('php://input');
@@ -957,18 +1077,6 @@ class Webhook extends BaseControls\Control {
             Flight::response()->status(400);
             echo json_encode(['error' => 'Empty payload']);
             return;
-        }
-
-        // Validate signature if secret is configured
-        $secret = Flight::get('webhooks.github_secret');
-        if (!empty($secret)) {
-            $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
-            if (!$this->validateGitHubSignature($payload, $signature, $secret)) {
-                $this->logger->warning('GitHub webhook: invalid signature');
-                Flight::response()->status(401);
-                echo json_encode(['error' => 'Invalid signature']);
-                return;
-            }
         }
 
         $event = $_SERVER['HTTP_X_GITHUB_EVENT'] ?? '';
@@ -981,10 +1089,42 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        $this->logger->info('GitHub webhook received', ['event' => $event]);
+        // Get repo full name from payload to look up tenant and secret
+        $repoFullName = $data['repository']['full_name'] ?? '';
+        if (empty($repoFullName)) {
+            $this->logger->warning('GitHub webhook: no repository in payload');
+            Flight::response()->status(400);
+            echo json_encode(['error' => 'Missing repository']);
+            return;
+        }
+
+        // Find the repo connection and switch to tenant
+        $repoConnection = $this->findGitHubRepoConnection($repoFullName);
+        if (!$repoConnection) {
+            $this->logger->debug('GitHub webhook: repo not connected', ['repo' => $repoFullName]);
+            // Return 200 so GitHub doesn't keep retrying
+            echo json_encode(['success' => true, 'message' => 'Repo not connected']);
+            return;
+        }
+
+        // Validate signature using repo-specific secret
+        $secret = $repoConnection['webhook_secret'] ?? '';
+        $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
+        if (!empty($secret) && !$this->validateGitHubSignature($payload, $signature, $secret)) {
+            $this->logger->warning('GitHub webhook: invalid signature', ['repo' => $repoFullName]);
+            Flight::response()->status(401);
+            echo json_encode(['error' => 'Invalid signature']);
+            return;
+        }
+
+        $this->logger->info('GitHub webhook received', [
+            'event' => $event,
+            'repo' => $repoFullName,
+            'tenant' => $repoConnection['tenant'] ?? 'unknown'
+        ]);
 
         try {
-            $this->processGitHubWebhook($event, $data);
+            $this->processGitHubWebhook($event, $data, $repoConnection);
             echo json_encode(['success' => true]);
         } catch (\Exception $e) {
             $this->logger->error('GitHub webhook processing failed', ['error' => $e->getMessage()]);
@@ -994,10 +1134,122 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
+     * Find GitHub repo connection across all tenants
+     * Returns repo data with tenant info if found
+     */
+    private function findGitHubRepoConnection(string $fullName): ?array {
+        // Search all tenant configs for this repo
+        $confDir = __DIR__ . '/../conf';
+        $configs = glob($confDir . '/config.*.ini');
+
+        foreach ($configs as $configFile) {
+            // Extract tenant slug from filename (config.{tenant}.ini)
+            if (!preg_match('/config\.([^.]+)\.ini$/', $configFile, $matches)) {
+                continue;
+            }
+            $tenant = $matches[1];
+
+            // Skip example config
+            if ($tenant === 'example') {
+                continue;
+            }
+
+            $tenantConfig = parse_ini_file($configFile, true);
+            if (!$tenantConfig || empty($tenantConfig['database'])) {
+                continue;
+            }
+
+            // Connect to tenant database
+            try {
+                $dbConfig = $tenantConfig['database'];
+                $type = $dbConfig['type'] ?? 'mysql';
+                $tenantDbKey = "github_webhook_{$tenant}";
+
+                if ($type === 'sqlite') {
+                    $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                    if (!file_exists($dbPath)) continue;
+                    $dsn = "sqlite:{$dbPath}";
+                    R::addDatabase($tenantDbKey, $dsn);
+                } else {
+                    $host = $dbConfig['host'] ?? 'localhost';
+                    $port = $dbConfig['port'] ?? 3306;
+                    $name = $dbConfig['name'] ?? $tenant;
+                    $user = $dbConfig['user'] ?? 'root';
+                    $pass = $dbConfig['pass'] ?? '';
+                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                    R::addDatabase($tenantDbKey, $dsn, $user, $pass);
+                }
+
+                R::selectDatabase($tenantDbKey);
+
+                // Look for repo connection
+                $repo = R::findOne('repoconnections', 'full_name = ? AND provider = ?', [$fullName, 'github']);
+                if ($repo) {
+                    $repoData = $repo->export();
+                    $repoData['tenant'] = $tenant;
+                    $repoData['tenant_config'] = $tenantConfig;
+
+                    // Find member_id for this tenant (owner of the database)
+                    $memberId = $this->findMemberIdForTenant($tenant);
+                    $repoData['member_id'] = $memberId;
+
+                    // Keep this database selected for subsequent operations
+                    Flight::set('tenant.slug', $tenant);
+                    Flight::set('tenant.active', true);
+
+                    return $repoData;
+                }
+
+                // Clean up - remove this database connection
+                R::close();
+
+            } catch (\Exception $e) {
+                $this->logger->debug('Error checking tenant for repo', [
+                    'tenant' => $tenant,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find member ID for a tenant
+     */
+    private function findMemberIdForTenant(string $tenant): ?int {
+        // Switch back to default database
+        R::selectDatabase('default');
+
+        // Look up member by their database name pattern
+        $dbName = "myctobot_{$tenant}";
+        $member = R::findOne('member', 'ceobot_db LIKE ?', ["%{$dbName}%"]);
+        if ($member) {
+            return (int)$member->id;
+        }
+
+        // Try matching by tenant slug in workspace
+        $member = R::findOne('member', 'workspace = ?', [$tenant]);
+        if ($member) {
+            return (int)$member->id;
+        }
+
+        return null;
+    }
+
+    /**
      * Process GitHub webhook data
      */
-    private function processGitHubWebhook(string $event, array $data): void {
+    private function processGitHubWebhook(string $event, array $data, array $repoConnection): void {
         switch ($event) {
+            case 'issues':
+                $this->handleGitHubIssuesEvent($data, $repoConnection);
+                break;
+
+            case 'issue_comment':
+                $this->handleGitHubIssueCommentEvent($data, $repoConnection);
+                break;
+
             case 'pull_request':
                 $this->handlePullRequestEvent($data);
                 break;
@@ -1012,6 +1264,281 @@ class Webhook extends BaseControls\Control {
 
             default:
                 $this->logger->debug('GitHub webhook: unhandled event', ['event' => $event]);
+        }
+    }
+
+    /**
+     * Handle GitHub issues event (labeled, opened, etc.)
+     */
+    private function handleGitHubIssuesEvent(array $data, array $repoConnection): void {
+        // Check if issue tracking is enabled for this repo
+        // If not set, default to false (GitHub used only for code hosting)
+        $issuesEnabled = ($repoConnection['issues_enabled'] ?? 0) == 1;
+        if (!$issuesEnabled) {
+            $this->logger->debug('GitHub issues event ignored - issue tracking disabled for repo', [
+                'repo' => $data['repository']['full_name'] ?? ''
+            ]);
+            return;
+        }
+
+        $action = $data['action'] ?? '';
+        $issue = $data['issue'] ?? [];
+        $issueNumber = $issue['number'] ?? 0;
+        $issueTitle = $issue['title'] ?? '';
+        $issueBody = $issue['body'] ?? '';
+        $repoFullName = $data['repository']['full_name'] ?? '';
+        $labels = $issue['labels'] ?? [];
+
+        $this->logger->debug('GitHub issues event', [
+            'action' => $action,
+            'issue_number' => $issueNumber,
+            'repo' => $repoFullName
+        ]);
+
+        // Check if ai-dev label is present
+        $hasAiDevLabel = false;
+        foreach ($labels as $label) {
+            if (($label['name'] ?? '') === 'ai-dev') {
+                $hasAiDevLabel = true;
+                break;
+            }
+        }
+
+        // Handle different actions
+        switch ($action) {
+            case 'labeled':
+                $labelAdded = $data['label']['name'] ?? '';
+                if ($labelAdded === 'ai-dev') {
+                    $this->logger->info('GitHub: ai-dev label added', [
+                        'issue' => $issueNumber,
+                        'repo' => $repoFullName
+                    ]);
+                    $this->triggerGitHubAIDevJob($data, $repoConnection);
+                }
+                break;
+
+            case 'unlabeled':
+                $labelRemoved = $data['label']['name'] ?? '';
+                if ($labelRemoved === 'ai-dev') {
+                    $this->logger->info('GitHub: ai-dev label removed', [
+                        'issue' => $issueNumber,
+                        'repo' => $repoFullName
+                    ]);
+                    // Could close any running tmux sessions here
+                }
+                break;
+
+            case 'opened':
+                // If issue is opened with ai-dev label already present, trigger job
+                if ($hasAiDevLabel) {
+                    $this->logger->info('GitHub: issue opened with ai-dev label', [
+                        'issue' => $issueNumber,
+                        'repo' => $repoFullName
+                    ]);
+                    $this->triggerGitHubAIDevJob($data, $repoConnection);
+                }
+                break;
+
+            case 'closed':
+                // Cleanup when issue is closed
+                if ($hasAiDevLabel) {
+                    $this->logger->info('GitHub: ai-dev issue closed', [
+                        'issue' => $issueNumber,
+                        'repo' => $repoFullName
+                    ]);
+                    // Could mark jobs complete, cleanup themes, etc.
+                }
+                break;
+        }
+    }
+
+    /**
+     * Handle GitHub issue_comment event
+     */
+    private function handleGitHubIssueCommentEvent(array $data, array $repoConnection): void {
+        // Check if issue tracking is enabled for this repo
+        $issuesEnabled = ($repoConnection['issues_enabled'] ?? 0) == 1;
+        if (!$issuesEnabled) {
+            return;
+        }
+
+        $action = $data['action'] ?? '';
+        if ($action !== 'created') {
+            return; // Only handle new comments
+        }
+
+        $issue = $data['issue'] ?? [];
+        $comment = $data['comment'] ?? [];
+        $issueNumber = $issue['number'] ?? 0;
+        $commentId = $comment['id'] ?? '';
+        $commentBody = $comment['body'] ?? '';
+        $commentAuthor = $comment['user']['login'] ?? '';
+        $repoFullName = $data['repository']['full_name'] ?? '';
+        $memberId = $repoConnection['member_id'] ?? null;
+
+        // Check if issue has ai-dev label
+        $hasAiDevLabel = false;
+        foreach (($issue['labels'] ?? []) as $label) {
+            if (($label['name'] ?? '') === 'ai-dev') {
+                $hasAiDevLabel = true;
+                break;
+            }
+        }
+
+        if (!$hasAiDevLabel) {
+            return;
+        }
+
+        $this->logger->info('GitHub: comment on ai-dev issue', [
+            'issue' => $issueNumber,
+            'repo' => $repoFullName,
+            'author' => $commentAuthor
+        ]);
+
+        if (!$memberId) {
+            return;
+        }
+
+        // Create issue key format
+        $issueKey = "{$repoFullName}#{$issueNumber}";
+
+        // Check if there's a job waiting for clarification for this issue
+        $jobManager = new AIDevJobManager($memberId);
+        $job = $jobManager->get($issueKey);
+
+        if (!$job) {
+            return;
+        }
+
+        if ($job->status !== AIDevJobManager::STATUS_WAITING_CLARIFICATION) {
+            return;
+        }
+
+        // Check if this comment is from someone other than the bot
+        $botCommentId = $job->clarificationCommentId ?? '';
+        if ($commentId === $botCommentId) {
+            return;
+        }
+
+        $this->logger->info('GitHub: Clarification response detected', [
+            'issue_key' => $issueKey,
+            'comment_id' => $commentId
+        ]);
+
+        // Resume the job
+        $this->resumeGitHubJob($memberId, $issueKey, $commentId);
+    }
+
+    /**
+     * Resume a GitHub job after clarification
+     */
+    private function resumeGitHubJob(int $memberId, string $issueKey, string $answerCommentId): void {
+        $cronSecret = Flight::get('cron.api_key');
+        $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
+
+        $cmd = sprintf(
+            'php %s --secret=%s --member=%d --issue=%s --action=resume --comment=%s --provider=github > /dev/null 2>&1 &',
+            escapeshellarg($scriptPath),
+            escapeshellarg($cronSecret),
+            $memberId,
+            escapeshellarg($issueKey),
+            escapeshellarg($answerCommentId)
+        );
+
+        exec($cmd);
+
+        $this->logger->info('GitHub job resume triggered', [
+            'member_id' => $memberId,
+            'issue_key' => $issueKey,
+            'comment_id' => $answerCommentId
+        ]);
+    }
+
+    /**
+     * Trigger AI Dev job for GitHub issue
+     */
+    private function triggerGitHubAIDevJob(array $data, array $repoConnection): void {
+        $issue = $data['issue'] ?? [];
+        $issueNumber = $issue['number'] ?? 0;
+        $issueTitle = $issue['title'] ?? '';
+        $issueBody = $issue['body'] ?? '';
+        $repoFullName = $data['repository']['full_name'] ?? '';
+        $memberId = $repoConnection['member_id'] ?? null;
+        $repoId = $repoConnection['id'] ?? null;
+        $tenant = $repoConnection['tenant'] ?? null;
+
+        if (!$memberId) {
+            $this->logger->warning('Cannot trigger GitHub AI Dev: no member_id', [
+                'repo' => $repoFullName
+            ]);
+            return;
+        }
+
+        if (!$repoId) {
+            $this->logger->warning('Cannot trigger GitHub AI Dev: no repo_id', [
+                'repo' => $repoFullName
+            ]);
+            return;
+        }
+
+        // Create issue key in format: owner/repo#123
+        $issueKey = "{$repoFullName}#{$issueNumber}";
+
+        // Use AIDevJobService to trigger the job
+        $jobService = new AIDevJobService();
+        $result = $jobService->triggerGitHubJob($memberId, $issueKey, $repoId, $tenant);
+
+        if ($result['success']) {
+            $this->logger->info('GitHub AI Dev job triggered via webhook', [
+                'member_id' => $memberId,
+                'job_id' => $result['job_id'],
+                'issue_key' => $issueKey,
+                'repo_id' => $repoId,
+                'local' => $result['local'] ?? false
+            ]);
+
+            // Add a working label to the issue
+            $this->addGitHubWorkingLabel($repoConnection, $repoFullName, $issueNumber);
+        } else {
+            $this->logger->warning('Failed to trigger GitHub AI Dev job via webhook', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'repo_id' => $repoId,
+                'error' => $result['error'] ?? 'Unknown error'
+            ]);
+        }
+    }
+
+    /**
+     * Add working label to GitHub issue
+     */
+    private function addGitHubWorkingLabel(array $repoConnection, string $repoFullName, int $issueNumber): void {
+        try {
+            // Get GitHub token from tenant settings
+            $tokenSetting = R::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            if (!$tokenSetting || empty($tokenSetting->setting_value)) {
+                return;
+            }
+
+            $token = EncryptionService::decrypt($tokenSetting->setting_value);
+            $github = new \app\services\GitHubClient($token);
+
+            [$owner, $repo] = explode('/', $repoFullName);
+
+            // Try to add myctobot-working label
+            try {
+                $github->addLabels($owner, $repo, $issueNumber, ['myctobot-working']);
+            } catch (\Exception $e) {
+                // Label might not exist, try to create it first
+                try {
+                    $github->createLabel($owner, $repo, 'myctobot-working', 'fbca04', 'MyCTOBot is working on this issue');
+                    $github->addLabels($owner, $repo, $issueNumber, ['myctobot-working']);
+                } catch (\Exception $e2) {
+                    $this->logger->debug('Could not add working label', ['error' => $e2->getMessage()]);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->logger->debug('Failed to add working label to GitHub issue', ['error' => $e->getMessage()]);
         }
     }
 
@@ -1073,6 +1600,86 @@ class Webhook extends BaseControls\Control {
     // ========================================
     // Helper Methods
     // ========================================
+
+    /**
+     * Check if ticket has the ai-dev label
+     * Returns true if 'ai-dev' label is present
+     */
+    private function hasAiDevLabel(array $labels): bool {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if ($labelName === 'ai-dev') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Find ai-dev label in list (for backward compatibility with ai-dev-{id} pattern)
+     * Returns 'ai-dev' or 'ai-dev-{id}' or null
+     */
+    private function findAiDevLabel(array $labels): ?string {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if ($labelName === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $labelName)) {
+                return $labelName;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a label matches the ai-dev pattern (ai-dev or ai-dev-{id})
+     */
+    private function isAiDevLabel(string $label): bool {
+        return $label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label);
+    }
+
+    /**
+     * Find repo-{id} label in list to determine which repo to use
+     * Returns the repo ID or null if not found
+     */
+    private function findRepoIdFromLabels(array $labels): ?int {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if (preg_match('/^repo-(\d+)$/', $labelName, $matches)) {
+                return (int) $matches[1];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extract repo ID from labels - checks both patterns:
+     * 1. repo-{id} label (preferred)
+     * 2. ai-dev-{id} label (legacy)
+     */
+    private function extractRepoIdFromLabels(array $labels): ?int {
+        // First check for repo-{id} label (new pattern)
+        $repoId = $this->findRepoIdFromLabels($labels);
+        if ($repoId !== null) {
+            return $repoId;
+        }
+
+        // Fall back to ai-dev-{id} pattern (legacy)
+        $aiDevLabel = $this->findAiDevLabel($labels);
+        if ($aiDevLabel && preg_match('/^ai-dev-(\d+)$/', $aiDevLabel, $matches)) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * @deprecated Use extractRepoIdFromLabels instead
+     */
+    private function extractRepoIdFromLabel(string $label): ?int {
+        if (preg_match('/^ai-dev-(\d+)$/', $label, $matches)) {
+            return (int) $matches[1];
+        }
+        return null;
+    }
 
     /**
      * Validate Jira webhook signature

@@ -26,24 +26,18 @@ require_once __DIR__ . '/../services/AIDevAgent.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
+require_once __DIR__ . '/../lib/Bean.php';
+
+use \app\Bean;
 
 class Enterprise extends BaseControls\Control {
 
     /**
-     * Check Enterprise tier access
+     * Check access - all features now available to logged-in users
      */
     private function requireEnterprise(): bool {
-        if (!$this->requireLogin()) return false;
-
-        // Use the model's getTier() method which fetches from subscription table
-        $tier = $this->member->getTier();
-        if (!TierFeatures::hasFeature($tier, TierFeatures::FEATURE_AI_DEVELOPER)) {
-            $this->flash('error', 'This feature requires an Enterprise subscription.');
-            Flight::redirect('/settings/subscription');
-            return false;
-        }
-
-        return true;
+        // All features now available to all tiers
+        return $this->requireLogin();
     }
 
     /**
@@ -139,33 +133,51 @@ class Enterprise extends BaseControls\Control {
      * Enterprise settings page
      */
     public function settings() {
+        // Redirect to unified settings page
+        Flight::redirect('/settings/connections');
+    }
+
+    /**
+     * Re-register Jira webhook with correct tenant URL
+     * POST /enterprise/reregisterwebhook
+     */
+    public function reregisterwebhook() {
         if (!$this->requireEnterprise()) return;
 
-        $this->connectUserDb();
-        try {
-            // Fetch all API keys
-            $keys = Bean::findAll('anthropickeys', ' ORDER BY created_at DESC ');
-            $anthropicKeys = [];
-            foreach ($keys as $key) {
-                $decrypted = EncryptionService::decrypt($key->api_key);
-                $anthropicKeys[] = [
-                    'id' => $key->id,
-                    'name' => $key->name,
-                    'model' => $key->model,
-                    'masked_key' => $this->maskAnthropicKey($decrypted),
-                    'created_at' => $key->created_at
-                ];
-            }
+        if (Flight::request()->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
 
-            $this->disconnectUserDb();
-            $this->render('enterprise/settings', [
-                'title' => 'Enterprise Settings',
-                'anthropicKeys' => $anthropicKeys,
-                'githubConfigured' => GitHubClient::isConfigured()
-            ]);
+        $cloudId = $this->getParam('cloud_id');
+        if (empty($cloudId)) {
+            // Try to get from member's first Atlassian token
+            $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            if ($token) {
+                $cloudId = $token->cloud_id;
+            }
+        }
+
+        if (empty($cloudId)) {
+            $this->json(['success' => false, 'error' => 'No Atlassian connection found']);
+            return;
+        }
+
+        try {
+            $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
+
+            if ($result) {
+                $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+                $this->json([
+                    'success' => true,
+                    'message' => "Webhook re-registered with tenant: {$tenantSlug}"
+                ]);
+            } else {
+                $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
+            }
         } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            throw $e;
+            $this->logger->error('Webhook re-registration failed', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
         }
     }
 
@@ -338,7 +350,8 @@ class Enterprise extends BaseControls\Control {
      * Start GitHub OAuth flow
      */
     public function github() {
-        if (!$this->requireEnterprise()) return;
+        // GitHub connection is free for all tiers
+        if (!$this->requireLogin()) return;
 
         if (!GitHubClient::isConfigured()) {
             $this->flash('error', 'GitHub integration is not configured.');
@@ -457,13 +470,33 @@ class Enterprise extends BaseControls\Control {
         }
         try {
             // Get board-repo mappings
+            // Note: mapboard() uses RedBeanPHP associations which create jiraboards_id and repoconnections_id
+            // Support both old schema (board_id, repo_connection_id) and new association columns
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                $mappings[$bean->board_id][] = [
+                // Use association column names (jiraboards_id, repoconnections_id) with fallback to old schema
+                $boardId = $bean->jiraboards_id ?? $bean->board_id;
+                $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
+
+                if (!$boardId || !$repoId) continue; // Skip invalid mappings
+
+                // Dedupe: skip if this exact mapping already exists
+                $isDupe = false;
+                if (isset($mappings[$boardId])) {
+                    foreach ($mappings[$boardId] as $existing) {
+                        if ($existing['repo_connection_id'] == $repoId) {
+                            $isDupe = true;
+                            break;
+                        }
+                    }
+                }
+                if ($isDupe) continue;
+
+                $mappings[$boardId][] = [
                     'id' => $bean->id,
-                    'board_id' => $bean->board_id,
-                    'repo_connection_id' => $bean->repo_connection_id,
+                    'board_id' => $boardId,
+                    'repo_connection_id' => $repoId,
                     'is_default' => $bean->is_default,
                     'created_at' => $bean->created_at
                 ];
@@ -487,13 +520,27 @@ class Enterprise extends BaseControls\Control {
                 }
             }
 
+            // Get agents for dropdown
+            $agents = [];
+            $agentBeans = R::findAll('aiagents', 'member_id = ? AND is_active = 1 ORDER BY name ASC', [$this->member->id]);
+            foreach ($agentBeans as $agentBean) {
+                $agents[] = [
+                    'id' => $agentBean->id,
+                    'name' => $agentBean->name,
+                    'runner_type' => $agentBean->runner_type,
+                    'runner_type_label' => $this->getRunnerTypeLabel($agentBean->runner_type),
+                    'is_default' => (bool) $agentBean->is_default
+                ];
+            }
+
             $this->render('enterprise/repos', [
                 'title' => 'Repository Connections',
                 'repos' => $repos,
                 'boards' => $boards,
                 'mappings' => $mappings,
                 'availableRepos' => $availableRepos,
-                'githubConnected' => !empty($githubToken)
+                'githubConnected' => !empty($githubToken),
+                'agents' => $agents
             ]);
         } catch (\Exception $e) {
             $this->disconnectUserDb();
@@ -703,15 +750,67 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
+     * Remove a board-to-repository mapping
+     */
+    public function unmapboard() {
+        if (!$this->requireEnterprise()) return;
+
+        $boardId = (int)$this->getParam('board_id');
+        $repoId = (int)$this->getParam('repo_id');
+
+        if (empty($boardId) || empty($repoId)) {
+            $this->flash('error', 'Invalid board or repository.');
+            Flight::redirect('/enterprise/repos');
+            return;
+        }
+
+        try {
+            $this->connectUserDb();
+
+            // Find and delete the mapping
+            $mapping = Bean::findOne('boardrepomapping',
+                '(jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
+                [$boardId, $boardId, $repoId, $repoId]
+            );
+
+            if ($mapping) {
+                Bean::trash($mapping);
+                $this->flash('success', 'Repository mapping removed.');
+            } else {
+                $this->flash('warning', 'Mapping not found.');
+            }
+
+            $this->disconnectUserDb();
+
+        } catch (Exception $e) {
+            $this->disconnectUserDb();
+            $this->logger->error('Failed to unmap board', ['error' => $e->getMessage()]);
+            $this->flash('error', 'Failed to remove mapping.');
+        }
+
+        Flight::redirect('/enterprise/repos');
+    }
+
+    /**
      * Helper: Get repository connections
      */
     private function getRepoConnections(): array {
-        $memberId = $this->member->id;
         $repos = [];
 
-        $repoBeans = R::findAll('repoconnections', 'member_id = ? ORDER BY created_at DESC', [$memberId]);
+        // repoconnections is in user SQLite database, use Bean::
+        $this->connectUserDb();
+        $repoBeans = Bean::findAll('repoconnections', ' ORDER BY created_at DESC ');
 
         foreach ($repoBeans as $bean) {
+            // Get agent name if assigned (aiagents is in MySQL)
+            $agentName = null;
+            if ($bean->agent_id) {
+                $agent = R::load('aiagents', $bean->agent_id);
+                if ($agent->id) {
+                    $agentName = $agent->name;
+                }
+            }
+
             $repos[] = [
                 'id' => $bean->id,
                 'provider' => $bean->provider,
@@ -721,11 +820,15 @@ class Enterprise extends BaseControls\Control {
                 'clone_url' => $bean->clone_url,
                 'access_token' => $bean->access_token,
                 'enabled' => $bean->enabled,
+                'issues_enabled' => $bean->issues_enabled ?? 0,
+                'agent_id' => $bean->agent_id,
+                'agent_name' => $agentName,
                 'created_at' => $bean->created_at,
                 'updated_at' => $bean->updated_at
             ];
         }
 
+        $this->disconnectUserDb();
         return $repos;
     }
 
@@ -774,9 +877,10 @@ class Enterprise extends BaseControls\Control {
     public function jobs() {
         if (!$this->requireEnterprise()) return;
 
-        $jobManager = new AIDevJobManager($this->member->id);
-        $jobs = $jobManager->getAll(50);
-        $activeJobs = $jobManager->getActive();
+        // Use AIDevStatusService for JSON-based job tracking
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::getAllJobs($this->member->id, 50);
+        $activeJobs = \app\services\AIDevStatusService::getActiveJobs($this->member->id);
 
         $this->render('enterprise/jobs', [
             'title' => 'AI Developer Jobs',
@@ -1119,8 +1223,11 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AIDevJobManager($this->member->id);
-        $job = $jobManager->get($issueKey);
+        // Use AIDevStatusService for JSON-based job tracking
+        // findAllJobsByIssueKey returns all jobs (including completed) sorted by updated_at DESC
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;  // Get the most recent job
 
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
@@ -1129,7 +1236,7 @@ class Enterprise extends BaseControls\Control {
 
         $this->json([
             'success' => true,
-            'status' => $jobManager->formatJob($job)
+            'status' => $job
         ]);
     }
 
@@ -1146,20 +1253,42 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $jobManager = new AIDevJobManager($this->member->id);
+        // Use AIDevStatusService for JSON-based job tracking
+        // findAllJobsByIssueKey returns all jobs (including completed) sorted by updated_at DESC
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;  // Get the most recent job
 
-        // Verify job exists
-        $job = $jobManager->get($issueKey);
         if (!$job) {
             $this->json(['success' => false, 'error' => 'Job not found']);
             return;
         }
 
-        $logs = $jobManager->getLogs($issueKey);
+        // Convert steps_completed to log format
+        $logs = [];
+        foreach ($job['steps_completed'] ?? [] as $step) {
+            $logs[] = [
+                'level' => 'info',
+                'message' => $step['step'],
+                'context' => ['progress' => $step['progress'] ?? 0],
+                'created_at' => $step['timestamp'] ?? null
+            ];
+        }
+
+        // Add error if present
+        if (!empty($job['error'])) {
+            $logs[] = [
+                'level' => 'error',
+                'message' => $job['error'],
+                'context' => null,
+                'created_at' => $job['updated_at'] ?? null
+            ];
+        }
 
         $this->json([
             'success' => true,
-            'logs' => $logs
+            'logs' => $logs,
+            'job' => $job
         ]);
     }
 
@@ -1193,12 +1322,20 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
+            // Get tenant slug for multi-tenancy support
+            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
+                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+                : '';
+
             $cmd = sprintf(
-                'php %s --script --secret=%s --member=%d --issue=%s --action=resume > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=resume%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
-                escapeshellarg($issueKey)
+                escapeshellarg($job->id),
+                escapeshellarg($issueKey),
+                $tenantParam
             );
 
             exec($cmd);
@@ -1283,14 +1420,22 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
+            // Get tenant slug for multi-tenancy support
+            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
+                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+                : '';
+
             $cmd = sprintf(
-                'php %s --script --secret=%s --member=%d --issue=%s --action=retry --branch=%s --pr=%d > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=retry --branch=%s --pr=%d%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
+                escapeshellarg($shardJobId),
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
-                $job->prNumber ?? 0
+                $job->prNumber ?? 0,
+                $tenantParam
             );
 
             exec($cmd);
@@ -1298,7 +1443,8 @@ class Enterprise extends BaseControls\Control {
             $this->logger->info('AI Developer retry job started', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'branch' => $job->branchName
+                'branch' => $job->branchName,
+                'tenant' => $tenantSlug ?? 'default'
             ]);
 
             $this->json([
@@ -1370,5 +1516,69 @@ class Enterprise extends BaseControls\Control {
 
         $loginUrl = AtlassianAuth::getLoginUrlWithWriteScopes();
         Flight::redirect($loginUrl);
+    }
+
+    // ========================================
+    // Agent Assignment
+    // ========================================
+
+    /**
+     * Assign an agent to a repository
+     */
+    public function assignagent() {
+        if (!$this->requireEnterprise()) return;
+
+        $memberId = $this->member->id;
+
+        // Get JSON body
+        $input = json_decode(file_get_contents('php://input'), true);
+        $repoId = (int) ($input['repo_id'] ?? 0);
+        $agentId = $input['agent_id'] ? (int) $input['agent_id'] : null;
+
+        if (!$repoId) {
+            Flight::jsonError('Repository ID required', 400);
+            return;
+        }
+
+        // repoconnections is in user SQLite database
+        $this->connectUserDb();
+
+        // Verify repo exists (no member_id filter - database is already per-tenant)
+        $repo = Bean::findOne('repoconnections', 'id = ?', [$repoId]);
+        if (!$repo) {
+            $this->disconnectUserDb();
+            Flight::jsonError('Repository not found', 404);
+            return;
+        }
+
+        // If agent_id provided, verify it belongs to this member (aiagents is in MySQL)
+        if ($agentId) {
+            $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+            if (!$agent) {
+                $this->disconnectUserDb();
+                Flight::jsonError('Agent not found', 404);
+                return;
+            }
+        }
+
+        // Update repo
+        $repo->agent_id = $agentId;
+        $repo->updated_at = date('Y-m-d H:i:s');
+        Bean::store($repo);
+
+        $this->disconnectUserDb();
+        Flight::jsonSuccess(['message' => 'Agent assigned successfully']);
+    }
+
+    /**
+     * Helper: Get runner type label
+     */
+    private function getRunnerTypeLabel(string $runnerType): string {
+        $labels = [
+            'claude_cli' => 'Claude CLI',
+            'anthropic_api' => 'Anthropic API',
+            'ollama' => 'Ollama'
+        ];
+        return $labels[$runnerType] ?? $runnerType;
     }
 }

@@ -18,10 +18,14 @@ require_once __DIR__ . '/../services/UserDatabaseService.php';
 class Dashboard extends BaseControls\Control {
 
     /**
-     * Main dashboard page
+     * Main dashboard page - redirects to settings/connections
      */
     public function index() {
         if (!$this->requireLogin()) return;
+
+        // Redirect to the main dashboard at /settings/connections
+        Flight::redirect('/settings/connections');
+        return;
 
         // Get connected Atlassian sites
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
@@ -47,6 +51,9 @@ class Dashboard extends BaseControls\Control {
         $stats = $this->getStats();
         $stats['user'] = $userStats;
 
+        // Get current tenant for display
+        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+
         $this->render('dashboard/index', [
             'title' => 'Dashboard',
             'member' => $this->member,
@@ -55,7 +62,8 @@ class Dashboard extends BaseControls\Control {
             'boards' => $boards,
             'recentAnalyses' => $recentAnalyses,
             'hasAtlassian' => count($sites) > 0,
-            'atlassianConfigured' => AtlassianAuth::isConfigured()
+            'atlassianConfigured' => AtlassianAuth::isConfigured(),
+            'tenantSlug' => $tenantSlug
         ]);
     }
 

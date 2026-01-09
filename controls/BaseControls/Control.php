@@ -8,6 +8,7 @@ namespace app\BaseControls;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 
 abstract class Control {
@@ -46,7 +47,13 @@ abstract class Control {
             // Render with layout (header/footer sandwich)
             Flight::render('layouts/header', $data, 'header_content');
             Flight::render($template, $data, 'body_content');
-            Flight::render('layouts/footer', $data, 'footer_content');
+            // Allow hiding footer via $data['hideFooter'] = true
+            if (empty($data['hideFooter'])) {
+                Flight::render('layouts/footer', $data, 'footer_content');
+            } else {
+                // Set empty footer content via view vars (Flight::set doesn't work for view context)
+                Flight::view()->set('footer_content', '');
+            }
             Flight::render('layouts/layout', $data);
         } else {
             // Render without layout (for AJAX, modals, etc)

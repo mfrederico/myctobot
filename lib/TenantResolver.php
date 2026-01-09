@@ -1,15 +1,18 @@
 <?php
 /**
- * TenantResolver - Helper for multi-tenant subdomain routing
+ * TenantResolver - Helper for multi-tenant routing
  *
- * Works with the bootstrap's config resolution to provide helper methods
- * for determining current tenant context.
+ * Supports two modes:
+ * 1. Session-based tenancy (preferred): User logs in with workspace code, stored in session
+ * 2. Subdomain-based tenancy (legacy): gwt.myctobot.ai → conf/config.gwt.ini
  *
- * Routing logic (handled by bootstrap):
- *   gwt.myctobot.ai     → conf/config.gwt.ini
- *   acme.myctobot.ai    → conf/config.acme.ini
- *   myctobot.ai         → conf/config.ini (default)
- *   localhost           → conf/config.ini (default)
+ * Session-based flow:
+ *   myctobot.ai/login/gwt → login with workspace "gwt" → session stores tenant
+ *   All subsequent requests check session for tenant
+ *
+ * Config resolution:
+ *   Session tenant "gwt" → conf/config.gwt.ini
+ *   No session tenant   → conf/config.ini (default)
  */
 
 namespace app;
@@ -18,15 +21,104 @@ use \Flight as Flight;
 
 class TenantResolver {
 
+    private static $sessionTenant = null;
+    private static $initialized = false;
+
     /**
-     * Extract subdomain from current HTTP host
+     * Get tenant slug from session (primary) or subdomain (fallback)
+     *
+     * @return string Tenant slug (e.g., 'gwt', 'acme', 'default')
+     */
+    public static function getSlug(): string {
+        // Check session first (session-based tenancy)
+        if (isset($_SESSION['tenant_slug']) && !empty($_SESSION['tenant_slug'])) {
+            return $_SESSION['tenant_slug'];
+        }
+
+        // Fallback to subdomain (legacy support)
+        return self::getSubdomain() ?? 'default';
+    }
+
+    /**
+     * Set tenant in session
+     *
+     * @param string $slug Tenant slug (e.g., 'gwt')
+     * @return bool True if tenant config exists and was set
+     */
+    public static function setTenant(string $slug): bool {
+        $slug = strtolower(trim($slug));
+
+        if (empty($slug) || $slug === 'default') {
+            self::clearTenant();
+            return true;
+        }
+
+        // Validate tenant config exists
+        $configFile = "conf/config.{$slug}.ini";
+        if (!file_exists($configFile)) {
+            return false;
+        }
+
+        $_SESSION['tenant_slug'] = $slug;
+        self::$sessionTenant = $slug;
+        return true;
+    }
+
+    /**
+     * Clear tenant from session (logout or switch to default)
+     */
+    public static function clearTenant(): void {
+        unset($_SESSION['tenant_slug']);
+        self::$sessionTenant = null;
+    }
+
+    /**
+     * Get tenant slug from session only (not subdomain)
+     *
+     * @return string|null Tenant slug or null if not in session
+     */
+    public static function getSessionTenant(): ?string {
+        return $_SESSION['tenant_slug'] ?? null;
+    }
+
+    /**
+     * Check if a tenant config exists
+     *
+     * @param string $slug Tenant slug to check
+     * @return bool True if config file exists
+     */
+    public static function tenantExists(string $slug): bool {
+        if (empty($slug) || $slug === 'default') {
+            return true;
+        }
+        return file_exists("conf/config.{$slug}.ini");
+    }
+
+    /**
+     * Get the config file path for a tenant
+     *
+     * @param string|null $slug Tenant slug (null for current tenant)
+     * @return string Config file path
+     */
+    public static function getConfigFile(?string $slug = null): string {
+        $slug = $slug ?? self::getSlug();
+
+        if (empty($slug) || $slug === 'default') {
+            return 'conf/config.ini';
+        }
+
+        $configFile = "conf/config.{$slug}.ini";
+        return file_exists($configFile) ? $configFile : 'conf/config.ini';
+    }
+
+    /**
+     * Extract subdomain from current HTTP host (legacy support)
      *
      * Examples:
      *   gwt.myctobot.ai → gwt
      *   acme.myctobot.ai → acme
      *   myctobot.ai → null
      *   localhost → null
-     *   192.168.1.1 → null
      *
      * @return string|null Subdomain or null
      */
@@ -58,15 +150,6 @@ class TenantResolver {
     }
 
     /**
-     * Get tenant slug
-     *
-     * @return string Tenant slug (e.g., 'gwt', 'acme', 'default')
-     */
-    public static function getSlug(): string {
-        return self::getSubdomain() ?? 'default';
-    }
-
-    /**
      * Check if current request is for a specific tenant
      *
      * @param string $slug Tenant slug to check
@@ -79,30 +162,17 @@ class TenantResolver {
     /**
      * Check if current request is for the default (public) tenant
      *
-     * This checks if we're on the main site (no subdomain) by examining
-     * the baseurl from the loaded config.
-     *
-     * @return bool True if default/public tenant
+     * @return bool True if default/public tenant (no session tenant, no subdomain)
      */
     public static function isDefault(): bool {
-        // Check if there's a subdomain in the current host
-        $subdomain = self::getSubdomain();
-
-        // No subdomain = default site
-        if ($subdomain === null) {
-            return true;
+        // Check session tenant first
+        if (isset($_SESSION['tenant_slug']) && !empty($_SESSION['tenant_slug'])) {
+            return false;
         }
 
-        // Check the baseurl from config - if it matches the main domain, it's default
-        $baseUrl = Flight::get('app.baseurl') ?? '';
-
-        // Parse the baseurl to see if it has a subdomain
-        $parsedUrl = parse_url($baseUrl);
-        $configHost = $parsedUrl['host'] ?? '';
-        $configParts = explode('.', $configHost);
-
-        // Main site (myctobot.ai) has 2 parts, subdomains have 3+
-        return count($configParts) < 3;
+        // Check subdomain
+        $subdomain = self::getSubdomain();
+        return $subdomain === null;
     }
 
     /**
@@ -124,7 +194,8 @@ class TenantResolver {
             'slug' => self::getSlug(),
             'host' => $_SERVER['HTTP_HOST'] ?? 'localhost',
             'baseurl' => self::getBaseUrl(),
-            'is_default' => self::isDefault()
+            'is_default' => self::isDefault(),
+            'from_session' => isset($_SESSION['tenant_slug'])
         ];
     }
 }

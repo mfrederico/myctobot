@@ -158,6 +158,9 @@ class Settings extends BaseControls\Control {
     public function connections() {
         if (!$this->requireLogin()) return;
 
+        // Switch to user database FIRST before any queries
+        $this->initUserDb();
+
         $connectionsService = new ConnectionsService($this->member->id);
         $connections = $connectionsService->getAllConnections();
         $summary = $connectionsService->getConnectionSummary();
@@ -169,14 +172,29 @@ class Settings extends BaseControls\Control {
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
         // Get user stats
-        $stats = [];
-        if ($this->initUserDb()) {
-            $stats = UserDatabaseService::getStats();
-        }
+        $stats = UserDatabaseService::getStats();
 
         // Get subscription info - use SubscriptionService directly for reliability
         $tier = SubscriptionService::getTier($this->member->id);
         $tierInfo = SubscriptionService::getTierInfo($tier);
+
+        // Get agent and shard counts for enterprise users
+        $agentCount = 0;
+        $shardCount = 0;
+        if ($tier === 'enterprise') {
+            $agentCount = R::count('aiagents', 'member_id = ?', [$this->member->id]);
+
+            // Shards are admin-level (not per-member)
+            if ($this->member->level <= 50) {
+                require_once __DIR__ . '/../services/ShardService.php';
+                $allShards = \app\services\ShardService::getAllShards(false);
+                $shardCount = count($allShards);
+            }
+        }
+
+        // Check if we should show onboarding wizard (all tiers)
+        $gitConnected = $connections['github']['connected'] ?? false;
+        $showOnboarding = !$gitConnected;
 
         $this->render('settings/connections', [
             'title' => 'Settings',
@@ -187,7 +205,11 @@ class Settings extends BaseControls\Control {
             'member' => $this->member,
             'sites' => $sites,
             'stats' => $stats,
-            'tierInfo' => $tierInfo
+            'tierInfo' => $tierInfo,
+            'agentCount' => $agentCount,
+            'shardCount' => $shardCount,
+            'showOnboarding' => $showOnboarding,
+            'gitConnected' => $gitConnected
         ]);
     }
 

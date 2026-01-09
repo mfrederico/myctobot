@@ -47,6 +47,8 @@
             "lib/MarkdownParser.php",
             "lib/CachedDatabaseAdapter.php",
             "lib/RedBeanQueryCache.php",
+            "lib/TenantResolver.php",
+            "lib/Bean.php",
             "lib/functions.php"
         ]
     },

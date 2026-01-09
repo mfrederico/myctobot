@@ -1,8 +1,8 @@
 <div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h1 class="h2 mb-1">Settings</h1>
-            <p class="text-muted mb-0">Manage your account and integrations</p>
+            <h1 class="h2 mb-1">Dashboard</h1>
+            <p class="text-muted mb-0">Your command center for MyCTOBot</p>
         </div>
     </div>
 
@@ -124,14 +124,27 @@
                     </a>
                 </div>
                 <?php endif; ?>
+                <?php if ($tier === 'enterprise'): ?>
+                <div class="col-md-3">
+                    <a href="/agents" class="text-decoration-none">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-robot fs-4 text-success me-3"></i>
+                            <div>
+                                <strong>Agent Profiles</strong>
+                                <small class="d-block text-muted">Configure how jobs run</small>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <?php endif; ?>
                 <?php if ($member->level <= 50): ?>
                 <div class="col-md-3">
                     <a href="/admin/shards" class="text-decoration-none">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-pc-display-horizontal fs-4 text-secondary me-3"></i>
                             <div>
-                                <strong>Workstation Shards</strong>
-                                <small class="d-block text-muted">Manage AI compute nodes</small>
+                                <strong>Workstations</strong>
+                                <small class="d-block text-muted">Where jobs run</small>
                             </div>
                         </div>
                     </a>
@@ -167,6 +180,54 @@
             </div>
         </div>
     </div>
+
+    <?php if ($tier === 'enterprise'): ?>
+    <!-- AI Developer Infrastructure -->
+    <div class="row g-4 mb-4">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-success text-white">
+                    <i class="bi bi-robot"></i> Agent Profiles
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h3 class="mb-1"><?= $agentCount ?? 0 ?></h3>
+                            <p class="text-muted mb-0 small">
+                                Agents define <em>how</em> AI Developer jobs run: runner type, MCP servers, and hooks.
+                            </p>
+                        </div>
+                        <a href="/agents" class="btn btn-outline-success">
+                            <i class="bi bi-gear"></i> Manage
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php if ($member->level <= 50): ?>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header bg-secondary text-white">
+                    <i class="bi bi-pc-display-horizontal"></i> Workstation Shards
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h3 class="mb-1"><?= $shardCount ?? 0 ?></h3>
+                            <p class="text-muted mb-0 small">
+                                Shards define <em>where</em> AI Developer jobs run: remote servers with Claude installed.
+                            </p>
+                        </div>
+                        <a href="/admin/shards" class="btn btn-outline-secondary">
+                            <i class="bi bi-gear"></i> Manage
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
 
     <!-- Connected Services Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">

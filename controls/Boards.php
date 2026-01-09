@@ -47,7 +47,7 @@ class Boards extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 
@@ -120,7 +120,7 @@ class Boards extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 

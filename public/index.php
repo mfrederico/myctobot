@@ -76,6 +76,29 @@ if (!file_exists($configFile)) {
 // Initialize application with CLI arguments if available
 $app = new app\Bootstrap($configFile);
 
+// Check maintenance mode (skip for CLI)
+if (php_sapi_name() !== 'cli') {
+    $maintenanceEnabled = \Flight::get('maintenance.enabled');
+    if ($maintenanceEnabled && strtolower($maintenanceEnabled) !== 'false' && $maintenanceEnabled !== '0') {
+        // Check if IP is allowed
+        $allowedIps = \Flight::get('maintenance.allowed_ips') ?? '';
+        $clientIp = $_SERVER['REMOTE_ADDR'] ?? '';
+        $allowedList = array_map('trim', explode(',', $allowedIps));
+
+        if (!in_array($clientIp, $allowedList)) {
+            $message = \Flight::get('maintenance.message') ?? 'We are currently performing maintenance. Please check back soon.';
+            http_response_code(503);
+            header('Retry-After: 3600');
+            echo '<!DOCTYPE html><html><head><title>Maintenance</title>
+                <style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#f5f5f5;}
+                .box{text-align:center;padding:40px;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:500px;}
+                h1{color:#333;margin-bottom:20px;}p{color:#666;}</style></head>
+                <body><div class="box"><h1>Under Maintenance</h1><p>' . htmlspecialchars($message) . '</p></div></body></html>';
+            exit;
+        }
+    }
+}
+
 // Load routes - for both web and CLI modes (CLI sets REQUEST_URI in CliHandler)
 if (isset($_SERVER['REQUEST_URI'])) {
     $routePath = BASE_PATH . '/routes';

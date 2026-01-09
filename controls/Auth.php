@@ -18,14 +18,42 @@ class Auth extends BaseControls\Control {
 
     /**
      * Show login form
+     * Canonical URL: /login or /login/{workspace}
      */
-    public function login() {
+    public function login($params = null) {
+        // Redirect /auth/login to /login (clean URLs)
+        $isAuthRoute = !isset($params['workspace']) && isset($params['operation']);
+        if ($isAuthRoute) {
+            $workspace = $params['operation']->name ?? '';
+            $redirect = Flight::request()->query->redirect ?? '';
+            $url = $workspace ? "/login/{$workspace}" : '/login';
+            if ($redirect) {
+                $url .= '?redirect=' . urlencode($redirect);
+            }
+            Flight::redirect($url);
+            return;
+        }
+
+        // Get workspace from URL params (/login/gwt)
+        $workspace = $params['workspace'] ?? '';
+
+        // Also check query string (e.g., /login?workspace=gwt)
+        if (empty($workspace)) {
+            $workspace = Flight::request()->query->workspace ?? '';
+        }
+
+        // If still no workspace, try to extract from subdomain
+        // e.g., clicksimple-inc.myctobot.ai -> clicksimple-inc
+        if (empty($workspace)) {
+            $workspace = $this->extractSubdomainFromHost();
+        }
+
         // Don't redirect if coming from a permission denied scenario
         $redirect = Flight::request()->query->redirect ?? '';
 
         // If already logged in and NOT coming from a permission denied redirect
         if (Flight::isLoggedIn() && empty($redirect)) {
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 
@@ -34,15 +62,25 @@ class Auth extends BaseControls\Control {
             $this->flash('error', 'You do not have permission to access that page.');
         }
 
+        // Validate workspace if provided
+        $workspaceError = null;
+        if (!empty($workspace) && !TenantResolver::tenantExists($workspace)) {
+            $workspaceError = "Workspace '{$workspace}' not found";
+            $workspace = '';
+        }
+
         $this->render('auth/login', [
             'title' => 'Login',
             'redirect' => $redirect,
-            'googleEnabled' => GoogleAuth::isConfigured()
+            'workspace' => $workspace,
+            'workspaceError' => $workspaceError,
+            'googleEnabled' => GoogleAuth::isConfigured() && TenantResolver::isDefault()
         ]);
     }
 
     /**
      * Process login
+     * Supports workspace-based multi-tenant authentication
      */
     public function dologin() {
         try {
@@ -58,30 +96,50 @@ class Auth extends BaseControls\Control {
             $username = $request->data->username ?? '';
             $email = $request->data->email ?? '';
             $password = $request->data->password ?? '';
-            $redirect = $request->data->redirect ?? '/dashboard';
+            $workspace = strtolower(trim($request->data->workspace ?? ''));
+            $redirect = $request->data->redirect ?? '/settings/connections';
 
             // Use username if provided, otherwise use email
             $login = $username ?: $email;
 
             // Validate input
             if (empty($login) || empty($password)) {
-                $this->flash('error', 'Username/Email and password are required');
-                Flight::redirect('/auth/login');
+                $this->flash('error', 'Email and password are required');
+                $this->redirectToLogin($workspace);
                 return;
             }
 
-            // Find member by username or email
+            // If workspace provided, switch to tenant database
+            if (!empty($workspace)) {
+                if (!TenantResolver::tenantExists($workspace)) {
+                    $this->flash('error', "Workspace '{$workspace}' not found");
+                    Flight::redirect('/auth/login');
+                    return;
+                }
+
+                // Switch to tenant database
+                if (!$this->switchToTenantDatabase($workspace)) {
+                    $this->flash('error', 'Could not connect to workspace. Please try again.');
+                    Flight::redirect('/auth/login');
+                    return;
+                }
+            }
+
+            // Find member by username or email (in current database - tenant or default)
             $member = R::findOne('member', '(username = ? OR email = ?) AND status = ?', [$login, $login, 'active']);
 
             if (!$member || !password_verify($password, $member->password)) {
-                $this->logger->warning('Failed login attempt', ['login' => $login]);
+                $this->logger->warning('Failed login attempt', ['login' => $login, 'workspace' => $workspace ?: 'default']);
                 $this->flash('error', 'Invalid credentials');
-                Flight::redirect('/auth/login');
+                $this->redirectToLogin($workspace);
                 return;
             }
 
-            // Ensure user has their database set up
-            $this->ensureUserDatabase($member);
+            // For workspace logins, user database is already the tenant DB
+            // For default logins (no workspace), ensure user has their SQLite set up
+            if (empty($workspace)) {
+                $this->ensureUserDatabase($member);
+            }
 
             // Update last login
             $member->last_login = date('Y-m-d H:i:s');
@@ -94,7 +152,18 @@ class Auth extends BaseControls\Control {
             // Set session
             $_SESSION['member'] = $member->export();
 
-            $this->logger->info('User logged in', ['id' => $member->id, 'username' => $member->username]);
+            // Store tenant in session for workspace logins
+            if (!empty($workspace)) {
+                TenantResolver::setTenant($workspace);
+                $this->logger->info('User logged in to workspace', [
+                    'id' => $member->id,
+                    'username' => $member->username,
+                    'workspace' => $workspace
+                ]);
+            } else {
+                $this->logger->info('User logged in', ['id' => $member->id, 'username' => $member->username]);
+            }
+
             $this->flash('success', 'Welcome back, ' . ($member->display_name ?? $member->username ?? $member->email) . '!');
 
             Flight::redirect($redirect);
@@ -105,12 +174,110 @@ class Auth extends BaseControls\Control {
     }
 
     /**
+     * Switch to a tenant's database
+     *
+     * @param string $workspace Tenant workspace code
+     * @return bool True on success
+     */
+    private function switchToTenantDatabase(string $workspace): bool {
+        $configFile = TenantResolver::getConfigFile($workspace);
+
+        if (!file_exists($configFile)) {
+            $this->logger->error('Tenant config not found', ['workspace' => $workspace, 'config' => $configFile]);
+            return false;
+        }
+
+        try {
+            $config = parse_ini_file($configFile, true);
+            $dbConfig = $config['database'] ?? [];
+
+            if (empty($dbConfig)) {
+                $this->logger->error('Tenant database config missing', ['workspace' => $workspace]);
+                return false;
+            }
+
+            // Build DSN and connect
+            $type = $dbConfig['type'] ?? 'mysql';
+            $host = $dbConfig['host'] ?? 'localhost';
+            $port = $dbConfig['port'] ?? 3306;
+            $name = $dbConfig['name'] ?? '';
+            $user = $dbConfig['user'] ?? '';
+            $pass = $dbConfig['pass'] ?? '';
+
+            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+
+            // Add this connection as a secondary database and switch to it
+            R::addDatabase($workspace, $dsn, $user, $pass);
+            R::selectDatabase($workspace);
+
+            $this->logger->debug('Switched to tenant database', ['workspace' => $workspace, 'database' => $name]);
+            return true;
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to switch tenant database', [
+                'workspace' => $workspace,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * Redirect back to login with workspace preserved
+     */
+    private function redirectToLogin(string $workspace = ''): void {
+        if (!empty($workspace)) {
+            Flight::redirect("/login/{$workspace}");
+        } else {
+            Flight::redirect('/auth/login');
+        }
+    }
+
+    /**
+     * Extract subdomain from HTTP host
+     * e.g., clicksimple-inc.myctobot.ai -> clicksimple-inc
+     * Returns empty string for main domain or localhost
+     */
+    private function extractSubdomainFromHost(): string {
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $host = explode(':', $host)[0]; // Remove port
+        $host = strtolower($host);
+
+        // Skip localhost and IP addresses
+        if ($host === 'localhost' || filter_var($host, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+
+        // Extract subdomain (first part if 3+ parts)
+        // clicksimple-inc.myctobot.ai -> clicksimple-inc
+        // myctobot.ai -> '' (no subdomain)
+        $parts = explode('.', $host);
+        if (count($parts) >= 3) {
+            $subdomain = $parts[0];
+            // Verify tenant config exists
+            if (TenantResolver::tenantExists($subdomain)) {
+                return $subdomain;
+            }
+        }
+
+        return '';
+    }
+
+    /**
      * Logout user
      */
     public function logout() {
+        $workspace = TenantResolver::getSessionTenant();
+
         if (isset($_SESSION['member'])) {
-            $this->logger->info('User logged out', ['id' => $_SESSION['member']['id']]);
+            $this->logger->info('User logged out', [
+                'id' => $_SESSION['member']['id'],
+                'workspace' => $workspace ?: 'default'
+            ]);
         }
+
+        // Clear tenant from session
+        TenantResolver::clearTenant();
 
         // Properly clear session data
         $_SESSION = array();
@@ -131,16 +298,27 @@ class Auth extends BaseControls\Control {
         session_start();
         $this->flash('success', 'You have been logged out');
 
-        Flight::redirect('/');
+        // If was in a workspace, redirect to workspace login
+        if (!empty($workspace)) {
+            Flight::redirect("/login/{$workspace}");
+        } else {
+            Flight::redirect('/');
+        }
     }
 
     /**
      * Show registration form
      */
     public function register() {
+        // Non-tenant (main site) should use /signup for tenant registration
+        if (!Flight::get('tenant.active')) {
+            Flight::redirect('/signup');
+            return;
+        }
+
         // Redirect if already logged in
         if (Flight::isLoggedIn()) {
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 
@@ -154,6 +332,12 @@ class Auth extends BaseControls\Control {
      * Process registration (simple version - no email verification)
      */
     public function doregister() {
+        // Non-tenant (main site) should use /signup for tenant registration
+        if (!Flight::get('tenant.active')) {
+            Flight::redirect('/signup');
+            return;
+        }
+
         $request = Flight::request();
 
         // Handle both GET and POST for easier testing
@@ -232,7 +416,7 @@ class Auth extends BaseControls\Control {
             $_SESSION['member'] = $member->export();
 
             $this->flash('success', 'Welcome to ' . Flight::get('app.name') . '! Your account has been created.');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
 
         } catch (\Exception $e) {
             Flight::get('log')->error('Registration failed: ' . $e->getMessage());
@@ -281,11 +465,27 @@ class Auth extends BaseControls\Control {
                 $member->reset_expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
                 R::store($member);
 
-                // Send reset email (implement your email service)
+                // Send reset email via Mailgun
                 $resetUrl = Flight::get('app.baseurl') . "/auth/reset?token={$token}";
 
-                // TODO: Send email with $resetUrl
-                $this->logger->info('Password reset requested', ['email' => $email]);
+                $mailgun = new \app\services\MailgunService();
+                if ($mailgun->isEnabled()) {
+                    $subject = 'Reset Your Password - MyCTOBot';
+                    $html = <<<HTML
+<h2>Password Reset Request</h2>
+<p>You requested to reset your password. Click the button below to create a new password:</p>
+<p style="text-align: center; margin: 30px 0;">
+    <a href="{$resetUrl}" style="background-color: #0d6efd; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Password</a>
+</p>
+<p>Or copy and paste this link into your browser:</p>
+<p><a href="{$resetUrl}">{$resetUrl}</a></p>
+<p style="color: #666; font-size: 14px;">This link expires in 1 hour. If you didn't request this, you can ignore this email.</p>
+HTML;
+                    $sent = $mailgun->send($email, $subject, $html);
+                    $this->logger->info('Password reset email sent', ['email' => $email, 'sent' => $sent]);
+                } else {
+                    $this->logger->warning('Mailgun not configured, password reset email not sent', ['email' => $email]);
+                }
             }
 
             // Always show success to prevent email enumeration
@@ -394,6 +594,18 @@ class Auth extends BaseControls\Control {
                 return;
             }
 
+            // Store workspace in session for after callback
+            $workspace = Flight::request()->query->workspace ?? '';
+            if (!empty($workspace)) {
+                $_SESSION['oauth_workspace'] = strtolower(trim($workspace));
+            }
+
+            // Store redirect URL if provided
+            $redirect = Flight::request()->query->redirect ?? '';
+            if (!empty($redirect)) {
+                $_SESSION['oauth_redirect'] = $redirect;
+            }
+
             $loginUrl = GoogleAuth::getLoginUrl();
             Flight::redirect($loginUrl);
 
@@ -443,8 +655,42 @@ class Auth extends BaseControls\Control {
                 return;
             }
 
-            // Ensure user has their database set up
-            $this->ensureUserDatabase($member);
+            // Check for workspace from OAuth flow
+            $workspace = $_SESSION['oauth_workspace'] ?? '';
+            $redirect = $_SESSION['oauth_redirect'] ?? '/settings/connections';
+            unset($_SESSION['oauth_workspace'], $_SESSION['oauth_redirect']);
+
+            // If workspace specified, switch to tenant database
+            if (!empty($workspace)) {
+                if (!TenantResolver::tenantExists($workspace)) {
+                    $this->flash('error', "Workspace '{$workspace}' not found");
+                    Flight::redirect('/auth/login');
+                    return;
+                }
+
+                if (!$this->switchToTenantDatabase($workspace)) {
+                    $this->flash('error', 'Could not connect to workspace');
+                    Flight::redirect('/auth/login');
+                    return;
+                }
+
+                // Re-find member in tenant database
+                $tenantMember = R::findOne('member', '(email = ? OR google_id = ?) AND status = ?',
+                    [$member->email, $member->google_id, 'active']);
+
+                if (!$tenantMember) {
+                    $this->flash('error', 'Your Google account is not registered in this workspace');
+                    Flight::redirect("/login/{$workspace}");
+                    return;
+                }
+                $member = $tenantMember;
+
+                // Set tenant in session
+                TenantResolver::setTenant($workspace);
+            } else {
+                // Ensure user has their database set up (main site login)
+                $this->ensureUserDatabase($member);
+            }
 
             // Regenerate session ID to prevent session fixation attacks
             session_regenerate_id(true);
@@ -454,11 +700,12 @@ class Auth extends BaseControls\Control {
 
             $this->logger->info('User logged in via Google', [
                 'id' => $member->id,
-                'email' => $member->email
+                'email' => $member->email,
+                'workspace' => $workspace ?: 'default'
             ]);
 
             $this->flash('success', 'Welcome, ' . ($member->display_name ?? $member->username ?? $member->email) . '!');
-            Flight::redirect('/dashboard');
+            Flight::redirect($redirect);
 
         } catch (Exception $e) {
             $this->handleException($e, 'Google login failed');

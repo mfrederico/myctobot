@@ -115,9 +115,6 @@
                         <button class="btn btn-outline-secondary btn-sm" onclick="testShard(<?= $shard['id'] ?>)" title="Test Connection">
                             <i class="bi bi-plug"></i> Test
                         </button>
-                        <a href="/admin/shardmcp/<?= $shard['id'] ?>" class="btn btn-outline-info btn-sm" title="MCP Servers">
-                            <i class="bi bi-box-seam"></i> MCP
-                        </a>
                         <a href="/admin/editshard/<?= $shard['id'] ?>" class="btn btn-outline-primary btn-sm" title="Edit">
                             <i class="bi bi-pencil"></i> Edit
                         </a>

@@ -42,6 +42,7 @@ $options = getopt('', [
     'member:',
     'board:',
     'job:',
+    'tenant:',
     'status-filter:',
     'email',
     'verbose',
@@ -90,10 +91,22 @@ use \app\services\AnalysisService;
 require_once $baseDir . '/services/AnalysisService.php';
 
 try {
-    $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
+    // Determine config file based on tenant parameter
+    $tenant = $options['tenant'] ?? null;
+    if ($tenant) {
+        $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            echo "Error: Tenant config not found: {$configFile}\n";
+            exit(1);
+        }
+    } else {
+        $configFile = $baseDir . '/conf/config.ini';
+    }
+
+    $bootstrap = new \app\Bootstrap($configFile);
 
     if ($verbose) {
-        echo "Application initialized\n\n";
+        echo "Application initialized" . ($tenant ? " (tenant: {$tenant})" : "") . "\n\n";
     }
 
     // Validate CLI secret key for authentication

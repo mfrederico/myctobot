@@ -4,8 +4,11 @@
  * AI Developer Agent Background Runner
  *
  * Usage:
- *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE_KEY --cloud=CLOUD_ID --repo=REPO_ID --action=process
- *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID]
+ *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE_KEY --cloud=CLOUD_ID --repo=REPO_ID --action=process [--tenant=TENANT]
+ *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--tenant=TENANT]
+ *
+ * Options:
+ *   --tenant     Tenant slug for multi-tenancy (e.g., gwt). Loads conf/config.{tenant}.ini
  */
 
 // Set up error reporting
@@ -41,10 +44,7 @@ use \app\services\EncryptionService;
 use \app\services\AIDevAgent;
 use \app\services\AIDevStatusService;
 
-// Initialize the application
-$bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
-
-// Parse command line arguments
+// Parse command line arguments BEFORE bootstrap (need tenant param for config)
 $options = getopt('', [
     'script',
     'secret:',
@@ -57,6 +57,7 @@ $options = getopt('', [
     'comment:',
     'branch:',
     'pr:',
+    'tenant:',
     'help',
     'verbose'
 ]);
@@ -66,11 +67,11 @@ if (isset($options['help'])) {
     echo "AI Developer Agent Background Runner\n\n";
     echo "Usage:\n";
     echo "  Process new ticket:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE --cloud=CLOUD --repo=REPO --action=process\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE --cloud=CLOUD --repo=REPO --action=process [--tenant=TENANT]\n\n";
     echo "  Resume after clarification:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID]\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--tenant=TENANT]\n\n";
     echo "  Retry on existing branch:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=retry --branch=BRANCH [--pr=PR_NUMBER]\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=retry --branch=BRANCH [--pr=PR_NUMBER] [--tenant=TENANT]\n\n";
     echo "Options:\n";
     echo "  --secret     Required. CLI authentication secret\n";
     echo "  --member     Required. Member ID\n";
@@ -82,9 +83,25 @@ if (isset($options['help'])) {
     echo "  --comment    Comment ID containing clarification (optional for resume)\n";
     echo "  --branch     Branch name (required for retry action)\n";
     echo "  --pr         PR number (optional for retry action)\n";
+    echo "  --tenant     Tenant slug for multi-tenancy (e.g., gwt)\n";
     echo "  --verbose    Show detailed output\n";
     exit(0);
 }
+
+// Determine config file based on tenant parameter
+$tenant = $options['tenant'] ?? null;
+if ($tenant) {
+    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    if (!file_exists($configFile)) {
+        echo "Error: Tenant config not found: {$configFile}\n";
+        exit(1);
+    }
+} else {
+    $configFile = $baseDir . '/conf/config.ini';
+}
+
+// Initialize the application with tenant-specific config
+$bootstrap = new \app\Bootstrap($configFile);
 
 // Validate CLI secret key
 $providedSecret = $options['secret'] ?? null;

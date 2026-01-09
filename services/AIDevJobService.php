@@ -37,9 +37,11 @@ class AIDevJobService {
      * @param string $cloudId Atlassian cloud ID
      * @param int|null $boardId Board ID (optional, will be auto-detected from issue key)
      * @param int|null $repoId Repository connection ID (optional, will use first enabled)
+     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @param bool $useOrchestrator Whether to use orchestrator mode
      * @return array Result with 'success', 'job_id', 'error' keys
      */
-    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, bool $useOrchestrator = false): array {
+    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false): array {
         try {
             // Validate member has enterprise tier
             $member = R::load('member', $memberId);
@@ -144,7 +146,7 @@ class AIDevJobService {
                     'source' => 'local_runner'
                 ]);
 
-                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $useOrchestrator);
+                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator);
 
                 if ($result['success']) {
                     // Add working label and transition status
@@ -598,10 +600,11 @@ class AIDevJobService {
      * @param int $boardId Board ID
      * @param string $cloudId Cloud ID
      * @param int|null $repoId Repository connection ID
+     * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Use orchestrator mode
      * @return array Result with 'success', 'job_id', 'session_name' keys
      */
-    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, bool $useOrchestrator = true): array {
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true): array {
         $tmux = new TmuxService($memberId, $issueKey);
 
         // Check if session already exists
@@ -638,7 +641,7 @@ class AIDevJobService {
             return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
-        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId)) {
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $tenant)) {
             $this->logger->info('Local AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),

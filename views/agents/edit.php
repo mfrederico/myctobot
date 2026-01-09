@@ -39,9 +39,22 @@ $hooksConfig = $agent['hooks_config'] ?? [];
             </a>
         </li>
         <li class="nav-item" role="presentation">
+            <?php
+            $hookCount = 0;
+            foreach (['PreToolUse', 'PostToolUse', 'Stop'] as $event) {
+                if (!empty($hooksConfig[$event])) {
+                    foreach ($hooksConfig[$event] as $rule) {
+                        $hookCount += count($rule['hooks'] ?? []);
+                    }
+                }
+            }
+            ?>
             <a class="nav-link <?= $activeTab === 'hooks' ? 'active' : '' ?>"
                href="/agents/edit/<?= $agentId ?>?tab=hooks">
                 <i class="bi bi-lightning"></i> Hooks
+                <?php if ($hookCount > 0): ?>
+                <span class="badge bg-secondary"><?= $hookCount ?></span>
+                <?php endif; ?>
             </a>
         </li>
     </ul>
@@ -173,7 +186,8 @@ $hooksConfig = $agent['hooks_config'] ?? [];
         <div class="card-body">
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
-                Configure MCP servers that will be available to this agent. These are merged with built-in defaults (Jira, Playwright) at runtime.
+                Configure <strong>additional</strong> MCP servers for this agent. <strong>Jira and Playwright are always enabled</strong> (auto-configured at runtime with your credentials).
+                Use "Load Defaults" to add common servers like GitHub and Fetch.
             </div>
 
             <form method="POST" action="/agents/update/<?= $agentId ?>">
@@ -199,13 +213,9 @@ $hooksConfig = $agent['hooks_config'] ?? [];
 
 <script>
 function loadDefaultMcp() {
+    // Note: Jira and Playwright are ALWAYS auto-added at runtime
+    // This loads additional useful servers
     const defaultConfig = [
-        {
-            "name": "playwright",
-            "type": "stdio",
-            "command": "npx",
-            "args": ["@playwright/mcp@latest", "--headless"]
-        },
         {
             "name": "github",
             "type": "stdio",
@@ -218,6 +228,12 @@ function loadDefaultMcp() {
             "type": "stdio",
             "command": "npx",
             "args": ["-y", "@modelcontextprotocol/server-fetch"]
+        },
+        {
+            "name": "mantic",
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "mantic-mcp"]
         }
     ];
     document.getElementById('mcp_servers').value = JSON.stringify(defaultConfig, null, 2);
@@ -236,13 +252,82 @@ function loadDefaultMcp() {
                 Configure hooks that run before/after tool execution. This generates the <code>.claude/settings.json</code> hooks section.
             </div>
 
+            <!-- Language Validator Quick Setup -->
+            <div class="card bg-light mb-4">
+                <div class="card-header">
+                    <i class="bi bi-shield-check"></i> Security Validators (Quick Setup)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Select language validators to automatically check for OWASP security issues, coding standards, and best practices.
+                        These run as PreToolUse hooks on Write/Edit operations.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_php" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_php">
+                                    <i class="bi bi-filetype-php text-primary"></i> <strong>PHP</strong>
+                                    <small class="d-block text-muted">RedBeanPHP, FlightPHP, OWASP</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_js" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_js">
+                                    <i class="bi bi-filetype-js text-warning"></i> <strong>JavaScript/TypeScript</strong>
+                                    <small class="d-block text-muted">XSS, eval, Node.js security</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_python" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_python">
+                                    <i class="bi bi-filetype-py text-success"></i> <strong>Python</strong>
+                                    <small class="d-block text-muted">SQL injection, pickle, subprocess</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_go" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_go">
+                                    <i class="bi bi-box"></i> Go <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_ruby" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_ruby">
+                                    <i class="bi bi-gem"></i> Ruby <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_liquid" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_liquid">
+                                    <i class="bi bi-droplet"></i> Liquid <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <form method="POST" action="/agents/update/<?= $agentId ?>">
                 <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
                 <input type="hidden" name="tab" value="hooks">
 
                 <div class="mb-3">
                     <label class="form-label">Hooks Configuration (JSON)</label>
-                    <textarea class="form-control font-monospace" name="hooks_config" rows="20"
+                    <textarea class="form-control font-monospace" id="hooks_config" name="hooks_config" rows="20"
                               placeholder='{
   "PreToolUse": [
     {
@@ -273,6 +358,91 @@ function loadDefaultMcp() {
             </form>
         </div>
     </div>
+
+<script>
+// Available language validators
+const languageValidators = {
+    php: {
+        command: "php scripts/hooks/validate-php.php",
+        timeout: 30
+    },
+    js: {
+        command: "php scripts/hooks/validate-js.php",
+        timeout: 30
+    },
+    python: {
+        command: "php scripts/hooks/validate-python.php",
+        timeout: 30
+    }
+};
+
+function updateHooksFromCheckboxes() {
+    const hooks = [];
+
+    // Check which validators are selected
+    if (document.getElementById('hook_php').checked) {
+        hooks.push({
+            type: "command",
+            command: languageValidators.php.command,
+            timeout: languageValidators.php.timeout
+        });
+    }
+    if (document.getElementById('hook_js').checked) {
+        hooks.push({
+            type: "command",
+            command: languageValidators.js.command,
+            timeout: languageValidators.js.timeout
+        });
+    }
+    if (document.getElementById('hook_python').checked) {
+        hooks.push({
+            type: "command",
+            command: languageValidators.python.command,
+            timeout: languageValidators.python.timeout
+        });
+    }
+
+    // Build config
+    const config = {
+        PreToolUse: hooks.length > 0 ? [{
+            matcher: "Write|Edit",
+            hooks: hooks
+        }] : [],
+        PostToolUse: [],
+        Stop: []
+    };
+
+    document.getElementById('hooks_config').value = JSON.stringify(config, null, 2);
+}
+
+// Initialize checkboxes from existing config on page load
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        const configText = document.getElementById('hooks_config').value;
+        if (!configText || configText === '{}') return;
+
+        const config = JSON.parse(configText);
+        const preToolUse = config.PreToolUse || [];
+
+        preToolUse.forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('validate-php')) {
+                    document.getElementById('hook_php').checked = true;
+                }
+                if (cmd.includes('validate-js')) {
+                    document.getElementById('hook_js').checked = true;
+                }
+                if (cmd.includes('validate-python')) {
+                    document.getElementById('hook_python').checked = true;
+                }
+            });
+        });
+    } catch (e) {
+        // Ignore parse errors
+    }
+});
+</script>
     <?php endif; ?>
 </div>
 

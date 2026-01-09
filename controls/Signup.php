@@ -31,7 +31,8 @@ class Signup extends BaseControls\Control {
 
         $this->render('signup/index', [
             'title' => 'Get Started - Create Your Team',
-            'data' => []
+            'data' => [],
+            'hideFooter' => true
         ]);
     }
 
@@ -94,7 +95,6 @@ class Signup extends BaseControls\Control {
 
         // Get form data
         $businessName = trim($this->getParam('business_name', ''));
-        $subdomain = strtolower(trim($this->getParam('subdomain', '')));
         $email = trim($this->getParam('email', ''));
         $password = $this->getParam('password', '');
         $passwordConfirm = $this->getParam('password_confirm', '');
@@ -107,10 +107,6 @@ class Signup extends BaseControls\Control {
         }
         if (strlen($businessName) > 100) {
             $errors[] = 'Business name must be 100 characters or less';
-        }
-
-        if (empty($subdomain)) {
-            $errors[] = 'Subdomain is required';
         }
 
         if (empty($email)) {
@@ -136,7 +132,6 @@ class Signup extends BaseControls\Control {
                 'errors' => $errors,
                 'data' => [
                     'business_name' => $businessName,
-                    'subdomain' => $subdomain,
                     'email' => $email
                 ]
             ]);
@@ -144,21 +139,22 @@ class Signup extends BaseControls\Control {
         }
 
         try {
-            // Validate subdomain with provisioner
+            // Get provisioner
             $adminHost = Flight::get('database.host') ?? 'localhost';
             $adminUser = Flight::get('provisioner.db_user') ?? Flight::get('database.user');
             $adminPass = Flight::get('provisioner.db_pass') ?? Flight::get('database.pass');
 
             $provisioner = new TenantProvisioner($adminHost, $adminUser, $adminPass);
-            $validation = $provisioner->validateSubdomain($subdomain);
 
-            if (!$validation['valid']) {
+            // Auto-generate an available subdomain from business name
+            $subdomain = $this->generateAvailableSubdomain($businessName, $provisioner);
+
+            if (!$subdomain) {
                 $this->render('signup/index', [
                     'title' => 'Get Started - Create Your Team',
-                    'errors' => [$validation['error']],
+                    'errors' => ['Unable to generate a workspace URL. Please contact support.'],
                     'data' => [
                         'business_name' => $businessName,
-                        'subdomain' => $subdomain,
                         'email' => $email
                     ]
                 ]);
@@ -210,11 +206,61 @@ class Signup extends BaseControls\Control {
                 'errors' => ['An error occurred during signup. Please try again or contact support.'],
                 'data' => [
                     'business_name' => $businessName,
-                    'subdomain' => $subdomain,
                     'email' => $email
                 ]
             ]);
         }
+    }
+
+    /**
+     * Generate an available subdomain from business name
+     * Tries base name first, then appends numbers until one is available
+     */
+    private function generateAvailableSubdomain(string $businessName, TenantProvisioner $provisioner): ?string {
+        // Convert business name to a valid subdomain base
+        $base = strtolower($businessName);
+        $base = preg_replace('/[^a-z0-9]+/', '-', $base);
+        $base = trim($base, '-');
+
+        // Ensure minimum length
+        if (strlen($base) < 3) {
+            $base = 'team-' . $base;
+        }
+
+        // Truncate to leave room for suffix
+        $base = substr($base, 0, 28);
+
+        // Try the base name first
+        $subdomain = $base;
+        $validation = $provisioner->validateSubdomain($subdomain);
+
+        // Also check pending signups
+        if ($validation['valid']) {
+            $pending = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+            if ($pending) {
+                $validation['valid'] = false;
+            }
+        }
+
+        if ($validation['valid']) {
+            return $subdomain;
+        }
+
+        // Try with numeric suffixes
+        for ($i = 1; $i <= 99; $i++) {
+            $subdomain = $base . '-' . $i;
+            $validation = $provisioner->validateSubdomain($subdomain);
+
+            if ($validation['valid']) {
+                $pending = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+                if (!$pending) {
+                    return $subdomain;
+                }
+            }
+        }
+
+        // Give up
+        return null;
     }
 
     /**
@@ -323,11 +369,8 @@ class Signup extends BaseControls\Control {
                 'database' => $result['database']
             ]);
 
-            // Show success page
-            $this->render('signup/success', [
-                'title' => 'Welcome to MyCTOBot!',
-                'tenant' => $result
-            ]);
+            // Redirect to the tenant's login page with welcome message
+            Flight::redirect($result['url'] . '/auth/login?welcome=1');
 
         } catch (\Exception $e) {
             $this->logger->error('Tenant provisioning failed after verification', [

@@ -116,8 +116,21 @@
                                     </tbody>
                                 </table>
                             </div>
+                            <div class="mt-2">
+                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                   class="btn btn-sm btn-outline-warning"
+                                   onclick="return confirm('This will delete existing webhooks and register a new one. Continue?')">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh Webhook
+                                </a>
+                            </div>
                             <?php else: ?>
-                            <small class="text-muted"><i class="bi bi-link-45deg"></i> No webhooks registered</small>
+                            <div class="d-flex align-items-center gap-2">
+                                <small class="text-muted"><i class="bi bi-link-45deg"></i> No webhooks registered</small>
+                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-plus-lg"></i> Register Webhook
+                                </a>
+                            </div>
                             <?php endif; ?>
                         </div>
                     </div>

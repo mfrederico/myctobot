@@ -159,20 +159,73 @@ class Github extends BaseControls\Control {
         }
 
         try {
+            // Generate webhook secret for this repo
+            $webhookSecret = bin2hex(random_bytes(20));
+
             $repo = Bean::dispense('repoconnections');
             $repo->provider = 'github';
             $repo->full_name = $fullName;
             $repo->default_branch = $defaultBranch;
+            $repo->webhook_secret = $webhookSecret;
             $repo->enabled = 1;
+            $repo->issues_enabled = 0; // Default: GitHub for code only, not issue tracking
             $repo->created_at = date('Y-m-d H:i:s');
             Bean::store($repo);
 
+            // Try to create webhook on GitHub
+            $webhookCreated = false;
+            $webhookError = null;
+            try {
+                $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+                if ($tokenSetting && !empty($tokenSetting->setting_value)) {
+                    $token = EncryptionService::decrypt($tokenSetting->setting_value);
+                    $github = new GitHubClient($token);
+
+                    [$owner, $repoName] = explode('/', $fullName);
+                    $baseUrl = rtrim(Flight::get('app.baseurl') ?? 'https://myctobot.ai', '/');
+                    $webhookUrl = $baseUrl . '/webhook/github';
+
+                    // Check if webhook already exists
+                    $existingHook = $github->findWebhook($owner, $repoName, $webhookUrl);
+                    if ($existingHook) {
+                        $webhookCreated = true;
+                        $repo->webhook_id = $existingHook['id'];
+                    } else {
+                        // Create webhook
+                        $hook = $github->createWebhook($owner, $repoName, $webhookUrl, $webhookSecret);
+                        $repo->webhook_id = $hook['id'];
+                        $webhookCreated = true;
+                    }
+
+                    // Ensure ai-dev label exists
+                    $github->ensureAiDevLabel($owner, $repoName);
+
+                    Bean::store($repo);
+                }
+            } catch (\Exception $e) {
+                $webhookError = $e->getMessage();
+                $this->logger->warning('Failed to create webhook', [
+                    'repo' => $fullName,
+                    'error' => $webhookError
+                ]);
+            }
+
             $this->logger->info('GitHub repo connected', [
                 'member_id' => $memberId,
-                'repo' => $fullName
+                'repo' => $fullName,
+                'webhook_created' => $webhookCreated
             ]);
 
-            Flight::jsonSuccess(['id' => $repo->id], 'Repository connected');
+            $message = 'Repository connected';
+            if (!$webhookCreated) {
+                $message .= ' (webhook setup failed - you may need admin access)';
+            }
+
+            Flight::jsonSuccess([
+                'id' => $repo->id,
+                'webhook_created' => $webhookCreated,
+                'webhook_error' => $webhookError
+            ], $message);
 
         } catch (\Exception $e) {
             $this->logger->error('Failed to connect repo', ['error' => $e->getMessage()]);
@@ -234,6 +287,71 @@ class Github extends BaseControls\Control {
         $this->logger->info('GitHub disconnected', ['member_id' => $this->member->id]);
         $this->flash('success', 'GitHub account disconnected.');
         Flight::redirect('/settings/connections');
+    }
+
+    /**
+     * Toggle issue tracking for a repository (AJAX)
+     *
+     * When enabled: GitHub Issues will trigger AI Developer jobs
+     * When disabled: GitHub used only for code hosting, use Jira for issues
+     */
+    public function toggleissues() {
+        if (!$this->requireLogin()) return;
+
+        $repoId = Flight::request()->data->id ?? 0;
+        $enabled = Flight::request()->data->enabled ?? false;
+
+        if (empty($repoId)) {
+            Flight::jsonError('Repository ID is required', 400);
+            return;
+        }
+
+        $repo = Bean::findOne('repoconnections', 'id = ? AND provider = ?', [$repoId, 'github']);
+        if (!$repo) {
+            Flight::jsonError('Repository not found', 404);
+            return;
+        }
+
+        $repo->issues_enabled = $enabled ? 1 : 0;
+        Bean::store($repo);
+
+        $this->logger->info('GitHub issue tracking toggled', [
+            'member_id' => $this->member->id,
+            'repo' => $repo->full_name,
+            'issues_enabled' => $enabled
+        ]);
+
+        $status = $enabled ? 'GitHub Issues enabled' : 'GitHub Issues disabled (use Jira instead)';
+        Flight::jsonSuccess(['issues_enabled' => $repo->issues_enabled], $status);
+    }
+
+    /**
+     * Get repository settings (AJAX)
+     */
+    public function reposettings() {
+        if (!$this->requireLogin()) return;
+
+        $repoId = Flight::request()->query->id ?? 0;
+
+        if (empty($repoId)) {
+            Flight::jsonError('Repository ID is required', 400);
+            return;
+        }
+
+        $repo = Bean::findOne('repoconnections', 'id = ? AND provider = ?', [$repoId, 'github']);
+        if (!$repo) {
+            Flight::jsonError('Repository not found', 404);
+            return;
+        }
+
+        Flight::jsonSuccess([
+            'id' => $repo->id,
+            'full_name' => $repo->full_name,
+            'default_branch' => $repo->default_branch,
+            'enabled' => (bool)$repo->enabled,
+            'issues_enabled' => (bool)$repo->issues_enabled,
+            'webhook_id' => $repo->webhook_id,
+        ]);
     }
 
     /**

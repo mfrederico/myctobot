@@ -201,13 +201,24 @@ class JiraClient {
     /**
      * Get image attachments from an issue
      * Returns array of image info with base64 data
+     * Images are automatically resized for context window optimization
      *
      * @param array $issue Issue data with 'fields' containing 'attachment'
      * @param int $maxImages Maximum images to fetch (default 3)
-     * @param int $maxSizeKb Maximum image size in KB (default 1024 = 1MB)
-     * @return array Array of ['filename' => string, 'mimeType' => string, 'base64' => string]
+     * @param int $maxSizeKb Maximum image size in KB (default 2048 = 2MB, resizing handles large images)
+     * @param bool $resize Whether to resize images for context window (default true)
+     * @param int $maxWidth Maximum width when resizing (default 1200)
+     * @param int $maxHeight Maximum height when resizing (default 1200)
+     * @return array Array of ['filename' => string, 'mimeType' => string, 'base64' => string, ...]
      */
-    public function getIssueImages(array $issue, int $maxImages = 3, int $maxSizeKb = 1024): array {
+    public function getIssueImages(
+        array $issue,
+        int $maxImages = 3,
+        int $maxSizeKb = 2048,
+        bool $resize = true,
+        int $maxWidth = 1200,
+        int $maxHeight = 1200
+    ): array {
         $attachments = $issue['fields']['attachment'] ?? [];
         if (empty($attachments)) {
             return [];
@@ -231,19 +242,60 @@ class JiraClient {
             }
 
             if ($size > ($maxSizeKb * 1024)) {
-                continue; // Skip images that are too large
+                continue; // Skip images that are too large even for resizing
             }
 
             // Download the image
             $imageData = $this->downloadAttachment($attachment['content'] ?? '');
-            if ($imageData) {
-                $images[] = [
-                    'filename' => $attachment['filename'] ?? 'image',
-                    'mimeType' => $mimeType,
-                    'base64' => base64_encode($imageData),
-                    'size' => $size
-                ];
+            if (!$imageData) {
+                continue;
             }
+
+            $filename = $attachment['filename'] ?? 'image';
+            $finalMimeType = $mimeType;
+            $resized = false;
+            $width = null;
+            $height = null;
+
+            // Resize if requested
+            if ($resize) {
+                try {
+                    $result = ImageService::resizeForContext($imageData, $maxWidth, $maxHeight);
+                    $imageData = $result['data'];
+                    $finalMimeType = $result['mimeType'];
+                    $resized = $result['resized'];
+                    $width = $result['width'];
+                    $height = $result['height'];
+
+                    if ($resized && Flight::has('log')) {
+                        Flight::log()->debug('Resized image for context', [
+                            'filename' => $filename,
+                            'originalSize' => $size,
+                            'newSize' => strlen($imageData),
+                            'dimensions' => "{$result['originalWidth']}x{$result['originalHeight']} -> {$width}x{$height}"
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    // If resize fails, use original
+                    if (Flight::has('log')) {
+                        Flight::log()->warning('Failed to resize image, using original', [
+                            'filename' => $filename,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+            }
+
+            $images[] = [
+                'filename' => $filename,
+                'mimeType' => $finalMimeType,
+                'base64' => base64_encode($imageData),
+                'size' => strlen($imageData),
+                'originalSize' => $size,
+                'resized' => $resized,
+                'width' => $width,
+                'height' => $height
+            ];
         }
 
         return $images;
@@ -276,10 +328,75 @@ class JiraClient {
      * Download attachment content from URL
      *
      * @param string $url Attachment content URL
+     * @param bool $resize Whether to resize the image for context window
+     * @param int $maxWidth Maximum width when resizing
+     * @param int $maxHeight Maximum height when resizing
      * @return string|null Binary data or null on failure
      */
-    public function downloadAttachmentContent(string $url): ?string {
-        return $this->downloadAttachment($url);
+    public function downloadAttachmentContent(
+        string $url,
+        bool $resize = false,
+        int $maxWidth = 1200,
+        int $maxHeight = 1200
+    ): ?string {
+        $data = $this->downloadAttachment($url);
+
+        if ($data === null || !$resize) {
+            return $data;
+        }
+
+        // Resize for context window
+        try {
+            $result = ImageService::resizeForContext($data, $maxWidth, $maxHeight);
+            return $result['data'];
+        } catch (\Exception $e) {
+            // If resize fails, return original data
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to resize image, returning original', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+            return $data;
+        }
+    }
+
+    /**
+     * Download and resize attachment for Claude context window
+     * Returns both the data and metadata about the resize operation
+     *
+     * @param string $url Attachment content URL
+     * @param int $maxWidth Maximum width
+     * @param int $maxHeight Maximum height
+     * @return array|null ['data' => string, 'mimeType' => string, 'resized' => bool, ...] or null
+     */
+    public function downloadAttachmentResized(
+        string $url,
+        int $maxWidth = 1200,
+        int $maxHeight = 1200
+    ): ?array {
+        $data = $this->downloadAttachment($url);
+        if ($data === null) {
+            return null;
+        }
+
+        try {
+            return ImageService::resizeForContext($data, $maxWidth, $maxHeight);
+        } catch (\Exception $e) {
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to resize image', [
+                    'error' => $e->getMessage()
+                ]);
+            }
+            // Return original with basic info
+            $dims = ImageService::getDimensions($data);
+            return [
+                'data' => $data,
+                'mimeType' => $dims['mimeType'] ?? 'application/octet-stream',
+                'width' => $dims['width'] ?? 0,
+                'height' => $dims['height'] ?? 0,
+                'resized' => false
+            ];
+        }
     }
 
     /**

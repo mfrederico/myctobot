@@ -17,20 +17,53 @@ class MailgunService {
     private bool $enabled;
 
     public function __construct() {
-        $apiKey = Flight::get('mailgun.api_key') ?? '';
-        $this->domain = Flight::get('mailgun.domain') ?? '';
-        $this->fromEmail = Flight::get('mailgun.from_email') ?? 'noreply@myceobot.ai';
-        $this->fromName = Flight::get('mailgun.from_name') ?? 'MyCTOBot';
+        // Try conf/mailgun.ini first, then fall back to Flight config
+        $config = $this->loadMailgunConfig();
+
+        $apiKey = $config['key'] ?? '';
+        $this->domain = $config['domain'] ?? '';
+        $this->fromEmail = $config['fromEmail'] ?? 'noreply@myctobot.ai';
+        $this->fromName = $config['fromName'] ?? 'MyCTOBot';
 
         $this->enabled = !empty($apiKey) && !empty($this->domain);
 
         if ($this->enabled) {
-            $endpoint = Flight::get('mailgun.endpoint') ?? 'https://api.mailgun.net';
+            $endpoint = $config['endpoint'] ?? 'https://api.mailgun.net';
             $this->client = new Client([
                 'base_uri' => $endpoint . '/v3/',
                 'auth' => ['api', $apiKey],
             ]);
         }
+    }
+
+    /**
+     * Load Mailgun config from tenant config or conf/mailgun.ini fallback
+     */
+    private function loadMailgunConfig(): array {
+        // Try tenant/Flight config first
+        $apiKey = Flight::get('mailgun.api_key') ?? '';
+        $domain = Flight::get('mailgun.domain') ?? '';
+
+        if (!empty($apiKey) && !empty($domain)) {
+            return [
+                'key' => $apiKey,
+                'domain' => $domain,
+                'fromEmail' => Flight::get('mailgun.from_email') ?? '',
+                'fromName' => Flight::get('mailgun.from_name') ?? '',
+                'endpoint' => Flight::get('mailgun.endpoint') ?? '',
+            ];
+        }
+
+        // Fall back to conf/mailgun.ini
+        $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
+        if (file_exists($iniPath)) {
+            $config = parse_ini_file($iniPath);
+            if ($config && !empty($config['key']) && !empty($config['domain'])) {
+                return $config;
+            }
+        }
+
+        return [];
     }
 
     public function isEnabled(): bool {
@@ -228,8 +261,22 @@ HTML;
      * Check if Mailgun is configured
      */
     public static function isConfigured(): bool {
+        // Check tenant/Flight config first
         $apiKey = Flight::get('mailgun.api_key');
         $domain = Flight::get('mailgun.domain');
-        return !empty($apiKey) && !empty($domain);
+        if (!empty($apiKey) && !empty($domain)) {
+            return true;
+        }
+
+        // Fall back to conf/mailgun.ini
+        $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
+        if (file_exists($iniPath)) {
+            $config = parse_ini_file($iniPath);
+            if ($config && !empty($config['key']) && !empty($config['domain'])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

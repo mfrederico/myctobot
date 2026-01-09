@@ -59,7 +59,12 @@
                 <li><strong>Comply with Law:</strong> Respond to legal requests and enforce our terms</li>
             </ul>
 
-            <h2 class="h4 mt-5 mb-3">3. AI Processing</h2>
+            <h2 class="h4 mt-5 mb-3">3. AI Processing and Code Access</h2>
+            <div class="alert alert-info">
+                <i class="bi bi-robot"></i> <strong>Important:</strong> MyCTOBot uses AI to analyze and implement code changes in your repositories.
+            </div>
+
+            <h5>AI Analysis</h5>
             <p>Your Jira data is processed by AI (Claude by Anthropic) to generate analysis and recommendations:</p>
             <ul>
                 <li>Data is sent to Anthropic's API for processing</li>
@@ -68,12 +73,44 @@
                 <li>You can request deletion of cached analysis at any time</li>
             </ul>
 
+            <h5>AI Developer Feature (Enterprise)</h5>
+            <p>When you enable the AI Developer feature, you grant MyCTOBot permission to:</p>
+            <ul>
+                <li><strong>Read your source code:</strong> AI accesses your GitHub repositories to understand your codebase architecture, patterns, and existing implementations</li>
+                <li><strong>Write and modify code:</strong> AI creates, edits, and commits code to implement Jira tickets</li>
+                <li><strong>Create branches and pull requests:</strong> AI creates feature branches and submits PRs to your repository</li>
+                <li><strong>Access Jira ticket details:</strong> AI reads ticket descriptions, comments, and attachments to understand requirements</li>
+                <li><strong>Post updates to Jira:</strong> AI comments on tickets with progress updates and completion status</li>
+            </ul>
+
+            <h5>Code Processing</h5>
+            <p>When implementing tickets:</p>
+            <ul>
+                <li>Your code is sent to Anthropic's Claude API for analysis and generation</li>
+                <li>Code is processed in Anthropic's secure environment</li>
+                <li>Anthropic does <strong>not</strong> use your code to train AI models (per their commercial API terms)</li>
+                <li>Generated code is committed to your repository with clear attribution</li>
+                <li>All changes are made via pull requests for your review before merging</li>
+            </ul>
+
+            <h5>Data You Control</h5>
+            <p>You maintain full control over AI Developer:</p>
+            <ul>
+                <li>Choose which boards/projects enable AI Developer</li>
+                <li>Select which label triggers AI processing (default: <code>ai-dev</code>)</li>
+                <li>Review all changes before merging pull requests</li>
+                <li>Disconnect GitHub access at any time</li>
+                <li>All code remains in your GitHub repository</li>
+            </ul>
+
             <h2 class="h4 mt-5 mb-3">4. Data Sharing and Disclosure</h2>
             <p>We do not sell your personal information. We may share data with:</p>
 
             <h5>Service Providers</h5>
             <ul>
-                <li><strong>Anthropic:</strong> AI processing for analysis generation</li>
+                <li><strong>Anthropic:</strong> AI processing for analysis and code generation</li>
+                <li><strong>GitHub:</strong> Repository access for AI Developer feature</li>
+                <li><strong>Atlassian:</strong> Jira integration for ticket management</li>
                 <li><strong>Stripe:</strong> Payment processing</li>
                 <li><strong>Mailgun:</strong> Email delivery</li>
                 <li><strong>Cloud hosting providers:</strong> Infrastructure and data storage</li>

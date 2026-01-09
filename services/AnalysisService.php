@@ -445,10 +445,7 @@ class AnalysisService {
             throw new \Exception("Board not found: {$boardId}");
         }
 
-        // Check subscription tier - shard analysis requires Enterprise
-        if (!SubscriptionService::canAccessFeature($this->memberId, TierFeatures::FEATURE_AI_DEVELOPER)) {
-            throw new \Exception("Shard analysis requires Enterprise tier");
-        }
+        // All features now available to all tiers
 
         // Get Anthropic API key - from member or options
         $anthropicApiKey = $options['anthropic_api_key'] ?? $this->getMemberAnthropicKey();

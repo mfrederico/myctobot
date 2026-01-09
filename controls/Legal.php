@@ -10,6 +10,9 @@ use \Flight as Flight;
 
 class Legal extends BaseControls\Control {
 
+    // Public pages - no login required
+    public $authcontrol = LEVELS['PUBLIC'];
+
     /**
      * Terms of Service
      */

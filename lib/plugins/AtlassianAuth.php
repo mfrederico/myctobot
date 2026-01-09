@@ -551,17 +551,24 @@ class AtlassianAuth {
     public static function registerAIDevWebhook(int $memberId, string $cloudId, string $accessToken): bool {
         $logger = Flight::get('log');
 
-        // Check if member has Enterprise tier
+        // All features now available to all tiers
         $member = R::load('member', $memberId);
-        if (!$member || $member->getTier() !== 'enterprise') {
-            $logger->debug('Skipping webhook registration - not Enterprise tier', [
+        if (!$member) {
+            $logger->debug('Skipping webhook registration - member not found', [
                 'member_id' => $memberId
             ]);
             return false;
         }
 
         $baseUrl = Flight::get('baseurl');
-        $webhookUrl = $baseUrl . '/webhook/jira';
+
+        // Include tenant slug in webhook URL for multi-tenancy
+        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+        if ($tenantSlug && $tenantSlug !== 'default') {
+            $webhookUrl = $baseUrl . '/webhook/jira/' . $tenantSlug;
+        } else {
+            $webhookUrl = $baseUrl . '/webhook/jira';
+        }
 
         // Check if webhook already exists
         $existingWebhooks = self::getRegisteredWebhooks($cloudId, $accessToken);
@@ -569,7 +576,8 @@ class AtlassianAuth {
             if (isset($webhook['url']) && strpos($webhook['url'], $webhookUrl) !== false) {
                 $logger->debug('AI Developer webhook already registered', [
                     'cloud_id' => $cloudId,
-                    'webhook_id' => $webhook['id'] ?? 'unknown'
+                    'webhook_id' => $webhook['id'] ?? 'unknown',
+                    'tenant' => $tenantSlug ?? 'default'
                 ]);
                 return true;
             }
@@ -577,6 +585,8 @@ class AtlassianAuth {
 
         // Register new webhook
         // Format per Atlassian docs: url at top level, webhooks array with jqlFilter and events
+        // JQL filter: only trigger for tickets with ai-dev label
+        // Repo selection: handler checks for additional repo-{id} label
         $requestBody = [
             'url' => $webhookUrl,
             'webhooks' => [
@@ -660,6 +670,34 @@ class AtlassianAuth {
         }
 
         return [];
+    }
+
+    /**
+     * Delete a webhook by ID
+     *
+     * @param string $cloudId Cloud ID
+     * @param string $accessToken Access token
+     * @param int $webhookId Webhook ID to delete
+     * @return bool Success
+     */
+    public static function deleteWebhook(string $cloudId, string $accessToken, int $webhookId): bool {
+        $apiUrl = "https://api.atlassian.com/ex/jira/{$cloudId}/rest/api/3/webhook";
+
+        $ch = curl_init($apiUrl);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['webhookIds' => [$webhookId]]));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+            'Accept: application/json'
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return $httpCode >= 200 && $httpCode < 300;
     }
 
     /**
@@ -769,5 +807,33 @@ class AtlassianAuth {
         }
 
         return false;
+    }
+
+    /**
+     * Re-register AI Developer webhook with correct tenant URL
+     * Removes existing webhook and creates new one
+     */
+    public static function reregisterAIDevWebhook(int $memberId, string $cloudId): bool {
+        $logger = Flight::get('log');
+
+        $accessToken = self::getValidToken($memberId, $cloudId);
+        if (!$accessToken) {
+            $logger->error('Cannot re-register webhook: no valid token');
+            return false;
+        }
+
+        $logger->info('Re-registering AI Developer webhook', [
+            'member_id' => $memberId,
+            'cloud_id' => $cloudId
+        ]);
+
+        // Step 1: Remove existing webhook
+        self::removeAIDevWebhook($memberId, $cloudId);
+
+        // Step 2: Clear stored webhook ID so registerAIDevWebhook doesn't skip
+        self::storeWebhookId($memberId, $cloudId, null);
+
+        // Step 3: Register new webhook (will include tenant slug from session)
+        return self::registerAIDevWebhook($memberId, $cloudId, $accessToken);
     }
 }

@@ -42,7 +42,7 @@ class TenantProvisioner {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]);
 
-        $this->schemaPath = dirname(__DIR__) . '/sql/mysql_schema.sql';
+        $this->schemaPath = dirname(__DIR__) . '/sql/tenant_schema.sql';
         $this->configDir = dirname(__DIR__) . '/conf';
     }
 

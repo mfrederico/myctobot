@@ -75,6 +75,20 @@ CREATE TABLE "digesthistory" (
     FOREIGN KEY (board_id) REFERENCES "jiraboards"(id) ON DELETE CASCADE
 );
 CREATE TABLE `enterprisesettings` ( id INTEGER PRIMARY KEY AUTOINCREMENT , `setting_key` TEXT, `created_at` NUMERIC, `setting_value` TEXT, `is_encrypted` INTEGER, `updated_at` NUMERIC);
+CREATE TABLE "aiagents" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    runner_type TEXT NOT NULL DEFAULT 'claude_cli',
+    runner_config TEXT DEFAULT '{}',
+    mcp_servers TEXT DEFAULT '[]',
+    hooks_config TEXT DEFAULT '{}',
+    is_active INTEGER DEFAULT 1,
+    is_default INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT
+);
 CREATE TABLE "jiraboards" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     board_id INTEGER NOT NULL,
@@ -114,8 +128,10 @@ CREATE TABLE "repoconnections" (
     clone_url TEXT,
     access_token TEXT,
     enabled INTEGER DEFAULT 1,
+    agent_id INTEGER DEFAULT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT
+    updated_at TEXT,
+    FOREIGN KEY (agent_id) REFERENCES "aiagents"(id) ON DELETE SET NULL
 );
 CREATE TABLE "ticketanalysiscache" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,3 +169,7 @@ CREATE INDEX idx_digest_created ON "digesthistory"(created_at DESC);
 CREATE INDEX idx_enterprisesettings_key ON enterprisesettings(setting_key);
 CREATE INDEX idx_ticket_cache_board ON "ticketanalysiscache"(board_id);
 CREATE INDEX idx_ticket_cache_hash ON "ticketanalysiscache"(content_hash);
+CREATE INDEX idx_aiagents_member ON "aiagents"(member_id);
+CREATE INDEX idx_aiagents_active ON "aiagents"(is_active);
+CREATE INDEX idx_aiagents_default ON "aiagents"(is_default);
+CREATE INDEX idx_repoconnections_agent ON "repoconnections"(agent_id);

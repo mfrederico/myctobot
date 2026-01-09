@@ -76,7 +76,7 @@
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li>
-                                <a class="dropdown-item" href="/dashboard">
+                                <a class="dropdown-item" href="/settings/connections">
                                     <i class="bi bi-speedometer2"></i> Dashboard
                                 </a>
                             </li>
@@ -94,7 +94,7 @@
                                 </a>
                             </li>
                             <li>
-                                <a class="dropdown-item" href="/settings">
+                                <a class="dropdown-item" href="/settings/connections">
                                     <i class="bi bi-gear"></i> Settings
                                 </a>
                             </li>
@@ -125,6 +125,16 @@
                             </li>
                         </ul>
                     </li>
+                    <?php
+                    $tenantSlug = \app\TenantResolver::getSessionTenant();
+                    if ($tenantSlug && $tenantSlug !== 'default'):
+                    ?>
+                    <li class="nav-item ms-2">
+                        <span class="badge bg-primary d-flex align-items-center" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+                            <i class="bi bi-building me-1"></i> <?= htmlspecialchars(strtoupper($tenantSlug)) ?>
+                        </span>
+                    </li>
+                    <?php endif; ?>
                 <?php else: ?>
                     <!-- Login/Register -->
                     <li class="nav-item">

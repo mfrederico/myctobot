@@ -21,6 +21,8 @@ $options = getopt('', [
     'issue:',
     'member:',
     'job-id:',
+    'tenant:',
+    'repo:',
     'attach',
     'repo-path:',
     'print',
@@ -35,7 +37,9 @@ if (isset($options['help']) || empty($options['issue'])) {
     echo "Options:\n";
     echo "  --issue         Issue key (e.g., SSI-1883) [required]\n";
     echo "  --member        Member ID (default: 3)\n";
+    echo "  --tenant        Tenant slug for multi-tenancy (e.g., gwt)\n";
     echo "  --job-id        Job ID for status tracking (auto-generated if not provided)\n";
+    echo "  --repo          Repository connection ID (from ai-dev-{id} label)\n";
     echo "  --attach        Attach to tmux session immediately\n";
     echo "  --print         Use --print mode (non-interactive, outputs to log)\n";
     echo "  --repo-path     Path to existing repo clone\n";
@@ -51,26 +55,43 @@ require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/bootstrap.php';
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/lib/TmuxManager.php';
+require_once $baseDir . '/lib/Bean.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
 require_once $baseDir . '/services/AIDevAgentOrchestrator.php';
 require_once $baseDir . '/services/AIDevStatusService.php';
 require_once $baseDir . '/services/ShopifyClient.php';
+require_once $baseDir . '/services/UserDatabaseService.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\TmuxManager;
+use \app\Bean;
 use \app\services\JiraClient;
 use \app\services\EncryptionService;
 use \app\services\ShopifyClient;
 use \app\services\AIDevStatusService;
+use \app\services\UserDatabaseService;
 use \app\plugins\AtlassianAuth;
 
-$bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
+// Determine config file based on tenant parameter
+$tenant = $options['tenant'] ?? null;
+if ($tenant) {
+    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    if (!file_exists($configFile)) {
+        echo "Error: Tenant config not found: {$configFile}\n";
+        exit(1);
+    }
+} else {
+    $configFile = $baseDir . '/conf/config.ini';
+}
+
+$bootstrap = new \app\Bootstrap($configFile);
 
 $issueKey = $options['issue'];
 $memberId = isset($options['member']) ? (int)$options['member'] : 3;
 $jobId = $options['job-id'] ?? null;
+$repoIdParam = isset($options['repo']) ? (int)$options['repo'] : null;
 $autoAttach = isset($options['attach']);
 $usePrintMode = isset($options['print']);
 $dryRun = isset($options['dry-run']);
@@ -91,6 +112,7 @@ echo "===========================================\n";
 echo "Local AI Developer - Using YOUR Claude Account\n";
 echo "===========================================\n\n";
 echo "Domain: {$domainId}\n";
+if ($tenant) echo "Tenant: {$tenant}\n";
 echo "Issue: {$issueKey}\n";
 echo "Member ID: {$memberId}\n";
 if ($jobId) echo "Job ID: {$jobId}\n";
@@ -112,10 +134,26 @@ if (is_dir("{$workDir}/repo")) {
 // ============================================
 // Fetch Full Jira Issue Details
 // ============================================
-echo "Fetching issue details from Jira...\n";
-try {
-    $jiraClient = new JiraClient($memberId, $cloudId);
-    $issue = $jiraClient->getIssue($issueKey);
+// Initialize variables that might be set by Jira
+$summary = '';
+$description = '';
+$issueType = 'Task';
+$priority = 'Medium';
+$status = 'Unknown';
+$commentText = '';
+$attachmentInfo = '';
+$linkedIssuesInfo = '';
+$urlsToCheck = [];
+
+if ($skipJira) {
+    echo "Skipping Jira API calls (--skip-jira flag)\n";
+    $summary = "Test ticket {$issueKey}";
+    $description = "Test description for database query testing";
+} else {
+    echo "Fetching issue details from Jira...\n";
+    try {
+        $jiraClient = new JiraClient($memberId, $cloudId);
+        $issue = $jiraClient->getIssue($issueKey);
 
     // Extract basic fields
     $summary = $issue['fields']['summary'] ?? '';
@@ -182,10 +220,11 @@ try {
 
     echo "\n";
 
-} catch (Exception $e) {
-    echo "Error fetching Jira issue: " . $e->getMessage() . "\n";
-    exit(1);
-}
+    } catch (Exception $e) {
+        echo "Error fetching Jira issue: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+} // end else (!$skipJira)
 
 // ============================================
 // Get Repository Configuration
@@ -197,11 +236,61 @@ if (!$member || !$member->id) {
     exit(1);
 }
 
-// Query repoconnections using RedBeanPHP (single MySQL database)
-$repoBean = R::findOne('repoconnections', 'member_id = ? AND enabled = 1', [$memberId]);
-if (!$repoBean) {
-    echo "Error: No enabled repository found\n";
-    exit(1);
+// Connect to user's database context for repoconnections, jiraboards, aiagents
+UserDatabaseService::connect($memberId);
+
+// Query repoconnections using Bean (user SQLite database)
+// Use specific repo ID if provided (from ai-dev-{id} label), otherwise use first enabled
+if ($repoIdParam) {
+    echo "  Using specific repo ID: {$repoIdParam}\n";
+    $repoBean = Bean::load('repoconnections', $repoIdParam);
+    if (!$repoBean || !$repoBean->id) {
+        echo "Error: Repository not found\n";
+        exit(1);
+    }
+} else {
+    $repoBean = Bean::findOne('repoconnections', 'enabled = 1');
+    if (!$repoBean) {
+        echo "Error: No enabled repository found\n";
+        exit(1);
+    }
+}
+
+// Load agent configuration for this repo
+$agentConfig = null;
+$agentId = $repoBean->agent_id ?? null;
+if ($agentId) {
+    // Load agent by ID - repo is already validated for this member
+    $agentBean = R::load('aiagents', $agentId);
+    if ($agentBean && $agentBean->id && $agentBean->is_active) {
+        $agentConfig = [
+            'id' => $agentBean->id,
+            'name' => $agentBean->name,
+            'runner_type' => $agentBean->runner_type,
+            'runner_config' => json_decode($agentBean->runner_config ?: '{}', true),
+            'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
+            'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true)
+        ];
+        echo "  Agent: {$agentConfig['name']} ({$agentConfig['runner_type']})\n";
+    }
+}
+
+// If no agent assigned, check for default agent
+if (!$agentConfig) {
+    $defaultAgent = R::findOne('aiagents', 'member_id = ? AND is_default = 1 AND is_active = 1', [$memberId]);
+    if ($defaultAgent) {
+        $agentConfig = [
+            'id' => $defaultAgent->id,
+            'name' => $defaultAgent->name,
+            'runner_type' => $defaultAgent->runner_type,
+            'runner_config' => json_decode($defaultAgent->runner_config ?: '{}', true),
+            'mcp_servers' => json_decode($defaultAgent->mcp_servers ?: '[]', true),
+            'hooks_config' => json_decode($defaultAgent->hooks_config ?: '{}', true)
+        ];
+        echo "  Agent: {$agentConfig['name']} (default)\n";
+    } else {
+        echo "  Agent: None (using built-in defaults)\n";
+    }
 }
 
 $repoOwner = $repoBean->repo_owner;
@@ -287,8 +376,8 @@ $statusSettings = [
 ];
 
 if (!empty($projectKey)) {
-    // Query jiraboards using RedBeanPHP (single MySQL database)
-    $boardBean = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+    // Query jiraboards using Bean (user SQLite database)
+    $boardBean = Bean::findOne('jiraboards', 'project_key = ?', [$projectKey]);
     if ($boardBean) {
         $statusSettings = [
             'working' => $boardBean->aidev_status_working ?? null,
@@ -325,8 +414,8 @@ try {
         $shopifyDomain = $shopifyClient->getShop();
         $shopifyAccessToken = $shopifyClient->getAccessToken();
 
-        // Get storefront password from enterprisesettings using RedBeanPHP
-        $storefrontPwdSetting = R::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'shopify_storefront_password']);
+        // Get storefront password from enterprisesettings using Bean (user SQLite database)
+        $storefrontPwdSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['shopify_storefront_password']);
         if ($storefrontPwdSetting && $storefrontPwdSetting->setting_value) {
             $shopifyStorefrontPassword = EncryptionService::decrypt($storefrontPwdSetting->setting_value);
         }
@@ -505,42 +594,117 @@ Follow the prompt in prompt.txt to implement the ticket.
 MD;
 file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 
+// ============================================
 // Create .mcp.json for MCP servers
-// Use HTTP transport for Jira (persistent, no timeout issues)
-// Use stdio for Playwright (local browser automation)
-$mcpHttpUrl = 'https://myctobot.ai/mcp/jira';
+// ============================================
+// Start with defaults (Jira HTTP + Playwright stdio)
+// Use fixed main domain with tenant slug in URL path
+// This ensures MCP works regardless of which subdomain context we're in
+// URL pattern: https://myctobot.ai/mcp/{tenant}/jira
+// Tenant comes from --tenant flag (e.g., 'gwt'), fall back to 'default' if not set
+$mcpTenant = $tenant ?? 'default';
+$mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
 $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
-$mcpConfig = [
-    'mcpServers' => [
-        'playwright' => [
-            'type' => 'stdio',
-            'command' => 'npx',
-            'args' => ['@playwright/mcp@latest'],
-            'env' => new \stdClass()
-        ],
-        'jira' => [
-            'type' => 'http',
-            'url' => $mcpHttpUrl,
-            'headers' => [
-                'Authorization' => "Basic {$mcpCredentials}"
-            ]
+$mcpServers = (object) [
+    'playwright' => (object) [
+        'type' => 'stdio',
+        'command' => 'npx',
+        'args' => ['@playwright/mcp@latest'],
+        'env' => new \stdClass()
+    ],
+    'jira' => (object) [
+        'type' => 'http',
+        'url' => $mcpHttpUrl,
+        'headers' => (object) [
+            'Authorization' => "Basic {$mcpCredentials}"
         ]
     ]
 ];
+
+// Merge agent's MCP servers if configured
+$enabledMcpServers = ['jira', 'playwright'];
+if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
+    echo "  Loading MCP servers from agent config...\n";
+    foreach ($agentConfig['mcp_servers'] as $server) {
+        $serverName = $server['name'] ?? 'unnamed';
+        $serverType = $server['type'] ?? 'stdio';
+
+        if ($serverType === 'http') {
+            $mcpServers->$serverName = (object) [
+                'type' => 'http',
+                'url' => $server['url'] ?? '',
+                'headers' => (object) ($server['headers'] ?? [])
+            ];
+        } else {
+            // stdio type
+            $mcpServers->$serverName = (object) [
+                'type' => 'stdio',
+                'command' => $server['command'] ?? '',
+                'args' => $server['args'] ?? [],
+                'env' => (object)($server['env'] ?? [])
+            ];
+        }
+
+        $enabledMcpServers[] = $serverName;
+        echo "    + {$serverName} ({$serverType})\n";
+    }
+}
+
+$mcpConfig = ['mcpServers' => $mcpServers];
 file_put_contents("{$workDir}/.mcp.json", json_encode($mcpConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+// Also copy to repo directory since Claude runs from there (after cd repo)
+if (is_dir($repoDir)) {
+    copy("{$workDir}/.mcp.json", "{$repoDir}/.mcp.json");
+    echo "  MCP config copied to repo directory\n";
+}
 echo "  MCP Jira: HTTP transport ({$mcpHttpUrl})\n";
 
+// ============================================
+// Create .claude/settings.json for hooks
+// ============================================
+if ($agentConfig && !empty($agentConfig['hooks_config'])) {
+    echo "  Loading hooks from agent config...\n";
+    $claudeSettingsDir = "{$workDir}/.claude";
+    if (!is_dir($claudeSettingsDir)) {
+        mkdir($claudeSettingsDir, 0755, true);
+    }
+
+    $hooksConfig = $agentConfig['hooks_config'];
+    $hookCount = 0;
+    foreach (['PreToolUse', 'PostToolUse', 'Stop'] as $event) {
+        if (!empty($hooksConfig[$event])) {
+            $hookCount += count($hooksConfig[$event]);
+        }
+    }
+    echo "    {$hookCount} hooks configured\n";
+
+    $claudeSettings = ['hooks' => $hooksConfig];
+    file_put_contents("{$claudeSettingsDir}/settings.json", json_encode($claudeSettings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+    // Also copy to repo directory
+    if (is_dir($repoDir)) {
+        $repoClaudeDir = "{$repoDir}/.claude";
+        if (!is_dir($repoClaudeDir)) {
+            mkdir($repoClaudeDir, 0755, true);
+        }
+        copy("{$claudeSettingsDir}/settings.json", "{$repoClaudeDir}/settings.json");
+    }
+}
+
 // Pre-approve MCP servers in ~/.claude.json so Claude doesn't prompt
+// Use $repoDir since Claude runs from there (after cd repo in the prompt)
 $claudeConfigPath = getenv('HOME') . '/.claude.json';
 if (file_exists($claudeConfigPath)) {
     $claudeConfig = json_decode(file_get_contents($claudeConfigPath), true);
     if ($claudeConfig && isset($claudeConfig['projects'])) {
-        $claudeConfig['projects'][$workDir] = [
+        // Register both workDir and repoDir to cover both paths
+        $projectConfig = [
             'allowedTools' => [],
             'dontCrawlDirectory' => false,
             'mcpContextUris' => [],
             'mcpServers' => new \stdClass(),  // Empty object, servers defined in .mcp.json
-            'enabledMcpjsonServers' => ['jira', 'playwright'],
+            'enabledMcpjsonServers' => array_unique($enabledMcpServers),
             'disabledMcpjsonServers' => [],
             'hasTrustDialogAccepted' => true,
             'hasCompletedProjectOnboarding' => true,
@@ -548,6 +712,10 @@ if (file_exists($claudeConfigPath)) {
             'hasClaudeMdExternalIncludesApproved' => false,
             'hasClaudeMdExternalIncludesWarningShown' => false
         ];
+        $claudeConfig['projects'][$workDir] = $projectConfig;
+        if (is_dir($repoDir)) {
+            $claudeConfig['projects'][$repoDir] = $projectConfig;
+        }
         file_put_contents($claudeConfigPath, json_encode($claudeConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         echo "Pre-approved MCP servers for this session\n";
     }

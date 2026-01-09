@@ -1,15 +1,15 @@
 <?php
 /**
  * AI Developer Status Service
- * Tracks progress of AI Developer jobs via JSON files
- * Status is stored per-user to ensure isolation
+ * Tracks progress of AI Developer jobs via database
+ * Status is stored per-tenant in the aidevjobs table
  */
 
 namespace app\services;
 
-class AIDevStatusService {
+use RedBeanPHP\R as R;
 
-    private static string $statusDir = __DIR__ . '/../storage/aidev_status';
+class AIDevStatusService {
 
     // Job statuses
     const STATUS_PENDING = 'pending';
@@ -41,33 +41,6 @@ class AIDevStatusService {
     const STEP_COMPLETE = 'Complete';
 
     /**
-     * Get domain identifier for multi-tenant isolation
-     */
-    private static function getDomainId(): string {
-        // Use TmuxManager if available, otherwise derive from Flight config
-        if (class_exists('\\app\\TmuxManager')) {
-            return \app\TmuxManager::getDomainId();
-        }
-        // Fallback: derive from baseurl
-        $baseUrl = \Flight::get('app.baseurl') ?? \Flight::get('baseurl') ?? 'localhost';
-        $domainId = preg_replace('/^https?:\/\//', '', $baseUrl);
-        $domainId = preg_replace('/[^a-zA-Z0-9]/', '-', $domainId);
-        return trim($domainId, '-') ?: 'default';
-    }
-
-    /**
-     * Initialize storage directory for a member (with domain isolation)
-     */
-    private static function ensureDir(int $memberId): string {
-        $domainId = self::getDomainId();
-        $dir = self::$statusDir . '/' . $domainId . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        return $dir;
-    }
-
-    /**
      * Generate an opaque job ID
      */
     private static function generateJobId(): string {
@@ -75,12 +48,41 @@ class AIDevStatusService {
     }
 
     /**
-     * Get status file path for a job
+     * Convert a bean to an array (matching old file-based format)
      */
-    private static function getStatusPath(int $memberId, string $jobId): string {
-        $dir = self::ensureDir($memberId);
-        $safeFilename = hash('sha256', $jobId) . '.json';
-        return $dir . '/' . $safeFilename;
+    private static function beanToArray($bean): array {
+        if (!$bean || !$bean->id) {
+            return [];
+        }
+
+        return [
+            'job_id' => $bean->job_id,
+            'member_id' => (int) $bean->member_id,
+            'board_id' => (int) $bean->board_id,
+            'issue_key' => $bean->issue_key,
+            'repo_connection_id' => $bean->repo_connection_id ? (int) $bean->repo_connection_id : null,
+            'cloud_id' => $bean->cloud_id,
+            'status' => $bean->status,
+            'progress' => (int) $bean->progress,
+            'current_step' => $bean->current_step,
+            'steps_completed' => json_decode($bean->steps_completed ?: '[]', true),
+            'branch_name' => $bean->branch_name,
+            'pr_url' => $bean->pr_url,
+            'pr_number' => $bean->pr_number ? (int) $bean->pr_number : null,
+            'pr_created_at' => $bean->pr_created_at,
+            'clarification_comment_id' => $bean->clarification_comment_id,
+            'clarification_questions' => json_decode($bean->clarification_questions ?: '[]', true),
+            'files_changed' => json_decode($bean->files_changed ?: '[]', true),
+            'commit_sha' => $bean->commit_sha,
+            'error' => $bean->error_message,
+            'shopify_theme_id' => $bean->shopify_theme_id ? (int) $bean->shopify_theme_id : null,
+            'shopify_preview_url' => $bean->shopify_preview_url,
+            'playwright_results' => json_decode($bean->playwright_results ?: 'null', true),
+            'preserve_branch' => (bool) $bean->preserve_branch,
+            'started_at' => $bean->started_at,
+            'updated_at' => $bean->updated_at,
+            'completed_at' => $bean->completed_at
+        ];
     }
 
     /**
@@ -102,36 +104,22 @@ class AIDevStatusService {
     ): string {
         $jobId = self::generateJobId();
 
-        $status = [
-            'job_id' => $jobId,
-            'member_id' => $memberId,
-            'board_id' => $boardId,
-            'issue_key' => $issueKey,
-            'repo_connection_id' => $repoConnectionId,
-            'cloud_id' => $cloudId,
-            'status' => self::STATUS_PENDING,
-            'progress' => 0,
-            'current_step' => self::STEP_INITIALIZING,
-            'steps_completed' => [],
-            'branch_name' => null,
-            'pr_url' => null,
-            'pr_number' => null,
-            'clarification_comment_id' => null,
-            'clarification_questions' => [],
-            'files_changed' => [],
-            'commit_sha' => null,
-            'error' => null,
-            // Shopify integration
-            'shopify_theme_id' => null,
-            'shopify_preview_url' => null,
-            'playwright_results' => null,
-            'preserve_branch' => true,  // Don't delete branch until ticket Done
-            'started_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-            'completed_at' => null
-        ];
+        $job = R::dispense('aidevjobs');
+        $job->job_id = $jobId;
+        $job->member_id = $memberId;
+        $job->board_id = $boardId;
+        $job->issue_key = $issueKey;
+        $job->repo_connection_id = $repoConnectionId;
+        $job->cloud_id = $cloudId;
+        $job->status = self::STATUS_PENDING;
+        $job->progress = 0;
+        $job->current_step = self::STEP_INITIALIZING;
+        $job->steps_completed = '[]';
+        $job->preserve_branch = 1;
+        $job->started_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents(self::getStatusPath($memberId, $jobId), json_encode($status, JSON_PRETTY_PRINT));
+        R::store($job);
 
         // Also log the creation
         self::log($jobId, $memberId, 'info', 'Job created', [
@@ -140,6 +128,13 @@ class AIDevStatusService {
         ]);
 
         return $jobId;
+    }
+
+    /**
+     * Find job by job_id
+     */
+    private static function findByJobId(int $memberId, string $jobId): ?object {
+        return R::findOne('aidevjobs', 'job_id = ? AND member_id = ?', [$jobId, $memberId]);
     }
 
     /**
@@ -152,44 +147,54 @@ class AIDevStatusService {
         int $progress,
         string $status = self::STATUS_RUNNING
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = $status;
-        $data['progress'] = $progress;
-        $data['current_step'] = $step;
-        $data['steps_completed'][] = [
+        $stepsCompleted = json_decode($job->steps_completed ?: '[]', true);
+        $stepsCompleted[] = [
             'step' => $step,
             'progress' => $progress,
             'timestamp' => date('Y-m-d H:i:s')
         ];
-        $data['updated_at'] = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        $job->status = $status;
+        $job->progress = $progress;
+        $job->current_step = $step;
+        $job->steps_completed = json_encode($stepsCompleted);
+        $job->updated_at = date('Y-m-d H:i:s');
+
+        R::store($job);
     }
 
     /**
      * Update additional job details
      */
     public static function updateDetails(int $memberId, string $jobId, array $details): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
+        $allowedFields = [
+            'branch_name', 'pr_url', 'pr_number', 'commit_sha',
+            'shopify_theme_id', 'shopify_preview_url', 'playwright_results',
+            'files_changed', 'preserve_branch', 'current_shard_job_id'
+        ];
 
         foreach ($details as $key => $value) {
-            if (array_key_exists($key, $data)) {
-                $data[$key] = $value;
+            if (in_array($key, $allowedFields)) {
+                // JSON encode arrays
+                if (is_array($value)) {
+                    $value = json_encode($value);
+                }
+                $job->$key = $value;
             }
         }
 
-        $data['updated_at'] = date('Y-m-d H:i:s');
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        $job->updated_at = date('Y-m-d H:i:s');
+        R::store($job);
     }
 
     /**
@@ -201,19 +206,18 @@ class AIDevStatusService {
         string $commentId,
         array $questions
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_WAITING_CLARIFICATION;
-        $data['current_step'] = 'Waiting for clarification';
-        $data['clarification_comment_id'] = $commentId;
-        $data['clarification_questions'] = $questions;
-        $data['updated_at'] = date('Y-m-d H:i:s');
+        $job->status = self::STATUS_WAITING_CLARIFICATION;
+        $job->current_step = 'Waiting for clarification';
+        $job->clarification_comment_id = $commentId;
+        $job->clarification_questions = json_encode($questions);
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'info', 'Waiting for clarification', [
             'comment_id' => $commentId,
@@ -231,26 +235,25 @@ class AIDevStatusService {
         ?int $prNumber = null,
         ?string $branchName = null
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_PR_CREATED;
-        $data['progress'] = 90;
-        $data['current_step'] = 'PR created - waiting for Jira completion';
-        $data['pr_url'] = $prUrl;
+        $job->status = self::STATUS_PR_CREATED;
+        $job->progress = 90;
+        $job->current_step = 'PR created - waiting for Jira completion';
+        $job->pr_url = $prUrl;
         if ($prNumber) {
-            $data['pr_number'] = $prNumber;
+            $job->pr_number = $prNumber;
         }
         if ($branchName) {
-            $data['branch_name'] = $branchName;
+            $job->branch_name = $branchName;
         }
-        $data['updated_at'] = date('Y-m-d H:i:s');
-        $data['pr_created_at'] = date('Y-m-d H:i:s');
+        $job->pr_created_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'info', 'PR created, waiting for Jira completion', [
             'pr_url' => $prUrl,
@@ -268,26 +271,25 @@ class AIDevStatusService {
         ?int $prNumber = null,
         ?string $branchName = null
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_COMPLETE;
-        $data['progress'] = 100;
-        $data['current_step'] = self::STEP_COMPLETE;
-        $data['pr_url'] = $prUrl;
+        $job->status = self::STATUS_COMPLETE;
+        $job->progress = 100;
+        $job->current_step = self::STEP_COMPLETE;
+        $job->pr_url = $prUrl;
         if ($prNumber) {
-            $data['pr_number'] = $prNumber;
+            $job->pr_number = $prNumber;
         }
         if ($branchName) {
-            $data['branch_name'] = $branchName;
+            $job->branch_name = $branchName;
         }
-        $data['updated_at'] = date('Y-m-d H:i:s');
-        $data['completed_at'] = date('Y-m-d H:i:s');
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'info', 'Job completed', [
             'pr_url' => $prUrl,
@@ -299,18 +301,17 @@ class AIDevStatusService {
      * Mark job as failed
      */
     public static function fail(int $memberId, string $jobId, string $error): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_FAILED;
-        $data['error'] = $error;
-        $data['updated_at'] = date('Y-m-d H:i:s');
-        $data['completed_at'] = date('Y-m-d H:i:s');
+        $job->status = self::STATUS_FAILED;
+        $job->error_message = $error;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'error', 'Job failed', ['error' => $error]);
     }
@@ -319,18 +320,17 @@ class AIDevStatusService {
      * Cancel a job
      */
     public static function cancel(int $memberId, string $jobId, string $reason = ''): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_CANCELLED;
-        $data['error'] = $reason ?: 'Job cancelled by user';
-        $data['updated_at'] = date('Y-m-d H:i:s');
-        $data['completed_at'] = date('Y-m-d H:i:s');
+        $job->status = self::STATUS_CANCELLED;
+        $job->error_message = $reason ?: 'Job cancelled by user';
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'info', 'Job cancelled', ['reason' => $reason]);
     }
@@ -339,132 +339,100 @@ class AIDevStatusService {
      * Get job status with ownership verification
      */
     public static function getStatus(string $jobId, int $requestingMemberId): ?array {
-        $path = self::getStatusPath($requestingMemberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($requestingMemberId, $jobId);
+        if (!$job) {
             return null;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-
-        // Verify member ID (defense in depth)
-        if (($data['member_id'] ?? null) !== $requestingMemberId) {
-            return null;
-        }
-
-        return $data;
+        return self::beanToArray($job);
     }
 
     /**
      * Get all jobs for a member
      */
     public static function getAllJobs(int $memberId, int $limit = 50): array {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return [];
+        $jobs = R::find('aidevjobs',
+            'member_id = ? ORDER BY updated_at DESC LIMIT ?',
+            [$memberId, $limit]
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            $result[] = self::beanToArray($job);
         }
 
-        $jobs = [];
-        $files = glob($dir . '/*.json');
-
-        // Sort by modification time, newest first
-        usort($files, fn($a, $b) => filemtime($b) - filemtime($a));
-
-        foreach (array_slice($files, 0, $limit) as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data) {
-                $jobs[] = $data;
-            }
-        }
-
-        return $jobs;
+        return $result;
     }
 
     /**
      * Get active jobs for a member
      */
     public static function getActiveJobs(int $memberId): array {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return [];
-        }
-
-        $jobs = [];
-        $files = glob($dir . '/*.json');
-
-        foreach ($files as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data && in_array($data['status'], [
+        $jobs = R::find('aidevjobs',
+            'member_id = ? AND status IN (?, ?, ?) ORDER BY updated_at DESC',
+            [
+                $memberId,
                 self::STATUS_PENDING,
                 self::STATUS_RUNNING,
                 self::STATUS_WAITING_CLARIFICATION
-            ])) {
-                $jobs[] = $data;
-            }
+            ]
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            $result[] = self::beanToArray($job);
         }
 
-        return $jobs;
+        return $result;
     }
 
     /**
      * Get count of running jobs for a member
      */
     public static function getRunningJobsCount(int $memberId): int {
-        $activeJobs = self::getActiveJobs($memberId);
-        $count = 0;
-        foreach ($activeJobs as $job) {
-            if ($job['status'] === self::STATUS_RUNNING) {
-                $count++;
-            }
-        }
-        return $count;
+        return (int) R::count('aidevjobs',
+            'member_id = ? AND status = ?',
+            [$memberId, self::STATUS_RUNNING]
+        );
     }
 
     /**
      * Get jobs waiting for clarification
      */
     public static function getJobsWaitingClarification(int $memberId): array {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return [];
+        $jobs = R::find('aidevjobs',
+            'member_id = ? AND status = ? ORDER BY updated_at DESC',
+            [$memberId, self::STATUS_WAITING_CLARIFICATION]
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            $result[] = self::beanToArray($job);
         }
 
-        $jobs = [];
-        $files = glob($dir . '/*.json');
-
-        foreach ($files as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data && $data['status'] === self::STATUS_WAITING_CLARIFICATION) {
-                $jobs[] = $data;
-            }
-        }
-
-        return $jobs;
+        return $result;
     }
 
     /**
-     * Find a job by issue key (for webhook handling)
+     * Find a job by issue key (for webhook handling - returns active jobs only)
      */
     public static function findJobByIssueKey(int $memberId, string $issueKey): ?array {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
+        $job = R::findOne('aidevjobs',
+            'member_id = ? AND issue_key = ? AND status IN (?, ?, ?) ORDER BY updated_at DESC',
+            [
+                $memberId,
+                $issueKey,
+                self::STATUS_PENDING,
+                self::STATUS_RUNNING,
+                self::STATUS_WAITING_CLARIFICATION
+            ]
+        );
+
+        if (!$job) {
             return null;
         }
 
-        $files = glob($dir . '/*.json');
-
-        foreach ($files as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data && $data['issue_key'] === $issueKey &&
-                in_array($data['status'], [
-                    self::STATUS_PENDING,
-                    self::STATUS_RUNNING,
-                    self::STATUS_WAITING_CLARIFICATION
-                ])) {
-                return $data;
-            }
-        }
-
-        return null;
+        return self::beanToArray($job);
     }
 
     /**
@@ -472,53 +440,29 @@ class AIDevStatusService {
      * Used for branch affinity - reuse existing branches instead of creating new ones
      */
     public static function findBranchForIssueKey(int $memberId, string $issueKey): ?string {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return null;
-        }
+        $job = R::findOne('aidevjobs',
+            'member_id = ? AND issue_key = ? AND branch_name IS NOT NULL AND branch_name != "" ORDER BY updated_at DESC',
+            [$memberId, $issueKey]
+        );
 
-        $files = glob($dir . '/*.json');
-        $latestBranch = null;
-        $latestTime = 0;
-
-        foreach ($files as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data && $data['issue_key'] === $issueKey && !empty($data['branch_name'])) {
-                // Get the most recent branch (by updated_at time)
-                $updatedAt = strtotime($data['updated_at'] ?? $data['created_at'] ?? '');
-                if ($updatedAt > $latestTime) {
-                    $latestTime = $updatedAt;
-                    $latestBranch = $data['branch_name'];
-                }
-            }
-        }
-
-        return $latestBranch;
+        return $job ? $job->branch_name : null;
     }
 
     /**
      * Find all jobs for an issue key (including completed/PR states for cleanup)
      */
     public static function findAllJobsByIssueKey(int $memberId, string $issueKey): array {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return [];
+        $jobs = R::find('aidevjobs',
+            'member_id = ? AND issue_key = ? ORDER BY updated_at DESC',
+            [$memberId, $issueKey]
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            $result[] = self::beanToArray($job);
         }
 
-        $jobs = [];
-        $files = glob($dir . '/*.json');
-
-        foreach ($files as $file) {
-            $data = json_decode(file_get_contents($file), true);
-            if ($data && $data['issue_key'] === $issueKey) {
-                $jobs[] = $data;
-            }
-        }
-
-        // Sort by updated_at descending
-        usort($jobs, fn($a, $b) => strtotime($b['updated_at'] ?? 0) - strtotime($a['updated_at'] ?? 0));
-
-        return $jobs;
+        return $result;
     }
 
     /**
@@ -531,23 +475,22 @@ class AIDevStatusService {
         string $previewUrl,
         ?array $playwrightResults = null
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['status'] = self::STATUS_PREVIEW_READY;
-        $data['progress'] = 75;
-        $data['current_step'] = 'Preview ready';
-        $data['shopify_theme_id'] = $shopifyThemeId;
-        $data['shopify_preview_url'] = $previewUrl;
+        $job->status = self::STATUS_PREVIEW_READY;
+        $job->progress = 75;
+        $job->current_step = 'Preview ready';
+        $job->shopify_theme_id = $shopifyThemeId;
+        $job->shopify_preview_url = $previewUrl;
         if ($playwrightResults !== null) {
-            $data['playwright_results'] = $playwrightResults;
+            $job->playwright_results = json_encode($playwrightResults);
         }
-        $data['updated_at'] = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
 
         self::log($jobId, $memberId, 'info', 'Shopify preview ready', [
             'theme_id' => $shopifyThemeId,
@@ -564,49 +507,33 @@ class AIDevStatusService {
         int $themeId,
         string $previewUrl
     ): void {
-        $path = self::getStatusPath($memberId, $jobId);
-        if (!file_exists($path)) {
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return;
         }
 
-        $data = json_decode(file_get_contents($path), true);
-        $data['shopify_theme_id'] = $themeId;
-        $data['shopify_preview_url'] = $previewUrl;
-        $data['updated_at'] = date('Y-m-d H:i:s');
+        $job->shopify_theme_id = $themeId;
+        $job->shopify_preview_url = $previewUrl;
+        $job->updated_at = date('Y-m-d H:i:s');
 
-        file_put_contents($path, json_encode($data, JSON_PRETTY_PRINT));
+        R::store($job);
     }
 
     /**
      * Get Shopify theme ID for an issue (reuse across job runs)
      */
     public static function getShopifyThemeForIssue(int $memberId, string $issueKey): ?int {
-        $jobs = self::findAllJobsByIssueKey($memberId, $issueKey);
+        $job = R::findOne('aidevjobs',
+            'member_id = ? AND issue_key = ? AND shopify_theme_id IS NOT NULL ORDER BY updated_at DESC',
+            [$memberId, $issueKey]
+        );
 
-        foreach ($jobs as $job) {
-            if (!empty($job['shopify_theme_id'])) {
-                return (int)$job['shopify_theme_id'];
-            }
-        }
-
-        return null;
+        return $job ? (int) $job->shopify_theme_id : null;
     }
 
     // ========================================
     // Logging Methods
     // ========================================
-
-    /**
-     * Get log file path for a job
-     */
-    private static function getLogPath(int $memberId, string $jobId): string {
-        $dir = self::ensureDir($memberId) . '/logs';
-        if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
-        }
-        $safeFilename = hash('sha256', $jobId) . '.log';
-        return $dir . '/' . $safeFilename;
-    }
 
     /**
      * Add a log entry for a job
@@ -618,38 +545,46 @@ class AIDevStatusService {
         string $message,
         array $context = []
     ): void {
-        $logPath = self::getLogPath($memberId, $jobId);
+        // Get issue_key from the job
+        $job = self::findByJobId($memberId, $jobId);
+        $issueKey = $job ? $job->issue_key : $jobId;
 
-        $entry = [
-            'timestamp' => date('Y-m-d H:i:s'),
-            'level' => $level,
-            'message' => $message,
-            'context' => $context
-        ];
+        $log = R::dispense('aidevjoblogs');
+        $log->issue_key = $issueKey;
+        $log->log_level = $level;
+        $log->message = $message;
+        $log->context_json = !empty($context) ? json_encode($context) : null;
+        $log->created_at = date('Y-m-d H:i:s');
 
-        file_put_contents($logPath, json_encode($entry) . "\n", FILE_APPEND);
+        R::store($log);
     }
 
     /**
      * Get all logs for a job
      */
     public static function getLogs(string $jobId, int $memberId): array {
-        $logPath = self::getLogPath($memberId, $jobId);
-        if (!file_exists($logPath)) {
+        // Get issue_key from the job
+        $job = self::findByJobId($memberId, $jobId);
+        if (!$job) {
             return [];
         }
 
-        $logs = [];
-        $lines = file($logPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $logs = R::find('aidevjoblogs',
+            'issue_key = ? ORDER BY created_at ASC',
+            [$job->issue_key]
+        );
 
-        foreach ($lines as $line) {
-            $entry = json_decode($line, true);
-            if ($entry) {
-                $logs[] = $entry;
-            }
+        $result = [];
+        foreach ($logs as $log) {
+            $result[] = [
+                'timestamp' => $log->created_at,
+                'level' => $log->log_level,
+                'message' => $log->message,
+                'context' => json_decode($log->context_json ?: '{}', true)
+            ];
         }
 
-        return $logs;
+        return $result;
     }
 
     // ========================================
@@ -657,60 +592,57 @@ class AIDevStatusService {
     // ========================================
 
     /**
-     * Clean up old status files for a member (older than 24 hours)
+     * Clean up old jobs for a member (older than specified days)
      */
-    public static function cleanup(int $memberId): int {
-        $dir = self::$statusDir . '/member_' . $memberId;
-        if (!is_dir($dir)) {
-            return 0;
-        }
+    public static function cleanup(int $memberId, int $daysOld = 30): int {
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
+
+        // Get jobs to delete
+        $jobs = R::find('aidevjobs',
+            'member_id = ? AND status IN (?, ?, ?) AND updated_at < ?',
+            [
+                $memberId,
+                self::STATUS_COMPLETE,
+                self::STATUS_FAILED,
+                self::STATUS_CANCELLED,
+                $cutoff
+            ]
+        );
 
         $count = 0;
-        $maxAge = 86400; // 24 hours
-
-        // Clean status files
-        $files = glob($dir . '/*.json');
-        foreach ($files as $file) {
-            if (filemtime($file) < time() - $maxAge) {
-                unlink($file);
-                $count++;
-            }
-        }
-
-        // Clean log files
-        $logDir = $dir . '/logs';
-        if (is_dir($logDir)) {
-            $logs = glob($logDir . '/*.log');
-            foreach ($logs as $log) {
-                if (filemtime($log) < time() - $maxAge) {
-                    unlink($log);
-                }
-            }
+        foreach ($jobs as $job) {
+            // Delete associated logs
+            R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
+            R::trash($job);
+            $count++;
         }
 
         return $count;
     }
 
     /**
-     * Clean up all old status files (for cron)
+     * Clean up all old jobs (for cron)
      */
-    public static function cleanupAll(): int {
-        if (!is_dir(self::$statusDir)) {
-            return 0;
-        }
+    public static function cleanupAll(int $daysOld = 30): int {
+        $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
+
+        // Get all old completed/failed/cancelled jobs
+        $jobs = R::find('aidevjobs',
+            'status IN (?, ?, ?) AND updated_at < ?',
+            [
+                self::STATUS_COMPLETE,
+                self::STATUS_FAILED,
+                self::STATUS_CANCELLED,
+                $cutoff
+            ]
+        );
 
         $count = 0;
-        $memberDirs = glob(self::$statusDir . '/member_*', GLOB_ONLYDIR);
-
-        foreach ($memberDirs as $dir) {
-            // Get member ID from directory name
-            $memberId = (int)str_replace(self::$statusDir . '/member_', '', $dir);
-            $count += self::cleanup($memberId);
-
-            // Remove empty directories
-            if (count(glob($dir . '/*')) === 0) {
-                rmdir($dir);
-            }
+        foreach ($jobs as $job) {
+            // Delete associated logs
+            R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
+            R::trash($job);
+            $count++;
         }
 
         return $count;

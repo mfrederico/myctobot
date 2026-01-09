@@ -67,6 +67,11 @@ $permissions = [
     // Webhooks - Public access (signature validation in controller)
     ['control' => 'webhook', 'method' => 'jira', 'level' => 101, 'description' => 'Jira webhook endpoint'],
     ['control' => 'webhook', 'method' => 'github', 'level' => 101, 'description' => 'GitHub webhook endpoint'],
+
+    // Tenant signup - Public access (only works on default/public site)
+    ['control' => 'signup', 'method' => 'index', 'level' => 101, 'description' => 'Tenant signup form'],
+    ['control' => 'signup', 'method' => 'checksubdomain', 'level' => 101, 'description' => 'Check subdomain availability'],
+    ['control' => 'signup', 'method' => 'dosignup', 'level' => 101, 'description' => 'Process tenant signup'],
 ];
 
 foreach ($permissions as $perm) {

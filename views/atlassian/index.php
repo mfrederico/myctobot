@@ -36,55 +36,105 @@
                 </div>
                 <div class="card-body">
                     <?php foreach ($sites as $site): ?>
-                    <div class="d-flex justify-content-between align-items-center p-3 bg-light rounded mb-3">
-                        <div>
-                            <h5 class="mb-1">
-                                <i class="bi bi-building"></i>
-                                <?= htmlspecialchars($site->site_name) ?>
-                            </h5>
-                            <a href="<?= htmlspecialchars($site->site_url) ?>" target="_blank" class="text-muted small">
-                                <?= htmlspecialchars($site->site_url) ?>
-                                <i class="bi bi-box-arrow-up-right"></i>
-                            </a>
-                            <br>
-                            <small class="text-muted">
-                                Token expires: <?= date('M j, Y H:i', strtotime($site->expires_at)) ?>
-                                <?php if (strtotime($site->expires_at) < time()): ?>
-                                <span class="badge bg-danger">Expired</span>
-                                <?php elseif (strtotime($site->expires_at) < time() + 86400): ?>
-                                <span class="badge bg-warning">Expiring Soon</span>
-                                <?php else: ?>
-                                <span class="badge bg-success">Active</span>
-                                <?php endif; ?>
-                            </small>
+                    <?php $webhooks = $webhooksPerSite[$site->cloud_id] ?? []; ?>
+                    <div class="p-3 bg-light rounded mb-3">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="mb-1">
+                                    <i class="bi bi-building"></i>
+                                    <?= htmlspecialchars($site->site_name) ?>
+                                </h5>
+                                <a href="<?= htmlspecialchars($site->site_url) ?>" target="_blank" class="text-muted small">
+                                    <?= htmlspecialchars($site->site_url) ?>
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                                <br>
+                                <small class="text-muted">
+                                    Token expires: <?= date('M j, Y H:i', strtotime($site->expires_at)) ?>
+                                    <?php if (strtotime($site->expires_at) < time()): ?>
+                                    <span class="badge bg-danger">Expired</span>
+                                    <?php elseif (strtotime($site->expires_at) < time() + 86400): ?>
+                                    <span class="badge bg-warning">Expiring Soon</span>
+                                    <?php else: ?>
+                                    <span class="badge bg-success">Active</span>
+                                    <?php endif; ?>
+                                </small>
+                            </div>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="refreshToken('<?= $site->cloud_id ?>')">
+                                    <i class="bi bi-arrow-repeat"></i> Refresh
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="disconnectSite('<?= $site->cloud_id ?>', '<?= htmlspecialchars($site->site_name) ?>')">
+                                    <i class="bi bi-x-circle"></i> Disconnect
+                                </button>
+                            </div>
                         </div>
-                        <div class="btn-group">
-                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="refreshToken('<?= $site->cloud_id ?>')">
-                                <i class="bi bi-arrow-repeat"></i> Refresh
-                            </button>
-                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="disconnectSite('<?= $site->cloud_id ?>', '<?= htmlspecialchars($site->site_name) ?>')">
-                                <i class="bi bi-x-circle"></i> Disconnect
-                            </button>
+
+                        <!-- Actions for this site -->
+                        <div class="mt-3 pt-3 border-top">
+                            <div class="d-flex gap-2 mb-3">
+                                <a href="/boards/discover?cloud_id=<?= urlencode($site->cloud_id) ?>" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-search"></i> Discover Boards
+                                </a>
+                                <a href="/boards?cloud_id=<?= urlencode($site->cloud_id) ?>" class="btn btn-sm btn-outline-secondary">
+                                    <i class="bi bi-kanban"></i> Manage Boards
+                                </a>
+                            </div>
+
+                            <!-- Webhooks for this site -->
+                            <?php if (!empty($webhooks)): ?>
+                            <h6 class="mb-2"><i class="bi bi-link-45deg"></i> Registered Webhooks</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered mb-0 bg-white">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width: 60px;">ID</th>
+                                            <th>URL</th>
+                                            <th>JQL Filter</th>
+                                            <th>Events</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($webhooks as $webhook): ?>
+                                        <tr>
+                                            <td><code><?= htmlspecialchars($webhook['id'] ?? 'N/A') ?></code></td>
+                                            <td class="text-break" style="max-width: 200px;">
+                                                <small><?= htmlspecialchars($webhook['url'] ?? 'N/A') ?></small>
+                                            </td>
+                                            <td><code><?= htmlspecialchars($webhook['jqlFilter'] ?? 'N/A') ?></code></td>
+                                            <td>
+                                                <?php if (!empty($webhook['events'])): ?>
+                                                    <?php foreach ($webhook['events'] as $event): ?>
+                                                    <span class="badge bg-secondary me-1"><?= htmlspecialchars($event) ?></span>
+                                                    <?php endforeach; ?>
+                                                <?php else: ?>
+                                                    <span class="text-muted">None</span>
+                                                <?php endif; ?>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="mt-2">
+                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                   class="btn btn-sm btn-outline-warning"
+                                   onclick="return confirm('This will delete existing webhooks and register a new one. Continue?')">
+                                    <i class="bi bi-arrow-clockwise"></i> Refresh Webhook
+                                </a>
+                            </div>
+                            <?php else: ?>
+                            <div class="d-flex align-items-center gap-2">
+                                <small class="text-muted"><i class="bi bi-link-45deg"></i> No webhooks registered</small>
+                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                   class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-plus-lg"></i> Register Webhook
+                                </a>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <?php endforeach; ?>
-                </div>
-            </div>
-
-            <!-- Quick Links -->
-            <div class="card">
-                <div class="card-header">
-                    <i class="bi bi-lightning"></i> Quick Actions
-                </div>
-                <div class="card-body">
-                    <div class="d-grid gap-2">
-                        <a href="/boards/discover" class="btn btn-outline-primary">
-                            <i class="bi bi-search"></i> Discover Jira Boards
-                        </a>
-                        <a href="/boards" class="btn btn-outline-secondary">
-                            <i class="bi bi-kanban"></i> Manage Tracked Boards
-                        </a>
-                    </div>
                 </div>
             </div>
 

@@ -24,10 +24,20 @@ class Atlassian extends BaseControls\Control {
 
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
+        // Fetch registered webhooks for each site
+        $webhooksPerSite = [];
+        foreach ($sites as $site) {
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $site->cloud_id);
+            if ($accessToken) {
+                $webhooksPerSite[$site->cloud_id] = AtlassianAuth::getRegisteredWebhooks($site->cloud_id, $accessToken);
+            }
+        }
+
         $this->render('atlassian/index', [
             'title' => 'Atlassian Connection',
             'sites' => $sites,
-            'atlassianConfigured' => AtlassianAuth::isConfigured()
+            'atlassianConfigured' => AtlassianAuth::isConfigured(),
+            'webhooksPerSite' => $webhooksPerSite
         ]);
     }
 
@@ -269,6 +279,55 @@ class Atlassian extends BaseControls\Control {
         } catch (Exception $e) {
             $this->logger->error('Status check failed: ' . $e->getMessage());
             $this->jsonError('Could not check status', 500);
+        }
+    }
+
+    /**
+     * Refresh webhook for a site (delete old + register new)
+     */
+    public function refreshwebhook($params = []) {
+        if (!$this->requireLogin()) return;
+
+        try {
+            $cloudId = $params['cloud_id'] ?? $this->getParam('cloud_id');
+            if (!$cloudId) {
+                $this->flash('error', 'No site specified');
+                Flight::redirect('/atlassian');
+                return;
+            }
+
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $cloudId);
+            if (!$accessToken) {
+                $this->flash('error', 'Could not get access token');
+                Flight::redirect('/atlassian');
+                return;
+            }
+
+            // Delete existing webhooks for this site
+            $existingWebhooks = AtlassianAuth::getRegisteredWebhooks($cloudId, $accessToken);
+            $deleted = 0;
+            foreach ($existingWebhooks as $webhook) {
+                if (isset($webhook['id'])) {
+                    if (AtlassianAuth::deleteWebhook($cloudId, $accessToken, (int)$webhook['id'])) {
+                        $deleted++;
+                    }
+                }
+            }
+
+            // Register new webhook
+            $registered = AtlassianAuth::registerAIDevWebhook($this->member->id, $cloudId, $accessToken);
+
+            if ($registered) {
+                $this->flash('success', "Webhook refreshed (deleted {$deleted}, registered new)");
+            } else {
+                $this->flash('warning', "Deleted {$deleted} webhooks but failed to register new one");
+            }
+
+            Flight::redirect('/atlassian');
+
+        } catch (Exception $e) {
+            $this->handleException($e, 'Webhook refresh failed');
+            Flight::redirect('/atlassian');
         }
     }
 }

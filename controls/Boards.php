@@ -47,17 +47,31 @@ class Boards extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
+
+        // Optional cloud_id filter from query string
+        $filterCloudId = $this->getParam('cloud_id');
 
         $boards = UserDatabaseService::getBoards();
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
         // Build cloud_id -> site_name lookup
         $siteNames = [];
+        $filterSiteName = null;
         foreach ($sites as $site) {
             $siteNames[$site->cloud_id] = $site->site_name ?? $site->site_url ?? null;
+            if ($filterCloudId && $site->cloud_id === $filterCloudId) {
+                $filterSiteName = $site->site_name;
+            }
+        }
+
+        // Filter boards by cloud_id if specified
+        if ($filterCloudId) {
+            $boards = array_filter($boards, function($board) use ($filterCloudId) {
+                return $board['cloud_id'] === $filterCloudId;
+            });
         }
 
         // Enrich boards with site_name
@@ -87,12 +101,14 @@ class Boards extends BaseControls\Control {
         }
 
         $this->render('boards/index', [
-            'title' => 'Jira Boards',
+            'title' => $filterSiteName ? "Jira Boards - {$filterSiteName}" : 'Jira Boards',
             'boards' => $boards,
             'boardsBySite' => $boardsBySite,
             'sites' => $sites,
             'hasAtlassian' => count($sites) > 0,
-            'atlassianConfigured' => \app\plugins\AtlassianAuth::isConfigured()
+            'atlassianConfigured' => \app\plugins\AtlassianAuth::isConfigured(),
+            'filterCloudId' => $filterCloudId,
+            'filterSiteName' => $filterSiteName
         ]);
     }
 
@@ -104,9 +120,12 @@ class Boards extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
+
+        // Optional cloud_id filter from query string
+        $filterCloudId = $this->getParam('cloud_id');
 
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
@@ -116,7 +135,19 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        // Fetch boards from each connected site
+        // Filter sites if cloud_id specified
+        $filterSiteName = null;
+        if ($filterCloudId) {
+            $sites = array_filter($sites, function($site) use ($filterCloudId, &$filterSiteName) {
+                if ($site->cloud_id === $filterCloudId) {
+                    $filterSiteName = $site->site_name;
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        // Fetch boards from each connected site (or just the filtered one)
         $jiraBoards = [];
         $existingBoards = UserDatabaseService::getBoards();
 
@@ -132,10 +163,12 @@ class Boards extends BaseControls\Control {
         }
 
         $this->render('boards/discover', [
-            'title' => 'Discover Jira Boards',
+            'title' => $filterSiteName ? "Discover Boards - {$filterSiteName}" : 'Discover Jira Boards',
             'jiraBoards' => $jiraBoards,
             'existingBoards' => $existingBoards,
-            'sites' => $sites
+            'sites' => $sites,
+            'filterCloudId' => $filterCloudId,
+            'filterSiteName' => $filterSiteName
         ]);
     }
 

@@ -1,5 +1,7 @@
 # Configuration files with sensitive data
 /conf/config.ini
+/conf/config.*.ini
+/conf/mailgun.ini
 config.ini
 stripe
 storage

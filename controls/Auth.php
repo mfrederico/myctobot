@@ -433,8 +433,10 @@ class Auth extends BaseControls\Control {
      * Show forgot password form
      */
     public function forgot() {
+        $workspace = $this->getParam('workspace') ?? '';
         $this->render('auth/forgot', [
-            'title' => 'Forgot Password'
+            'title' => 'Forgot Password',
+            'workspace' => $workspace
         ]);
     }
 
@@ -449,24 +451,49 @@ class Auth extends BaseControls\Control {
             }
 
             $email = $this->sanitize($this->getParam('email'), 'email');
+            $workspace = $this->sanitize($this->getParam('workspace'), 'string');
+
+            $this->logger->debug('Password reset requested', ['email' => $email, 'workspace' => $workspace]);
 
             if (empty($email)) {
                 $this->flash('error', 'Email is required');
-                Flight::redirect('/auth/forgot');
+                $redirectUrl = '/auth/forgot' . ($workspace ? '?workspace=' . urlencode($workspace) : '');
+                Flight::redirect($redirectUrl);
                 return;
             }
 
-            $member = R::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
+            // If workspace provided, switch to tenant database
+            $member = null;
+            $connectedToTenant = false;
+            if (!empty($workspace)) {
+                if ($this->switchToTenantDatabase($workspace)) {
+                    $connectedToTenant = true;
+                    $member = R::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
+                    $this->logger->debug('Member lookup in tenant DB', ['found' => $member ? true : false, 'workspace' => $workspace]);
+                }
+            } else {
+                $member = R::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
+            }
 
             if ($member) {
-                // Generate reset token
+                // Generate reset token and store (still connected to tenant DB if workspace was provided)
                 $token = bin2hex(random_bytes(32));
                 $member->reset_token = $token;
                 $member->reset_expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
                 R::store($member);
 
-                // Send reset email via Mailgun
+                $this->logger->debug('Reset token stored', ['member_id' => $member->id, 'workspace' => $workspace]);
+
+                // Now switch back to default DB
+                if ($connectedToTenant) {
+                    R::selectDatabase('default');
+                }
+
+                // Send reset email via Mailgun - include workspace in URL
                 $resetUrl = Flight::get('app.baseurl') . "/auth/reset?token={$token}";
+                if (!empty($workspace)) {
+                    $resetUrl .= "&workspace=" . urlencode($workspace);
+                }
 
                 $mailgun = new \app\services\MailgunService();
                 if ($mailgun->isEnabled()) {
@@ -490,7 +517,8 @@ HTML;
 
             // Always show success to prevent email enumeration
             $this->flash('success', 'If the email exists, a reset link has been sent');
-            Flight::redirect('/auth/login');
+            $loginUrl = $workspace ? "/login/{$workspace}" : '/auth/login';
+            Flight::redirect($loginUrl);
 
         } catch (Exception $e) {
             $this->handleException($e, 'Password reset failed');
@@ -502,6 +530,7 @@ HTML;
      */
     public function reset() {
         $token = $this->getParam('token');
+        $workspace = $this->getParam('workspace') ?? '';
 
         if (empty($token)) {
             $this->flash('error', 'Invalid reset link');
@@ -509,18 +538,33 @@ HTML;
             return;
         }
 
+        // If workspace provided, switch to tenant database
+        if (!empty($workspace)) {
+            if (!$this->switchToTenantDatabase($workspace)) {
+                $this->flash('error', 'Invalid workspace');
+                Flight::redirect('/auth/login');
+                return;
+            }
+        }
+
         $member = R::findOne('member', 'reset_token = ? AND reset_expires > ?',
             [$token, date('Y-m-d H:i:s')]);
 
+        if (!empty($workspace)) {
+            R::selectDatabase('default');
+        }
+
         if (!$member) {
             $this->flash('error', 'Invalid or expired reset link');
-            Flight::redirect('/auth/login');
+            $loginUrl = $workspace ? "/login/{$workspace}" : '/auth/login';
+            Flight::redirect($loginUrl);
             return;
         }
 
         $this->render('auth/reset', [
             'title' => 'Reset Password',
-            'token' => $token
+            'token' => $token,
+            'workspace' => $workspace
         ]);
     }
 
@@ -537,6 +581,13 @@ HTML;
             $token = $this->getParam('token');
             $password = $this->getParam('password');
             $password_confirm = $this->getParam('password_confirm');
+            $workspace = $this->getParam('workspace') ?? '';
+
+            // Build reset URL for redirects
+            $resetUrl = "/auth/reset?token={$token}";
+            if (!empty($workspace)) {
+                $resetUrl .= "&workspace=" . urlencode($workspace);
+            }
 
             // Validate input
             if (empty($token) || empty($password)) {
@@ -547,14 +598,23 @@ HTML;
 
             if (strlen($password) < 8) {
                 $this->flash('error', 'Password must be at least 8 characters');
-                Flight::redirect("/auth/reset?token={$token}");
+                Flight::redirect($resetUrl);
                 return;
             }
 
             if ($password !== $password_confirm) {
                 $this->flash('error', 'Passwords do not match');
-                Flight::redirect("/auth/reset?token={$token}");
+                Flight::redirect($resetUrl);
                 return;
+            }
+
+            // If workspace provided, switch to tenant database
+            if (!empty($workspace)) {
+                if (!$this->switchToTenantDatabase($workspace)) {
+                    $this->flash('error', 'Invalid workspace');
+                    Flight::redirect('/auth/login');
+                    return;
+                }
             }
 
             // Find member
@@ -562,8 +622,12 @@ HTML;
                 [$token, date('Y-m-d H:i:s')]);
 
             if (!$member) {
+                if (!empty($workspace)) {
+                    R::selectDatabase('default');
+                }
                 $this->flash('error', 'Invalid or expired reset link');
-                Flight::redirect('/auth/login');
+                $loginUrl = $workspace ? "/login/{$workspace}" : '/auth/login';
+                Flight::redirect($loginUrl);
                 return;
             }
 
@@ -573,10 +637,15 @@ HTML;
             $member->reset_expires = null;
             R::store($member);
 
-            $this->logger->info('Password reset completed', ['id' => $member->id]);
+            if (!empty($workspace)) {
+                R::selectDatabase('default');
+            }
+
+            $this->logger->info('Password reset completed', ['id' => $member->id, 'workspace' => $workspace]);
 
             $this->flash('success', 'Password reset successful! Please login with your new password');
-            Flight::redirect('/auth/login');
+            $loginUrl = $workspace ? "/login/{$workspace}" : '/auth/login';
+            Flight::redirect($loginUrl);
 
         } catch (Exception $e) {
             $this->handleException($e, 'Password reset failed');

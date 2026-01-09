@@ -116,7 +116,7 @@ $hasWorkspace = !empty($workspace);
                         <?php if (!$hasWorkspace): ?>
                             <a href="/auth/register">Don't have an account? Register</a><br>
                         <?php endif; ?>
-                        <a href="/auth/forgot">Forgot your password?</a>
+                        <a href="/auth/forgot<?= $hasWorkspace ? '?workspace=' . urlencode($workspace) : '' ?>">Forgot your password?</a>
                     </div>
                 </div>
             </div>

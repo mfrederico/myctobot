@@ -102,18 +102,22 @@ if (php_sapi_name() !== 'cli') {
 // Load routes - for both web and CLI modes (CLI sets REQUEST_URI in CliHandler)
 if (isset($_SERVER['REQUEST_URI'])) {
     $routePath = BASE_PATH . '/routes';
-    
+
     // Check if we have a specific route file for the first segment
     $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
-    $segments = explode('/', trim($requestUri, '/'));
-    $firstSegment = (!empty($segments[0])) ? $segments[0] : 'index';
-    
+    // Strip query string for segment detection
+    $uriPath = parse_url($requestUri, PHP_URL_PATH) ?? $requestUri;
+    $segments = explode('/', trim($uriPath, '/'));
+    $firstSegment = (!empty($segments[0])) ? strtolower($segments[0]) : 'index';
+
     // Load specific route file if it exists, otherwise use default
     $specificRoute = $routePath . '/' . $firstSegment . '.php';
     if (file_exists($specificRoute)) {
+        Flight::get('log')->debug("Loading route file: {$specificRoute}");
         require_once $specificRoute;
     } else {
         // Load default routes
+        Flight::get('log')->debug("Loading default routes (no route file for: {$firstSegment})");
         require_once $routePath . '/default.php';
     }
 }

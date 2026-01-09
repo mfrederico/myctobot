@@ -10,7 +10,7 @@
 
 use \Flight as Flight;
 
-// Route /login/{workspace} to Auth->login with workspace parameter
+// Register login route FIRST (takes priority over default route)
 Flight::route('/login(/@workspace)', function($workspace = null) {
     Flight::view()->set('LEVELS', LEVELS);
 

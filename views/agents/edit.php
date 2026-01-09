@@ -243,8 +243,11 @@ function loadDefaultMcp() {
     <?php elseif ($activeTab === 'hooks'): ?>
     <!-- Hooks Tab -->
     <div class="card">
-        <div class="card-header">
-            <i class="bi bi-lightning"></i> Hooks Configuration
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-lightning"></i> Hooks Configuration</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAllHooks()">
+                <i class="bi bi-arrow-repeat"></i> Load All Hooks
+            </button>
         </div>
         <div class="card-body">
             <div class="alert alert-info">
@@ -321,6 +324,47 @@ function loadDefaultMcp() {
                 </div>
             </div>
 
+            <!-- Additional Hooks Quick Setup -->
+            <div class="card bg-light mb-4">
+                <div class="card-header">
+                    <i class="bi bi-gear"></i> Additional Hooks
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Additional automation hooks for commit cleanup, activity logging, and response capture.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_commit_cruft" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_commit_cruft">
+                                    <i class="bi bi-git text-danger"></i> <strong>Strip Commit Cruft</strong>
+                                    <small class="d-block text-muted">Remove emojis and Claude signatures from commits</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_log_activity" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_log_activity">
+                                    <i class="bi bi-journal-text text-info"></i> <strong>Log Activity</strong>
+                                    <small class="d-block text-muted">Log file changes to AI Dev job</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_capture_response" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_capture_response">
+                                    <i class="bi bi-chat-dots text-success"></i> <strong>Capture Responses</strong>
+                                    <small class="d-block text-muted">Save Claude responses to job log</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <form method="POST" action="/agents/update/<?= $agentId ?>">
                 <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
                 <input type="hidden" name="tab" value="hooks">
@@ -360,71 +404,152 @@ function loadDefaultMcp() {
     </div>
 
 <script>
-// Available language validators
-const languageValidators = {
+// Available hooks configuration
+// Note: ${MYCTOBOT_APP_ROOT} is set by local-aidev-full.php at runtime
+const availableHooks = {
+    // Language validators (PreToolUse on Write|Edit)
     php: {
-        command: "php scripts/hooks/validate-php.php",
-        timeout: 30
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-php.php",
+        timeout: 30,
+        matcher: "Write|Edit"
     },
     js: {
-        command: "php scripts/hooks/validate-js.php",
-        timeout: 30
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-js.php",
+        timeout: 30,
+        matcher: "Write|Edit"
     },
     python: {
-        command: "php scripts/hooks/validate-python.php",
-        timeout: 30
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-python.php",
+        timeout: 30,
+        matcher: "Write|Edit"
+    },
+    // Commit cruft stripper (PreToolUse on Bash - git commit)
+    commit_cruft: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/strip-commit-cruft.php",
+        timeout: 5,
+        matcher: "Bash"
+    },
+    // Activity logger (PostToolUse on Write|Edit)
+    log_activity: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/log-activity.php",
+        timeout: 10,
+        matcher: "Write|Edit",
+        event: "PostToolUse"
+    },
+    // Response capture (Stop hook)
+    capture_response: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/capture-response.php",
+        timeout: 5,
+        matcher: "",
+        event: "Stop"
     }
 };
 
 function updateHooksFromCheckboxes() {
-    const hooks = [];
+    const preToolUseValidators = [];
+    const preToolUseBash = [];
+    const postToolUse = [];
+    const stop = [];
 
-    // Check which validators are selected
+    // Language validators (PreToolUse on Write|Edit)
     if (document.getElementById('hook_php').checked) {
-        hooks.push({
+        preToolUseValidators.push({
             type: "command",
-            command: languageValidators.php.command,
-            timeout: languageValidators.php.timeout
+            command: availableHooks.php.command,
+            timeout: availableHooks.php.timeout
         });
     }
     if (document.getElementById('hook_js').checked) {
-        hooks.push({
+        preToolUseValidators.push({
             type: "command",
-            command: languageValidators.js.command,
-            timeout: languageValidators.js.timeout
+            command: availableHooks.js.command,
+            timeout: availableHooks.js.timeout
         });
     }
     if (document.getElementById('hook_python').checked) {
-        hooks.push({
+        preToolUseValidators.push({
             type: "command",
-            command: languageValidators.python.command,
-            timeout: languageValidators.python.timeout
+            command: availableHooks.python.command,
+            timeout: availableHooks.python.timeout
         });
     }
 
-    // Build config
-    const config = {
-        PreToolUse: hooks.length > 0 ? [{
+    // Commit cruft stripper (PreToolUse on Bash)
+    if (document.getElementById('hook_commit_cruft').checked) {
+        preToolUseBash.push({
+            type: "command",
+            command: availableHooks.commit_cruft.command,
+            timeout: availableHooks.commit_cruft.timeout
+        });
+    }
+
+    // Activity logger (PostToolUse)
+    if (document.getElementById('hook_log_activity').checked) {
+        postToolUse.push({
+            type: "command",
+            command: availableHooks.log_activity.command,
+            timeout: availableHooks.log_activity.timeout
+        });
+    }
+
+    // Response capture (Stop)
+    if (document.getElementById('hook_capture_response').checked) {
+        stop.push({
+            type: "command",
+            command: availableHooks.capture_response.command,
+            timeout: availableHooks.capture_response.timeout
+        });
+    }
+
+    // Build config with proper structure
+    const preToolUseRules = [];
+    if (preToolUseValidators.length > 0) {
+        preToolUseRules.push({
             matcher: "Write|Edit",
-            hooks: hooks
+            hooks: preToolUseValidators
+        });
+    }
+    if (preToolUseBash.length > 0) {
+        preToolUseRules.push({
+            matcher: "Bash",
+            hooks: preToolUseBash
+        });
+    }
+
+    const config = {
+        PreToolUse: preToolUseRules,
+        PostToolUse: postToolUse.length > 0 ? [{
+            matcher: "Write|Edit",
+            hooks: postToolUse
         }] : [],
-        PostToolUse: [],
-        Stop: []
+        Stop: stop.length > 0 ? [{
+            matcher: "",
+            hooks: stop
+        }] : []
     };
 
     document.getElementById('hooks_config').value = JSON.stringify(config, null, 2);
+}
+
+// Load all available hooks
+function loadAllHooks() {
+    document.getElementById('hook_php').checked = true;
+    document.getElementById('hook_commit_cruft').checked = true;
+    document.getElementById('hook_log_activity').checked = true;
+    document.getElementById('hook_capture_response').checked = true;
+    updateHooksFromCheckboxes();
 }
 
 // Initialize checkboxes from existing config on page load
 document.addEventListener('DOMContentLoaded', function() {
     try {
         const configText = document.getElementById('hooks_config').value;
-        if (!configText || configText === '{}') return;
+        if (!configText || configText === '{}' || configText === '[]') return;
 
         const config = JSON.parse(configText);
-        const preToolUse = config.PreToolUse || [];
 
-        preToolUse.forEach(rule => {
+        // Check PreToolUse hooks
+        (config.PreToolUse || []).forEach(rule => {
             (rule.hooks || []).forEach(hook => {
                 const cmd = hook.command || '';
                 if (cmd.includes('validate-php')) {
@@ -435,6 +560,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (cmd.includes('validate-python')) {
                     document.getElementById('hook_python').checked = true;
+                }
+                if (cmd.includes('strip-commit-cruft')) {
+                    document.getElementById('hook_commit_cruft').checked = true;
+                }
+            });
+        });
+
+        // Check PostToolUse hooks
+        (config.PostToolUse || []).forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('log-activity')) {
+                    document.getElementById('hook_log_activity').checked = true;
+                }
+            });
+        });
+
+        // Check Stop hooks
+        (config.Stop || []).forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('capture-response')) {
+                    document.getElementById('hook_capture_response').checked = true;
                 }
             });
         });

@@ -369,8 +369,10 @@ class Signup extends BaseControls\Control {
                 'database' => $result['database']
             ]);
 
-            // Redirect to the tenant's login page with welcome message
-            Flight::redirect($result['url'] . '/auth/login?welcome=1');
+            // Redirect to the main site login page with workspace context
+            // This ensures the user lands on myctobot.ai/login/{subdomain}
+            $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
+            Flight::redirect("{$baseUrl}/login/{$pending->subdomain}?welcome=1");
 
         } catch (\Exception $e) {
             $this->logger->error('Tenant provisioning failed after verification', [
@@ -448,7 +450,8 @@ class Signup extends BaseControls\Control {
             return;
         }
 
-        $verifyUrl = "https://myctobot.ai/signup/verify/{$token}";
+        $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
+        $verifyUrl = "{$baseUrl}/signup/verify/{$token}?workspace=" . urlencode($subdomain);
 
         $html = <<<HTML
 <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">

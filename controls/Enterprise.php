@@ -820,6 +820,7 @@ class Enterprise extends BaseControls\Control {
                 'clone_url' => $bean->clone_url,
                 'access_token' => $bean->access_token,
                 'enabled' => $bean->enabled,
+                'issues_enabled' => $bean->issues_enabled ?? 0,
                 'agent_id' => $bean->agent_id,
                 'agent_name' => $agentName,
                 'created_at' => $bean->created_at,

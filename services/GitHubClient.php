@@ -574,4 +574,241 @@ class GitHubClient {
         $response = $this->client->get('/rate_limit');
         return json_decode($response->getBody()->getContents(), true);
     }
+
+    // ========================================
+    // Webhook Methods
+    // ========================================
+
+    /**
+     * Create a webhook for a repository
+     *
+     * @param string $owner Repository owner
+     * @param string $repo Repository name
+     * @param string $webhookUrl URL to receive webhook events
+     * @param string $secret Secret for webhook signature verification
+     * @param array $events Events to subscribe to (default: issues, issue_comment)
+     * @return array Created webhook data
+     */
+    public function createWebhook(
+        string $owner,
+        string $repo,
+        string $webhookUrl,
+        string $secret,
+        array $events = ['issues', 'issue_comment']
+    ): array {
+        $response = $this->client->post("/repos/{$owner}/{$repo}/hooks", [
+            'json' => [
+                'name' => 'web',
+                'active' => true,
+                'events' => $events,
+                'config' => [
+                    'url' => $webhookUrl,
+                    'content_type' => 'json',
+                    'secret' => $secret,
+                    'insecure_ssl' => '0',
+                ],
+            ],
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * List webhooks for a repository
+     */
+    public function listWebhooks(string $owner, string $repo): array {
+        $response = $this->client->get("/repos/{$owner}/{$repo}/hooks");
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Delete a webhook
+     */
+    public function deleteWebhook(string $owner, string $repo, int $hookId): void {
+        $this->client->delete("/repos/{$owner}/{$repo}/hooks/{$hookId}");
+    }
+
+    /**
+     * Check if our webhook already exists on a repo
+     */
+    public function findWebhook(string $owner, string $repo, string $webhookUrl): ?array {
+        try {
+            $hooks = $this->listWebhooks($owner, $repo);
+            foreach ($hooks as $hook) {
+                if (($hook['config']['url'] ?? '') === $webhookUrl) {
+                    return $hook;
+                }
+            }
+        } catch (GuzzleException $e) {
+            // No access or no hooks
+        }
+        return null;
+    }
+
+    // ========================================
+    // Issue Methods
+    // ========================================
+
+    /**
+     * Get an issue
+     */
+    public function getIssue(string $owner, string $repo, int $issueNumber): array {
+        $response = $this->client->get("/repos/{$owner}/{$repo}/issues/{$issueNumber}");
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * List issues for a repository
+     */
+    public function listIssues(
+        string $owner,
+        string $repo,
+        string $state = 'open',
+        ?string $labels = null,
+        int $perPage = 30
+    ): array {
+        $query = [
+            'state' => $state,
+            'per_page' => min($perPage, 100),
+        ];
+        if ($labels) {
+            $query['labels'] = $labels;
+        }
+
+        $response = $this->client->get("/repos/{$owner}/{$repo}/issues", [
+            'query' => $query,
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Add a comment to an issue
+     */
+    public function addIssueComment(string $owner, string $repo, int $issueNumber, string $body): array {
+        $response = $this->client->post("/repos/{$owner}/{$repo}/issues/{$issueNumber}/comments", [
+            'json' => [
+                'body' => $body,
+            ],
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Update an issue (change state, labels, assignees, etc.)
+     */
+    public function updateIssue(string $owner, string $repo, int $issueNumber, array $data): array {
+        $response = $this->client->patch("/repos/{$owner}/{$repo}/issues/{$issueNumber}", [
+            'json' => $data,
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Close an issue
+     */
+    public function closeIssue(string $owner, string $repo, int $issueNumber): array {
+        return $this->updateIssue($owner, $repo, $issueNumber, ['state' => 'closed']);
+    }
+
+    /**
+     * Reopen an issue
+     */
+    public function reopenIssue(string $owner, string $repo, int $issueNumber): array {
+        return $this->updateIssue($owner, $repo, $issueNumber, ['state' => 'open']);
+    }
+
+    /**
+     * Add labels to an issue
+     */
+    public function addLabels(string $owner, string $repo, int $issueNumber, array $labels): array {
+        $response = $this->client->post("/repos/{$owner}/{$repo}/issues/{$issueNumber}/labels", [
+            'json' => ['labels' => $labels],
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Remove a label from an issue
+     */
+    public function removeLabel(string $owner, string $repo, int $issueNumber, string $label): void {
+        $this->client->delete("/repos/{$owner}/{$repo}/issues/{$issueNumber}/labels/" . urlencode($label));
+    }
+
+    /**
+     * Get labels for a repository (to verify ai-dev label exists)
+     */
+    public function listLabels(string $owner, string $repo): array {
+        $response = $this->client->get("/repos/{$owner}/{$repo}/labels");
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Create a label in a repository
+     */
+    public function createLabel(string $owner, string $repo, string $name, string $color = 'c5def5', string $description = ''): array {
+        $response = $this->client->post("/repos/{$owner}/{$repo}/labels", [
+            'json' => [
+                'name' => $name,
+                'color' => $color,
+                'description' => $description,
+            ],
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Ensure ai-dev label exists in repository
+     */
+    public function ensureAiDevLabel(string $owner, string $repo): array {
+        try {
+            $labels = $this->listLabels($owner, $repo);
+            foreach ($labels as $label) {
+                if ($label['name'] === 'ai-dev') {
+                    return $label;
+                }
+            }
+            // Create if not exists
+            return $this->createLabel($owner, $repo, 'ai-dev', '7057ff', 'AI Developer will work on this issue');
+        } catch (GuzzleException $e) {
+            throw new \Exception('Failed to ensure ai-dev label: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get all repos the user has access to (paginated)
+     */
+    public function getRepos(int $limit = 100): array {
+        $repos = [];
+        $page = 1;
+        $perPage = min($limit, 100);
+
+        while (count($repos) < $limit) {
+            $response = $this->client->get('/user/repos', [
+                'query' => [
+                    'sort' => 'updated',
+                    'per_page' => $perPage,
+                    'page' => $page,
+                ],
+            ]);
+
+            $pageRepos = json_decode($response->getBody()->getContents(), true);
+            if (empty($pageRepos)) {
+                break;
+            }
+
+            $repos = array_merge($repos, $pageRepos);
+            $page++;
+
+            if (count($pageRepos) < $perPage) {
+                break;
+            }
+        }
+
+        return array_slice($repos, 0, $limit);
+    }
 }

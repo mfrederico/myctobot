@@ -245,8 +245,9 @@ class Webhook extends BaseControls\Control {
                 $hasLabelChange = true;
                 $hasOnlyStatusChange = false;
                 // Check if this is our bot's label change
-                $oldLabels = explode(' ', $item['fromString'] ?? '');
-                $newLabels = explode(' ', $item['toString'] ?? '');
+                // Jira webhooks use 'from'/'to', but some formats use 'fromString'/'toString'
+                $oldLabels = explode(' ', $item['fromString'] ?? $item['from'] ?? '');
+                $newLabels = explode(' ', $item['toString'] ?? $item['to'] ?? '');
                 if ((in_array('myctobot-working', $newLabels) && !in_array('myctobot-working', $oldLabels)) ||
                     (!in_array('myctobot-working', $newLabels) && in_array('myctobot-working', $oldLabels))) {
                     $hasBotLabelChange = true;
@@ -308,11 +309,13 @@ class Webhook extends BaseControls\Control {
         if ($hasOnlyStatusChange && !$hasLabelChange) {
             // Even for status-only changes, check if ai-dev label is present and no job running
             if ($hasAiDevLabel) {
+                // Extract repo ID from labels (repo-{id} or ai-dev-{id})
+                $repoId = $this->extractRepoIdFromLabels($currentLabels);
                 $this->logger->debug('Jira webhook: status change on ai-dev issue, checking if job needed', [
                     'issue_key' => $issueKey,
-                    'label' => $currentAiDevLabel
+                    'label' => $currentAiDevLabel,
+                    'repo_id' => $repoId
                 ]);
-                $repoId = $this->extractRepoIdFromLabel($currentAiDevLabel);
                 $this->triggerAIDevJobIfNeeded($issueKey, $cloudId, $repoId);
             } else {
                 $this->logger->debug('Jira webhook: ignoring status-only change', ['issue_key' => $issueKey]);
@@ -352,11 +355,12 @@ class Webhook extends BaseControls\Control {
                 $aiDevWasRemoved = $oldAiDevLabel !== null && $newAiDevLabel === null;
 
                 if ($aiDevWasAdded && $hasAiDevLabel) {
-                    $repoId = $this->extractRepoIdFromLabel($currentAiDevLabel);
+                    // Extract repo ID from labels (repo-{id} or ai-dev-{id}), null = use default
+                    $repoId = $this->extractRepoIdFromLabels($currentLabels);
                     $this->logger->info('AI-dev label added, triggering job', [
                         'issue_key' => $issueKey,
                         'label' => $currentAiDevLabel,
-                        'repo_id' => $repoId
+                        'repo_id' => $repoId ?? 'default'
                     ]);
                     $this->triggerAIDevJob($issueKey, $cloudId, $repoId);
                     return;
@@ -484,10 +488,13 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Get tenant slug for multi-tenancy support
+        $tenant = Flight::get('tenant.slug');
+
         // AIDevJobService handles local vs shard execution based on config
-        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId)
+        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId, tenant)
         $jobService = new AIDevJobService();
-        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId);
+        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
 
         if ($result['success']) {
             $this->logger->info('AI Developer job triggered via webhook', [
@@ -1185,8 +1192,22 @@ class Webhook extends BaseControls\Control {
     // ========================================
 
     /**
-     * Check if any label matches the ai-dev pattern (ai-dev or ai-dev-{repo_id})
-     * Returns the matching label or null
+     * Check if ticket has the ai-dev label
+     * Returns true if 'ai-dev' label is present
+     */
+    private function hasAiDevLabel(array $labels): bool {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if ($labelName === 'ai-dev') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Find ai-dev label in list (for backward compatibility with ai-dev-{id} pattern)
+     * Returns 'ai-dev' or 'ai-dev-{id}' or null
      */
     private function findAiDevLabel(array $labels): ?string {
         foreach ($labels as $label) {
@@ -1199,14 +1220,49 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Check if a label matches the ai-dev pattern
+     * Check if a label matches the ai-dev pattern (ai-dev or ai-dev-{id})
      */
     private function isAiDevLabel(string $label): bool {
         return $label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label);
     }
 
     /**
-     * Extract repo ID from ai-dev-{repo_id} label, returns null for plain 'ai-dev'
+     * Find repo-{id} label in list to determine which repo to use
+     * Returns the repo ID or null if not found
+     */
+    private function findRepoIdFromLabels(array $labels): ?int {
+        foreach ($labels as $label) {
+            $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+            if (preg_match('/^repo-(\d+)$/', $labelName, $matches)) {
+                return (int) $matches[1];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extract repo ID from labels - checks both patterns:
+     * 1. repo-{id} label (preferred)
+     * 2. ai-dev-{id} label (legacy)
+     */
+    private function extractRepoIdFromLabels(array $labels): ?int {
+        // First check for repo-{id} label (new pattern)
+        $repoId = $this->findRepoIdFromLabels($labels);
+        if ($repoId !== null) {
+            return $repoId;
+        }
+
+        // Fall back to ai-dev-{id} pattern (legacy)
+        $aiDevLabel = $this->findAiDevLabel($labels);
+        if ($aiDevLabel && preg_match('/^ai-dev-(\d+)$/', $aiDevLabel, $matches)) {
+            return (int) $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * @deprecated Use extractRepoIdFromLabels instead
      */
     private function extractRepoIdFromLabel(string $label): ?int {
         if (preg_match('/^ai-dev-(\d+)$/', $label, $matches)) {

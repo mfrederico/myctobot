@@ -451,6 +451,75 @@ The logs will usually show the exact error (e.g., `Class "app\Bean" not found`) 
 
 **Log location**: `log/app-YYYY-MM-DD.log`
 
+## Multi-Tenancy
+
+The application supports session-based multi-tenancy. Each tenant has:
+- Their own config file: `conf/config.{tenant}.ini`
+- Their own database (SQLite or MySQL)
+- Their own data (members, boards, settings, etc.)
+
+### Background Scripts
+
+Background scripts must be passed the `--tenant` parameter to load the correct database:
+
+```bash
+# Run analysis for a specific tenant
+php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --tenant=gwt
+
+# Run digest cron (processes all tenants automatically)
+php scripts/cron-digest.php --script --verbose
+
+# Run AI Developer for specific tenant
+php scripts/ai-dev-agent.php --secret=KEY --member=3 --job=ID --action=process --tenant=gwt
+
+# Run local AI Developer
+php scripts/local-aidev-full.php --issue=SSI-1883 --tenant=gwt
+```
+
+### Web Requests
+
+For web requests, the tenant is stored in `$_SESSION['tenant_slug']` after login.
+The bootstrap reads this and switches to the tenant database automatically.
+
+When spawning background scripts from controllers, include the tenant:
+
+```php
+$tenantSlug = $_SESSION['tenant_slug'] ?? null;
+$tenantParam = $tenantSlug && $tenantSlug !== 'default'
+    ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+    : '';
+
+$cmd = sprintf(
+    'php scripts/cron-analysis.php --script --secret=%s --member=%d --board=%d%s',
+    escapeshellarg($cronSecret),
+    $memberId,
+    $boardId,
+    $tenantParam
+);
+```
+
+### Webhooks
+
+Jira webhooks now support tenant-specific URLs. Each tenant should register their
+webhook in Jira with their tenant slug in the URL:
+
+```
+https://myctobot.ai/webhook/jira/gwt        # For tenant "gwt"
+https://myctobot.ai/webhook/jira/testcorp   # For tenant "testcorp"
+```
+
+The webhook controller will:
+1. Extract the tenant from the URL
+2. Load the tenant's config file (`conf/config.{tenant}.ini`)
+3. Switch to the tenant's database
+4. Process the webhook with the correct tenant context
+
+**To update an existing Jira webhook:**
+1. Go to Jira → Settings → System → Webhooks
+2. Edit the webhook URL to include your tenant slug
+3. Change: `https://myctobot.ai/webhook/jira`
+4. To: `https://myctobot.ai/webhook/jira/your-tenant-slug`
+
 ## See Also
 
 - `REDBEAN_README.md` - Detailed RedBeanPHP reference

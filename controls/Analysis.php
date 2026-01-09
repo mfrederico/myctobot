@@ -58,7 +58,7 @@ class Analysis extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 
@@ -134,14 +134,22 @@ class Analysis extends BaseControls\Control {
             // Build the command to run in background
             $scriptPath = realpath(__DIR__ . '/../scripts/cron-analysis.php');
             $cronSecret = Flight::get('cron.api_key');
+
+            // Get tenant slug for multi-tenancy support
+            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
+                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+                : '';
+
             $cmd = sprintf(
-                'php %s --script --secret=%s --member=%d --board=%d --job=%s --status-filter=%s > /dev/null 2>&1 &',
+                'php %s --script --secret=%s --member=%d --board=%d --job=%s --status-filter=%s%s > /dev/null 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
                 (int)$boardId,
                 escapeshellarg($jobId),
-                escapeshellarg($statusFilter)
+                escapeshellarg($statusFilter),
+                $tenantParam
             );
 
             // Execute in background
@@ -150,7 +158,8 @@ class Analysis extends BaseControls\Control {
             $this->logger->info('Background analysis started', [
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
-                'job_id' => $jobId
+                'job_id' => $jobId,
+                'tenant' => $tenantSlug ?? 'default'
             ]);
 
             // Redirect to progress page
@@ -237,7 +246,7 @@ class Analysis extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'User database not initialized');
-            Flight::redirect('/dashboard');
+            Flight::redirect('/settings/connections');
             return;
         }
 

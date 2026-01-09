@@ -137,12 +137,15 @@
             <!-- Board Repository Mappings (Board-Centric) -->
             <?php if (!empty($boards)): ?>
             <div class="card">
-                <div class="card-header">
+                <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Board Repository Mappings</h5>
+                    <a href="/boards" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-kanban"></i> Manage Boards
+                    </a>
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-4">
-                        Map repositories to boards. Add both labels to a Jira ticket: <code>ai-dev</code> triggers the job, <code>repo-{id}</code> specifies which repository.
+                        Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{id}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
                     </p>
 
                     <?php foreach ($boards as $board):
@@ -183,7 +186,7 @@
                                             }
                                             if (!$repo) continue;
                                             $repoLabel = 'repo-' . $repo['id'];
-                                            $fullLabels = 'ai-dev ' . $repoLabel;
+                                            $fullLabels = $repoLabel . ' ai-dev';
                                         ?>
                                         <tr>
                                             <td>
@@ -194,8 +197,8 @@
                                             </td>
                                             <td>
                                                 <div class="d-flex gap-1 align-items-center">
-                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
                                                     <code class="bg-secondary text-white px-2 py-1 rounded"><?= $repoLabel ?></code>
+                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
                                                     <button class="btn btn-sm btn-outline-secondary" type="button"
                                                             onclick="copyLabel('<?= $fullLabels ?>', this)" title="Copy both labels">
                                                         <i class="bi bi-clipboard"></i>
@@ -278,12 +281,12 @@
                 <div class="card-body">
                     <h5 class="card-title">Using Labels</h5>
                     <p class="text-muted small">
-                        Each repository has a unique label like <code>ai-dev-42</code>.
-                        Add this label to a Jira ticket to trigger AI Developer for that specific repo.
+                        Each repository has a unique label like <code>repo-42</code>.
+                        Add this label first, then add <code>ai-dev</code> to trigger the job.
                     </p>
                     <p class="text-muted small mb-0">
-                        <strong>Example:</strong> If your frontend repo has label <code>ai-dev-5</code> and backend
-                        has <code>ai-dev-8</code>, use the appropriate label based on which codebase the ticket affects.
+                        <strong>Example:</strong> If your frontend repo has label <code>repo-5</code> and backend
+                        has <code>repo-8</code>, add the appropriate repo label first, then <code>ai-dev</code> to trigger.
                     </p>
                 </div>
             </div>

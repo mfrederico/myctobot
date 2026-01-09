@@ -149,9 +149,10 @@ class TmuxService {
      * @param bool $orchestrator Use orchestrator mode
      * @param string|null $jobId Job ID for tracking
      * @param int|null $repoId Repository connection ID
+     * @param string|null $tenant Tenant slug for multi-tenancy
      * @return bool Success
      */
-    public function spawnWithScript(string $scriptPath, bool $orchestrator = true, ?string $jobId = null, ?int $repoId = null): bool {
+    public function spawnWithScript(string $scriptPath, bool $orchestrator = true, ?string $jobId = null, ?int $repoId = null, ?string $tenant = null): bool {
         if ($this->exists()) {
             return false;
         }
@@ -161,14 +162,16 @@ class TmuxService {
         $orchestratorFlag = $orchestrator ? '--orchestrator' : '';
         $jobIdFlag = $jobId ? sprintf('--job-id=%s', escapeshellarg($jobId)) : '';
         $repoIdFlag = $repoId ? sprintf('--repo=%d', $repoId) : '';
+        $tenantFlag = $tenant ? sprintf('--tenant=%s', escapeshellarg($tenant)) : '';
         $command = sprintf(
-            'php %s --issue=%s --member=%d %s %s %s',
+            'php %s --issue=%s --member=%d %s %s %s %s',
             escapeshellarg($scriptPath),
             escapeshellarg($this->issueKey),
             $this->memberId,
             $orchestratorFlag,
             $jobIdFlag,
-            $repoIdFlag
+            $repoIdFlag,
+            $tenantFlag
         );
 
         try {

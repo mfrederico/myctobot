@@ -11,14 +11,15 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                 <h1 class="display-4 fw-bold">MyCTOBot</h1>
                 <p class="lead">AI-powered daily sprint digests for Jira. Get intelligent prioritization and actionable insights delivered to your inbox every morning.</p>
                 <div class="d-grid gap-2 d-md-flex">
-                    <?php if (!$isLoggedIn): ?>
-                        <?php if (!empty($googleEnabled)): ?>
-                        <a href="/auth/google" class="btn btn-light btn-lg">
-                            <i class="bi bi-google"></i> Sign in with Google
+                    <?php if (\app\TenantResolver::isDefault()): ?>
+                        <a href="/signup" class="btn btn-light btn-lg">
+                            <i class="bi bi-building"></i> Create Your Workspace
                         </a>
-                        <?php else: ?>
-                        <a href="/auth/login" class="btn btn-light btn-lg">Get Started</a>
-                        <?php endif; ?>
+                        <a href="#" class="btn btn-outline-light btn-lg" data-bs-toggle="modal" data-bs-target="#existingTeamModal">
+                            Already have a team?
+                        </a>
+                    <?php elseif (!$isLoggedIn): ?>
+                        <a href="/auth/login" class="btn btn-light btn-lg">Sign In</a>
                     <?php else: ?>
                         <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
                     <?php endif; ?>
@@ -331,17 +332,54 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
 <div class="bg-primary text-white py-5">
     <div class="container text-center">
         <h2 class="mb-4">Start Getting Smarter Sprint Insights Today</h2>
-        <p class="lead mb-4">Free to use. Connect your Jira in under 2 minutes.</p>
-        <?php if (!$isLoggedIn): ?>
-            <?php if (!empty($googleEnabled)): ?>
-            <a href="/auth/google" class="btn btn-light btn-lg">
-                <i class="bi bi-google"></i> Sign in with Google
+        <p class="lead mb-4">Create your team workspace in under 2 minutes.</p>
+        <?php if (\app\TenantResolver::isDefault()): ?>
+            <a href="/signup" class="btn btn-light btn-lg">
+                <i class="bi bi-building"></i> Create Your Workspace
             </a>
-            <?php else: ?>
-            <a href="/auth/register" class="btn btn-light btn-lg">Get Started Free</a>
-            <?php endif; ?>
+        <?php elseif (!$isLoggedIn): ?>
+            <a href="/auth/login" class="btn btn-light btn-lg">Sign In</a>
         <?php else: ?>
             <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
         <?php endif; ?>
     </div>
 </div>
+
+<!-- Existing Team Modal -->
+<div class="modal fade" id="existingTeamModal" tabindex="-1" aria-labelledby="existingTeamModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="existingTeamModalLabel">Sign in to Your Team</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Enter your team's subdomain to go to your workspace:</p>
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="teamSubdomain" placeholder="yourteam" autofocus>
+                    <span class="input-group-text">.myctobot.ai</span>
+                </div>
+                <div class="d-grid">
+                    <button type="button" class="btn btn-primary" onclick="goToTeam()">
+                        Go to Workspace
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <small class="text-muted">Don't have a team yet? <a href="/signup">Create one</a></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function goToTeam() {
+    const subdomain = document.getElementById('teamSubdomain').value.trim().toLowerCase();
+    if (subdomain) {
+        window.location.href = 'https://' + subdomain + '.myctobot.ai';
+    }
+}
+document.getElementById('teamSubdomain')?.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') goToTeam();
+});
+</script>

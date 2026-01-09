@@ -14,6 +14,7 @@
  * OPTIONS:
  * --------
  *   --script     REQUIRED for CLI execution
+ *   --tenant     Process specific tenant (e.g., gwt, greenworks). If omitted, processes all tenants.
  *   --verbose    Show detailed output
  *   --dry-run    Check what would be sent without actually sending
  *   --force      Send digests now, ignoring time window (for missed digests)
@@ -28,13 +29,14 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'help']);
+$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'tenant:', 'help']);
 
 if (isset($options['help'])) {
     echo "MyCTOBot Daily Digest Scheduler\n\n";
     echo "Usage: php cron-digest.php --script [options]\n\n";
     echo "Options:\n";
     echo "  --script     REQUIRED for standalone script mode\n";
+    echo "  --tenant     Process specific tenant (omit to process all tenants)\n";
     echo "  --verbose    Show detailed output\n";
     echo "  --dry-run    Check what would be sent without sending\n";
     echo "  --force      Send digests now, ignoring time window\n";
@@ -45,12 +47,14 @@ if (isset($options['help'])) {
 $verbose = isset($options['verbose']);
 $dryRun = isset($options['dry-run']);
 $force = isset($options['force']);
+$specificTenant = $options['tenant'] ?? null;
 
 if ($verbose) {
     echo "MyCTOBot Digest Scheduler\n";
     echo "=========================\n";
     echo "Time: " . date('Y-m-d H:i:s') . "\n";
     echo "Base: {$baseDir}\n";
+    if ($specificTenant) echo "Tenant: {$specificTenant}\n";
     if ($force) echo "Mode: FORCE (ignoring time windows)\n";
     if ($dryRun) echo "Mode: DRY RUN\n";
     echo "\n";
@@ -70,63 +74,132 @@ use \app\services\AnalysisService;
 require_once $baseDir . '/services/AnalysisService.php';
 
 try {
-    $bootstrap = new \app\Bootstrap($baseDir . '/conf/config.ini');
+    // Discover tenants to process
+    $tenantsToProcess = [];
+    if ($specificTenant) {
+        // Single tenant specified
+        $tenantConfig = $baseDir . "/conf/config.{$specificTenant}.ini";
+        if (!file_exists($tenantConfig)) {
+            echo "Error: Tenant config not found: {$tenantConfig}\n";
+            exit(1);
+        }
+        $tenantsToProcess[$specificTenant] = $tenantConfig;
+    } else {
+        // Discover all tenant configs
+        $configFiles = glob($baseDir . '/conf/config.*.ini');
+        foreach ($configFiles as $configFile) {
+            $basename = basename($configFile);
+            // Extract tenant name from config.{tenant}.ini
+            if (preg_match('/^config\.([a-z0-9]+)\.ini$/', $basename, $matches)) {
+                $tenantSlug = $matches[1];
+                // Skip 'example' config
+                if ($tenantSlug !== 'example') {
+                    $tenantsToProcess[$tenantSlug] = $configFile;
+                }
+            }
+        }
+    }
 
-    // Set timezone from config
-    $configTimezone = Flight::get('config')['app']['timezone'] ?? 'America/New_York';
-    date_default_timezone_set($configTimezone);
+    if (empty($tenantsToProcess)) {
+        if ($verbose) {
+            echo "No tenant configs found. Nothing to process.\n";
+        }
+        exit(0);
+    }
 
     if ($verbose) {
-        echo "Application initialized\n";
-        echo "Timezone: {$configTimezone} (current time: " . date('H:i:s') . ")\n\n";
+        echo "Tenants to process: " . implode(', ', array_keys($tenantsToProcess)) . "\n\n";
     }
 
-    // Process all boards with digests enabled across all members
-    // Single database now - query directly with member join
-    $boards = R::findAll('jiraboards', 'enabled = 1 AND digest_enabled = 1');
-    $processedCount = 0;
-    $errorCount = 0;
+    $totalProcessed = 0;
+    $totalErrors = 0;
 
-    // Group boards by member for logging
-    $memberBoards = [];
-    foreach ($boards as $board) {
-        $memberId = $board->member_id;
-        if (!isset($memberBoards[$memberId])) {
-            $memberBoards[$memberId] = [];
-        }
-        $memberBoards[$memberId][] = $board;
-    }
-
-    foreach ($memberBoards as $memberId => $boards) {
-        $member = R::load('member', $memberId);
-        if (!$member->id || $member->status !== 'active') {
-            continue; // Skip inactive members
+    // Process each tenant
+    foreach ($tenantsToProcess as $tenantSlug => $configFile) {
+        if ($verbose) {
+            echo "=== Processing tenant: {$tenantSlug} ===\n";
         }
 
         try {
-            $result = processMemberDigests($member, $boards, $verbose, $dryRun, $force);
-            $processedCount += $result['processed'];
-            $errorCount += $result['errors'];
-        } catch (\Exception $e) {
-            $errorCount++;
+            // Initialize fresh bootstrap for this tenant
+            $bootstrap = new \app\Bootstrap($configFile);
+
+            // Set timezone from config
+            $configTimezone = Flight::get('app.timezone') ?? 'America/New_York';
+            date_default_timezone_set($configTimezone);
+
             if ($verbose) {
-                echo "Error processing member {$member->id}: {$e->getMessage()}\n";
+                echo "Tenant initialized, timezone: {$configTimezone}\n";
             }
-            Flight::get('log')->error('Digest cron error for member', [
-                'member_id' => $member->id,
-                'error' => $e->getMessage()
-            ]);
+
+            // Process all boards with digests enabled for this tenant
+            $boards = R::findAll('jiraboards', 'enabled = 1 AND digest_enabled = 1');
+            $processedCount = 0;
+            $errorCount = 0;
+
+            if (empty($boards)) {
+                if ($verbose) {
+                    echo "No boards with digests enabled for tenant {$tenantSlug}\n";
+                }
+                continue;
+            }
+
+            // Group boards by member for logging
+            $memberBoards = [];
+            foreach ($boards as $board) {
+                $memberId = $board->member_id;
+                if (!isset($memberBoards[$memberId])) {
+                    $memberBoards[$memberId] = [];
+                }
+                $memberBoards[$memberId][] = $board;
+            }
+
+            foreach ($memberBoards as $memberId => $memberBoardList) {
+                $member = R::load('member', $memberId);
+                if (!$member->id || $member->status !== 'active') {
+                    continue; // Skip inactive members
+                }
+
+                try {
+                    $result = processMemberDigests($member, $memberBoardList, $verbose, $dryRun, $force);
+                    $processedCount += $result['processed'];
+                    $errorCount += $result['errors'];
+                } catch (\Exception $e) {
+                    $errorCount++;
+                    if ($verbose) {
+                        echo "Error processing member {$member->id}: {$e->getMessage()}\n";
+                    }
+                    Flight::get('log')->error('Digest cron error for member', [
+                        'tenant' => $tenantSlug,
+                        'member_id' => $member->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            $totalProcessed += $processedCount;
+            $totalErrors += $errorCount;
+
+            if ($verbose) {
+                echo "Tenant {$tenantSlug}: {$processedCount} digests sent, {$errorCount} errors\n\n";
+            }
+
+        } catch (\Exception $e) {
+            $totalErrors++;
+            if ($verbose) {
+                echo "Error processing tenant {$tenantSlug}: {$e->getMessage()}\n\n";
+            }
         }
     }
 
     if ($verbose) {
-        echo "\n=========================\n";
-        echo "Processing complete!\n";
-        echo "Digests sent: {$processedCount}\n";
-        echo "Errors: {$errorCount}\n";
+        echo "=========================\n";
+        echo "All tenants complete!\n";
+        echo "Total digests sent: {$totalProcessed}\n";
+        echo "Total errors: {$totalErrors}\n";
     }
 
-    exit($errorCount > 0 ? 1 : 0);
+    exit($totalErrors > 0 ? 1 : 0);
 
 } catch (Exception $e) {
     $message = "FATAL ERROR: " . $e->getMessage();

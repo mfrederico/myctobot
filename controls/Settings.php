@@ -178,18 +178,15 @@ class Settings extends BaseControls\Control {
         $tier = SubscriptionService::getTier($this->member->id);
         $tierInfo = SubscriptionService::getTierInfo($tier);
 
-        // Get agent and shard counts for enterprise users
-        $agentCount = 0;
+        // Get agent and shard counts (available to all users)
+        $agentCount = Bean::count('aiagents', 'member_id = ?', [$this->member->id]);
         $shardCount = 0;
-        if ($tier === 'enterprise') {
-            $agentCount = R::count('aiagents', 'member_id = ?', [$this->member->id]);
 
-            // Shards are admin-level (not per-member)
-            if ($this->member->level <= 50) {
-                require_once __DIR__ . '/../services/ShardService.php';
-                $allShards = \app\services\ShardService::getAllShards(false);
-                $shardCount = count($allShards);
-            }
+        // Shards are admin-level (not per-member)
+        if ($this->member->level <= 50) {
+            require_once __DIR__ . '/../services/ShardService.php';
+            $allShards = \app\services\ShardService::getAllShards(false);
+            $shardCount = count($allShards);
         }
 
         // Check if we should show onboarding wizard (all tiers)

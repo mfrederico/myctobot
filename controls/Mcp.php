@@ -28,6 +28,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\services\ImageService;
 use app\BaseControls\Control;
 use app\services\JiraClient;
 
@@ -807,8 +808,51 @@ class Mcp extends Control {
 
     /**
      * Build an image tool response
+     * Automatically resizes images to fit within context window
+     *
+     * @param mixed $id Request ID
+     * @param string $imageData Raw binary image data
+     * @param string $mimeType Original MIME type
+     * @param string $filename Original filename
+     * @param int $maxWidth Maximum width for resizing (default 1200)
+     * @param int $maxHeight Maximum height for resizing (default 1200)
+     * @return array JSON-RPC response
      */
-    private function toolImageResponse($id, string $imageData, string $mimeType, string $filename): array {
+    private function toolImageResponse(
+        $id,
+        string $imageData,
+        string $mimeType,
+        string $filename,
+        int $maxWidth = 1200,
+        int $maxHeight = 1200
+    ): array {
+        $resizeInfo = '';
+
+        // Resize image for context window optimization
+        try {
+            $result = ImageService::resizeForContext($imageData, $maxWidth, $maxHeight);
+            $imageData = $result['data'];
+            $mimeType = $result['mimeType'];
+
+            if ($result['resized']) {
+                $resizeInfo = sprintf(
+                    ' (resized from %dx%d to %dx%d)',
+                    $result['originalWidth'],
+                    $result['originalHeight'],
+                    $result['width'],
+                    $result['height']
+                );
+            }
+        } catch (\Exception $e) {
+            // If resize fails, use original image
+            if (Flight::has('log')) {
+                Flight::log()->warning('Failed to resize image for MCP response', [
+                    'filename' => $filename,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
         $base64 = base64_encode($imageData);
 
         return [
@@ -818,7 +862,7 @@ class Mcp extends Control {
                 'content' => [
                     [
                         'type' => 'text',
-                        'text' => "Image: {$filename}"
+                        'text' => "Image: {$filename}{$resizeInfo}"
                     ],
                     [
                         'type' => 'image',

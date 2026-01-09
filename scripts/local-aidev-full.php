@@ -742,6 +742,17 @@ echo "SHOPIFY_CLI_THEME_TOKEN: ****\${SHOPIFY_CLI_THEME_TOKEN: -4}"
 SHOPIFY_ECHO;
 }
 
+// Hook environment variables for multi-tenant support
+$hookEnvSection = <<<HOOK_ENV
+
+# MyCTOBot Hook Environment Variables (for multi-tenant hooks)
+export MYCTOBOT_APP_ROOT="{$baseDir}"
+export MYCTOBOT_WORKSPACE="{$tenant}"
+export MYCTOBOT_JOB_ID="{$jobId}"
+export MYCTOBOT_MEMBER_ID="{$memberId}"
+export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
+HOOK_ENV;
+
 $envScript = <<<BASH
 #!/bin/bash
 # Environment setup for AI Developer session
@@ -754,6 +765,7 @@ export JIRA_EMAIL="{$jiraEmail}"
 export JIRA_API_TOKEN="{$jiraOAuthToken}"
 export GIT_TERMINAL_PROMPT="0"
 export TERM="xterm-256color"
+{$hookEnvSection}
 {$shopifyEnvSection}
 
 # Verify tokens are set
@@ -765,6 +777,8 @@ echo "GITHUB_TOKEN: ****\${GITHUB_TOKEN: -4}"
 echo "GH_TOKEN: ****\${GH_TOKEN: -4}"
 echo "JIRA_HOST: \$JIRA_HOST"
 echo "JIRA_API_TOKEN: ****\${JIRA_API_TOKEN: -4}"
+echo "MYCTOBOT_WORKSPACE: \$MYCTOBOT_WORKSPACE"
+echo "MYCTOBOT_JOB_ID: \$MYCTOBOT_JOB_ID"
 {$shopifyEchoSection}
 echo "========================="
 echo ""

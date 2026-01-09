@@ -44,8 +44,9 @@ class GitHubClient {
      * @return string The authorization URL
      */
     public static function getLoginUrl(string $state): string {
-        $clientId = Flight::get('github.client_id');
-        $redirectUri = Flight::get('github.redirect_uri');
+        $config = self::getConfig();
+        $clientId = $config['client_id'] ?? '';
+        $redirectUri = $config['redirect_uri'] ?? Flight::get('github.redirect_uri') ?? '';
 
         if (empty($clientId)) {
             throw new \Exception('GitHub client_id not configured');
@@ -69,8 +70,9 @@ class GitHubClient {
      * @return array Token response containing access_token and user info
      */
     public static function handleCallback(string $code, string $state): array {
-        $clientId = Flight::get('github.client_id');
-        $clientSecret = Flight::get('github.client_secret');
+        $config = self::getConfig();
+        $clientId = $config['client_id'] ?? '';
+        $clientSecret = $config['client_secret'] ?? '';
 
         if (empty($clientId) || empty($clientSecret)) {
             throw new \Exception('GitHub OAuth not properly configured');
@@ -116,7 +118,45 @@ class GitHubClient {
      * Check if GitHub OAuth is configured
      */
     public static function isConfigured(): bool {
-        return !empty(Flight::get('github.client_id')) && !empty(Flight::get('github.client_secret'));
+        $config = self::getConfig();
+        return !empty($config['client_id']) && !empty($config['client_secret']);
+    }
+
+    /**
+     * Get GitHub config from Flight or fallback to conf/github.ini
+     */
+    private static function getConfig(): array {
+        // Try Flight config first (tenant config)
+        $clientId = Flight::get('github.client_id') ?? '';
+        $clientSecret = Flight::get('github.client_secret') ?? '';
+
+        if (!empty($clientId) && !empty($clientSecret)) {
+            return [
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret,
+                'redirect_uri' => Flight::get('github.redirect_uri') ?? '',
+            ];
+        }
+
+        // Fall back to conf/github.ini
+        $iniPath = dirname(__DIR__) . '/conf/github.ini';
+        if (file_exists($iniPath)) {
+            $config = parse_ini_file($iniPath);
+            if ($config && !empty($config['client_id']) && !empty($config['client_secret'])) {
+                return $config;
+            }
+        }
+
+        // Fall back to main config.ini [github] section
+        $mainConfigPath = dirname(__DIR__) . '/conf/config.ini';
+        if (file_exists($mainConfigPath)) {
+            $mainConfig = parse_ini_file($mainConfigPath, true);
+            if (!empty($mainConfig['github']['client_id']) && !empty($mainConfig['github']['client_secret'])) {
+                return $mainConfig['github'];
+            }
+        }
+
+        return [];
     }
 
     // ========================================

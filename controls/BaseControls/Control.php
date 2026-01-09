@@ -8,6 +8,7 @@ namespace app\BaseControls;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 
 abstract class Control {

@@ -551,10 +551,10 @@ class AtlassianAuth {
     public static function registerAIDevWebhook(int $memberId, string $cloudId, string $accessToken): bool {
         $logger = Flight::get('log');
 
-        // Check if member has Enterprise tier
+        // All features now available to all tiers
         $member = R::load('member', $memberId);
-        if (!$member || $member->getTier() !== 'enterprise') {
-            $logger->debug('Skipping webhook registration - not Enterprise tier', [
+        if (!$member) {
+            $logger->debug('Skipping webhook registration - member not found', [
                 'member_id' => $memberId
             ]);
             return false;

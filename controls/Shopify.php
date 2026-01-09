@@ -18,19 +18,10 @@ require_once __DIR__ . '/../services/ShopifyClient.php';
 class Shopify extends BaseControls\Control {
 
     /**
-     * Check Enterprise tier access
+     * Check access - all features now available to logged-in users
      */
     private function requireEnterprise(): bool {
-        if (!$this->requireLogin()) return false;
-
-        $tier = $this->member->getTier();
-        if (!TierFeatures::hasFeature($tier, TierFeatures::FEATURE_AI_DEVELOPER)) {
-            $this->flash('error', 'Shopify integration requires an Enterprise subscription.');
-            Flight::redirect('/settings/subscription');
-            return false;
-        }
-
-        return true;
+        return $this->requireLogin();
     }
 
     /**

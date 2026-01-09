@@ -33,20 +33,11 @@ use \app\Bean;
 class Enterprise extends BaseControls\Control {
 
     /**
-     * Check Enterprise tier access
+     * Check access - all features now available to logged-in users
      */
     private function requireEnterprise(): bool {
-        if (!$this->requireLogin()) return false;
-
-        // Use the model's getTier() method which fetches from subscription table
-        $tier = $this->member->getTier();
-        if (!TierFeatures::hasFeature($tier, TierFeatures::FEATURE_AI_DEVELOPER)) {
-            $this->flash('error', 'This feature requires an Enterprise subscription.');
-            Flight::redirect('/settings/subscription');
-            return false;
-        }
-
-        return true;
+        // All features now available to all tiers
+        return $this->requireLogin();
     }
 
     /**
@@ -359,7 +350,8 @@ class Enterprise extends BaseControls\Control {
      * Start GitHub OAuth flow
      */
     public function github() {
-        if (!$this->requireEnterprise()) return;
+        // GitHub connection is free for all tiers
+        if (!$this->requireLogin()) return;
 
         if (!GitHubClient::isConfigured()) {
             $this->flash('error', 'GitHub integration is not configured.');

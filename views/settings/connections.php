@@ -4,6 +4,11 @@
             <h1 class="h2 mb-1">Dashboard</h1>
             <p class="text-muted mb-0">Your command center for MyCTOBot</p>
         </div>
+        <div>
+            <button type="button" class="btn btn-outline-primary" onclick="openOnboardingWizard()">
+                <i class="bi bi-rocket-takeoff me-1"></i> Setup Guide
+            </button>
+        </div>
     </div>
 
     <!-- Profile & Subscription Row -->
@@ -111,20 +116,17 @@
                         </div>
                     </a>
                 </div>
-                <?php if ($tier === 'enterprise'): ?>
                 <div class="col-md-3">
                     <a href="/enterprise" class="text-decoration-none">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-robot fs-4 text-warning me-3"></i>
                             <div>
                                 <strong>AI Developer</strong>
-                                <small class="d-block text-muted">Enterprise dashboard</small>
+                                <small class="d-block text-muted">Dashboard</small>
                             </div>
                         </div>
                     </a>
                 </div>
-                <?php endif; ?>
-                <?php if ($tier === 'enterprise'): ?>
                 <div class="col-md-3">
                     <a href="/agents" class="text-decoration-none">
                         <div class="d-flex align-items-center">
@@ -136,7 +138,6 @@
                         </div>
                     </a>
                 </div>
-                <?php endif; ?>
                 <?php if ($member->level <= 50): ?>
                 <div class="col-md-3">
                     <a href="/admin/shards" class="text-decoration-none">
@@ -181,7 +182,6 @@
         </div>
     </div>
 
-    <?php if ($tier === 'enterprise'): ?>
     <!-- AI Developer Infrastructure -->
     <div class="row g-4 mb-4">
         <div class="col-md-6">
@@ -227,7 +227,6 @@
         </div>
         <?php endif; ?>
     </div>
-    <?php endif; ?>
 
     <!-- Connected Services Section -->
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -237,15 +236,8 @@
         </span>
     </div>
 
-    <?php if ($tier !== 'enterprise'): ?>
-    <div class="alert alert-info mb-4">
-        <i class="bi bi-info-circle me-2"></i>
-        <strong>Upgrade to Enterprise</strong> to unlock GitHub, Anthropic API, and upcoming Shopify integrations.
-        <a href="/settings/subscription" class="alert-link ms-2">View Plans</a>
-    </div>
-    <?php endif; ?>
 
-    <?php if (!$aiDevReady['ready'] && $tier === 'enterprise'): ?>
+    <?php if (!$aiDevReady['ready']): ?>
     <div class="alert alert-warning mb-4">
         <i class="bi bi-exclamation-triangle me-2"></i>
         <strong>AI Developer Setup Incomplete:</strong>
@@ -450,3 +442,8 @@ function dismissCreditWarning() {
     });
 }
 </script>
+
+<?php
+// Include onboarding wizard modal
+include __DIR__ . '/../partials/onboarding-wizard.php';
+?>

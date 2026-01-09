@@ -43,16 +43,12 @@ class AIDevJobService {
      */
     public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false): array {
         try {
-            // Validate member has enterprise tier
+            // Validate member exists
             $member = R::load('member', $memberId);
             if (!$member || !$member->id) {
                 return ['success' => false, 'error' => 'Member not found'];
             }
-
-            $tier = $member->getTier();
-            if ($tier !== 'enterprise') {
-                return ['success' => false, 'error' => 'Enterprise tier required'];
-            }
+            // All features now available to all tiers
 
             // API key and model will be determined per-board later (after boardId is resolved)
 

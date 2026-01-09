@@ -14,6 +14,7 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 require_once __DIR__ . '/EncryptionService.php';
 require_once __DIR__ . '/SubscriptionService.php';
@@ -44,7 +45,7 @@ class ConnectionsService {
             'description' => 'Connect repositories for AI-powered code implementation',
             'icon' => 'bi-github',
             'color' => 'dark',
-            'tier_required' => 'enterprise',
+            'tier_required' => 'free',  // Available to all tiers
             'auth_type' => 'oauth',
             'features' => ['AI Developer', 'Automated PRs', 'Code Analysis']
         ],
@@ -53,7 +54,7 @@ class ConnectionsService {
             'description' => 'Your Claude API key for AI-powered features',
             'icon' => 'bi-robot',
             'color' => 'warning',
-            'tier_required' => 'enterprise',
+            'tier_required' => 'free',  // Available to all tiers
             'auth_type' => 'api_key',
             'features' => ['AI Developer', 'Advanced Analysis']
         ],
@@ -62,7 +63,7 @@ class ConnectionsService {
             'description' => 'Connect your Shopify store for theme development',
             'icon' => 'bi-shop',
             'color' => 'success',
-            'tier_required' => 'enterprise',
+            'tier_required' => 'free',  // Available to all tiers
             'auth_type' => 'oauth',
             'features' => ['Theme Development', 'Store Analysis']
         ]
@@ -200,24 +201,24 @@ class ConnectionsService {
             'status' => 'Not connected',
             'details' => null,
             'actions' => [
-                ['label' => 'Connect GitHub', 'url' => '/enterprise/github', 'class' => 'btn-dark']
+                ['label' => 'Connect GitHub', 'url' => '/github/connect', 'class' => 'btn-dark']
             ]
         ];
 
         try {
-            // Check for GitHub token
-            $tokenSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['github_token', $this->memberId]);
+            // Check for GitHub token (user database via Bean::)
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
 
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
                 return $result;
             }
 
             // Get user info
-            $userSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['github_user', $this->memberId]);
+            $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_user']);
             $user = $userSetting ? json_decode($userSetting->setting_value, true) : null;
 
             // Get connected repositories
-            $repos = R::find('repoconnections', 'enabled = ? AND member_id = ?', [1, $this->memberId]);
+            $repos = Bean::find('repoconnections', 'enabled = ?', [1]);
             $repoList = [];
             foreach ($repos as $repo) {
                 $repoList[] = $repo->export();
@@ -233,11 +234,15 @@ class ConnectionsService {
                 ],
                 'actions' => [
                     ['label' => 'Manage Repos', 'url' => '/enterprise/repos', 'class' => 'btn-outline-dark'],
-                    ['label' => 'Disconnect', 'url' => '/enterprise/github/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect GitHub?']
+                    ['label' => 'Disconnect', 'url' => '/github/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect GitHub?']
                 ]
             ];
         } catch (\Exception $e) {
-            // Database error
+            $logger = \Flight::get('log');
+            $logger->error('GitHub status check failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
         }
 
         return $result;

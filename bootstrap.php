@@ -392,6 +392,11 @@ class Bootstrap {
      * @return string Config file to use
      */
     private function resolveConfigFile(string $defaultConfigFile): string {
+        // Skip in CLI mode
+        if (php_sapi_name() === 'cli') {
+            return $defaultConfigFile;
+        }
+
         // Get host without port
         $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
         $host = explode(':', $host)[0];
@@ -403,15 +408,31 @@ class Bootstrap {
         }
 
         // Extract subdomain (first part if 3+ parts)
-        // greenworks.myctobot.ai → greenworks
+        // clicksimple-inc.myctobot.ai → clicksimple-inc
         // myctobot.ai → null (no subdomain)
         $parts = explode('.', $host);
         if (count($parts) >= 3) {
             $subdomain = $parts[0];
-            $subdomainConfig = "conf/config.{$subdomain}.ini";
-            if (file_exists($subdomainConfig)) {
-                return $subdomainConfig;
+
+            // Redirect subdomain to main domain with workspace in path
+            // clicksimple-inc.myctobot.ai/login → myctobot.ai/login/clicksimple-inc
+            // clicksimple-inc.myctobot.ai/settings/connections → myctobot.ai/settings/connections?workspace=clicksimple-inc
+            $mainDomain = implode('.', array_slice($parts, 1)); // myctobot.ai
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+
+            // For /login, append workspace to path: /login/workspace
+            // For other paths, add workspace as query param
+            if (preg_match('#^/login/?$#', $requestUri)) {
+                $redirectUrl = "{$scheme}://{$mainDomain}/login/{$subdomain}";
+            } else {
+                // Preserve existing query string and add workspace
+                $separator = (strpos($requestUri, '?') !== false) ? '&' : '?';
+                $redirectUrl = "{$scheme}://{$mainDomain}{$requestUri}{$separator}workspace={$subdomain}";
             }
+
+            header("Location: {$redirectUrl}", true, 302);
+            exit;
         }
 
         // Fallback to default

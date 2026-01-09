@@ -158,6 +158,9 @@ class Settings extends BaseControls\Control {
     public function connections() {
         if (!$this->requireLogin()) return;
 
+        // Switch to user database FIRST before any queries
+        $this->initUserDb();
+
         $connectionsService = new ConnectionsService($this->member->id);
         $connections = $connectionsService->getAllConnections();
         $summary = $connectionsService->getConnectionSummary();
@@ -169,10 +172,7 @@ class Settings extends BaseControls\Control {
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
         // Get user stats
-        $stats = [];
-        if ($this->initUserDb()) {
-            $stats = UserDatabaseService::getStats();
-        }
+        $stats = UserDatabaseService::getStats();
 
         // Get subscription info - use SubscriptionService directly for reliability
         $tier = SubscriptionService::getTier($this->member->id);
@@ -192,6 +192,10 @@ class Settings extends BaseControls\Control {
             }
         }
 
+        // Check if we should show onboarding wizard (all tiers)
+        $gitConnected = $connections['github']['connected'] ?? false;
+        $showOnboarding = !$gitConnected;
+
         $this->render('settings/connections', [
             'title' => 'Settings',
             'connections' => $connections,
@@ -203,7 +207,9 @@ class Settings extends BaseControls\Control {
             'stats' => $stats,
             'tierInfo' => $tierInfo,
             'agentCount' => $agentCount,
-            'shardCount' => $shardCount
+            'shardCount' => $shardCount,
+            'showOnboarding' => $showOnboarding,
+            'gitConnected' => $gitConnected
         ]);
     }
 

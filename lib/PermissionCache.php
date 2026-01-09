@@ -79,11 +79,48 @@ class PermissionCache {
      * @return bool
      */
     public static function check($control, $method, $userLevel) {
+        // Normalize names
+        $control = strtolower($control);
+        $method = strtolower($method);
+
+        // Routes that are always public (no database lookup needed)
+        // These include custom routes that don't map to controllers
+        static $publicRoutes = [
+            'index::index',
+            'login::index',         // Custom route /login
+            'login::*',             // Custom route /login/{workspace}
+            'auth::login',
+            'auth::dologin',
+            'auth::logout',
+            'auth::register',
+            'auth::doregister',
+            'auth::forgot',
+            'auth::doforgot',
+            'auth::reset',
+            'auth::doreset',
+            'auth::google',
+            'auth::googlecallback',
+            'error::notfound',
+            'error::forbidden',
+            'error::servererror',
+            'health::index',
+            'webhook::jira',
+            'webhook::github',
+            'signup::index',
+            'signup::pending',
+            'signup::verify',
+            'signup::resend',
+        ];
+
+        $key = "{$control}::{$method}";
+        if (in_array($key, $publicRoutes) || in_array("{$control}::*", $publicRoutes)) {
+            return true;
+        }
+
         // Ensure cache is loaded
         self::ensureLoaded();
 
         // Check specific method permission
-        $key = strtolower("{$control}::{$method}");
         if (isset(self::$localCache[$key])) {
             $requiredLevel = self::$localCache[$key];
             self::logAccess('hit', $key);

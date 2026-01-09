@@ -1,9 +1,10 @@
+<?php $hasWorkspace = !empty($workspace); ?>
 <div class="container py-5">
     <div class="row justify-content-center">
         <div class="col-md-4">
             <div class="card">
                 <div class="card-header">
-                    <h4>Reset Password</h4>
+                    <h4><?= $hasWorkspace ? 'Reset Password for <span class="text-primary">' . htmlspecialchars($workspace) . '</span>' : 'Reset Password' ?></h4>
                 </div>
                 <div class="card-body">
                     <?php if (!empty($error)): ?>
@@ -23,6 +24,9 @@
                         <?php endif; ?>
 
                         <input type="hidden" name="token" value="<?= htmlspecialchars($token ?? '') ?>">
+                        <?php if ($hasWorkspace): ?>
+                            <input type="hidden" name="workspace" value="<?= htmlspecialchars($workspace) ?>">
+                        <?php endif; ?>
 
                         <div class="mb-3">
                             <label for="password" class="form-label">New Password</label>
@@ -41,7 +45,7 @@
                     <hr>
 
                     <div class="text-center">
-                        <a href="/login">Back to Login</a>
+                        <a href="/login<?= $hasWorkspace ? '/' . urlencode($workspace) : '' ?>">Back to Login</a>
                     </div>
                 </div>
             </div>

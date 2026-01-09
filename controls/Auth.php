@@ -495,6 +495,7 @@ class Auth extends BaseControls\Control {
                     $resetUrl .= "&workspace=" . urlencode($workspace);
                 }
 
+
                 $mailgun = new \app\services\MailgunService();
                 if ($mailgun->isEnabled()) {
                     $subject = 'Reset Your Password - MyCTOBot';

@@ -623,9 +623,19 @@ class GitHubClient {
 
     /**
      * Delete a webhook
+     * @return bool True if deleted successfully
      */
-    public function deleteWebhook(string $owner, string $repo, int $hookId): void {
-        $this->client->delete("/repos/{$owner}/{$repo}/hooks/{$hookId}");
+    public function deleteWebhook(string $owner, string $repo, $hookId): bool {
+        try {
+            $this->client->delete("/repos/{$owner}/{$repo}/hooks/{$hookId}");
+            return true;
+        } catch (\Exception $e) {
+            // 404 means already deleted, which is fine
+            if (strpos($e->getMessage(), '404') !== false) {
+                return true;
+            }
+            throw $e;
+        }
     }
 
     /**
@@ -690,6 +700,17 @@ class GitHubClient {
             'json' => [
                 'body' => $body,
             ],
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
+     * Get comments for an issue
+     */
+    public function getIssueComments(string $owner, string $repo, int $issueNumber, int $perPage = 100): array {
+        $response = $this->client->get("/repos/{$owner}/{$repo}/issues/{$issueNumber}/comments", [
+            'query' => ['per_page' => min($perPage, 100)],
         ]);
 
         return json_decode($response->getBody()->getContents(), true);

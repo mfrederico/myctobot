@@ -17,6 +17,26 @@ use \Flight;
 class TmuxManager {
 
     /**
+     * Sanitize a string for use in tmux session names
+     *
+     * Removes/replaces characters that are invalid in tmux session names:
+     * - Colons (:) - used for window:pane notation
+     * - Periods (.) - can cause issues in some contexts
+     * - Hash (#) - starts a comment in some contexts
+     * - Slashes (/) - path separator, not valid in names
+     *
+     * @param string $component The string to sanitize
+     * @return string Sanitized string safe for tmux session names
+     */
+    public static function sanitizeForSessionName(string $component): string {
+        // Replace invalid characters with hyphens
+        $sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '-', $component);
+        // Collapse multiple hyphens
+        $sanitized = preg_replace('/-+/', '-', $sanitized);
+        return trim($sanitized, '-');
+    }
+
+    /**
      * Get domain identifier from config for session naming
      *
      * @return string Domain ID (sanitized for use in session names)
@@ -24,8 +44,7 @@ class TmuxManager {
     public static function getDomainId(): string {
         $baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? 'localhost';
         $domainId = preg_replace('/^https?:\/\//', '', $baseUrl);
-        $domainId = preg_replace('/[^a-zA-Z0-9]/', '-', $domainId);
-        return trim($domainId, '-');
+        return self::sanitizeForSessionName($domainId);
     }
 
     /**
@@ -332,24 +351,26 @@ class TmuxManager {
      * Build an AI Developer session name
      *
      * @param int $memberId Member ID
-     * @param string $issueKey Jira issue key
-     * @return string Session name
+     * @param string $issueKey Issue key (Jira like PROJ-123, or GitHub like owner/repo#123)
+     * @return string Session name (sanitized for tmux)
      */
     public static function buildSessionName(int $memberId, string $issueKey): string {
         $domainId = self::getDomainId();
-        return "aidev-{$domainId}-{$memberId}-{$issueKey}";
+        $safeIssueKey = self::sanitizeForSessionName($issueKey);
+        return "aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
     }
 
     /**
      * Build a local runner session name
      *
      * @param int $memberId Member ID
-     * @param string $issueKey Jira issue key
-     * @return string Session name
+     * @param string $issueKey Issue key (Jira like PROJ-123, or GitHub like owner/repo#123)
+     * @return string Session name (sanitized for tmux)
      */
     public static function buildLocalRunnerSessionName(int $memberId, string $issueKey): string {
         $domainId = self::getDomainId();
-        return "local-aidev-{$domainId}-{$memberId}-{$issueKey}";
+        $safeIssueKey = self::sanitizeForSessionName($issueKey);
+        return "local-aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
     }
 
     /**

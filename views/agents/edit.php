@@ -270,6 +270,15 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     </div>
                 </div>
                 <?php endif; ?>
+
+                <!-- Provider Capabilities -->
+                <div class="mb-3">
+                    <label class="form-label">LLM Capabilities</label>
+                    <div id="provider-capabilities" class="d-flex flex-wrap gap-2">
+                        <span class="text-muted small">Loading...</span>
+                    </div>
+                    <div class="form-text">Capabilities derived from the selected model</div>
+                </div>
                 <?php endif; ?>
 
                 <hr>
@@ -1290,3 +1299,73 @@ document.addEventListener('DOMContentLoaded', function() {
 
     <?php endif; ?>
 </div>
+
+<?php if (!$isNew): ?>
+<script>
+// Load and display provider capabilities on page load
+function loadProviderCapabilities() {
+    const container = document.getElementById('provider-capabilities');
+    if (!container) return;
+
+    const provider = '<?= $provider ?>';
+    const providerConfig = <?= json_encode($providerConfig) ?>;
+
+    fetch('/agents/getCapabilities', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= $csrf ?>'
+        },
+        body: 'provider=' + encodeURIComponent(provider) + '&provider_config=' + encodeURIComponent(JSON.stringify(providerConfig))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const caps = data.data.capabilities;
+            const labels = data.data.labels;
+            let html = '';
+
+            for (const [key, enabled] of Object.entries(caps)) {
+                if (key === 'can_orchestrate') continue; // Show separately
+                const label = labels[key] || key;
+                const icon = getCapabilityIcon(key);
+                const badgeClass = enabled ? 'bg-success' : 'bg-secondary';
+                const titleText = enabled ? 'Supported' : 'Not supported';
+                html += `<span class="badge ${badgeClass}" title="${titleText}">
+                    <i class="bi bi-${icon}"></i> ${label}
+                </span>`;
+            }
+
+            // Add orchestration badge
+            if (caps.can_orchestrate) {
+                html += `<span class="badge bg-primary" title="Can spawn sub-agents">
+                    <i class="bi bi-diagram-3"></i> ${labels.can_orchestrate || 'Orchestration'}
+                </span>`;
+            }
+
+            container.innerHTML = html || '<span class="text-muted small">No capabilities info</span>';
+        } else {
+            container.innerHTML = '<span class="text-muted small">Could not load capabilities</span>';
+        }
+    })
+    .catch(e => {
+        container.innerHTML = '<span class="text-muted small">Error loading capabilities</span>';
+    });
+}
+
+function getCapabilityIcon(key) {
+    const icons = {
+        'tool_calling': 'wrench',
+        'vision': 'eye',
+        'streaming': 'lightning',
+        'file_operations': 'folder',
+        'web_search': 'search',
+        'embedding': 'hash'
+    };
+    return icons[key] || 'gear';
+}
+
+// Load capabilities on page load for existing agents
+document.addEventListener('DOMContentLoaded', loadProviderCapabilities);
+</script>
+<?php endif; ?>

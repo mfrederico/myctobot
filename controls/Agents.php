@@ -73,6 +73,9 @@ class Agents extends BaseControls\Control {
 
             $providerConfig = json_decode($bean->provider_config ?: '{}', true);
 
+            // Get LLM capabilities (tool calling, vision, etc.)
+            $llmCapabilities = LLMProviderFactory::getCapabilities($provider, $providerConfig);
+
             $agents[] = [
                 'id' => $bean->id,
                 'name' => $bean->name,
@@ -80,6 +83,7 @@ class Agents extends BaseControls\Control {
                 'provider' => $provider,
                 'provider_label' => $providerInfo['name'] ?? $provider,
                 'provider_config' => $providerConfig,
+                'llm_capabilities' => $llmCapabilities,
                 'runner_type' => $bean->runner_type, // Legacy field
                 'mcp_count' => count($mcpServers),
                 'hooks_count' => $this->countHooks($hooksConfig),
@@ -597,6 +601,40 @@ class Agents extends BaseControls\Control {
             'model' => $modelName,
             'details' => [],
             'message' => 'Model info not available for this provider'
+        ]);
+    }
+
+    /**
+     * Get provider capabilities (AJAX endpoint)
+     * For Ollama backend, queries the model info to derive capabilities
+     */
+    public function getCapabilities($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $provider = $this->getParam('provider', 'claude_cli');
+        $providerConfigJson = $this->getParam('provider_config', '{}');
+
+        $providerConfig = json_decode($providerConfigJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid provider config JSON', 400);
+            return;
+        }
+
+        $capabilities = LLMProviderFactory::getCapabilities($provider, $providerConfig);
+
+        Flight::jsonSuccess([
+            'capabilities' => $capabilities,
+            'labels' => [
+                'can_orchestrate' => 'Agent Orchestration',
+                'tool_calling' => 'Tool Calling',
+                'vision' => 'Vision/Images',
+                'streaming' => 'Streaming',
+                'file_operations' => 'File Operations',
+                'web_search' => 'Web Search'
+            ]
         ]);
     }
 

@@ -148,6 +148,85 @@ class OllamaProvider implements LLMProviderInterface
     }
 
     /**
+     * Get model capabilities by analyzing model info
+     * Cached per model to avoid repeated API calls
+     *
+     * @param string $modelName Model name
+     * @return array Capabilities array
+     */
+    public function getModelCapabilities(string $modelName): array
+    {
+        static $cache = [];
+
+        if (isset($cache[$modelName])) {
+            return $cache[$modelName];
+        }
+
+        $capabilities = [
+            'tool_calling' => false,
+            'vision' => false,
+            'streaming' => true,
+            'embedding' => false
+        ];
+
+        $info = $this->getModelInfo($modelName);
+        if (!$info['success']) {
+            $cache[$modelName] = $capabilities;
+            return $capabilities;
+        }
+
+        $modelInfo = $info['model_info'] ?? [];
+        $details = $info['details'] ?? [];
+        $template = $info['template'] ?? '';
+        $family = strtolower($details['family'] ?? '');
+        $modelNameLower = strtolower($modelName);
+
+        // Vision detection - look for vision/multimodal indicators
+        if (str_contains($modelNameLower, 'llava') ||
+            str_contains($modelNameLower, 'vision') ||
+            str_contains($modelNameLower, 'moondream') ||
+            str_contains($family, 'llava') ||
+            !empty($modelInfo['vision'])) {
+            $capabilities['vision'] = true;
+        }
+
+        // Tool calling detection - check template and known models
+        $toolIndicators = ['tools', 'function', '<tool_call>', '<<functioncall>>'];
+        foreach ($toolIndicators as $indicator) {
+            if (str_contains($template, $indicator)) {
+                $capabilities['tool_calling'] = true;
+                break;
+            }
+        }
+
+        // Known tool-capable model families
+        $toolCapableFamilies = ['llama', 'qwen', 'mistral', 'mixtral', 'command-r'];
+        foreach ($toolCapableFamilies as $tcFamily) {
+            if (str_contains($family, $tcFamily) || str_contains($modelNameLower, $tcFamily)) {
+                // Llama 3+ and Qwen 2.5+ support tools
+                if (str_contains($modelNameLower, 'llama3') ||
+                    str_contains($modelNameLower, 'qwen2') ||
+                    str_contains($modelNameLower, 'qwen3') ||
+                    str_contains($modelNameLower, 'mistral') ||
+                    str_contains($modelNameLower, 'mixtral')) {
+                    $capabilities['tool_calling'] = true;
+                }
+                break;
+            }
+        }
+
+        // Embedding models
+        if (str_contains($modelNameLower, 'embed') ||
+            str_contains($modelNameLower, 'nomic') ||
+            str_contains($modelNameLower, 'mxbai')) {
+            $capabilities['embedding'] = true;
+        }
+
+        $cache[$modelName] = $capabilities;
+        return $capabilities;
+    }
+
+    /**
      * Format bytes to human readable
      */
     private function formatBytes(int $bytes): string

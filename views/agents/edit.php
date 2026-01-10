@@ -277,6 +277,34 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         </div>
     </div>
 
+    <?php if ($isNew): ?>
+    <!-- JavaScript for Create Form -->
+    <script>
+    function updateCreateProviderConfig() {
+        const provider = document.getElementById('provider_create')?.value;
+        if (!provider) return;
+
+        document.querySelectorAll('.create-provider-config').forEach(el => el.style.display = 'none');
+        const configEl = document.getElementById('create-config-' + provider);
+        if (configEl) {
+            configEl.style.display = 'block';
+        }
+    }
+
+    function toggleCreateClaudeBackend() {
+        const useOllama = document.getElementById('create-use-ollama')?.checked;
+        const anthropicEl = document.getElementById('create-claude-anthropic');
+        const ollamaEl = document.getElementById('create-claude-ollama');
+        if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
+        if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateCreateProviderConfig();
+    });
+    </script>
+    <?php endif; ?>
+
     <?php elseif ($activeTab === 'mcp'): ?>
     <!-- MCP Servers Tab -->
     <div class="card">

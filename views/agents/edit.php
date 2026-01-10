@@ -297,47 +297,91 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         const host = document.getElementById('create-ollama-host').value;
         const modelSelect = document.getElementById('create-ollama-model');
 
-        // Check if host is localhost - can't test from web UI
-        if (host.includes('localhost') || host.includes('127.0.0.1')) {
-            modelSelect.innerHTML = '<option value="">Enter model name manually below</option>';
-            // Show manual input fallback
-            showCreateOllamaManualInput();
-            return;
-        }
-
         modelSelect.innerHTML = '<option value="">Loading...</option>';
 
-        fetch('/agents/getModels', {
+        // Try browser-direct fetch first (Ollama has CORS enabled by default)
+        // This works if user's browser is on the same network as Ollama
+        fetchOllamaModelsDirect(host)
+            .then(models => {
+                if (models && models.length > 0) {
+                    populateModelSelect(modelSelect, models);
+                    hideCreateOllamaManualInput();
+                } else {
+                    throw new Error('No models found');
+                }
+            })
+            .catch(e => {
+                console.log('Browser-direct fetch failed, trying server proxy:', e.message);
+                // Fall back to server-side fetch (works for public URLs)
+                return fetchOllamaModelsViaServer(host);
+            })
+            .then(models => {
+                if (models && models.length > 0) {
+                    populateModelSelect(modelSelect, models);
+                    hideCreateOllamaManualInput();
+                }
+            })
+            .catch(e => {
+                console.log('All fetch methods failed:', e.message);
+                modelSelect.innerHTML = '<option value="">Could not reach Ollama - enter manually</option>';
+                showCreateOllamaManualInput();
+            });
+    }
+
+    // Try fetching directly from browser to Ollama (CORS-enabled)
+    async function fetchOllamaModelsDirect(host) {
+        const url = host.replace(/\/$/, '') + '/api/tags';
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            mode: 'cors',
+            signal: AbortSignal.timeout(5000)
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        return (data.models || []).map(m => ({
+            name: m.name,
+            size_formatted: formatBytes(m.size || 0),
+            details: m.details || {}
+        }));
+    }
+
+    // Fall back to server-side proxy
+    async function fetchOllamaModelsViaServer(host) {
+        const response = await fetch('/agents/getModels', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'X-CSRF-Token': '<?= $csrf ?>'
             },
             body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success && data.data.models) {
-                modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
-                data.data.models.forEach(model => {
-                    const opt = document.createElement('option');
-                    opt.value = model.name;
-                    const details = model.details || {};
-                    const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
-                    const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
-                    opt.textContent = model.name + paramInfo + sizeInfo;
-                    modelSelect.appendChild(opt);
-                });
-                hideCreateOllamaManualInput();
-            } else {
-                modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
-                showCreateOllamaManualInput();
-            }
-        })
-        .catch(e => {
-            modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
-            showCreateOllamaManualInput();
         });
+        const data = await response.json();
+        if (data.success && data.data.models) {
+            return data.data.models;
+        }
+        throw new Error(data.message || 'Server proxy failed');
+    }
+
+    function populateModelSelect(select, models) {
+        select.innerHTML = '<option value="">-- Select a model --</option>';
+        models.forEach(model => {
+            const opt = document.createElement('option');
+            opt.value = model.name;
+            const details = model.details || {};
+            const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+            const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+            opt.textContent = model.name + paramInfo + sizeInfo;
+            select.appendChild(opt);
+        });
+    }
+
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
     }
 
     function showCreateOllamaManualInput() {
@@ -1055,52 +1099,96 @@ function loadClaudeOllamaModels() {
     const modelSelect = document.getElementById('claude-ollama-model');
     const currentModel = modelSelect.value;
 
-    // Check if host is localhost - can't test from web UI
-    if (host.includes('localhost') || host.includes('127.0.0.1')) {
-        modelSelect.innerHTML = '<option value="">Enter model name manually</option>';
-        showClaudeOllamaManualInput();
-        return;
-    }
-
     modelSelect.innerHTML = '<option value="">Loading...</option>';
 
-    fetch('/agents/getModels', {
+    // Try browser-direct fetch first (Ollama has CORS enabled by default)
+    fetchOllamaModelsDirectEdit(host)
+        .then(models => {
+            if (models && models.length > 0) {
+                populateModelSelectEdit(modelSelect, models, currentModel);
+                hideClaudeOllamaManualInput();
+                if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
+            } else {
+                throw new Error('No models found');
+            }
+        })
+        .catch(e => {
+            console.log('Browser-direct fetch failed, trying server proxy:', e.message);
+            return fetchOllamaModelsViaServerEdit(host);
+        })
+        .then(models => {
+            if (models && models.length > 0) {
+                populateModelSelectEdit(modelSelect, models, currentModel);
+                hideClaudeOllamaManualInput();
+                if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
+            }
+        })
+        .catch(e => {
+            console.log('All fetch methods failed:', e.message);
+            modelSelect.innerHTML = '<option value="">Could not reach Ollama - enter manually</option>';
+            showClaudeOllamaManualInput();
+        });
+}
+
+// Browser-direct fetch for edit form
+async function fetchOllamaModelsDirectEdit(host) {
+    const url = host.replace(/\/$/, '') + '/api/tags';
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        mode: 'cors',
+        signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    const data = await response.json();
+    return (data.models || []).map(m => ({
+        name: m.name,
+        size_formatted: formatBytesEdit(m.size || 0),
+        details: m.details || {}
+    }));
+}
+
+// Server proxy fallback for edit form
+async function fetchOllamaModelsViaServerEdit(host) {
+    const response = await fetch('/agents/getModels', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-CSRF-Token': '<?= $csrf ?>'
         },
         body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && data.data.models) {
-            modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
-            data.data.models.forEach(model => {
-                const opt = document.createElement('option');
-                opt.value = model.name;
-                const details = model.details || {};
-                const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
-                const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
-                opt.textContent = model.name + paramInfo + sizeInfo;
-                opt.dataset.family = details.family || '';
-                opt.dataset.params = details.parameter_size || '';
-                opt.dataset.quant = details.quantization || '';
-                opt.dataset.size = model.size_formatted || '';
-                if (model.name === currentModel) opt.selected = true;
-                modelSelect.appendChild(opt);
-            });
-            hideClaudeOllamaManualInput();
-            if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
-        } else {
-            modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
-            showClaudeOllamaManualInput();
-        }
-    })
-    .catch(e => {
-        modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
-        showClaudeOllamaManualInput();
     });
+    const data = await response.json();
+    if (data.success && data.data.models) {
+        return data.data.models;
+    }
+    throw new Error(data.message || 'Server proxy failed');
+}
+
+function populateModelSelectEdit(select, models, currentModel) {
+    select.innerHTML = '<option value="">-- Select a model --</option>';
+    models.forEach(model => {
+        const opt = document.createElement('option');
+        opt.value = model.name;
+        const details = model.details || {};
+        const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+        const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+        opt.textContent = model.name + paramInfo + sizeInfo;
+        opt.dataset.family = details.family || '';
+        opt.dataset.params = details.parameter_size || '';
+        opt.dataset.quant = details.quantization || '';
+        opt.dataset.size = model.size_formatted || '';
+        if (model.name === currentModel) opt.selected = true;
+        select.appendChild(opt);
+    });
+}
+
+function formatBytesEdit(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
 function showClaudeOllamaManualInput() {
@@ -1160,34 +1248,50 @@ function testClaudeOllamaConnection() {
     const host = document.getElementById('claude-ollama-host').value;
     const resultEl = document.getElementById('claude-ollama-test-result');
 
-    // Check if host is localhost - can't test from web UI
-    if (host.includes('localhost') || host.includes('127.0.0.1')) {
-        resultEl.innerHTML = '<span class="text-warning"><i class="bi bi-info-circle"></i> Localhost - will test when agent runs locally</span>';
-        showClaudeOllamaManualInput();
-        return;
-    }
+    resultEl.innerHTML = '<span class="text-muted">Testing connection...</span>';
 
-    resultEl.innerHTML = '<span class="text-muted">Testing...</span>';
-
-    fetch('/agents/testConnection', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
-        },
-        body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    // Try browser-direct first
+    const url = host.replace(/\/$/, '') + '/api/tags';
+    fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        mode: 'cors',
+        signal: AbortSignal.timeout(5000)
     })
-    .then(r => r.json())
+    .then(response => {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+    })
     .then(data => {
-        if (data.success && data.data.success) {
-            resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + '</span>';
-            loadClaudeOllamaModels();
-        } else {
-            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || data.message || 'Failed') + '</span>';
-        }
+        const modelCount = (data.models || []).length;
+        resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> Connected (browser-direct) - ' + modelCount + ' models</span>';
+        loadClaudeOllamaModels();
     })
     .catch(e => {
-        resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
+        console.log('Browser-direct test failed:', e.message);
+        // Try server proxy
+        fetch('/agents/testConnection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': '<?= $csrf ?>'
+            },
+            body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.data.success) {
+                resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + ' (via server)</span>';
+                loadClaudeOllamaModels();
+            } else {
+                resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || 'Cannot reach Ollama from browser or server') + '</span>';
+                showClaudeOllamaManualInput();
+            }
+        })
+        .catch(e2 => {
+            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Cannot reach Ollama - enter model manually</span>';
+            showClaudeOllamaManualInput();
+        });
     });
 }
 

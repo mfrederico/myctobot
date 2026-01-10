@@ -492,6 +492,7 @@ class Agents extends BaseControls\Control {
 
         $provider = $this->getParam('provider', '');
         $configJson = $this->getParam('config', '{}');
+        $detailed = (bool) $this->getParam('detailed', false);
 
         $config = json_decode($configJson, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
@@ -503,15 +504,75 @@ class Agents extends BaseControls\Control {
         if (!$providerInstance) {
             // Return defaults for claude_cli
             if ($provider === 'claude_cli') {
-                Flight::jsonSuccess(['models' => ['haiku', 'sonnet', 'opus']]);
+                Flight::jsonSuccess(['models' => [
+                    ['name' => 'haiku', 'details' => ['family' => 'claude', 'parameter_size' => 'Small']],
+                    ['name' => 'sonnet', 'details' => ['family' => 'claude', 'parameter_size' => 'Medium']],
+                    ['name' => 'opus', 'details' => ['family' => 'claude', 'parameter_size' => 'Large']]
+                ]]);
                 return;
             }
             Flight::jsonError('Unknown provider', 400);
             return;
         }
 
-        $models = $providerInstance->getAvailableModels();
+        // For Ollama, get detailed models if requested
+        if ($provider === 'ollama' && $detailed && method_exists($providerInstance, 'getModelsWithDetails')) {
+            $models = $providerInstance->getModelsWithDetails();
+        } else {
+            $models = $providerInstance->getAvailableModels();
+            // Normalize to array of objects for consistency
+            if (!empty($models) && is_string($models[0])) {
+                $models = array_map(fn($m) => ['name' => $m], $models);
+            }
+        }
+
         Flight::jsonSuccess(['models' => $models]);
+    }
+
+    /**
+     * Get detailed info about a specific model (AJAX endpoint)
+     */
+    public function getModelInfo($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $provider = $this->getParam('provider', '');
+        $modelName = $this->getParam('model', '');
+        $configJson = $this->getParam('config', '{}');
+
+        if (empty($modelName)) {
+            Flight::jsonError('Model name is required', 400);
+            return;
+        }
+
+        $config = json_decode($configJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid configuration JSON', 400);
+            return;
+        }
+
+        $providerInstance = LLMProviderFactory::create($provider, $config, $this->member->id);
+        if (!$providerInstance) {
+            Flight::jsonError('Unknown provider', 400);
+            return;
+        }
+
+        // Only Ollama supports model info currently
+        if ($provider === 'ollama' && method_exists($providerInstance, 'getModelInfo')) {
+            $info = $providerInstance->getModelInfo($modelName);
+            Flight::jsonSuccess($info);
+            return;
+        }
+
+        // Return basic info for other providers
+        Flight::jsonSuccess([
+            'success' => true,
+            'model' => $modelName,
+            'details' => [],
+            'message' => 'Model info not available for this provider'
+        ]);
     }
 
     /**

@@ -77,6 +77,90 @@ class OllamaProvider implements LLMProviderInterface
         return [];
     }
 
+    /**
+     * Get detailed model list with metadata
+     *
+     * @return array List of models with details
+     */
+    public function getModelsWithDetails(): array
+    {
+        try {
+            $response = $this->httpGet('/api/tags');
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                $models = [];
+                foreach ($data['models'] ?? [] as $m) {
+                    $models[] = [
+                        'name' => $m['name'],
+                        'size' => $m['size'] ?? 0,
+                        'size_formatted' => $this->formatBytes($m['size'] ?? 0),
+                        'modified_at' => $m['modified_at'] ?? null,
+                        'digest' => substr($m['digest'] ?? '', 0, 12),
+                        'details' => [
+                            'family' => $m['details']['family'] ?? 'unknown',
+                            'parameter_size' => $m['details']['parameter_size'] ?? 'unknown',
+                            'quantization' => $m['details']['quantization_level'] ?? 'unknown'
+                        ]
+                    ];
+                }
+                return $models;
+            }
+        } catch (\Exception $e) {
+            // Ignore
+        }
+        return [];
+    }
+
+    /**
+     * Get detailed information about a specific model
+     *
+     * @param string $modelName Model name (e.g., "llama3.2")
+     * @return array Model info or error
+     */
+    public function getModelInfo(string $modelName): array
+    {
+        try {
+            $response = $this->httpPost('/api/show', ['name' => $modelName]);
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                return [
+                    'success' => true,
+                    'model' => $modelName,
+                    'license' => $data['license'] ?? null,
+                    'modelfile' => $data['modelfile'] ?? null,
+                    'parameters' => $data['parameters'] ?? null,
+                    'template' => $data['template'] ?? null,
+                    'system' => $data['system'] ?? null,
+                    'details' => $data['details'] ?? [],
+                    'model_info' => $data['model_info'] ?? []
+                ];
+            }
+            return [
+                'success' => false,
+                'error' => 'Failed to get model info: HTTP ' . ($response['http_code'] ?? 'unknown')
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => 'Error: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Format bytes to human readable
+     */
+    private function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = 0;
+        while ($bytes >= 1024 && $i < count($units) - 1) {
+            $bytes /= 1024;
+            $i++;
+        }
+        return round($bytes, 1) . ' ' . $units[$i];
+    }
+
     public function complete(string $prompt, array $options = []): array
     {
         $payload = [

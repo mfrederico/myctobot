@@ -3,10 +3,14 @@ $isNew = empty($agent);
 $agentId = $agent['id'] ?? 0;
 $csrf = $csrf['csrf_token'] ?? '';
 $agentName = $agent['name'] ?? '';
-$runnerType = $agent['runner_type'] ?? 'claude_cli';
-$runnerConfig = $agent['runner_config'] ?? [];
+$provider = $agent['provider'] ?? 'claude_cli';
+$providerConfig = $agent['provider_config'] ?? [];
 $mcpServers = $agent['mcp_servers'] ?? [];
 $hooksConfig = $agent['hooks_config'] ?? [];
+$agentCapabilities = $agent['capabilities'] ?? [];
+$exposeAsMcp = $agent['expose_as_mcp'] ?? false;
+$mcpToolName = $agent['mcp_tool_name'] ?? '';
+$mcpToolDescription = $agent['mcp_tool_description'] ?? '';
 ?>
 
 <div class="container py-4">
@@ -27,6 +31,12 @@ $hooksConfig = $agent['hooks_config'] ?? [];
             <a class="nav-link <?= $activeTab === 'general' ? 'active' : '' ?>"
                href="/agents/edit/<?= $agentId ?>?tab=general">
                 <i class="bi bi-gear"></i> General
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'provider' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=provider">
+                <i class="bi bi-cpu"></i> Provider
             </a>
         </li>
         <li class="nav-item" role="presentation">
@@ -54,6 +64,15 @@ $hooksConfig = $agent['hooks_config'] ?? [];
                 <i class="bi bi-lightning"></i> Hooks
                 <?php if ($hookCount > 0): ?>
                 <span class="badge bg-secondary"><?= $hookCount ?></span>
+                <?php endif; ?>
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'capabilities' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=capabilities">
+                <i class="bi bi-stars"></i> Capabilities
+                <?php if (count($agentCapabilities) > 0): ?>
+                <span class="badge bg-secondary"><?= count($agentCapabilities) ?></span>
                 <?php endif; ?>
             </a>
         </li>
@@ -86,60 +105,16 @@ $hooksConfig = $agent['hooks_config'] ?? [];
                 </div>
 
                 <div class="mb-3">
-                    <label for="runner_type" class="form-label">Runner Type <span class="text-danger">*</span></label>
-                    <select class="form-select" id="runner_type" name="runner_type" onchange="toggleRunnerConfig()">
-                        <?php foreach ($runnerTypes as $value => $label): ?>
-                        <option value="<?= $value ?>" <?= $runnerType === $value ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($label) ?>
+                    <label for="provider" class="form-label">Provider <span class="text-danger">*</span></label>
+                    <select class="form-select" id="provider" name="provider" disabled>
+                        <?php foreach ($providers as $p): ?>
+                        <option value="<?= $p['type'] ?>" <?= $provider === $p['type'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($p['name']) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
                     <div class="form-text">
-                        <strong>Claude CLI:</strong> Uses your local Claude Code CLI subscription<br>
-                        <strong>Anthropic API:</strong> Uses API key for headless execution<br>
-                        <strong>Ollama:</strong> Uses local Ollama instance with specified model
-                    </div>
-                </div>
-
-                <!-- Runner-specific config -->
-                <div id="config-anthropic_api" class="runner-config mb-3" style="display: none;">
-                    <div class="card bg-light">
-                        <div class="card-body">
-                            <h6><i class="bi bi-key"></i> Anthropic API Settings</h6>
-                            <div class="mb-2">
-                                <label class="form-label">API Key</label>
-                                <input type="password" class="form-control" name="api_key"
-                                       placeholder="sk-ant-api03-...">
-                                <div class="form-text">Your Anthropic API key (will be encrypted)</div>
-                            </div>
-                            <div class="mb-0">
-                                <label class="form-label">Model</label>
-                                <select class="form-select" name="model">
-                                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                                    <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                                    <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="config-ollama" class="runner-config mb-3" style="display: none;">
-                    <div class="card bg-light">
-                        <div class="card-body">
-                            <h6><i class="bi bi-cpu"></i> Ollama Settings</h6>
-                            <div class="mb-2">
-                                <label class="form-label">Model</label>
-                                <input type="text" class="form-control" name="ollama_model"
-                                       value="<?= htmlspecialchars($runnerConfig['model'] ?? 'llama3') ?>"
-                                       placeholder="llama3, codellama, etc.">
-                            </div>
-                            <div class="mb-0">
-                                <label class="form-label">Base URL</label>
-                                <input type="text" class="form-control" name="base_url"
-                                       value="<?= htmlspecialchars($runnerConfig['base_url'] ?? 'http://localhost:11434') ?>">
-                            </div>
-                        </div>
+                        Provider configuration is on the <strong>Provider</strong> tab.
                     </div>
                 </div>
 
@@ -593,19 +568,262 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
-    <?php endif; ?>
-</div>
+
+    <?php elseif ($activeTab === 'provider'): ?>
+    <!-- Provider Tab -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-cpu"></i> LLM Provider Configuration
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Choose which LLM provider this agent uses. Different providers have different capabilities and costs.
+            </div>
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>">
+                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="tab" value="provider">
+
+                <div class="mb-4">
+                    <label for="provider_select" class="form-label">Provider Type <span class="text-danger">*</span></label>
+                    <select class="form-select" id="provider_select" name="provider" onchange="updateProviderForm()">
+                        <?php foreach ($providers as $p): ?>
+                        <option value="<?= $p['type'] ?>"
+                                <?= $provider === $p['type'] ? 'selected' : '' ?>
+                                data-can-orchestrate="<?= $p['can_orchestrate'] ? '1' : '0' ?>"
+                                data-requires-api-key="<?= $p['requires_api_key'] ? '1' : '0' ?>">
+                            <?= htmlspecialchars($p['name']) ?> - <?= htmlspecialchars($p['description']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <!-- Dynamic provider config form -->
+                <div id="provider-config-form" class="mb-4">
+                    <!-- Claude CLI -->
+                    <div class="provider-config" id="config-claude_cli" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-terminal"></i> Claude CLI Settings</h6>
+                                <p class="text-muted small">Uses your logged-in Claude Code subscription. Runs in tmux for monitoring.</p>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select provider-field" name="config_model">
+                                        <option value="sonnet" <?= ($providerConfig['model'] ?? 'sonnet') === 'sonnet' ? 'selected' : '' ?>>Sonnet (Recommended)</option>
+                                        <option value="opus" <?= ($providerConfig['model'] ?? '') === 'opus' ? 'selected' : '' ?>>Opus</option>
+                                        <option value="haiku" <?= ($providerConfig['model'] ?? '') === 'haiku' ? 'selected' : '' ?>>Haiku (Fast)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ollama -->
+                    <div class="provider-config" id="config-ollama" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cpu"></i> Ollama Settings</h6>
+                                <p class="text-muted small">Connect to a local or remote Ollama instance.</p>
+                                <div class="mb-2">
+                                    <label class="form-label">Host URL</label>
+                                    <input type="text" class="form-control provider-field" name="config_host"
+                                           value="<?= htmlspecialchars($providerConfig['host'] ?? 'http://localhost:11434') ?>"
+                                           placeholder="http://localhost:11434">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <input type="text" class="form-control provider-field" name="config_model"
+                                           value="<?= htmlspecialchars($providerConfig['model'] ?? 'llama3') ?>"
+                                           placeholder="llama3, codellama, mistral">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Temperature</label>
+                                    <input type="number" class="form-control provider-field" name="config_temperature"
+                                           value="<?= htmlspecialchars($providerConfig['temperature'] ?? '0.7') ?>"
+                                           min="0" max="2" step="0.1">
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testOllamaConnection()">
+                                    <i class="bi bi-plug"></i> Test Connection
+                                </button>
+                                <span id="ollama-test-result" class="ms-2"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OpenAI -->
+                    <div class="provider-config" id="config-openai" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-stars"></i> OpenAI Settings</h6>
+                                <p class="text-muted small">Connect to OpenAI API.</p>
+                                <div class="mb-2">
+                                    <label class="form-label">API Key Setting Name</label>
+                                    <input type="text" class="form-control provider-field" name="config_api_key_setting"
+                                           value="<?= htmlspecialchars($providerConfig['api_key_setting'] ?? 'openai_api_key') ?>"
+                                           placeholder="openai_api_key">
+                                    <div class="form-text">Name of the encrypted setting in your enterprise settings</div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select provider-field" name="config_model">
+                                        <option value="gpt-4-turbo" <?= ($providerConfig['model'] ?? 'gpt-4-turbo') === 'gpt-4-turbo' ? 'selected' : '' ?>>GPT-4 Turbo</option>
+                                        <option value="gpt-4o" <?= ($providerConfig['model'] ?? '') === 'gpt-4o' ? 'selected' : '' ?>>GPT-4o</option>
+                                        <option value="gpt-4o-mini" <?= ($providerConfig['model'] ?? '') === 'gpt-4o-mini' ? 'selected' : '' ?>>GPT-4o Mini</option>
+                                        <option value="gpt-4" <?= ($providerConfig['model'] ?? '') === 'gpt-4' ? 'selected' : '' ?>>GPT-4</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hidden field to store provider config as JSON -->
+                <input type="hidden" name="provider_config" id="provider_config_json" value="<?= htmlspecialchars(json_encode($providerConfig)) ?>">
+
+                <hr>
+
+                <!-- MCP Exposure -->
+                <h6><i class="bi bi-plug"></i> Expose as MCP Tool</h6>
+                <p class="text-muted small">Allow other agents to call this agent as an MCP tool for inter-LLM orchestration.</p>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="expose_as_mcp" name="expose_as_mcp" value="1"
+                               <?= $exposeAsMcp ? 'checked' : '' ?> onchange="toggleMcpExposure()">
+                        <label class="form-check-label" for="expose_as_mcp">
+                            Expose this agent as an MCP tool
+                        </label>
+                    </div>
+                </div>
+
+                <div id="mcp-exposure-config" style="display: <?= $exposeAsMcp ? 'block' : 'none' ?>;">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">MCP Tool Name</label>
+                            <input type="text" class="form-control" name="mcp_tool_name"
+                                   value="<?= htmlspecialchars($mcpToolName) ?>"
+                                   placeholder="e.g., ollama_review">
+                            <div class="form-text">How Claude will call this agent</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tool Description</label>
+                            <input type="text" class="form-control" name="mcp_tool_description"
+                                   value="<?= htmlspecialchars($mcpToolDescription) ?>"
+                                   placeholder="Get code review from local Ollama">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary" onclick="prepareProviderConfig()">
+                        <i class="bi bi-check-lg"></i> Save Provider Config
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 <script>
-function toggleRunnerConfig() {
-    const runnerType = document.getElementById('runner_type').value;
-    document.querySelectorAll('.runner-config').forEach(el => el.style.display = 'none');
-    const configEl = document.getElementById('config-' + runnerType);
+function updateProviderForm() {
+    const provider = document.getElementById('provider_select').value;
+    document.querySelectorAll('.provider-config').forEach(el => el.style.display = 'none');
+    const configEl = document.getElementById('config-' + provider);
     if (configEl) {
         configEl.style.display = 'block';
     }
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', toggleRunnerConfig);
+function toggleMcpExposure() {
+    const show = document.getElementById('expose_as_mcp').checked;
+    document.getElementById('mcp-exposure-config').style.display = show ? 'block' : 'none';
+}
+
+function prepareProviderConfig() {
+    const provider = document.getElementById('provider_select').value;
+    const configEl = document.getElementById('config-' + provider);
+    const config = {};
+
+    if (configEl) {
+        configEl.querySelectorAll('.provider-field').forEach(field => {
+            const name = field.name.replace('config_', '');
+            config[name] = field.value;
+        });
+    }
+
+    document.getElementById('provider_config_json').value = JSON.stringify(config);
+}
+
+function testOllamaConnection() {
+    const host = document.querySelector('#config-ollama input[name="config_host"]').value;
+    const resultEl = document.getElementById('ollama-test-result');
+    resultEl.innerHTML = '<span class="text-muted">Testing...</span>';
+
+    fetch('/agents/testConnection', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= $csrf ?>'
+        },
+        body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data.success) {
+            resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + '</span>';
+        } else {
+            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || data.message || 'Failed') + '</span>';
+        }
+    })
+    .catch(e => {
+        resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', updateProviderForm);
 </script>
+
+    <?php elseif ($activeTab === 'capabilities'): ?>
+    <!-- Capabilities Tab -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-stars"></i> Agent Capabilities
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Define what tasks this agent can handle. The orchestrator uses capabilities to route tasks to appropriate agents.
+            </div>
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>">
+                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="tab" value="capabilities">
+
+                <div class="row">
+                    <?php foreach ($capabilities as $key => $label): ?>
+                    <div class="col-md-6 mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="capabilities[]"
+                                   value="<?= $key ?>" id="cap_<?= $key ?>"
+                                   <?= in_array($key, $agentCapabilities) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="cap_<?= $key ?>">
+                                <strong><?= htmlspecialchars($label) ?></strong>
+                            </label>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <hr>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Save Capabilities
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <?php endif; ?>
+</div>

@@ -207,7 +207,10 @@ class Auth extends BaseControls\Control {
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
 
             // Add this connection as a secondary database and switch to it
-            R::addDatabase($workspace, $dsn, $user, $pass);
+            // Check if already added (e.g., from previous login attempt)
+            if (!R::hasDatabase($workspace)) {
+                R::addDatabase($workspace, $dsn, $user, $pass);
+            }
             R::selectDatabase($workspace);
 
             $this->logger->debug('Switched to tenant database', ['workspace' => $workspace, 'database' => $name]);

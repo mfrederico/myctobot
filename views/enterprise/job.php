@@ -240,7 +240,7 @@ async function resumeJob(issueKey) {
     if (!confirm('Resume this job?')) return;
 
     try {
-        const response = await fetch('/enterprise/resumejob/' + encodeURIComponent(issueKey), {
+        const response = await fetch('/jobs/resume/' + encodeURIComponent(issueKey), {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'}
         });
@@ -261,7 +261,7 @@ async function retryJob(issueKey) {
     if (!confirm('Retry this job on its existing branch?')) return;
 
     try {
-        const response = await fetch('/enterprise/retryjob/' + encodeURIComponent(issueKey), {
+        const response = await fetch('/jobs/retry/' + encodeURIComponent(issueKey), {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'}
         });
@@ -282,7 +282,7 @@ async function completeJob(issueKey) {
     if (!confirm('Mark this job as complete?')) return;
 
     try {
-        const response = await fetch('/enterprise/completejob/' + encodeURIComponent(issueKey), {
+        const response = await fetch('/jobs/complete/' + encodeURIComponent(issueKey), {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'}
         });

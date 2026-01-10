@@ -233,7 +233,7 @@ class ConnectionsService {
                     'repo_count' => count($repoList)
                 ],
                 'actions' => [
-                    ['label' => 'Manage Repos', 'url' => '/enterprise/repos', 'class' => 'btn-outline-dark'],
+                    ['label' => 'Manage Repos', 'url' => '/github/repos', 'class' => 'btn-outline-dark'],
                     ['label' => 'Disconnect', 'url' => '/github/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect GitHub?']
                 ]
             ];

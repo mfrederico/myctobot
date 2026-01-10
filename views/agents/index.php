@@ -18,7 +18,7 @@
         <i class="bi bi-info-circle"></i>
         <strong>Agent Profiles</strong> define <em>how</em> AI Developer jobs run: which runner to use, MCP servers, and hooks.
         <strong><a href="/admin/shards">Workstation Shards</a></strong> define <em>where</em> jobs run (remote servers with Claude installed).
-        Assign agents to repositories on the <a href="/enterprise/repos">Repos page</a>.
+        Assign agents to repositories on the <a href="/github/repos">Repos page</a>.
     </div>
 
     <?php if (empty($agents)): ?>

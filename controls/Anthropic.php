@@ -14,6 +14,9 @@ use \app\services\EncryptionService;
 
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
+require_once __DIR__ . '/../lib/Bean.php';
+
+use \app\Bean;
 
 class Anthropic extends BaseControls\Control {
 
@@ -207,5 +210,184 @@ class Anthropic extends BaseControls\Control {
         } catch (\Exception $e) {
             Flight::json(['success' => false, 'error' => $e->getMessage()], 500);
         }
+    }
+
+    // ========================================
+    // Multi-Key Management (anthropickeys table)
+    // ========================================
+
+    /**
+     * List all API keys
+     */
+    public function keys() {
+        if (!$this->requireEnterprise()) return;
+
+        $keys = [];
+        $keyBeans = Bean::findAll('anthropickeys', ' ORDER BY created_at DESC ');
+        foreach ($keyBeans as $key) {
+            $decrypted = EncryptionService::decrypt($key->api_key);
+            $keys[] = [
+                'id' => $key->id,
+                'name' => $key->name,
+                'model' => $key->model,
+                'masked_key' => $this->maskAnthropicKey($decrypted),
+                'created_at' => $key->created_at
+            ];
+        }
+
+        $this->render('anthropic/keys', [
+            'title' => 'API Keys',
+            'keys' => $keys
+        ]);
+    }
+
+    /**
+     * Add a new API key
+     */
+    public function addkey() {
+        if (!$this->requireEnterprise()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        if (!$this->validateCSRF()) return;
+
+        $name = trim(Flight::request()->data->key_name ?? '');
+        $apiKey = trim(Flight::request()->data->api_key ?? '');
+        $model = Flight::request()->data->key_model ?? 'claude-sonnet-4-20250514';
+
+        if (empty($name) || empty($apiKey)) {
+            $this->flash('error', 'Name and API key are required.');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        if (!preg_match('/^sk-ant-/', $apiKey)) {
+            $this->flash('error', 'Invalid API key format. Should start with sk-ant-');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        try {
+            $encrypted = EncryptionService::encrypt($apiKey);
+
+            $key = Bean::dispense('anthropickeys');
+            $key->name = $name;
+            $key->api_key = $encrypted;
+            $key->model = $model;
+            $key->created_at = date('Y-m-d H:i:s');
+            Bean::store($key);
+
+            $this->flash('success', 'API key added successfully.');
+            $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name]);
+
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Delete an API key
+     */
+    public function deletekey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $params['operation']->name ?? null;
+        if (!$keyId) {
+            $this->flash('error', 'No key specified.');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        try {
+            $key = Bean::load('anthropickeys', $keyId);
+            if ($key && $key->id) {
+                $keyName = $key->name;
+                Bean::trash($key);
+
+                // Reset any boards using this key to NULL (local runner)
+                Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
+
+                $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
+                $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);
+            } else {
+                $this->flash('error', 'Key not found.');
+            }
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Test an API key
+     */
+    public function testkey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $params['operation']->name ?? null;
+        if (!$keyId) {
+            Flight::json(['success' => false, 'error' => 'No key specified']);
+            return;
+        }
+
+        try {
+            $key = Bean::load('anthropickeys', $keyId);
+            if (!$key || !$key->id) {
+                Flight::json(['success' => false, 'error' => 'Key not found']);
+                return;
+            }
+
+            $apiKey = EncryptionService::decrypt($key->api_key);
+            $model = $key->model ?? 'claude-sonnet-4-20250514';
+
+            // Test the key
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => 'https://api.anthropic.com',
+                'headers' => [
+                    'x-api-key' => $apiKey,
+                    'anthropic-version' => '2023-06-01',
+                    'Content-Type' => 'application/json',
+                ],
+            ]);
+
+            $response = $client->post('/v1/messages', [
+                'json' => [
+                    'model' => $model,
+                    'max_tokens' => 10,
+                    'messages' => [['role' => 'user', 'content' => 'Hi']]
+                ]
+            ]);
+
+            Flight::json(['success' => true, 'message' => 'API key is valid!']);
+
+        } catch (\Exception $e) {
+            $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
+            Flight::json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Mask an Anthropic API key for display
+     */
+    private function maskAnthropicKey(string $key): string {
+        if (empty($key)) return '(empty)';
+
+        if (preg_match('/^(sk-ant-api\d+-)(.+)$/', $key, $matches)) {
+            $prefix = $matches[1];
+            $secret = $matches[2];
+            $secretLen = strlen($secret);
+            if ($secretLen > 7) {
+                return $prefix . substr($secret, 0, 3) . '...' . substr($secret, -4);
+            }
+            return $prefix . '***';
+        }
+
+        return substr($key, 0, 10) . '...' . substr($key, -4);
     }
 }

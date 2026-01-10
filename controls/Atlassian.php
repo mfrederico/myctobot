@@ -330,4 +330,58 @@ class Atlassian extends BaseControls\Control {
             Flight::redirect('/atlassian');
         }
     }
+
+    /**
+     * Re-register Jira webhook with correct tenant URL (AJAX)
+     * POST /atlassian/reregisterwebhook
+     */
+    public function reregisterwebhook() {
+        if (!$this->requireLogin()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
+
+        $cloudId = $this->getParam('cloud_id');
+        if (empty($cloudId)) {
+            // Try to get from member's first Atlassian token
+            $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            if ($token) {
+                $cloudId = $token->cloud_id;
+            }
+        }
+
+        if (empty($cloudId)) {
+            $this->json(['success' => false, 'error' => 'No Atlassian connection found']);
+            return;
+        }
+
+        try {
+            $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
+
+            if ($result) {
+                $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+                $this->json([
+                    'success' => true,
+                    'message' => "Webhook re-registered with tenant: {$tenantSlug}"
+                ]);
+            } else {
+                $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Webhook re-registration failed', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Upgrade Atlassian scopes to include write access
+     */
+    public function upgradescopes() {
+        if (!$this->requireLogin()) return;
+
+        $loginUrl = AtlassianAuth::getLoginUrlWithWriteScopes();
+        Flight::redirect($loginUrl);
+    }
 }

@@ -241,6 +241,7 @@ CREATE TABLE IF NOT EXISTS `aidevjoblogs` (
 -- GitHub/repo connections
 CREATE TABLE IF NOT EXISTS `repoconnections` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `member_id` INT DEFAULT NULL,
     `connection_name` VARCHAR(255),
     `provider` VARCHAR(30) DEFAULT 'github',
     `repo_owner` VARCHAR(100) NOT NULL,
@@ -255,7 +256,8 @@ CREATE TABLE IF NOT EXISTS `repoconnections` (
     `agent_id` INT DEFAULT NULL,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
-    INDEX `idx_agent` (`agent_id`)
+    INDEX `idx_agent` (`agent_id`),
+    INDEX `idx_member` (`member_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Board to repo mapping

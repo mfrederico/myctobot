@@ -26,7 +26,7 @@
                     <!-- Add Key Form (collapsed) -->
                     <div class="collapse mb-3" id="addKeyForm">
                         <div class="card card-body bg-light">
-                            <form method="POST" action="/enterprise/addkey">
+                            <form method="POST" action="/anthropic/addkey">
                                 <?php if (!empty($csrf) && is_array($csrf)): ?>
                                     <?php foreach ($csrf as $name => $value): ?>
                                         <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
@@ -103,7 +103,7 @@
                                         <button type="button" class="btn btn-sm btn-outline-success" onclick="testKey(<?= $key['id'] ?>)">
                                             <i class="bi bi-check-circle"></i> Test
                                         </button>
-                                        <a href="/enterprise/deletekey/<?= $key['id'] ?>" class="btn btn-sm btn-outline-danger"
+                                        <a href="/anthropic/deletekey/<?= $key['id'] ?>" class="btn btn-sm btn-outline-danger"
                                            onclick="return confirm('Delete this API key? Boards using it will switch to local runner.')">
                                             <i class="bi bi-trash"></i>
                                         </a>
@@ -127,7 +127,7 @@
                     <p class="text-muted">
                         Connect your GitHub account to enable repository access for AI Developer.
                     </p>
-                    <a href="/enterprise/github" class="btn btn-dark">
+                    <a href="/github" class="btn btn-dark">
                         <i class="bi bi-github"></i> Connect GitHub
                     </a>
                     <?php else: ?>
@@ -168,10 +168,10 @@
                         <a href="/enterprise" class="list-group-item list-group-item-action">
                             <i class="bi bi-house"></i> AI Developer Dashboard
                         </a>
-                        <a href="/enterprise/repos" class="list-group-item list-group-item-action">
+                        <a href="/github/repos" class="list-group-item list-group-item-action">
                             <i class="bi bi-folder"></i> Manage Repositories
                         </a>
-                        <a href="/enterprise/jobs" class="list-group-item list-group-item-action">
+                        <a href="/jobs" class="list-group-item list-group-item-action">
                             <i class="bi bi-list-ul"></i> View Jobs
                         </a>
                     </div>
@@ -189,7 +189,7 @@ async function testKey(keyId) {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
-        const response = await fetch('/enterprise/testkey/' + keyId);
+        const response = await fetch('/anthropic/testkey/' + keyId);
         const data = await response.json();
 
         if (data.success) {

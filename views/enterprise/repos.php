@@ -9,7 +9,7 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2 mb-0">Repository Connections</h1>
         <?php if (!$githubConnected): ?>
-        <a href="/enterprise/github" class="btn btn-dark">
+        <a href="/github" class="btn btn-dark">
             <i class="bi bi-github"></i> Connect GitHub
         </a>
         <?php endif; ?>
@@ -30,7 +30,7 @@
                         <?php if ($githubConnected): ?>
                         <p>Add a repository below to get started.</p>
                         <?php else: ?>
-                        <a href="/enterprise/github" class="btn btn-dark">
+                        <a href="/github" class="btn btn-dark">
                             <i class="bi bi-github"></i> Connect GitHub First
                         </a>
                         <?php endif; ?>
@@ -64,7 +64,7 @@
                                 </small>
                             </div>
                             <div>
-                                <a href="/enterprise/disconnectrepo/<?= $repo['id'] ?>" class="btn btn-sm btn-outline-danger"
+                                <a href="/github/disconnectrepo/<?= $repo['id'] ?>" class="btn btn-sm btn-outline-danger"
                                    onclick="return confirm('Are you sure you want to disconnect this repository?')">
                                     <i class="bi bi-x-lg"></i> Disconnect
                                 </a>
@@ -97,20 +97,21 @@
                             </a>
                         </div>
                         <?php if ($repo['provider'] === 'github'): ?>
-                        <!-- GitHub Issues Toggle -->
+                        <!-- Issue Tracking Source -->
                         <div class="d-flex align-items-center gap-2 pt-2 border-top">
-                            <label class="text-muted small mb-0" style="min-width: 60px;">
-                                <i class="bi bi-github"></i> Issues:
+                            <label class="text-muted small mb-0" style="min-width: 80px;">
+                                <i class="bi bi-card-checklist"></i> Issues:
                             </label>
-                            <div class="form-check form-switch mb-0">
-                                <input class="form-check-input" type="checkbox" role="switch"
-                                       id="issuesToggle<?= $repo['id'] ?>"
-                                       <?= $repo['issues_enabled'] ? 'checked' : '' ?>
-                                       onchange="toggleGitHubIssues(<?= $repo['id'] ?>, this.checked, this)">
-                                <label class="form-check-label small text-muted" for="issuesToggle<?= $repo['id'] ?>">
-                                    <?= $repo['issues_enabled'] ? 'GitHub Issues trigger AI Developer' : 'Use Jira for issue tracking' ?>
-                                </label>
-                            </div>
+                            <select class="form-select form-select-sm" style="max-width: 200px;"
+                                    id="issuesSource<?= $repo['id'] ?>"
+                                    onchange="setIssueSource(<?= $repo['id'] ?>, this.value, this)">
+                                <option value="jira" <?= !$repo['issues_enabled'] ? 'selected' : '' ?>>
+                                    Jira (default)
+                                </option>
+                                <option value="github" <?= $repo['issues_enabled'] ? 'selected' : '' ?>>
+                                    GitHub Issues
+                                </option>
+                            </select>
                             <span id="issuesStatus<?= $repo['id'] ?>" class="ms-auto"></span>
                         </div>
                         <?php endif; ?>
@@ -127,36 +128,28 @@
                     <h5 class="card-title mb-0">Add Repository</h5>
                 </div>
                 <div class="card-body">
-                    <form method="POST" action="/enterprise/connectrepo">
-                        <?php if (!empty($csrf) && is_array($csrf)): ?>
-                            <?php foreach ($csrf as $name => $value): ?>
-                                <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
+                    <div class="mb-3">
+                        <label for="addRepoSelect" class="form-label">Select Repository</label>
+                        <select class="form-select" id="addRepoSelect">
+                            <option value="">Choose a repository...</option>
+                            <?php
+                            $connectedRepoNames = array_map(fn($r) => $r['repo_owner'] . '/' . $r['repo_name'], $repos);
+                            foreach ($availableRepos as $availRepo):
+                                $fullName = $availRepo['full_name'];
+                                if (in_array($fullName, $connectedRepoNames)) continue;
+                            ?>
+                            <option value="<?= htmlspecialchars($fullName) ?>" data-branch="<?= htmlspecialchars($availRepo['default_branch'] ?? 'main') ?>">
+                                <?= htmlspecialchars($fullName) ?>
+                                <?= $availRepo['private'] ? ' (private)' : '' ?>
+                            </option>
                             <?php endforeach; ?>
-                        <?php endif; ?>
-                        <input type="hidden" name="provider" value="github">
+                        </select>
+                    </div>
 
-                        <div class="mb-3">
-                            <label for="repo" class="form-label">Select Repository</label>
-                            <select class="form-select" name="repo" id="repo" required>
-                                <option value="">Choose a repository...</option>
-                                <?php
-                                $connectedRepoNames = array_map(fn($r) => $r['repo_owner'] . '/' . $r['repo_name'], $repos);
-                                foreach ($availableRepos as $availRepo):
-                                    $fullName = $availRepo['full_name'];
-                                    if (in_array($fullName, $connectedRepoNames)) continue;
-                                ?>
-                                <option value="<?= htmlspecialchars($fullName) ?>">
-                                    <?= htmlspecialchars($fullName) ?>
-                                    <?= $availRepo['private'] ? ' (private)' : '' ?>
-                                </option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-plus-lg"></i> Connect Repository
-                        </button>
-                    </form>
+                    <button type="button" class="btn btn-primary" id="addRepoBtn" onclick="connectRepository()">
+                        <i class="bi bi-plus-lg"></i> Connect Repository
+                    </button>
+                    <span id="addRepoStatus" class="ms-2"></span>
                 </div>
             </div>
             <?php endif; ?>
@@ -233,7 +226,7 @@
                                                 </div>
                                             </td>
                                             <td>
-                                                <a href="/enterprise/unmapboard?board_id=<?= $board['id'] ?>&repo_id=<?= $repo['id'] ?>"
+                                                <a href="/github/unmapboard?board_id=<?= $board['id'] ?>&repo_id=<?= $repo['id'] ?>"
                                                    class="btn btn-sm btn-outline-danger"
                                                    onclick="return confirm('Remove this mapping?')">
                                                     <i class="bi bi-x-lg"></i>
@@ -254,7 +247,7 @@
                             $unmappedRepos = array_filter($repos, fn($r) => !in_array($r['id'], $mappedRepoIds));
                             ?>
                             <?php if (!empty($unmappedRepos)): ?>
-                            <form method="POST" action="/enterprise/mapboard" class="d-flex gap-2">
+                            <form method="POST" action="/github/mapboard" class="d-flex gap-2">
                                 <?php if (!empty($csrf) && is_array($csrf)): ?>
                                     <?php foreach ($csrf as $name => $value): ?>
                                         <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
@@ -354,10 +347,10 @@
                         <a href="/enterprise" class="list-group-item list-group-item-action">
                             <i class="bi bi-house"></i> AI Developer Dashboard
                         </a>
-                        <a href="/enterprise/settings" class="list-group-item list-group-item-action">
+                        <a href="/settings/connections" class="list-group-item list-group-item-action">
                             <i class="bi bi-gear"></i> Settings
                         </a>
-                        <a href="/enterprise/jobs" class="list-group-item list-group-item-action">
+                        <a href="/jobs" class="list-group-item list-group-item-action">
                             <i class="bi bi-list-ul"></i> View Jobs
                         </a>
                     </div>
@@ -383,7 +376,7 @@ function copyLabel(label, btn) {
 }
 
 function assignAgent(repoId, agentId, selectEl) {
-    fetch('/enterprise/assignagent', {
+    fetch('/github/assignagent', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -411,9 +404,10 @@ function assignAgent(repoId, agentId, selectEl) {
     });
 }
 
-function toggleGitHubIssues(repoId, enabled, checkbox) {
+function setIssueSource(repoId, source, selectEl) {
     const statusEl = document.getElementById('issuesStatus' + repoId);
-    const labelEl = checkbox.nextElementSibling;
+    const enabled = (source === 'github');
+    const previousValue = enabled ? 'jira' : 'github';
 
     fetch('/github/toggleissues', {
         method: 'POST',
@@ -429,24 +423,67 @@ function toggleGitHubIssues(repoId, enabled, checkbox) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Update label text
-            labelEl.textContent = enabled
-                ? 'GitHub Issues trigger AI Developer'
-                : 'Use Jira for issue tracking';
             // Show brief success indicator
             statusEl.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+            selectEl.style.borderColor = '#198754';
             setTimeout(() => {
                 statusEl.innerHTML = '';
+                selectEl.style.borderColor = '';
             }, 1500);
         } else {
-            // Revert checkbox on error
-            checkbox.checked = !enabled;
-            alert('Error: ' + (data.message || 'Failed to toggle issues'));
+            // Revert dropdown on error
+            selectEl.value = previousValue;
+            alert('Error: ' + (data.message || 'Failed to update issue source'));
         }
     })
     .catch(error => {
-        checkbox.checked = !enabled;
+        selectEl.value = previousValue;
         alert('Error: ' + error.message);
+    });
+}
+
+function connectRepository() {
+    const select = document.getElementById('addRepoSelect');
+    const btn = document.getElementById('addRepoBtn');
+    const status = document.getElementById('addRepoStatus');
+    const fullName = select.value;
+    const defaultBranch = select.options[select.selectedIndex]?.dataset?.branch || 'main';
+
+    if (!fullName) {
+        alert('Please select a repository');
+        return;
+    }
+
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+
+    fetch('/github/addrepo', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            full_name: fullName,
+            default_branch: defaultBranch
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        if (data.success) {
+            status.innerHTML = '<i class="bi bi-check-circle text-success"></i> Connected!';
+            // Reload page to show new repo
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            status.innerHTML = '<i class="bi bi-x-circle text-danger"></i> ' + (data.message || 'Failed');
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        status.innerHTML = '<i class="bi bi-x-circle text-danger"></i> Error: ' + error.message;
     });
 }
 </script>

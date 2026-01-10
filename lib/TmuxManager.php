@@ -39,11 +39,30 @@ class TmuxManager {
     /**
      * Get domain identifier from config for session naming
      *
+     * Extracts just the tenant/subdomain part for shorter session names:
+     * - footest4.myctobot.ai → footest4
+     * - gwt.myctobot.ai → gwt
+     * - myctobot.ai → default
+     *
      * @return string Domain ID (sanitized for use in session names)
      */
     public static function getDomainId(): string {
         $baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? 'localhost';
         $domainId = preg_replace('/^https?:\/\//', '', $baseUrl);
+
+        // Extract subdomain/tenant from full domain
+        // e.g., "footest4.myctobot.ai" → "footest4"
+        // e.g., "myctobot.ai" → "default"
+        $parts = explode('.', $domainId);
+        if (count($parts) >= 3) {
+            // Has subdomain (e.g., footest4.myctobot.ai)
+            $domainId = $parts[0];
+        } elseif (count($parts) == 2 && in_array($parts[1], ['ai', 'com', 'net', 'org', 'io'])) {
+            // Main domain (e.g., myctobot.ai) - use 'default'
+            $domainId = 'default';
+        }
+        // else: localhost or other simple names, use as-is
+
         return self::sanitizeForSessionName($domainId);
     }
 

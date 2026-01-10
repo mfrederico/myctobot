@@ -348,15 +348,21 @@ RESULT_EOF
 
 ## Important Rules
 
-1. **Pass minimal context** - Each agent starts fresh. Include only what it needs.
-2. **Don't repeat history** - Don't include previous agent outputs in new agent prompts.
-3. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
-4. **Output JSON** - Final output must be valid JSON for parsing.
-5. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
+1. **ALWAYS post to issue tracker** - ALL results, summaries, findings, and status updates MUST be posted to the {$ticketLabel} using MCP tools. NEVER just print results to terminal - the stakeholder is watching the {$ticketLabel}, not your terminal output.
+2. **Pass minimal context** - Each agent starts fresh. Include only what it needs.
+3. **Don't repeat history** - Don't include previous agent outputs in new agent prompts.
+4. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
+5. **Output JSON** - Final output must be valid JSON for parsing.
+6. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
 
 ## Start Now
 
-Begin by spawning the impl-agent to implement the changes.
+1. **Read the ticket carefully** - Understand what is being asked.
+2. **Determine task type**:
+   - **Implementation task** (new feature, bug fix, code changes) → Spawn impl-agent
+   - **Research/audit task** (security audit, code review, analysis) → Do the research yourself, then post findings to the {$ticketLabel}
+   - **Documentation task** → Write docs, then post summary to the {$ticketLabel}
+3. **Post your results** - Whatever the task type, your final output MUST be posted to the {$ticketLabel} using MCP tools.
 PROMPT;
     }
 

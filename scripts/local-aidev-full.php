@@ -763,6 +763,19 @@ if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
         $serverName = $server['name'] ?? 'unnamed';
         $serverType = $server['type'] ?? 'stdio';
 
+        // Substitute environment variable placeholders in env values
+        $serverEnv = $server['env'] ?? [];
+        foreach ($serverEnv as $key => $value) {
+            if (is_string($value)) {
+                // Replace ${GITHUB_TOKEN} or ${GH_TOKEN} with actual token
+                $value = str_replace('${GITHUB_TOKEN}', $githubToken ?? '', $value);
+                $value = str_replace('${GH_TOKEN}', $githubToken ?? '', $value);
+                // Replace ${JIRA_API_TOKEN} with actual Jira token
+                $value = str_replace('${JIRA_API_TOKEN}', $jiraOAuthToken ?? '', $value);
+                $serverEnv[$key] = $value;
+            }
+        }
+
         if ($serverType === 'http') {
             $mcpServers->$serverName = (object) [
                 'type' => 'http',
@@ -775,7 +788,7 @@ if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
                 'type' => 'stdio',
                 'command' => $server['command'] ?? '',
                 'args' => $server['args'] ?? [],
-                'env' => (object)($server['env'] ?? [])
+                'env' => (object)$serverEnv
             ];
         }
 

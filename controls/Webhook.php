@@ -1151,6 +1151,49 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
+     * Find linked issue number from PR body
+     *
+     * Parses common patterns like:
+     * - Fixes #123
+     * - Closes #123
+     * - Resolves #123
+     * - Related to #123
+     * - References #123
+     *
+     * @param string $prBody The PR description body
+     * @param string $repoFullName The full repo name (owner/repo)
+     * @return string|null The linked issue key (owner/repo#123) or null
+     */
+    private function findLinkedIssueFromPrBody(string $prBody, string $repoFullName): ?string {
+        // Common patterns for linking issues
+        // Matches: Fixes #123, Closes #123, Resolves #123, Related to #123, etc.
+        $patterns = [
+            '/(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?|related\s+to|references?|refs?)\s*#(\d+)/i',
+            '/(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:\s*#(\d+)/i',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $prBody, $matches)) {
+                $issueNumber = $matches[1];
+                return "{$repoFullName}#{$issueNumber}";
+            }
+        }
+
+        // Also check for explicit issue URLs
+        // e.g., https://github.com/owner/repo/issues/123
+        if (preg_match('/github\.com\/([^\/]+\/[^\/]+)\/issues\/(\d+)/', $prBody, $matches)) {
+            $linkedRepo = $matches[1];
+            $issueNumber = $matches[2];
+            // Only link if same repo
+            if ($linkedRepo === $repoFullName) {
+                return "{$repoFullName}#{$issueNumber}";
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Handle GitHub webhook
      * Endpoint: POST /webhook/github
      *
@@ -1522,6 +1565,27 @@ class Webhook extends BaseControls\Control {
 
         // Create issue key format
         $issueKey = "{$repoFullName}#{$issueNumber}";
+
+        // Check if this is a comment on a PR (PRs have pull_request field)
+        $isPullRequest = isset($issue['pull_request']);
+        $linkedIssueKey = null;
+
+        if ($isPullRequest && $memberId) {
+            // Try to find the linked issue from PR body
+            $prBody = $issue['body'] ?? '';
+            $linkedIssueKey = $this->findLinkedIssueFromPrBody($prBody, $repoFullName);
+
+            if ($linkedIssueKey) {
+                $this->logger->info('GitHub: PR comment forwarding to linked issue', [
+                    'pr_number' => $issueNumber,
+                    'linked_issue' => $linkedIssueKey,
+                    'repo' => $repoFullName
+                ]);
+                // Forward to the linked issue's session instead
+                $this->augmentGitHubLocalSession($linkedIssueKey, $memberId, $commentAuthor, "[PR #{$issueNumber} comment] {$commentBody}");
+                return; // Don't process further - this is a PR comment, not an issue
+            }
+        }
 
         // First, try to augment any running local tmux session with this comment
         if ($memberId) {

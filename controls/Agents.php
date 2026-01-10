@@ -140,8 +140,9 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        if (!isset(self::RUNNER_TYPES[$runnerType])) {
-            $this->flash('error', 'Invalid runner type');
+        // Validate provider type
+        if (!LLMProviderFactory::getProviderInfo($runnerType)) {
+            $this->flash('error', 'Invalid provider type');
             Flight::redirect('/agents/create');
             return;
         }
@@ -154,8 +155,9 @@ class Agents extends BaseControls\Control {
         $agent->member_id = $memberId;
         $agent->name = $name;
         $agent->description = $description;
-        $agent->runner_type = $runnerType;
-        $agent->runner_config = json_encode($runnerConfig);
+        $agent->provider = $runnerType;
+        $agent->provider_config = json_encode($runnerConfig);
+        $agent->runner_type = $runnerType; // Legacy field
         $agent->mcp_servers = '[]';
         $agent->hooks_config = '{}';
         $agent->is_active = 1;
@@ -281,9 +283,10 @@ class Agents extends BaseControls\Control {
         }
         $agent->description = $description;
 
-        if (isset(self::RUNNER_TYPES[$runnerType])) {
-            $agent->runner_type = $runnerType;
-            $agent->runner_config = json_encode($this->buildRunnerConfig($runnerType));
+        if (LLMProviderFactory::getProviderInfo($runnerType)) {
+            $agent->provider = $runnerType;
+            $agent->provider_config = json_encode($this->buildRunnerConfig($runnerType));
+            $agent->runner_type = $runnerType; // Legacy field
         }
 
         $agent->is_active = $isActive ? 1 : 0;

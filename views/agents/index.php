@@ -53,26 +53,35 @@
 
                     <table class="table table-sm table-borderless mb-3">
                         <tr>
-                            <td class="text-muted" style="width: 40%">Runner:</td>
+                            <td class="text-muted" style="width: 40%">Provider:</td>
                             <td>
                                 <?php
-                                $runnerIcon = match($agent['runner_type']) {
+                                $providerIcon = match($agent['provider']) {
                                     'claude_cli' => 'terminal',
-                                    'anthropic_api' => 'cloud',
+                                    'claude_api' => 'cloud',
                                     'ollama' => 'cpu',
+                                    'openai' => 'stars',
+                                    'custom_http' => 'globe',
                                     default => 'gear'
                                 };
-                                $runnerClass = match($agent['runner_type']) {
+                                $providerClass = match($agent['provider']) {
                                     'claude_cli' => 'bg-primary',
-                                    'anthropic_api' => 'bg-info',
+                                    'claude_api' => 'bg-info',
                                     'ollama' => 'bg-success',
+                                    'openai' => 'bg-dark',
+                                    'custom_http' => 'bg-secondary',
                                     default => 'bg-secondary'
                                 };
                                 ?>
-                                <span class="badge <?= $runnerClass ?>">
-                                    <i class="bi bi-<?= $runnerIcon ?>"></i>
-                                    <?= htmlspecialchars($agent['runner_type_label']) ?>
+                                <span class="badge <?= $providerClass ?>">
+                                    <i class="bi bi-<?= $providerIcon ?>"></i>
+                                    <?= htmlspecialchars($agent['provider_label']) ?>
                                 </span>
+                                <?php if ($agent['expose_as_mcp']): ?>
+                                <span class="badge bg-warning text-dark" title="Exposed as MCP tool: <?= htmlspecialchars($agent['mcp_tool_name'] ?? '') ?>">
+                                    <i class="bi bi-plug"></i> MCP
+                                </span>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <tr>
@@ -95,6 +104,14 @@
                                 <?php endif; ?>
                             </td>
                         </tr>
+                        <?php if (($agent['capabilities_count'] ?? 0) > 0): ?>
+                        <tr>
+                            <td class="text-muted">Capabilities:</td>
+                            <td>
+                                <span class="badge bg-info"><?= $agent['capabilities_count'] ?> skills</span>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <td class="text-muted">Used By:</td>
                             <td>

@@ -24,14 +24,14 @@
                         
                         <div class="mb-3">
                             <label for="username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="username" value="<?= htmlspecialchars($member->username) ?>" readonly>
+                            <input type="text" class="form-control" id="username" value="<?= htmlspecialchars($member->username ?? '') ?>" readonly>
                             <small class="form-text text-muted">Username cannot be changed</small>
                         </div>
                         
                         <div class="mb-3">
                             <label for="email" class="form-label">Email Address</label>
                             <input type="email" class="form-control" id="email" name="email" 
-                                   value="<?= htmlspecialchars($member->email) ?>" required>
+                                   value="<?= htmlspecialchars($member->email ?? '') ?>" required>
                         </div>
                         
                         <hr class="my-4">
@@ -114,7 +114,7 @@
                         </dd>
                         
                         <dt>Status</dt>
-                        <dd><?= htmlspecialchars($member->status) ?></dd>
+                        <dd><?= htmlspecialchars($member->status ?? 'active') ?></dd>
                         
                         <dt>Member Since</dt>
                         <dd><?= date('F j, Y', strtotime($member->created_at ?? 'now')) ?></dd>

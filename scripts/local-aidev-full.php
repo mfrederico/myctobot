@@ -808,15 +808,25 @@ if (is_dir($repoDir)) {
 echo "  {$mcpProviderInfo}\n";
 
 // ============================================
-// Create .claude/settings.json for hooks
+// Create .claude/settings.json with attribution and hooks
 // ============================================
+echo "  Creating .claude/settings.json...\n";
+$claudeSettingsDir = "{$workDir}/.claude";
+if (!is_dir($claudeSettingsDir)) {
+    mkdir($claudeSettingsDir, 0755, true);
+}
+
+// Start with attribution (always included)
+$claudeSettings = [
+    'attribution' => [
+        'commit' => "Generated with MyCTOBOT.ai\n\nCo-Authored-By: claude",
+        'pr' => ''
+    ]
+];
+
+// Add hooks if configured in agent
 if ($agentConfig && !empty($agentConfig['hooks_config'])) {
     echo "  Loading hooks from agent config...\n";
-    $claudeSettingsDir = "{$workDir}/.claude";
-    if (!is_dir($claudeSettingsDir)) {
-        mkdir($claudeSettingsDir, 0755, true);
-    }
-
     $hooksConfig = $agentConfig['hooks_config'];
     $hookCount = 0;
     foreach (['PreToolUse', 'PostToolUse', 'Stop'] as $event) {
@@ -825,18 +835,18 @@ if ($agentConfig && !empty($agentConfig['hooks_config'])) {
         }
     }
     echo "    {$hookCount} hooks configured\n";
+    $claudeSettings['hooks'] = $hooksConfig;
+}
 
-    $claudeSettings = ['hooks' => $hooksConfig];
-    file_put_contents("{$claudeSettingsDir}/settings.json", json_encode($claudeSettings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+file_put_contents("{$claudeSettingsDir}/settings.json", json_encode($claudeSettings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
-    // Also copy to repo directory
-    if (is_dir($repoDir)) {
-        $repoClaudeDir = "{$repoDir}/.claude";
-        if (!is_dir($repoClaudeDir)) {
-            mkdir($repoClaudeDir, 0755, true);
-        }
-        copy("{$claudeSettingsDir}/settings.json", "{$repoClaudeDir}/settings.json");
+// Also copy to repo directory
+if (is_dir($repoDir)) {
+    $repoClaudeDir = "{$repoDir}/.claude";
+    if (!is_dir($repoClaudeDir)) {
+        mkdir($repoClaudeDir, 0755, true);
     }
+    copy("{$claudeSettingsDir}/settings.json", "{$repoClaudeDir}/settings.json");
 }
 
 // Pre-approve MCP servers in ~/.claude.json so Claude doesn't prompt

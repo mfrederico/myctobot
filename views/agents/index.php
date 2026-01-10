@@ -114,6 +114,28 @@
                             </td>
                         </tr>
                         <?php endif; ?>
+                        <?php if (!empty($agent['llm_capabilities'])): ?>
+                        <tr>
+                            <td class="text-muted">LLM Features:</td>
+                            <td>
+                                <?php $caps = $agent['llm_capabilities']; ?>
+                                <span class="badge <?= ($caps['tool_calling'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['tool_calling'] ?? false) ? 'Tool Calling Supported' : 'No Tool Calling' ?>">
+                                    <i class="bi bi-wrench"></i>
+                                </span>
+                                <span class="badge <?= ($caps['vision'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['vision'] ?? false) ? 'Vision Supported' : 'No Vision' ?>">
+                                    <i class="bi bi-eye"></i>
+                                </span>
+                                <span class="badge <?= ($caps['web_search'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['web_search'] ?? false) ? 'Web Search Supported' : 'No Web Search' ?>">
+                                    <i class="bi bi-search"></i>
+                                </span>
+                                <?php if ($caps['can_orchestrate'] ?? false): ?>
+                                <span class="badge bg-primary" title="Can Orchestrate Sub-Agents">
+                                    <i class="bi bi-diagram-3"></i>
+                                </span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <td class="text-muted">MCP Servers:</td>
                             <td>

@@ -18,30 +18,59 @@ class LLMProviderFactory
             'description' => 'Claude Code CLI - can use Anthropic or local Ollama',
             'class' => null, // Special case - not an API provider
             'can_orchestrate' => true,
-            'requires_api_key' => false
+            'requires_api_key' => false,
+            'capabilities' => [
+                'tool_calling' => true,
+                'vision' => true,
+                'streaming' => true,
+                'file_operations' => true,
+                'web_search' => true
+            ]
         ],
         'claude_api' => [
             'name' => 'Claude API',
             'description' => 'Uses Anthropic API credits (no CLI)',
             'class' => 'ClaudeApiProvider',
             'can_orchestrate' => false,
-            'requires_api_key' => true
+            'requires_api_key' => true,
+            'capabilities' => [
+                'tool_calling' => true,
+                'vision' => true,
+                'streaming' => true,
+                'file_operations' => false,
+                'web_search' => false
+            ]
         ],
         'openai' => [
             'name' => 'OpenAI',
             'description' => 'OpenAI GPT models',
             'class' => 'OpenAIProvider',
             'can_orchestrate' => false,
-            'requires_api_key' => true
+            'requires_api_key' => true,
+            'capabilities' => [
+                'tool_calling' => true,
+                'vision' => true,
+                'streaming' => true,
+                'file_operations' => false,
+                'web_search' => false
+            ]
         ],
         'custom_http' => [
             'name' => 'Custom HTTP',
             'description' => 'Any OpenAI-compatible API endpoint',
             'class' => 'OpenAIProvider', // Reuse OpenAI provider with custom endpoint
             'can_orchestrate' => false,
-            'requires_api_key' => false
+            'requires_api_key' => false,
+            'capabilities' => [
+                'tool_calling' => false, // Unknown - depends on endpoint
+                'vision' => false,
+                'streaming' => true,
+                'file_operations' => false,
+                'web_search' => false
+            ]
         ]
     ];
+
 
     /**
      * Get OllamaProvider for model discovery (used by Claude CLI + Ollama)
@@ -128,6 +157,46 @@ class LLMProviderFactory
             ];
         }
         return $result;
+    }
+
+    /**
+     * Get capabilities for a provider, optionally considering Ollama model
+     * For Ollama backend, capabilities are derived from model info dynamically
+     *
+     * @param string $providerType
+     * @param array $providerConfig Optional config with ollama_model/ollama_host for Ollama backend
+     * @return array
+     */
+    public static function getCapabilities(string $providerType, array $providerConfig = []): array
+    {
+        $baseCapabilities = self::PROVIDERS[$providerType]['capabilities'] ?? [];
+        $canOrchestrate = self::PROVIDERS[$providerType]['can_orchestrate'] ?? false;
+
+        // For Claude CLI with Ollama backend, get capabilities from model info
+        if ($providerType === 'claude_cli' && !empty($providerConfig['use_ollama'])) {
+            $ollamaModel = $providerConfig['ollama_model'] ?? '';
+            $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
+
+            if ($ollamaModel) {
+                $ollamaProvider = self::getOllamaProvider(['host' => $ollamaHost]);
+                $modelCaps = $ollamaProvider->getModelCapabilities($ollamaModel);
+
+                $baseCapabilities['tool_calling'] = $modelCaps['tool_calling'];
+                $baseCapabilities['vision'] = $modelCaps['vision'];
+            } else {
+                // No model specified - assume limited capabilities
+                $baseCapabilities['tool_calling'] = false;
+                $baseCapabilities['vision'] = false;
+            }
+
+            // Ollama doesn't have web search
+            $baseCapabilities['web_search'] = false;
+        }
+
+        return [
+            'can_orchestrate' => $canOrchestrate,
+            ...$baseCapabilities
+        ];
     }
 
     /**

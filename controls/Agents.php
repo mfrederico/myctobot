@@ -2,6 +2,7 @@
 /**
  * AI Agents Controller
  * Handles agent profile CRUD and configuration (MCP servers, hooks)
+ * Supports multiple LLM providers: Claude, Ollama, OpenAI, etc.
  */
 
 namespace app;
@@ -11,9 +12,14 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\services\TierFeatures;
 use \app\services\EncryptionService;
+use \app\services\LLMProviders\LLMProviderFactory;
 
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
+require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
+require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
+require_once __DIR__ . '/../services/LLMProviders/OllamaProvider.php';
+require_once __DIR__ . '/../services/LLMProviders/OpenAIProvider.php';
 require_once __DIR__ . '/../lib/Bean.php';
 
 use \app\Bean;
@@ -21,12 +27,17 @@ use \app\Bean;
 class Agents extends BaseControls\Control {
 
     /**
-     * Valid runner types
+     * Available capabilities for agents
      */
-    private const RUNNER_TYPES = [
-        'claude_cli' => 'Claude CLI (Local)',
-        'anthropic_api' => 'Anthropic API',
-        'ollama' => 'Ollama (Local LLM)'
+    private const CAPABILITIES = [
+        'code_implementation' => 'Code Implementation',
+        'code_review' => 'Code Review',
+        'browser_testing' => 'Browser Testing',
+        'requirements_analysis' => 'Requirements Analysis',
+        'documentation' => 'Documentation',
+        'security_audit' => 'Security Audit',
+        'refactoring' => 'Refactoring',
+        'debugging' => 'Debugging'
     ];
 
     /**
@@ -51,21 +62,30 @@ class Agents extends BaseControls\Control {
         foreach ($agentBeans as $bean) {
             $mcpServers = json_decode($bean->mcp_servers ?: '[]', true);
             $hooksConfig = json_decode($bean->hooks_config ?: '{}', true);
+            $capabilities = json_decode($bean->capabilities ?: '[]', true);
 
             // Count repos using this agent (repoconnections is in user SQLite database)
             $repoCount = Bean::count('repoconnections', 'agent_id = ?', [$bean->id]);
+
+            // Get provider info
+            $provider = $bean->provider ?: 'claude_cli';
+            $providerInfo = LLMProviderFactory::getProviderInfo($provider);
 
             $agents[] = [
                 'id' => $bean->id,
                 'name' => $bean->name,
                 'description' => $bean->description,
-                'runner_type' => $bean->runner_type,
-                'runner_type_label' => self::RUNNER_TYPES[$bean->runner_type] ?? $bean->runner_type,
+                'provider' => $provider,
+                'provider_label' => $providerInfo['name'] ?? $provider,
+                'runner_type' => $bean->runner_type, // Legacy field
                 'mcp_count' => count($mcpServers),
                 'hooks_count' => $this->countHooks($hooksConfig),
+                'capabilities_count' => count($capabilities),
                 'repo_count' => $repoCount,
                 'is_active' => (bool) $bean->is_active,
                 'is_default' => (bool) $bean->is_default,
+                'expose_as_mcp' => (bool) $bean->expose_as_mcp,
+                'mcp_tool_name' => $bean->mcp_tool_name,
                 'created_at' => $bean->created_at,
                 'updated_at' => $bean->updated_at
             ];
@@ -73,7 +93,7 @@ class Agents extends BaseControls\Control {
 
         $this->viewData['title'] = 'AI Agent Profiles';
         $this->viewData['agents'] = $agents;
-        $this->viewData['runnerTypes'] = self::RUNNER_TYPES;
+        $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
         // csrf already set by parent constructor
 
         $this->render('agents/index', $this->viewData);
@@ -87,7 +107,9 @@ class Agents extends BaseControls\Control {
 
         $this->viewData['title'] = 'Create Agent Profile';
         $this->viewData['agent'] = null;
-        $this->viewData['runnerTypes'] = self::RUNNER_TYPES;
+        $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
+        $this->viewData['capabilities'] = self::CAPABILITIES;
+        $this->viewData['providerConfigs'] = $this->getAllProviderConfigs();
         // csrf already set by parent constructor
         $this->viewData['activeTab'] = $this->getParam('tab', 'general');
 
@@ -173,14 +195,22 @@ class Agents extends BaseControls\Control {
             'id' => $agent->id,
             'name' => $agent->name,
             'description' => $agent->description,
-            'runner_type' => $agent->runner_type,
+            'provider' => $agent->provider ?: 'claude_cli',
+            'provider_config' => json_decode($agent->provider_config ?: '{}', true),
+            'runner_type' => $agent->runner_type, // Legacy
             'runner_config' => json_decode($agent->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($agent->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($agent->hooks_config ?: '{}', true),
+            'capabilities' => json_decode($agent->capabilities ?: '[]', true),
+            'expose_as_mcp' => (bool) $agent->expose_as_mcp,
+            'mcp_tool_name' => $agent->mcp_tool_name,
+            'mcp_tool_description' => $agent->mcp_tool_description,
             'is_active' => (bool) $agent->is_active,
             'is_default' => (bool) $agent->is_default
         ];
-        $this->viewData['runnerTypes'] = self::RUNNER_TYPES;
+        $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
+        $this->viewData['capabilities'] = self::CAPABILITIES;
+        $this->viewData['providerConfigs'] = $this->getAllProviderConfigs();
         // csrf already set by parent constructor
         $this->viewData['activeTab'] = $this->getParam('tab', 'general');
 
@@ -215,11 +245,17 @@ class Agents extends BaseControls\Control {
             case 'general':
                 $this->updateGeneral($agent, $memberId);
                 break;
+            case 'provider':
+                $this->updateProvider($agent);
+                break;
             case 'mcp':
                 $this->updateMcp($agent);
                 break;
             case 'hooks':
                 $this->updateHooks($agent);
+                break;
+            case 'capabilities':
+                $this->updateCapabilities($agent);
                 break;
         }
 
@@ -360,5 +396,132 @@ class Agents extends BaseControls\Control {
             }
         }
         return $count;
+    }
+
+    /**
+     * Update provider settings
+     */
+    private function updateProvider($agent): void {
+        $provider = $this->getParam('provider', 'claude_cli');
+        $providerConfigJson = $this->getParam('provider_config', '{}');
+
+        // Validate provider type
+        if (!LLMProviderFactory::getProviderInfo($provider)) {
+            $this->flash('error', 'Invalid provider type');
+            return;
+        }
+
+        // Parse and validate provider config
+        $providerConfig = json_decode($providerConfigJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->flash('error', 'Invalid provider configuration JSON');
+            return;
+        }
+
+        // MCP exposure settings
+        $exposeAsMcp = (bool) $this->getParam('expose_as_mcp', false);
+        $mcpToolName = trim($this->getParam('mcp_tool_name', ''));
+        $mcpToolDescription = trim($this->getParam('mcp_tool_description', ''));
+
+        // Validate MCP tool name if exposing
+        if ($exposeAsMcp && empty($mcpToolName)) {
+            $mcpToolName = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $agent->name));
+        }
+
+        $agent->provider = $provider;
+        $agent->provider_config = json_encode($providerConfig);
+        $agent->expose_as_mcp = $exposeAsMcp ? 1 : 0;
+        $agent->mcp_tool_name = $mcpToolName;
+        $agent->mcp_tool_description = $mcpToolDescription;
+
+        // Also update legacy runner_type for backwards compatibility
+        $agent->runner_type = $provider;
+    }
+
+    /**
+     * Update capabilities
+     */
+    private function updateCapabilities($agent): void {
+        $capabilities = $this->getParam('capabilities', []);
+
+        // Validate capabilities
+        if (!is_array($capabilities)) {
+            $capabilities = [];
+        }
+
+        // Filter to valid capabilities
+        $validCapabilities = array_intersect($capabilities, array_keys(self::CAPABILITIES));
+
+        $agent->capabilities = json_encode(array_values($validCapabilities));
+    }
+
+    /**
+     * Test provider connection (AJAX endpoint)
+     */
+    public function testConnection($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $provider = $this->getParam('provider', '');
+        $configJson = $this->getParam('config', '{}');
+
+        $config = json_decode($configJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid configuration JSON', 400);
+            return;
+        }
+
+        $result = LLMProviderFactory::testConnection($provider, $config, $this->member->id);
+
+        Flight::jsonSuccess($result);
+    }
+
+    /**
+     * Get available models for a provider (AJAX endpoint)
+     */
+    public function getModels($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $provider = $this->getParam('provider', '');
+        $configJson = $this->getParam('config', '{}');
+
+        $config = json_decode($configJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid configuration JSON', 400);
+            return;
+        }
+
+        $providerInstance = LLMProviderFactory::create($provider, $config, $this->member->id);
+        if (!$providerInstance) {
+            // Return defaults for claude_cli
+            if ($provider === 'claude_cli') {
+                Flight::jsonSuccess(['models' => ['haiku', 'sonnet', 'opus']]);
+                return;
+            }
+            Flight::jsonError('Unknown provider', 400);
+            return;
+        }
+
+        $models = $providerInstance->getAvailableModels();
+        Flight::jsonSuccess(['models' => $models]);
+    }
+
+    /**
+     * Get all provider configs for JavaScript
+     */
+    private function getAllProviderConfigs(): array {
+        $configs = [];
+        foreach (LLMProviderFactory::getProviderTypes() as $type) {
+            $configs[$type] = [
+                'schema' => LLMProviderFactory::getConfigSchema($type),
+                'defaults' => LLMProviderFactory::getDefaultConfig($type)
+            ];
+        }
+        return $configs;
     }
 }

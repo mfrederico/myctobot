@@ -297,6 +297,14 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         const host = document.getElementById('create-ollama-host').value;
         const modelSelect = document.getElementById('create-ollama-model');
 
+        // Check if host is localhost - can't test from web UI
+        if (host.includes('localhost') || host.includes('127.0.0.1')) {
+            modelSelect.innerHTML = '<option value="">Enter model name manually below</option>';
+            // Show manual input fallback
+            showCreateOllamaManualInput();
+            return;
+        }
+
         modelSelect.innerHTML = '<option value="">Loading...</option>';
 
         fetch('/agents/getModels', {
@@ -320,13 +328,52 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     opt.textContent = model.name + paramInfo + sizeInfo;
                     modelSelect.appendChild(opt);
                 });
+                hideCreateOllamaManualInput();
             } else {
-                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+                modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
+                showCreateOllamaManualInput();
             }
         })
         .catch(e => {
-            modelSelect.innerHTML = '<option value="">Error: ' + e.message + '</option>';
+            modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
+            showCreateOllamaManualInput();
         });
+    }
+
+    function showCreateOllamaManualInput() {
+        let manualDiv = document.getElementById('create-ollama-manual');
+        if (!manualDiv) {
+            const modelDiv = document.getElementById('create-ollama-model').parentElement;
+            manualDiv = document.createElement('div');
+            manualDiv.id = 'create-ollama-manual';
+            manualDiv.className = 'mt-2';
+            manualDiv.innerHTML = `
+                <label class="form-label small text-muted">Or enter model name:</label>
+                <input type="text" class="form-control form-control-sm" id="create-ollama-model-manual"
+                       placeholder="qwen3-coder, codellama, llama3" onchange="syncManualModel()">
+                <div class="form-text">Localhost not reachable from web - model will be validated when agent runs</div>
+            `;
+            modelDiv.appendChild(manualDiv);
+        }
+        manualDiv.style.display = 'block';
+    }
+
+    function hideCreateOllamaManualInput() {
+        const manualDiv = document.getElementById('create-ollama-manual');
+        if (manualDiv) manualDiv.style.display = 'none';
+    }
+
+    function syncManualModel() {
+        const manual = document.getElementById('create-ollama-model-manual');
+        const select = document.getElementById('create-ollama-model');
+        if (manual && manual.value) {
+            // Add as option and select it
+            const opt = document.createElement('option');
+            opt.value = manual.value;
+            opt.textContent = manual.value;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
     }
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -1008,6 +1055,13 @@ function loadClaudeOllamaModels() {
     const modelSelect = document.getElementById('claude-ollama-model');
     const currentModel = modelSelect.value;
 
+    // Check if host is localhost - can't test from web UI
+    if (host.includes('localhost') || host.includes('127.0.0.1')) {
+        modelSelect.innerHTML = '<option value="">Enter model name manually</option>';
+        showClaudeOllamaManualInput();
+        return;
+    }
+
     modelSelect.innerHTML = '<option value="">Loading...</option>';
 
     fetch('/agents/getModels', {
@@ -1036,14 +1090,52 @@ function loadClaudeOllamaModels() {
                 if (model.name === currentModel) opt.selected = true;
                 modelSelect.appendChild(opt);
             });
+            hideClaudeOllamaManualInput();
             if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
         } else {
-            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
+            showClaudeOllamaManualInput();
         }
     })
     .catch(e => {
-        modelSelect.innerHTML = '<option value="">Error: ' + e.message + '</option>';
+        modelSelect.innerHTML = '<option value="">Error - enter model manually</option>';
+        showClaudeOllamaManualInput();
     });
+}
+
+function showClaudeOllamaManualInput() {
+    let manualDiv = document.getElementById('claude-ollama-manual');
+    if (!manualDiv) {
+        const modelDiv = document.getElementById('claude-ollama-model').parentElement;
+        manualDiv = document.createElement('div');
+        manualDiv.id = 'claude-ollama-manual';
+        manualDiv.className = 'mt-2';
+        manualDiv.innerHTML = `
+            <label class="form-label small text-muted">Or enter model name:</label>
+            <input type="text" class="form-control form-control-sm" id="claude-ollama-model-manual"
+                   placeholder="qwen3-coder, codellama, llama3" onchange="syncClaudeManualModel()">
+            <div class="form-text">Localhost not reachable from web - model validated when agent runs</div>
+        `;
+        modelDiv.appendChild(manualDiv);
+    }
+    manualDiv.style.display = 'block';
+}
+
+function hideClaudeOllamaManualInput() {
+    const manualDiv = document.getElementById('claude-ollama-manual');
+    if (manualDiv) manualDiv.style.display = 'none';
+}
+
+function syncClaudeManualModel() {
+    const manual = document.getElementById('claude-ollama-model-manual');
+    const select = document.getElementById('claude-ollama-model');
+    if (manual && manual.value) {
+        const opt = document.createElement('option');
+        opt.value = manual.value;
+        opt.textContent = manual.value;
+        opt.selected = true;
+        select.appendChild(opt);
+    }
 }
 
 function loadClaudeOllamaModelInfo(modelName) {
@@ -1067,6 +1159,14 @@ function loadClaudeOllamaModelInfo(modelName) {
 function testClaudeOllamaConnection() {
     const host = document.getElementById('claude-ollama-host').value;
     const resultEl = document.getElementById('claude-ollama-test-result');
+
+    // Check if host is localhost - can't test from web UI
+    if (host.includes('localhost') || host.includes('127.0.0.1')) {
+        resultEl.innerHTML = '<span class="text-warning"><i class="bi bi-info-circle"></i> Localhost - will test when agent runs locally</span>';
+        showClaudeOllamaManualInput();
+        return;
+    }
+
     resultEl.innerHTML = '<span class="text-muted">Testing...</span>';
 
     fetch('/agents/testConnection', {

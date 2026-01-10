@@ -142,14 +142,22 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                                 <div id="create-claude-ollama" style="display:none;">
                                     <div class="mb-2">
                                         <label class="form-label">Ollama Host</label>
-                                        <input type="text" class="form-control" name="ollama_host"
-                                               value="http://localhost:11434" placeholder="http://localhost:11434">
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="create-ollama-host" name="ollama_host"
+                                                   value="http://localhost:11434" placeholder="http://localhost:11434">
+                                            <button type="button" class="btn btn-outline-primary" onclick="loadCreateOllamaModels()">
+                                                <i class="bi bi-arrow-clockwise"></i> Load Models
+                                            </button>
+                                        </div>
                                     </div>
                                     <div class="mb-2">
                                         <label class="form-label">Ollama Model</label>
-                                        <input type="text" class="form-control" name="ollama_model"
-                                               placeholder="qwen3-coder, codellama, llama3">
-                                        <div class="form-text">You can load models after the agent is created</div>
+                                        <select class="form-select" id="create-ollama-model" name="ollama_model">
+                                            <option value="">-- Click "Load Models" to fetch --</option>
+                                        </select>
+                                        <div class="form-text">
+                                            Recommended: <code>qwen3-coder</code>, <code>codellama</code>, <code>llama3</code>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -278,6 +286,47 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         const ollamaEl = document.getElementById('create-claude-ollama');
         if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
         if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
+
+        // Auto-load models when toggling on
+        if (useOllama) {
+            loadCreateOllamaModels();
+        }
+    }
+
+    function loadCreateOllamaModels() {
+        const host = document.getElementById('create-ollama-host').value;
+        const modelSelect = document.getElementById('create-ollama-model');
+
+        modelSelect.innerHTML = '<option value="">Loading...</option>';
+
+        fetch('/agents/getModels', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': '<?= $csrf ?>'
+            },
+            body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.data.models) {
+                modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
+                data.data.models.forEach(model => {
+                    const opt = document.createElement('option');
+                    opt.value = model.name;
+                    const details = model.details || {};
+                    const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+                    const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+                    opt.textContent = model.name + paramInfo + sizeInfo;
+                    modelSelect.appendChild(opt);
+                });
+            } else {
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            }
+        })
+        .catch(e => {
+            modelSelect.innerHTML = '<option value="">Error: ' + e.message + '</option>';
+        });
     }
 
     document.addEventListener('DOMContentLoaded', function() {

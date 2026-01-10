@@ -854,7 +854,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 Choose which LLM provider this agent uses. Different providers have different capabilities and costs.
             </div>
 
-            <form method="POST" action="/agents/update/<?= $agentId ?>">
+            <form method="POST" action="/agents/update/<?= $agentId ?>" onsubmit="prepareProviderConfig()">
                 <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
                 <input type="hidden" name="tab" value="provider">
 
@@ -1035,7 +1035,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
 
                 <div class="d-flex justify-content-end">
-                    <button type="submit" class="btn btn-primary" onclick="prepareProviderConfig()">
+                    <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-lg"></i> Save Provider Config
                     </button>
                 </div>

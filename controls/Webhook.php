@@ -575,10 +575,46 @@ class Webhook extends BaseControls\Control {
             'reason' => $reason
         ]);
 
+        // Garbage collect: remove the work directory (contains cloned repo)
+        $workDir = $tmux->getWorkDir();
+        if ($workDir && is_dir($workDir)) {
+            $this->removeWorkDirectory($workDir);
+            $this->logger->info('Cleaned up work directory', [
+                'issue_key' => $issueKey,
+                'work_dir' => $workDir
+            ]);
+        }
+
         // Remove ai-dev label from the ticket (only when label was explicitly removed, not on completion)
         if ($cloudId && $reason === 'label_removed') {
             $this->removeAiDevLabel($issueKey, $memberId, $cloudId);
         }
+    }
+
+    /**
+     * Recursively remove a work directory
+     */
+    private function removeWorkDirectory(string $dir): bool {
+        if (!is_dir($dir)) {
+            return false;
+        }
+
+        // Safety check: only remove directories under /tmp
+        if (strpos($dir, '/tmp/') !== 0) {
+            $this->logger->warning('Refusing to remove directory outside /tmp', ['dir' => $dir]);
+            return false;
+        }
+
+        $files = array_diff(scandir($dir), ['.', '..']);
+        foreach ($files as $file) {
+            $path = $dir . '/' . $file;
+            if (is_dir($path)) {
+                $this->removeWorkDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+        return rmdir($dir);
     }
 
     /**
@@ -1421,11 +1457,15 @@ class Webhook extends BaseControls\Control {
             case 'unlabeled':
                 $labelRemoved = $data['label']['name'] ?? '';
                 if ($labelRemoved === 'ai-dev') {
-                    $this->logger->info('GitHub: ai-dev label removed', [
+                    $this->logger->info('GitHub: ai-dev label removed, killing session', [
                         'issue' => $issueNumber,
                         'repo' => $repoFullName
                     ]);
-                    // Could close any running tmux sessions here
+                    $memberId = $repoConnection['member_id'] ?? null;
+                    if ($memberId) {
+                        $issueKey = "{$repoFullName}#{$issueNumber}";
+                        $this->closeLocalTmuxSession($issueKey, $memberId, null, 'label_removed');
+                    }
                 }
                 break;
 
@@ -1441,13 +1481,16 @@ class Webhook extends BaseControls\Control {
                 break;
 
             case 'closed':
-                // Cleanup when issue is closed
-                if ($hasAiDevLabel) {
-                    $this->logger->info('GitHub: ai-dev issue closed', [
-                        'issue' => $issueNumber,
-                        'repo' => $repoFullName
-                    ]);
-                    // Could mark jobs complete, cleanup themes, etc.
+                // Cleanup when issue is closed - kill the tmux session
+                $this->logger->info('GitHub: issue closed, killing session', [
+                    'issue' => $issueNumber,
+                    'repo' => $repoFullName,
+                    'had_ai_dev_label' => $hasAiDevLabel
+                ]);
+                $memberId = $repoConnection['member_id'] ?? null;
+                if ($memberId) {
+                    $issueKey = "{$repoFullName}#{$issueNumber}";
+                    $this->closeLocalTmuxSession($issueKey, $memberId, null, 'issue_closed');
                 }
                 break;
         }

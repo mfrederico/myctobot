@@ -52,6 +52,15 @@
                                     <?php else: ?>
                                     <span class="badge bg-secondary">Disabled</span>
                                     <?php endif; ?>
+                                    <?php if (!empty($repo['webhook_id'])): ?>
+                                    <span class="badge bg-info" title="Webhook auto-configured">
+                                        <i class="bi bi-link-45deg"></i> Webhook
+                                    </span>
+                                    <?php else: ?>
+                                    <span class="badge bg-warning text-dark" title="Webhook needs manual setup - see instructions below">
+                                        <i class="bi bi-exclamation-triangle"></i> No Webhook
+                                    </span>
+                                    <?php endif; ?>
                                 </small>
                             </div>
                             <div>
@@ -305,6 +314,35 @@
                     <p class="text-muted small mb-0">
                         <strong>Example:</strong> If your frontend repo has label <code>repo-5</code> and backend
                         has <code>repo-8</code>, add the appropriate repo label first, then <code>ai-dev</code> to trigger.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card mt-3 border-info">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-github"></i> GitHub Webhook Setup
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        <i class="bi bi-check-circle text-success"></i> <strong>Webhooks are auto-created</strong> when you connect a repository. If a repo shows "No Webhook", you may need to set it up manually:
+                    </p>
+                    <ol class="small mb-3">
+                        <li>Go to your repo on GitHub</li>
+                        <li>Click <strong>Settings</strong> &rarr; <strong>Webhooks</strong></li>
+                        <li>Click <strong>Add webhook</strong></li>
+                        <li>Configure:
+                            <ul class="mb-1">
+                                <li><strong>Payload URL:</strong><br>
+                                    <code class="user-select-all">https://myctobot.ai/webhook/github</code>
+                                </li>
+                                <li><strong>Content type:</strong> <code>application/json</code></li>
+                                <li><strong>Events:</strong> Select "Let me select individual events" then check <strong>Issues</strong> and <strong>Issue comments</strong></li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Add webhook</strong></li>
+                    </ol>
+                    <p class="text-muted small mb-0">
+                        <i class="bi bi-info-circle"></i> Manual setup is usually needed if you don't have admin access to the repo. After adding, check "Recent Deliveries" for a green checkmark to confirm it's working.
                     </p>
                 </div>
             </div>

@@ -151,20 +151,31 @@ class Github extends BaseControls\Control {
 
         $memberId = $this->member->id;
 
+        // Parse owner/repo from full_name for duplicate check
+        $parts = explode('/', $fullName, 2);
+        if (count($parts) !== 2) {
+            Flight::jsonError('Invalid repository name format (expected owner/repo)', 400);
+            return;
+        }
+
         // Check if already connected (user database via Bean::)
-        $existing = Bean::findOne('repoconnections', 'full_name = ?', [$fullName]);
+        $existing = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ?', [$parts[0], $parts[1]]);
         if ($existing) {
             Flight::jsonError('Repository is already connected', 400);
             return;
         }
 
         try {
+            // Use parsed owner/repo from earlier
+            [$owner, $repoName] = $parts;
+
             // Generate webhook secret for this repo
             $webhookSecret = bin2hex(random_bytes(20));
 
             $repo = Bean::dispense('repoconnections');
             $repo->provider = 'github';
-            $repo->full_name = $fullName;
+            $repo->repo_owner = $owner;
+            $repo->repo_name = $repoName;
             $repo->default_branch = $defaultBranch;
             $repo->webhook_secret = $webhookSecret;
             $repo->enabled = 1;
@@ -181,7 +192,7 @@ class Github extends BaseControls\Control {
                     $token = EncryptionService::decrypt($tokenSetting->setting_value);
                     $github = new GitHubClient($token);
 
-                    [$owner, $repoName] = explode('/', $fullName);
+                    // $owner and $repoName already set from earlier parsing
                     $baseUrl = rtrim(Flight::get('app.baseurl') ?? 'https://myctobot.ai', '/');
                     $webhookUrl = $baseUrl . '/webhook/github';
 

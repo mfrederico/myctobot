@@ -228,6 +228,12 @@ class LLMProviderFactory
             ];
         }
 
+        // Special handling for Ollama (used by Claude CLI + Ollama backend)
+        if ($type === 'ollama') {
+            $provider = self::getOllamaProvider($config);
+            return $provider->testConnection();
+        }
+
         $provider = self::create($type, $config, $memberId);
         if (!$provider) {
             return [

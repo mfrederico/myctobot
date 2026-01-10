@@ -500,30 +500,39 @@ class Agents extends BaseControls\Control {
             return;
         }
 
+        // Special handling for Ollama (used by Claude CLI + Ollama backend)
+        if ($provider === 'ollama') {
+            $providerInstance = LLMProviderFactory::getOllamaProvider($config);
+            if ($detailed) {
+                $models = $providerInstance->getModelsWithDetails();
+            } else {
+                $models = $providerInstance->getAvailableModels();
+                $models = array_map(fn($m) => ['name' => $m], $models);
+            }
+            Flight::jsonSuccess(['models' => $models]);
+            return;
+        }
+
+        // Return defaults for claude_cli (Anthropic models)
+        if ($provider === 'claude_cli') {
+            Flight::jsonSuccess(['models' => [
+                ['name' => 'haiku', 'details' => ['family' => 'claude', 'parameter_size' => 'Small']],
+                ['name' => 'sonnet', 'details' => ['family' => 'claude', 'parameter_size' => 'Medium']],
+                ['name' => 'opus', 'details' => ['family' => 'claude', 'parameter_size' => 'Large']]
+            ]]);
+            return;
+        }
+
         $providerInstance = LLMProviderFactory::create($provider, $config, $this->member->id);
         if (!$providerInstance) {
-            // Return defaults for claude_cli
-            if ($provider === 'claude_cli') {
-                Flight::jsonSuccess(['models' => [
-                    ['name' => 'haiku', 'details' => ['family' => 'claude', 'parameter_size' => 'Small']],
-                    ['name' => 'sonnet', 'details' => ['family' => 'claude', 'parameter_size' => 'Medium']],
-                    ['name' => 'opus', 'details' => ['family' => 'claude', 'parameter_size' => 'Large']]
-                ]]);
-                return;
-            }
             Flight::jsonError('Unknown provider', 400);
             return;
         }
 
-        // For Ollama, get detailed models if requested
-        if ($provider === 'ollama' && $detailed && method_exists($providerInstance, 'getModelsWithDetails')) {
-            $models = $providerInstance->getModelsWithDetails();
-        } else {
-            $models = $providerInstance->getAvailableModels();
-            // Normalize to array of objects for consistency
-            if (!empty($models) && is_string($models[0])) {
-                $models = array_map(fn($m) => ['name' => $m], $models);
-            }
+        $models = $providerInstance->getAvailableModels();
+        // Normalize to array of objects for consistency
+        if (!empty($models) && is_string($models[0])) {
+            $models = array_map(fn($m) => ['name' => $m], $models);
         }
 
         Flight::jsonSuccess(['models' => $models]);
@@ -553,16 +562,17 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $providerInstance = LLMProviderFactory::create($provider, $config, $this->member->id);
-        if (!$providerInstance) {
-            Flight::jsonError('Unknown provider', 400);
+        // Special handling for Ollama
+        if ($provider === 'ollama') {
+            $providerInstance = LLMProviderFactory::getOllamaProvider($config);
+            $info = $providerInstance->getModelInfo($modelName);
+            Flight::jsonSuccess($info);
             return;
         }
 
-        // Only Ollama supports model info currently
-        if ($provider === 'ollama' && method_exists($providerInstance, 'getModelInfo')) {
-            $info = $providerInstance->getModelInfo($modelName);
-            Flight::jsonSuccess($info);
+        $providerInstance = LLMProviderFactory::create($provider, $config, $this->member->id);
+        if (!$providerInstance) {
+            Flight::jsonError('Unknown provider', 400);
             return;
         }
 

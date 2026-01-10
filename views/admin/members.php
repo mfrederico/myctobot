@@ -7,7 +7,7 @@
     </div>
     
     <?php if (!empty($success)): ?>
-        <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
+        <div class="alert alert-success"><?= htmlspecialchars($success ?? '') ?></div>
     <?php endif; ?>
     
     <!-- Search and Filter -->
@@ -57,8 +57,8 @@
                 <?php foreach ($members as $member): ?>
                     <tr>
                         <td><?= $member->id ?></td>
-                        <td><?= htmlspecialchars($member->username) ?></td>
-                        <td><?= htmlspecialchars($member->email) ?></td>
+                        <td><?= htmlspecialchars($member->username ?? '') ?></td>
+                        <td><?= htmlspecialchars($member->email ?? '') ?></td>
                         <td>
                             <?php
                             $levelName = 'Unknown';
@@ -107,7 +107,7 @@
                             }
                             ?>
                             <span class="badge bg-<?= $statusClass ?>">
-                                <?= htmlspecialchars($member->status) ?>
+                                <?= htmlspecialchars($member->status ?? '') ?>
                             </span>
                         </td>
                         <td>

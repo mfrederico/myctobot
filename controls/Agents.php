@@ -651,4 +651,331 @@ class Agents extends BaseControls\Control {
         }
         return $configs;
     }
+
+    // =========================================================================
+    // MCP Tools CRUD
+    // =========================================================================
+
+    /**
+     * List tools for an agent (AJAX)
+     */
+    public function tools($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $memberId = $this->member->id;
+
+        // Verify agent ownership
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        if (!$agent) {
+            Flight::jsonError('Agent not found', 404);
+            return;
+        }
+
+        $tools = R::find('agenttools', 'agent_id = ? ORDER BY tool_name ASC', [$agentId]);
+
+        $result = [];
+        foreach ($tools as $tool) {
+            $result[] = [
+                'id' => (int) $tool->id,
+                'tool_name' => $tool->tool_name,
+                'tool_description' => $tool->tool_description,
+                'parameters_schema' => json_decode($tool->parameters_schema ?: '[]', true),
+                'prompt_template' => $tool->prompt_template,
+                'is_active' => (bool) $tool->is_active,
+                'created_at' => $tool->created_at,
+                'updated_at' => $tool->updated_at
+            ];
+        }
+
+        Flight::jsonSuccess(['tools' => $result]);
+    }
+
+    /**
+     * Save a tool (create or update) (AJAX)
+     */
+    public function saveTool($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $toolId = (int) $this->getParam('tool_id', 0);
+        $memberId = $this->member->id;
+
+        // Verify agent ownership
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        if (!$agent) {
+            Flight::jsonError('Agent not found', 404);
+            return;
+        }
+
+        // Get tool data
+        $toolName = trim($this->getParam('tool_name', ''));
+        $toolDescription = trim($this->getParam('tool_description', ''));
+        $parametersSchema = $this->getParam('parameters_schema', '[]');
+        $promptTemplate = trim($this->getParam('prompt_template', ''));
+        $isActive = (bool) $this->getParam('is_active', true);
+
+        // Validate tool name
+        if (empty($toolName)) {
+            Flight::jsonError('Tool name is required', 400);
+            return;
+        }
+
+        // Validate tool name format (alphanumeric + underscores)
+        if (!preg_match('/^[a-z][a-z0-9_]*$/', $toolName)) {
+            Flight::jsonError('Tool name must start with lowercase letter and contain only lowercase letters, numbers, and underscores', 400);
+            return;
+        }
+
+        // Validate JSON parameters
+        $parsedParams = json_decode($parametersSchema, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid parameters schema JSON', 400);
+            return;
+        }
+
+        // Validate each parameter
+        foreach ($parsedParams as $param) {
+            if (empty($param['name'])) {
+                Flight::jsonError('Each parameter must have a name', 400);
+                return;
+            }
+            if (!in_array($param['type'] ?? 'string', ['string', 'number', 'boolean'])) {
+                Flight::jsonError('Invalid parameter type: ' . ($param['type'] ?? 'unknown'), 400);
+                return;
+            }
+        }
+
+        // Check for duplicate tool name (excluding current tool if updating)
+        $existingTool = R::findOne('agenttools', 'agent_id = ? AND tool_name = ? AND id != ?', [$agentId, $toolName, $toolId]);
+        if ($existingTool) {
+            Flight::jsonError('A tool with this name already exists for this agent', 400);
+            return;
+        }
+
+        // Create or update tool
+        if ($toolId > 0) {
+            $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+            if (!$tool) {
+                Flight::jsonError('Tool not found', 404);
+                return;
+            }
+        } else {
+            $tool = R::dispense('agenttools');
+            $tool->agent_id = $agentId;
+            $tool->created_at = date('Y-m-d H:i:s');
+        }
+
+        $tool->tool_name = $toolName;
+        $tool->tool_description = $toolDescription;
+        $tool->parameters_schema = json_encode($parsedParams);
+        $tool->prompt_template = $promptTemplate;
+        $tool->is_active = $isActive ? 1 : 0;
+        $tool->updated_at = date('Y-m-d H:i:s');
+
+        $id = R::store($tool);
+
+        Flight::jsonSuccess([
+            'id' => $id,
+            'message' => $toolId > 0 ? 'Tool updated' : 'Tool created'
+        ]);
+    }
+
+    /**
+     * Delete a tool (AJAX)
+     */
+    public function deleteTool($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $toolId = (int) $this->getParam('tool_id', 0);
+        $memberId = $this->member->id;
+
+        // Verify agent ownership
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        if (!$agent) {
+            Flight::jsonError('Agent not found', 404);
+            return;
+        }
+
+        // Find and delete tool
+        $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        if (!$tool) {
+            Flight::jsonError('Tool not found', 404);
+            return;
+        }
+
+        R::trash($tool);
+
+        Flight::jsonSuccess(['message' => 'Tool deleted']);
+    }
+
+    /**
+     * Test a tool execution (AJAX)
+     */
+    public function testTool($params = []) {
+        if (!$this->requireEnterprise()) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $toolId = (int) $this->getParam('tool_id', 0);
+        $testParams = $this->getParam('test_params', '{}');
+        $memberId = $this->member->id;
+
+        // Verify agent ownership
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        if (!$agent) {
+            Flight::jsonError('Agent not found', 404);
+            return;
+        }
+
+        // Find tool
+        $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        if (!$tool) {
+            Flight::jsonError('Tool not found', 404);
+            return;
+        }
+
+        // Parse test parameters
+        $params = json_decode($testParams, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid test parameters JSON', 400);
+            return;
+        }
+
+        // Build prompt from template
+        $prompt = $tool->prompt_template;
+        $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
+
+        // Replace placeholders with values
+        foreach ($parametersSchema as $paramDef) {
+            $paramName = $paramDef['name'];
+            $value = $params[$paramName] ?? $paramDef['default'] ?? '';
+            $prompt = str_replace('{' . $paramName . '}', $value, $prompt);
+        }
+
+        // Get agent provider config
+        $provider = $agent->provider ?: 'claude_cli';
+        $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+
+        // Check if this is an image tool (has image_path parameter)
+        $hasImageParam = false;
+        $imagePath = null;
+        foreach ($parametersSchema as $paramDef) {
+            if (in_array($paramDef['name'], ['image_path', 'image', 'file_path'])) {
+                $hasImageParam = true;
+                $imagePath = $params[$paramDef['name']] ?? null;
+                break;
+            }
+        }
+
+        try {
+            // Execute based on provider
+            if ($provider === 'claude_cli' && !empty($providerConfig['use_ollama'])) {
+                // Ollama backend
+                $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
+                $ollamaModel = $providerConfig['ollama_model'] ?? 'llama3';
+
+                $response = $this->callOllama($ollamaHost, $ollamaModel, $prompt, $imagePath);
+            } elseif ($provider === 'ollama') {
+                // Direct Ollama
+                $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
+                $ollamaModel = $providerConfig['model'] ?? 'llama3';
+
+                $response = $this->callOllama($ollamaHost, $ollamaModel, $prompt, $imagePath);
+            } else {
+                // For other providers, return a placeholder response
+                $response = [
+                    'success' => true,
+                    'message' => 'Test mode: Prompt would be sent to ' . $provider,
+                    'prompt_preview' => substr($prompt, 0, 500) . (strlen($prompt) > 500 ? '...' : '')
+                ];
+                Flight::jsonSuccess($response);
+                return;
+            }
+
+            Flight::jsonSuccess([
+                'success' => true,
+                'response' => $response,
+                'prompt_used' => $prompt
+            ]);
+        } catch (Exception $e) {
+            Flight::jsonError('Tool execution failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Call Ollama API
+     */
+    private function callOllama(string $host, string $model, string $prompt, ?string $imagePath = null): string {
+        $url = rtrim($host, '/') . '/api/chat';
+
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        // Add image if provided
+        if ($imagePath && file_exists($imagePath)) {
+            $imageData = file_get_contents($imagePath);
+            if ($imageData !== false) {
+                $messages[0]['images'] = [base64_encode($imageData)];
+            }
+        }
+
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'stream' => false
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 120
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            throw new Exception('Ollama request failed: ' . $error);
+        }
+
+        if ($httpCode !== 200) {
+            throw new Exception('Ollama returned HTTP ' . $httpCode);
+        }
+
+        $data = json_decode($response, true);
+        if (isset($data['message']['content'])) {
+            return $data['message']['content'];
+        }
+
+        return $response;
+    }
 }

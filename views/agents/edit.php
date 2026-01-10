@@ -76,6 +76,13 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                 <?php endif; ?>
             </a>
         </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'tools' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=tools">
+                <i class="bi bi-tools"></i> MCP Tools
+                <span class="badge bg-secondary" id="tools-count-badge">0</span>
+            </a>
+        </li>
     </ul>
     <?php endif; ?>
 
@@ -1296,6 +1303,478 @@ document.addEventListener('DOMContentLoaded', function() {
             </form>
         </div>
     </div>
+
+    <?php elseif ($activeTab === 'tools'): ?>
+    <!-- MCP Tools Tab -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-tools"></i> Custom MCP Tools</span>
+            <button type="button" class="btn btn-sm btn-primary" onclick="showToolModal()">
+                <i class="bi bi-plus-lg"></i> Add Tool
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Define custom MCP tools for this agent. When called, tools format a prompt with parameters and send to the agent's LLM.
+                <strong>Requires "Expose as MCP Tool"</strong> to be enabled on the Provider tab.
+            </div>
+
+            <!-- Tools List -->
+            <div id="tools-list">
+                <div class="text-center text-muted py-4" id="tools-loading">
+                    <i class="bi bi-hourglass-split"></i> Loading tools...
+                </div>
+                <div id="tools-empty" class="text-center py-5" style="display:none;">
+                    <i class="bi bi-tools display-4 text-muted"></i>
+                    <p class="text-muted mt-3">No tools defined yet.</p>
+                    <button type="button" class="btn btn-primary" onclick="showToolModal()">
+                        <i class="bi bi-plus-lg"></i> Create Your First Tool
+                    </button>
+                </div>
+                <div id="tools-container" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Modal -->
+    <div class="modal fade" id="toolModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="toolModalTitle">
+                        <i class="bi bi-tools"></i> Add MCP Tool
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="tool_id" value="0">
+
+                    <div class="mb-3">
+                        <label class="form-label">Tool Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="tool_name"
+                               pattern="[a-z][a-z0-9_]*" required
+                               placeholder="e.g., analyze_image, extract_text">
+                        <div class="form-text">Lowercase letters, numbers, underscores. Must start with letter.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control" id="tool_description"
+                               placeholder="What this tool does (shown in MCP tools/list)">
+                    </div>
+
+                    <hr>
+
+                    <h6><i class="bi bi-sliders"></i> Parameters</h6>
+                    <p class="text-muted small">Define the input parameters for this tool.</p>
+
+                    <div id="parameters-list" class="mb-3"></div>
+
+                    <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addParameter()">
+                        <i class="bi bi-plus-lg"></i> Add Parameter
+                    </button>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <label class="form-label">Prompt Template</label>
+                        <textarea class="form-control font-monospace" id="prompt_template" rows="6"
+                                  placeholder="Use {parameter_name} placeholders.
+
+Example:
+Analyze the image at {image_path}.
+
+User request: {prompt}
+
+Respond concisely."></textarea>
+                        <div class="form-text">
+                            Available placeholders: <span id="available-placeholders" class="text-primary">none defined</span>
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="tool_is_active" checked>
+                        <label class="form-check-label" for="tool_is_active">Active</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" onclick="testTool()" id="btn-test-tool" style="display:none;">
+                        <i class="bi bi-play"></i> Test
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveTool()">
+                        <i class="bi bi-check-lg"></i> Save Tool
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Modal -->
+    <div class="modal fade" id="testModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-play"></i> Test Tool</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="test-params-form"></div>
+                    <hr>
+                    <div id="test-result" style="display:none;">
+                        <h6>Result:</h6>
+                        <pre class="bg-light p-3 rounded" id="test-result-content"></pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="executeTest()">
+                        <i class="bi bi-play"></i> Run Test
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const agentId = <?= $agentId ?>;
+const csrfToken = '<?= $csrf ?>';
+let toolsData = [];
+let parameterIndex = 0;
+
+// Load tools on page load
+document.addEventListener('DOMContentLoaded', loadTools);
+
+function loadTools() {
+    fetch('/agents/tools/' + agentId, {
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('tools-loading').style.display = 'none';
+        if (data.success && data.data.tools.length > 0) {
+            toolsData = data.data.tools;
+            renderTools();
+            document.getElementById('tools-container').style.display = 'block';
+            document.getElementById('tools-count-badge').textContent = toolsData.length;
+        } else {
+            document.getElementById('tools-empty').style.display = 'block';
+            document.getElementById('tools-count-badge').textContent = '0';
+        }
+    })
+    .catch(e => {
+        document.getElementById('tools-loading').innerHTML =
+            '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error loading tools</span>';
+    });
+}
+
+function renderTools() {
+    const container = document.getElementById('tools-container');
+    let html = '<div class="list-group">';
+
+    toolsData.forEach(tool => {
+        const params = tool.parameters_schema || [];
+        const paramStr = params.map(p => `${p.name} (${p.type})`).join(', ') || 'none';
+        const statusBadge = tool.is_active
+            ? '<span class="badge bg-success">Active</span>'
+            : '<span class="badge bg-secondary">Inactive</span>';
+
+        html += `
+        <div class="list-group-item">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h6 class="mb-1">
+                        <code>${escapeHtml(tool.tool_name)}</code>
+                        ${statusBadge}
+                    </h6>
+                    <p class="text-muted small mb-1">${escapeHtml(tool.tool_description || 'No description')}</p>
+                    <small class="text-muted">Parameters: ${escapeHtml(paramStr)}</small>
+                </div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="editTool(${tool.id})">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-info" onclick="showTestModal(${tool.id})">
+                        <i class="bi bi-play"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTool(${tool.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function showToolModal(toolId = 0) {
+    document.getElementById('tool_id').value = toolId;
+    document.getElementById('tool_name').value = '';
+    document.getElementById('tool_description').value = '';
+    document.getElementById('prompt_template').value = '';
+    document.getElementById('tool_is_active').checked = true;
+    document.getElementById('parameters-list').innerHTML = '';
+    document.getElementById('available-placeholders').textContent = 'none defined';
+    parameterIndex = 0;
+
+    document.getElementById('toolModalTitle').innerHTML = '<i class="bi bi-tools"></i> Add MCP Tool';
+    document.getElementById('btn-test-tool').style.display = 'none';
+
+    new bootstrap.Modal(document.getElementById('toolModal')).show();
+}
+
+function editTool(toolId) {
+    const tool = toolsData.find(t => t.id === toolId);
+    if (!tool) return;
+
+    document.getElementById('tool_id').value = tool.id;
+    document.getElementById('tool_name').value = tool.tool_name;
+    document.getElementById('tool_description').value = tool.tool_description || '';
+    document.getElementById('prompt_template').value = tool.prompt_template || '';
+    document.getElementById('tool_is_active').checked = tool.is_active;
+
+    // Load parameters
+    document.getElementById('parameters-list').innerHTML = '';
+    parameterIndex = 0;
+    (tool.parameters_schema || []).forEach(param => {
+        addParameter(param);
+    });
+    updatePlaceholders();
+
+    document.getElementById('toolModalTitle').innerHTML = '<i class="bi bi-tools"></i> Edit Tool: ' + escapeHtml(tool.tool_name);
+    document.getElementById('btn-test-tool').style.display = 'inline-block';
+
+    new bootstrap.Modal(document.getElementById('toolModal')).show();
+}
+
+function addParameter(data = null) {
+    const idx = parameterIndex++;
+    const name = data?.name || '';
+    const type = data?.type || 'string';
+    const description = data?.description || '';
+    const required = data?.required ?? true;
+    const defaultVal = data?.default || '';
+
+    const html = `
+    <div class="card mb-2 param-card" id="param-${idx}">
+        <div class="card-body py-2">
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <input type="text" class="form-control form-control-sm param-name"
+                           placeholder="Name" value="${escapeHtml(name)}" onchange="updatePlaceholders()">
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm param-type">
+                        <option value="string" ${type === 'string' ? 'selected' : ''}>string</option>
+                        <option value="number" ${type === 'number' ? 'selected' : ''}>number</option>
+                        <option value="boolean" ${type === 'boolean' ? 'selected' : ''}>boolean</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="text" class="form-control form-control-sm param-desc"
+                           placeholder="Description" value="${escapeHtml(description)}">
+                </div>
+                <div class="col-md-2">
+                    <input type="text" class="form-control form-control-sm param-default"
+                           placeholder="Default" value="${escapeHtml(defaultVal)}">
+                </div>
+                <div class="col-md-1">
+                    <div class="form-check mt-1">
+                        <input type="checkbox" class="form-check-input param-required" ${required ? 'checked' : ''}>
+                        <label class="form-check-label small">Req</label>
+                    </div>
+                </div>
+                <div class="col-md-1">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeParameter(${idx})">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+
+    document.getElementById('parameters-list').insertAdjacentHTML('beforeend', html);
+    updatePlaceholders();
+}
+
+function removeParameter(idx) {
+    document.getElementById('param-' + idx)?.remove();
+    updatePlaceholders();
+}
+
+function updatePlaceholders() {
+    const names = [];
+    document.querySelectorAll('.param-name').forEach(el => {
+        if (el.value.trim()) names.push('{' + el.value.trim() + '}');
+    });
+    document.getElementById('available-placeholders').textContent = names.length ? names.join(', ') : 'none defined';
+}
+
+function getParametersSchema() {
+    const params = [];
+    document.querySelectorAll('.param-card').forEach(card => {
+        const name = card.querySelector('.param-name').value.trim();
+        if (!name) return;
+
+        const param = {
+            name: name,
+            type: card.querySelector('.param-type').value,
+            description: card.querySelector('.param-desc').value.trim(),
+            required: card.querySelector('.param-required').checked
+        };
+
+        const defaultVal = card.querySelector('.param-default').value.trim();
+        if (defaultVal) param.default = defaultVal;
+
+        params.push(param);
+    });
+    return params;
+}
+
+function saveTool() {
+    const toolId = parseInt(document.getElementById('tool_id').value) || 0;
+    const toolName = document.getElementById('tool_name').value.trim();
+    const toolDescription = document.getElementById('tool_description').value.trim();
+    const promptTemplate = document.getElementById('prompt_template').value;
+    const isActive = document.getElementById('tool_is_active').checked;
+    const parametersSchema = getParametersSchema();
+
+    if (!toolName) {
+        alert('Tool name is required');
+        return;
+    }
+
+    if (!/^[a-z][a-z0-9_]*$/.test(toolName)) {
+        alert('Tool name must start with lowercase letter and contain only lowercase letters, numbers, and underscores');
+        return;
+    }
+
+    const body = new URLSearchParams({
+        tool_id: toolId,
+        tool_name: toolName,
+        tool_description: toolDescription,
+        parameters_schema: JSON.stringify(parametersSchema),
+        prompt_template: promptTemplate,
+        is_active: isActive ? '1' : '0',
+        csrf_token: csrfToken
+    });
+
+    fetch('/agents/saveTool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: body.toString()
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('toolModal')).hide();
+            loadTools();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to save tool'));
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e.message);
+    });
+}
+
+function deleteTool(toolId) {
+    if (!confirm('Are you sure you want to delete this tool?')) return;
+
+    fetch('/agents/deleteTool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: 'tool_id=' + toolId + '&csrf_token=' + csrfToken
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadTools();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete tool'));
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e.message);
+    });
+}
+
+function showTestModal(toolId) {
+    const tool = toolsData.find(t => t.id === toolId);
+    if (!tool) return;
+
+    document.getElementById('test-result').style.display = 'none';
+
+    let html = '<input type="hidden" id="test-tool-id" value="' + toolId + '">';
+    (tool.parameters_schema || []).forEach(param => {
+        html += `
+        <div class="mb-2">
+            <label class="form-label small">${escapeHtml(param.name)} (${param.type})${param.required ? ' *' : ''}</label>
+            <input type="text" class="form-control form-control-sm test-param"
+                   data-param="${escapeHtml(param.name)}"
+                   value="${escapeHtml(param.default || '')}"
+                   placeholder="${escapeHtml(param.description || param.name)}">
+        </div>`;
+    });
+
+    if (!tool.parameters_schema?.length) {
+        html += '<p class="text-muted">No parameters to configure.</p>';
+    }
+
+    document.getElementById('test-params-form').innerHTML = html;
+    new bootstrap.Modal(document.getElementById('testModal')).show();
+}
+
+function executeTest() {
+    const toolId = document.getElementById('test-tool-id').value;
+    const params = {};
+
+    document.querySelectorAll('.test-param').forEach(el => {
+        params[el.dataset.param] = el.value;
+    });
+
+    document.getElementById('test-result-content').textContent = 'Executing...';
+    document.getElementById('test-result').style.display = 'block';
+
+    fetch('/agents/testTool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: 'tool_id=' + toolId + '&test_params=' + encodeURIComponent(JSON.stringify(params)) + '&csrf_token=' + csrfToken
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('test-result-content').textContent =
+                typeof data.data.response === 'string'
+                    ? data.data.response
+                    : JSON.stringify(data.data, null, 2);
+        } else {
+            document.getElementById('test-result-content').textContent = 'Error: ' + (data.message || 'Test failed');
+        }
+    })
+    .catch(e => {
+        document.getElementById('test-result-content').textContent = 'Error: ' + e.message;
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+}
+</script>
 
     <?php endif; ?>
 </div>

@@ -392,6 +392,52 @@ CREATE TABLE IF NOT EXISTS `digestjobs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
+-- AI AGENT TABLES
+-- ============================================================================
+
+-- AI Agent profiles (LLM providers, MCP servers, hooks)
+CREATE TABLE IF NOT EXISTS `aiagents` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `member_id` INT NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `description` TEXT,
+    `provider` VARCHAR(50) DEFAULT 'claude_cli',
+    `provider_config` JSON,
+    `runner_type` VARCHAR(50) DEFAULT 'claude_cli',
+    `runner_config` JSON,
+    `mcp_servers` JSON DEFAULT '[]',
+    `hooks_config` JSON DEFAULT '{}',
+    `capabilities` JSON DEFAULT '[]',
+    `expose_as_mcp` TINYINT(1) DEFAULT 0,
+    `mcp_tool_name` VARCHAR(100),
+    `mcp_tool_description` TEXT,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `is_default` TINYINT(1) DEFAULT 0,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_member` (`member_id`),
+    INDEX `idx_active` (`is_active`),
+    INDEX `idx_default` (`is_default`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Agent custom MCP tools (multiple tools per agent)
+CREATE TABLE IF NOT EXISTS `agenttools` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `agent_id` INT UNSIGNED NOT NULL,
+    `tool_name` VARCHAR(100) NOT NULL,
+    `tool_description` TEXT,
+    `parameters_schema` JSON DEFAULT '[]',
+    `prompt_template` TEXT,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `idx_agenttools_name` (`agent_id`, `tool_name`),
+    INDEX `idx_agenttools_agent` (`agent_id`),
+    INDEX `idx_agenttools_active` (`is_active`),
+    FOREIGN KEY (`agent_id`) REFERENCES `aiagents`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
 -- SEED DATA
 -- ============================================================================
 

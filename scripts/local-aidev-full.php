@@ -349,12 +349,18 @@ if ($agentId) {
         $agentConfig = [
             'id' => $agentBean->id,
             'name' => $agentBean->name,
-            'runner_type' => $agentBean->runner_type,
+            'provider' => $agentBean->provider ?: 'claude_cli',
+            'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
+            'runner_type' => $agentBean->runner_type, // Legacy
             'runner_config' => json_decode($agentBean->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true)
         ];
-        echo "  Agent: {$agentConfig['name']} ({$agentConfig['runner_type']})\n";
+        $providerLabel = $agentConfig['provider'];
+        if (!empty($agentConfig['provider_config']['use_ollama'])) {
+            $providerLabel .= ' + Ollama';
+        }
+        echo "  Agent: {$agentConfig['name']} ({$providerLabel})\n";
     }
 }
 
@@ -365,6 +371,8 @@ if (!$agentConfig) {
         $agentConfig = [
             'id' => $defaultAgent->id,
             'name' => $defaultAgent->name,
+            'provider' => $defaultAgent->provider ?: 'claude_cli',
+            'provider_config' => json_decode($defaultAgent->provider_config ?: '{}', true),
             'runner_type' => $defaultAgent->runner_type,
             'runner_config' => json_decode($defaultAgent->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($defaultAgent->mcp_servers ?: '[]', true),
@@ -947,6 +955,38 @@ echo "Provider: Jira"
 PROVIDER_ECHO;
 }
 
+// ========================================
+// Ollama Backend Configuration
+// ========================================
+// If agent is configured to use Ollama as Claude's backend, set the env vars
+// See: https://docs.ollama.com/integrations/claude-code
+$ollamaEnvSection = '';
+$ollamaEchoSection = '';
+$ollamaModel = '';
+
+if ($agentConfig && !empty($agentConfig['provider_config']['use_ollama'])) {
+    $ollamaHost = $agentConfig['provider_config']['ollama_host'] ?? 'http://localhost:11434';
+    $ollamaModel = $agentConfig['provider_config']['ollama_model'] ?? 'qwen3-coder';
+
+    $ollamaEnvSection = <<<OLLAMA_ENV
+
+# Ollama Backend for Claude Code
+# This makes Claude Code use local Ollama instead of Anthropic API
+export ANTHROPIC_BASE_URL="{$ollamaHost}"
+export ANTHROPIC_API_KEY="ollama"
+OLLAMA_ENV;
+
+    $ollamaEchoSection = <<<OLLAMA_ECHO
+echo ""
+echo "=== Ollama Backend ==="
+echo "ANTHROPIC_BASE_URL: \$ANTHROPIC_BASE_URL"
+echo "Model: {$ollamaModel}"
+echo "Claude Code will use Ollama for inference"
+OLLAMA_ECHO;
+
+    echo "  Ollama Backend: {$ollamaHost} (model: {$ollamaModel})\n";
+}
+
 $envScript = <<<BASH
 #!/bin/bash
 # Environment setup for AI Developer session
@@ -954,6 +994,7 @@ $envScript = <<<BASH
 # Provider: {$provider}
 
 {$providerEnvSection}
+{$ollamaEnvSection}
 export GIT_TERMINAL_PROMPT="0"
 export TERM="xterm-256color"
 {$hookEnvSection}
@@ -965,6 +1006,7 @@ echo "Issue: {$issueKey}"
 echo "Summary: {$summary}"
 echo ""
 {$providerEchoSection}
+{$ollamaEchoSection}
 echo "MYCTOBOT_WORKSPACE: \$MYCTOBOT_WORKSPACE"
 echo "MYCTOBOT_JOB_ID: \$MYCTOBOT_JOB_ID"
 {$shopifyEchoSection}
@@ -1237,6 +1279,12 @@ JIRA_BASH;
 $updateScriptWithVars = str_replace('${WORK_DIR}', $workDir, $updateScript);
 $envScript .= $updateScriptWithVars;
 
+// Build Claude command with optional --model flag for Ollama
+$modelFlag = '';
+if (!empty($ollamaModel)) {
+    $modelFlag = "--model {$ollamaModel}";
+}
+
 if ($usePrintMode) {
     // Non-interactive mode with logging
     $logFile = "{$workDir}/session.log";
@@ -1245,7 +1293,7 @@ if ($usePrintMode) {
 echo "Starting Claude in print mode..."
 echo "Log file: {$logFile}"
 echo ""
-claude --print --dangerously-skip-permissions < prompt.txt 2>&1 | tee {$logFile}
+claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt 2>&1 | tee {$logFile}
 
 # Update issue tracker after Claude completes
 {$updateFunction} "{$logFile}" "{$logFile}"
@@ -1261,7 +1309,7 @@ echo ""
 
 # Use script to capture output while preserving TUI
 # Pass prompt content as argument (without -p) to start with message AND show TUI
-script -q session.log -c 'claude --dangerously-skip-permissions "\$(cat prompt.txt)"'
+script -q session.log -c 'claude --dangerously-skip-permissions {$modelFlag} "\$(cat prompt.txt)"'
 
 # Update issue tracker after Claude completes
 BASH;

@@ -104,6 +104,133 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                               placeholder="Optional description of this agent's purpose"><?= htmlspecialchars($agent['description'] ?? '') ?></textarea>
                 </div>
 
+                <?php if ($isNew): ?>
+                <!-- Provider Selection for New Agent -->
+                <div class="mb-3">
+                    <label for="provider" class="form-label">Provider <span class="text-danger">*</span></label>
+                    <select class="form-select" id="provider_create" name="provider" onchange="updateCreateProviderConfig()">
+                        <?php foreach ($providers as $p): ?>
+                        <option value="<?= $p['type'] ?>" <?= $provider === $p['type'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($p['name']) ?> - <?= htmlspecialchars($p['description']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <!-- Provider Config for New Agent (inline) -->
+                <div id="create-provider-config" class="mb-3">
+                    <!-- Claude CLI Config -->
+                    <div class="create-provider-config" id="create-config-claude_cli">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-terminal"></i> Claude CLI Settings</h6>
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="create-use-ollama" name="use_ollama"
+                                           onchange="toggleCreateClaudeBackend()">
+                                    <label class="form-check-label" for="create-use-ollama">
+                                        <i class="bi bi-cpu"></i> Use Ollama as backend
+                                    </label>
+                                </div>
+                                <div id="create-claude-anthropic">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select" name="model">
+                                        <option value="sonnet" selected>Sonnet (Recommended)</option>
+                                        <option value="opus">Opus</option>
+                                        <option value="haiku">Haiku (Fast)</option>
+                                    </select>
+                                </div>
+                                <div id="create-claude-ollama" style="display:none;">
+                                    <div class="mb-2">
+                                        <label class="form-label">Ollama Host</label>
+                                        <input type="text" class="form-control" name="ollama_host"
+                                               value="http://localhost:11434" placeholder="http://localhost:11434">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">Ollama Model</label>
+                                        <input type="text" class="form-control" name="ollama_model"
+                                               placeholder="qwen3-coder, codellama, llama3">
+                                        <div class="form-text">You can load models after the agent is created</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ollama Direct Config -->
+                    <div class="create-provider-config" id="create-config-ollama" style="display:none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cpu"></i> Ollama Settings</h6>
+                                <div class="mb-2">
+                                    <label class="form-label">Host URL</label>
+                                    <input type="text" class="form-control" name="host"
+                                           value="http://localhost:11434" placeholder="http://localhost:11434">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <input type="text" class="form-control" name="model"
+                                           placeholder="llama3, codellama, mistral">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OpenAI Config -->
+                    <div class="create-provider-config" id="create-config-openai" style="display:none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-stars"></i> OpenAI Settings</h6>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select" name="model">
+                                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                        <option value="gpt-4o">GPT-4o</option>
+                                        <option value="gpt-4o-mini">GPT-4o Mini</option>
+                                    </select>
+                                </div>
+                                <div class="form-text">API key is configured in Settings → Connections</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Claude API Config -->
+                    <div class="create-provider-config" id="create-config-claude_api" style="display:none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cloud"></i> Claude API Settings</h6>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select" name="model">
+                                        <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                                        <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                                    </select>
+                                </div>
+                                <div class="form-text">API key is configured in Settings → Connections</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Custom HTTP Config -->
+                    <div class="create-provider-config" id="create-config-custom_http" style="display:none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-globe"></i> Custom HTTP Settings</h6>
+                                <div class="mb-2">
+                                    <label class="form-label">Endpoint URL</label>
+                                    <input type="text" class="form-control" name="endpoint"
+                                           placeholder="https://api.example.com/v1/chat/completions">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <input type="text" class="form-control" name="model"
+                                           placeholder="Model name">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php else: ?>
+                <!-- Provider Display for Existing Agent (edit on Provider tab) -->
                 <div class="mb-3">
                     <label for="provider" class="form-label">Provider <span class="text-danger">*</span></label>
                     <select class="form-select" id="provider" name="provider" disabled>
@@ -117,6 +244,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         Provider configuration is on the <strong>Provider</strong> tab.
                     </div>
                 </div>
+                <?php endif; ?>
 
                 <hr>
 
@@ -606,14 +734,92 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="card bg-light">
                             <div class="card-body">
                                 <h6><i class="bi bi-terminal"></i> Claude CLI Settings</h6>
-                                <p class="text-muted small">Uses your logged-in Claude Code subscription. Runs in tmux for monitoring.</p>
-                                <div class="mb-2">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select provider-field" name="config_model">
-                                        <option value="sonnet" <?= ($providerConfig['model'] ?? 'sonnet') === 'sonnet' ? 'selected' : '' ?>>Sonnet (Recommended)</option>
-                                        <option value="opus" <?= ($providerConfig['model'] ?? '') === 'opus' ? 'selected' : '' ?>>Opus</option>
-                                        <option value="haiku" <?= ($providerConfig['model'] ?? '') === 'haiku' ? 'selected' : '' ?>>Haiku (Fast)</option>
-                                    </select>
+                                <p class="text-muted small">Uses Claude Code CLI. Can use Anthropic API or local Ollama as backend.</p>
+
+                                <!-- Backend Toggle -->
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input provider-field" type="checkbox" role="switch"
+                                               id="claude-use-ollama" name="config_use_ollama"
+                                               <?= !empty($providerConfig['use_ollama']) ? 'checked' : '' ?>
+                                               onchange="toggleClaudeBackend()">
+                                        <label class="form-check-label" for="claude-use-ollama">
+                                            <i class="bi bi-cpu"></i> Use Ollama as backend
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Run Claude Code with local Ollama models instead of Anthropic API</div>
+                                </div>
+
+                                <!-- Anthropic Backend (default) -->
+                                <div id="claude-anthropic-config">
+                                    <div class="mb-2">
+                                        <label class="form-label">Model</label>
+                                        <select class="form-select provider-field" name="config_model" id="claude-model-select">
+                                            <option value="sonnet" <?= ($providerConfig['model'] ?? 'sonnet') === 'sonnet' ? 'selected' : '' ?>>Sonnet (Recommended)</option>
+                                            <option value="opus" <?= ($providerConfig['model'] ?? '') === 'opus' ? 'selected' : '' ?>>Opus</option>
+                                            <option value="haiku" <?= ($providerConfig['model'] ?? '') === 'haiku' ? 'selected' : '' ?>>Haiku (Fast)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Ollama Backend -->
+                                <div id="claude-ollama-config" style="display: none;">
+                                    <div class="alert alert-info small py-2 mb-3">
+                                        <i class="bi bi-info-circle"></i>
+                                        Claude Code will run with Ollama. Requires Ollama running locally or accessible via network.
+                                        <a href="https://docs.ollama.com/integrations/claude-code" target="_blank">Learn more</a>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">Ollama Host</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control provider-field" name="config_ollama_host"
+                                                   id="claude-ollama-host"
+                                                   value="<?= htmlspecialchars($providerConfig['ollama_host'] ?? 'http://localhost:11434') ?>"
+                                                   placeholder="http://localhost:11434">
+                                            <button type="button" class="btn btn-outline-primary" onclick="loadClaudeOllamaModels()">
+                                                <i class="bi bi-arrow-clockwise"></i> Load Models
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">Ollama Model</label>
+                                        <select class="form-select provider-field" name="config_ollama_model" id="claude-ollama-model"
+                                                onchange="loadClaudeOllamaModelInfo(this.value)">
+                                            <option value="">-- Click "Load Models" to fetch --</option>
+                                            <?php if (!empty($providerConfig['ollama_model'])): ?>
+                                            <option value="<?= htmlspecialchars($providerConfig['ollama_model']) ?>" selected>
+                                                <?= htmlspecialchars($providerConfig['ollama_model']) ?>
+                                            </option>
+                                            <?php endif; ?>
+                                        </select>
+                                        <div class="form-text">
+                                            Recommended: <code>qwen3-coder</code>, <code>gpt-oss:20b</code>, <code>codellama</code>
+                                        </div>
+                                    </div>
+
+                                    <!-- Model Info Card for Claude+Ollama -->
+                                    <div id="claude-ollama-model-info" class="mb-3" style="display:none;">
+                                        <div class="card border-info">
+                                            <div class="card-header bg-info bg-opacity-10 py-2">
+                                                <strong id="claude-model-info-name">Model Info</strong>
+                                            </div>
+                                            <div class="card-body py-2 small">
+                                                <div class="row">
+                                                    <div class="col-6"><strong>Family:</strong> <span id="claude-model-info-family">-</span></div>
+                                                    <div class="col-6"><strong>Size:</strong> <span id="claude-model-info-size">-</span></div>
+                                                    <div class="col-6"><strong>Parameters:</strong> <span id="claude-model-info-params">-</span></div>
+                                                    <div class="col-6"><strong>Quantization:</strong> <span id="claude-model-info-quant">-</span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testClaudeOllamaConnection()">
+                                        <i class="bi bi-plug"></i> Test Ollama Connection
+                                    </button>
+                                    <span id="claude-ollama-test-result" class="ms-2"></span>
                                 </div>
                             </div>
                         </div>
@@ -804,7 +1010,12 @@ function prepareProviderConfig() {
     if (configEl) {
         configEl.querySelectorAll('.provider-field').forEach(field => {
             const name = field.name.replace('config_', '');
-            config[name] = field.value;
+            // Handle checkboxes properly
+            if (field.type === 'checkbox') {
+                config[name] = field.checked;
+            } else {
+                config[name] = field.value;
+            }
         });
     }
 
@@ -939,7 +1150,132 @@ function loadModelInfo(modelName) {
     .catch(e => console.log('Model info error:', e));
 }
 
-document.addEventListener('DOMContentLoaded', updateProviderForm);
+// Claude + Ollama backend functions
+function toggleClaudeBackend() {
+    const useOllama = document.getElementById('claude-use-ollama').checked;
+    document.getElementById('claude-anthropic-config').style.display = useOllama ? 'none' : 'block';
+    document.getElementById('claude-ollama-config').style.display = useOllama ? 'block' : 'none';
+}
+
+function loadClaudeOllamaModels() {
+    const host = document.getElementById('claude-ollama-host').value;
+    const modelSelect = document.getElementById('claude-ollama-model');
+    const currentModel = modelSelect.value;
+
+    modelSelect.innerHTML = '<option value="">Loading...</option>';
+
+    fetch('/agents/getModels', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= $csrf ?>'
+        },
+        body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data.models) {
+            modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
+            data.data.models.forEach(model => {
+                const opt = document.createElement('option');
+                opt.value = model.name;
+                const details = model.details || {};
+                const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+                const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+                opt.textContent = model.name + paramInfo + sizeInfo;
+                opt.dataset.family = details.family || '';
+                opt.dataset.params = details.parameter_size || '';
+                opt.dataset.quant = details.quantization || '';
+                opt.dataset.size = model.size_formatted || '';
+                if (model.name === currentModel) opt.selected = true;
+                modelSelect.appendChild(opt);
+            });
+            if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
+        } else {
+            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        }
+    })
+    .catch(e => {
+        modelSelect.innerHTML = '<option value="">Error: ' + e.message + '</option>';
+    });
+}
+
+function loadClaudeOllamaModelInfo(modelName) {
+    const infoCard = document.getElementById('claude-ollama-model-info');
+    if (!modelName) {
+        infoCard.style.display = 'none';
+        return;
+    }
+
+    const modelSelect = document.getElementById('claude-ollama-model');
+    const selectedOpt = modelSelect.options[modelSelect.selectedIndex];
+
+    document.getElementById('claude-model-info-name').textContent = modelName;
+    document.getElementById('claude-model-info-family').textContent = selectedOpt?.dataset.family || '-';
+    document.getElementById('claude-model-info-size').textContent = selectedOpt?.dataset.size || '-';
+    document.getElementById('claude-model-info-params').textContent = selectedOpt?.dataset.params || '-';
+    document.getElementById('claude-model-info-quant').textContent = selectedOpt?.dataset.quant || '-';
+    infoCard.style.display = 'block';
+}
+
+function testClaudeOllamaConnection() {
+    const host = document.getElementById('claude-ollama-host').value;
+    const resultEl = document.getElementById('claude-ollama-test-result');
+    resultEl.innerHTML = '<span class="text-muted">Testing...</span>';
+
+    fetch('/agents/testConnection', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= $csrf ?>'
+        },
+        body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data.success) {
+            resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + '</span>';
+            loadClaudeOllamaModels();
+        } else {
+            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || data.message || 'Failed') + '</span>';
+        }
+    })
+    .catch(e => {
+        resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
+    });
+}
+
+// Create form provider functions
+function updateCreateProviderConfig() {
+    const provider = document.getElementById('provider_create')?.value;
+    if (!provider) return;
+
+    document.querySelectorAll('.create-provider-config').forEach(el => el.style.display = 'none');
+    const configEl = document.getElementById('create-config-' + provider);
+    if (configEl) {
+        configEl.style.display = 'block';
+    }
+}
+
+function toggleCreateClaudeBackend() {
+    const useOllama = document.getElementById('create-use-ollama')?.checked;
+    const anthropicEl = document.getElementById('create-claude-anthropic');
+    const ollamaEl = document.getElementById('create-claude-ollama');
+    if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
+    if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // For edit form (Provider tab)
+    if (document.getElementById('provider_select')) {
+        updateProviderForm();
+        toggleClaudeBackend();
+    }
+    // For create form
+    if (document.getElementById('provider_create')) {
+        updateCreateProviderConfig();
+    }
+});
 </script>
 
     <?php elseif ($activeTab === 'capabilities'): ?>

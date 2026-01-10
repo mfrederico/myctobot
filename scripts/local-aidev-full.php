@@ -23,6 +23,7 @@ $options = getopt('', [
     'job-id:',
     'tenant:',
     'repo:',
+    'provider:',  // jira or github
     'attach',
     'repo-path:',
     'print',
@@ -57,6 +58,7 @@ require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/lib/TmuxManager.php';
 require_once $baseDir . '/lib/Bean.php';
 require_once $baseDir . '/services/JiraClient.php';
+require_once $baseDir . '/services/GitHubClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
 require_once $baseDir . '/services/AIDevAgentOrchestrator.php';
 require_once $baseDir . '/services/AIDevStatusService.php';
@@ -68,6 +70,7 @@ use \RedBeanPHP\R as R;
 use \app\TmuxManager;
 use \app\Bean;
 use \app\services\JiraClient;
+use \app\services\GitHubClient;
 use \app\services\EncryptionService;
 use \app\services\ShopifyClient;
 use \app\services\AIDevStatusService;
@@ -92,10 +95,11 @@ $issueKey = $options['issue'];
 $memberId = isset($options['member']) ? (int)$options['member'] : 3;
 $jobId = $options['job-id'] ?? null;
 $repoIdParam = isset($options['repo']) ? (int)$options['repo'] : null;
+$provider = $options['provider'] ?? 'jira';  // jira or github
 $autoAttach = isset($options['attach']);
 $usePrintMode = isset($options['print']);
 $dryRun = isset($options['dry-run']);
-$skipJira = isset($options['skip-jira']);
+$skipJira = isset($options['skip-jira']) || $provider === 'github';  // Skip Jira if using GitHub
 $repoPath = $options['repo-path'] ?? null;
 
 // Get domain identifier and session names from TmuxManager (single source of truth)
@@ -106,13 +110,16 @@ $cloudId = 'cb1fabf7-9018-49bb-90c7-afa23343dbe5';
 
 // Use TmuxManager for consistent session naming across all components
 $sessionName = TmuxManager::buildLocalRunnerSessionName($memberId, $issueKey);
-$workDir = "/tmp/local-aidev-{$domainId}-{$memberId}-{$issueKey}";
+// Sanitize issue key for directory path (GitHub issues contain / and #)
+$safeIssueKey = TmuxManager::sanitizeForSessionName($issueKey);
+$workDir = "/tmp/local-aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
 
 echo "===========================================\n";
 echo "Local AI Developer - Using YOUR Claude Account\n";
 echo "===========================================\n\n";
 echo "Domain: {$domainId}\n";
 if ($tenant) echo "Tenant: {$tenant}\n";
+echo "Provider: {$provider}\n";
 echo "Issue: {$issueKey}\n";
 echo "Member ID: {$memberId}\n";
 if ($jobId) echo "Job ID: {$jobId}\n";
@@ -145,86 +152,162 @@ $attachmentInfo = '';
 $linkedIssuesInfo = '';
 $urlsToCheck = [];
 
-if ($skipJira) {
-    echo "Skipping Jira API calls (--skip-jira flag)\n";
+if ($provider === 'github') {
+    // ============================================
+    // Fetch GitHub Issue Details
+    // ============================================
+    echo "Fetching issue details from GitHub...\n";
+    try {
+        // Parse GitHub issue key: owner/repo#number
+        if (!preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches)) {
+            echo "Error: Invalid GitHub issue format. Expected: owner/repo#number\n";
+            exit(1);
+        }
+        $ghOwner = $matches[1];
+        $ghRepo = $matches[2];
+        $ghIssueNumber = (int)$matches[3];
+
+        // Get GitHub token from enterprisesettings
+        UserDatabaseService::connect($memberId);
+        $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+        if (!$tokenSetting || empty($tokenSetting->setting_value)) {
+            echo "Error: No GitHub token found for member {$memberId}\n";
+            exit(1);
+        }
+        $githubToken = EncryptionService::decrypt($tokenSetting->setting_value);
+        $githubClient = new GitHubClient($githubToken);
+
+        // Fetch issue details
+        $issue = $githubClient->getIssue($ghOwner, $ghRepo, $ghIssueNumber);
+
+        $summary = $issue['title'] ?? '';
+        $description = $issue['body'] ?? '';
+        $issueType = 'Issue';
+        $status = $issue['state'] ?? 'open';
+        $priority = 'Medium';
+
+        // Get labels
+        $labels = array_map(fn($l) => $l['name'], $issue['labels'] ?? []);
+        if (in_array('bug', $labels)) $issueType = 'Bug';
+        if (in_array('enhancement', $labels)) $issueType = 'Enhancement';
+        if (in_array('feature', $labels)) $issueType = 'Feature';
+
+        echo "  Title: {$summary}\n";
+        echo "  Type: {$issueType}\n";
+        echo "  State: {$status}\n";
+        echo "  Labels: " . implode(', ', $labels) . "\n";
+
+        // Fetch comments
+        try {
+            $comments = $githubClient->getIssueComments($ghOwner, $ghRepo, $ghIssueNumber);
+            $commentCount = count($comments);
+            echo "  Comments: {$commentCount}\n";
+
+            foreach (array_slice($comments, -10) as $comment) {
+                $author = $comment['user']['login'] ?? 'Unknown';
+                $created = $comment['created_at'] ?? '';
+                $body = $comment['body'] ?? '';
+                $commentText .= "**{$author}** ({$created}):\n{$body}\n\n";
+            }
+        } catch (Exception $e) {
+            echo "  Warning: Could not fetch comments: " . $e->getMessage() . "\n";
+        }
+
+        // Extract URLs from description and comments
+        $urlsToCheck = extractUrls($description . ' ' . $commentText);
+        if (!empty($urlsToCheck)) {
+            echo "  URLs found: " . count($urlsToCheck) . "\n";
+        }
+
+        echo "\n";
+
+    } catch (Exception $e) {
+        echo "Error fetching GitHub issue: " . $e->getMessage() . "\n";
+        exit(1);
+    }
+} elseif ($skipJira) {
+    echo "Skipping issue API calls (--skip-jira flag)\n";
     $summary = "Test ticket {$issueKey}";
     $description = "Test description for database query testing";
 } else {
+    // ============================================
+    // Fetch Jira Issue Details
+    // ============================================
     echo "Fetching issue details from Jira...\n";
     try {
         $jiraClient = new JiraClient($memberId, $cloudId);
         $issue = $jiraClient->getIssue($issueKey);
 
-    // Extract basic fields
-    $summary = $issue['fields']['summary'] ?? '';
-    $description = JiraClient::extractTextFromAdf($issue['fields']['description'] ?? null);
-    $issueType = $issue['fields']['issuetype']['name'] ?? 'Task';
-    $priority = $issue['fields']['priority']['name'] ?? 'Medium';
-    $status = $issue['fields']['status']['name'] ?? 'Unknown';
+        // Extract basic fields
+        $summary = $issue['fields']['summary'] ?? '';
+        $description = JiraClient::extractTextFromAdf($issue['fields']['description'] ?? null);
+        $issueType = $issue['fields']['issuetype']['name'] ?? 'Task';
+        $priority = $issue['fields']['priority']['name'] ?? 'Medium';
+        $status = $issue['fields']['status']['name'] ?? 'Unknown';
 
-    echo "  Summary: {$summary}\n";
-    echo "  Type: {$issueType}\n";
-    echo "  Priority: {$priority}\n";
-    echo "  Status: {$status}\n";
+        echo "  Summary: {$summary}\n";
+        echo "  Type: {$issueType}\n";
+        echo "  Priority: {$priority}\n";
+        echo "  Status: {$status}\n";
 
-    // Extract comments (last 10)
-    $comments = $issue['fields']['comment']['comments'] ?? [];
-    $commentText = '';
-    $commentCount = count($comments);
-    echo "  Comments: {$commentCount}\n";
-    foreach (array_slice($comments, -10) as $comment) {
-        $author = $comment['author']['displayName'] ?? 'Unknown';
-        $created = $comment['created'] ?? '';
-        $body = JiraClient::extractTextFromAdf($comment['body']);
-        $commentText .= "**{$author}** ({$created}):\n{$body}\n\n";
-    }
-
-    // Extract attachments
-    $attachments = $issue['fields']['attachment'] ?? [];
-    $attachmentInfo = '';
-    if (!empty($attachments)) {
-        echo "  Attachments: " . count($attachments) . "\n";
-        $attachmentInfo = "## Attachments\n";
-        $attachmentInfo .= "The following files are attached to this ticket. Download and examine them as needed:\n\n";
-        foreach ($attachments as $att) {
-            $attachmentInfo .= "- **{$att['filename']}** ({$att['mimeType']}, " . number_format($att['size']) . " bytes)\n";
-            $attachmentInfo .= "  Download URL: {$att['content']}\n";
+        // Extract comments (last 10)
+        $comments = $issue['fields']['comment']['comments'] ?? [];
+        $commentText = '';
+        $commentCount = count($comments);
+        echo "  Comments: {$commentCount}\n";
+        foreach (array_slice($comments, -10) as $comment) {
+            $author = $comment['author']['displayName'] ?? 'Unknown';
+            $created = $comment['created'] ?? '';
+            $body = JiraClient::extractTextFromAdf($comment['body']);
+            $commentText .= "**{$author}** ({$created}):\n{$body}\n\n";
         }
-    }
 
-    // Extract URLs from description and comments
-    $urlsToCheck = extractUrls($description . ' ' . $commentText);
-    if (!empty($urlsToCheck)) {
-        echo "  URLs found: " . count($urlsToCheck) . "\n";
-    }
-
-    // Get linked issues
-    $linkedIssues = $issue['fields']['issuelinks'] ?? [];
-    $linkedIssuesInfo = '';
-    if (!empty($linkedIssues)) {
-        echo "  Linked issues: " . count($linkedIssues) . "\n";
-        $linkedIssuesInfo = "## Linked Issues\n";
-        foreach ($linkedIssues as $link) {
-            $linkType = $link['type']['name'] ?? 'Related';
-            if (isset($link['outwardIssue'])) {
-                $linkedKey = $link['outwardIssue']['key'];
-                $linkedSummary = $link['outwardIssue']['fields']['summary'] ?? '';
-                $linkedIssuesInfo .= "- {$linkType}: [{$linkedKey}] {$linkedSummary}\n";
-            } elseif (isset($link['inwardIssue'])) {
-                $linkedKey = $link['inwardIssue']['key'];
-                $linkedSummary = $link['inwardIssue']['fields']['summary'] ?? '';
-                $linkedIssuesInfo .= "- {$linkType}: [{$linkedKey}] {$linkedSummary}\n";
+        // Extract attachments
+        $attachments = $issue['fields']['attachment'] ?? [];
+        $attachmentInfo = '';
+        if (!empty($attachments)) {
+            echo "  Attachments: " . count($attachments) . "\n";
+            $attachmentInfo = "## Attachments\n";
+            $attachmentInfo .= "The following files are attached to this ticket. Download and examine them as needed:\n\n";
+            foreach ($attachments as $att) {
+                $attachmentInfo .= "- **{$att['filename']}** ({$att['mimeType']}, " . number_format($att['size']) . " bytes)\n";
+                $attachmentInfo .= "  Download URL: {$att['content']}\n";
             }
         }
-    }
 
-    echo "\n";
+        // Extract URLs from description and comments
+        $urlsToCheck = extractUrls($description . ' ' . $commentText);
+        if (!empty($urlsToCheck)) {
+            echo "  URLs found: " . count($urlsToCheck) . "\n";
+        }
+
+        // Get linked issues
+        $linkedIssues = $issue['fields']['issuelinks'] ?? [];
+        $linkedIssuesInfo = '';
+        if (!empty($linkedIssues)) {
+            echo "  Linked issues: " . count($linkedIssues) . "\n";
+            $linkedIssuesInfo = "## Linked Issues\n";
+            foreach ($linkedIssues as $link) {
+                $linkType = $link['type']['name'] ?? 'Related';
+                if (isset($link['outwardIssue'])) {
+                    $linkedKey = $link['outwardIssue']['key'];
+                    $linkedSummary = $link['outwardIssue']['fields']['summary'] ?? '';
+                    $linkedIssuesInfo .= "- {$linkType}: [{$linkedKey}] {$linkedSummary}\n";
+                } elseif (isset($link['inwardIssue'])) {
+                    $linkedKey = $link['inwardIssue']['key'];
+                    $linkedSummary = $link['inwardIssue']['fields']['summary'] ?? '';
+                    $linkedIssuesInfo .= "- {$linkType}: [{$linkedKey}] {$linkedSummary}\n";
+                }
+            }
+        }
+
+        echo "\n";
 
     } catch (Exception $e) {
         echo "Error fetching Jira issue: " . $e->getMessage() . "\n";
         exit(1);
     }
-} // end else (!$skipJira)
+}
 
 // ============================================
 // Get Repository Configuration

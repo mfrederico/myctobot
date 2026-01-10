@@ -31,7 +31,7 @@ class TmuxService {
      * Create a TmuxService for a specific member and issue
      *
      * @param int $memberId Member ID
-     * @param string $issueKey Jira issue key
+     * @param string $issueKey Issue key (Jira like PROJ-123, or GitHub like owner/repo#123)
      * @param string|null $repoPath Optional repository path (for local runner)
      */
     public function __construct(int $memberId, string $issueKey, ?string $repoPath = null) {
@@ -41,7 +41,9 @@ class TmuxService {
         $this->sessionName = TmuxManager::buildSessionName($memberId, $issueKey);
         $this->localSessionName = TmuxManager::buildLocalRunnerSessionName($memberId, $issueKey);
         $domainId = TmuxManager::getDomainId();
-        $this->workDir = "/tmp/aidev-{$domainId}-{$memberId}-{$issueKey}";
+        // Sanitize issue key for directory path (GitHub issues contain / and #)
+        $safeIssueKey = TmuxManager::sanitizeForSessionName($issueKey);
+        $this->workDir = "/tmp/aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
     }
 
     /**

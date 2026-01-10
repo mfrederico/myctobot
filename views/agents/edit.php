@@ -156,25 +156,6 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         </div>
                     </div>
 
-                    <!-- Ollama Direct Config -->
-                    <div class="create-provider-config" id="create-config-ollama" style="display:none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-cpu"></i> Ollama Settings</h6>
-                                <div class="mb-2">
-                                    <label class="form-label">Host URL</label>
-                                    <input type="text" class="form-control" name="host"
-                                           value="http://localhost:11434" placeholder="http://localhost:11434">
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label">Model</label>
-                                    <input type="text" class="form-control" name="model"
-                                           placeholder="llama3, codellama, mistral">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- OpenAI Config -->
                     <div class="create-provider-config" id="create-config-openai" style="display:none;">
                         <div class="card bg-light">
@@ -853,95 +834,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         </div>
                     </div>
 
-                    <!-- Ollama -->
-                    <div class="provider-config" id="config-ollama" style="display: none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-cpu"></i> Ollama Settings</h6>
-                                <p class="text-muted small">Connect to a local or remote Ollama instance.</p>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Host URL</label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control provider-field" name="config_host" id="ollama-host"
-                                               value="<?= htmlspecialchars($providerConfig['host'] ?? 'http://localhost:11434') ?>"
-                                               placeholder="http://localhost:11434">
-                                        <button type="button" class="btn btn-outline-primary" onclick="loadOllamaModels()">
-                                            <i class="bi bi-arrow-clockwise"></i> Load Models
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select provider-field" name="config_model" id="ollama-model"
-                                            onchange="loadModelInfo(this.value)">
-                                        <option value="">-- Click "Load Models" to fetch available models --</option>
-                                        <?php if (!empty($providerConfig['model'])): ?>
-                                        <option value="<?= htmlspecialchars($providerConfig['model']) ?>" selected>
-                                            <?= htmlspecialchars($providerConfig['model']) ?>
-                                        </option>
-                                        <?php endif; ?>
-                                    </select>
-                                    <div id="ollama-models-loading" class="form-text text-muted" style="display:none;">
-                                        <span class="spinner-border spinner-border-sm"></span> Loading models...
-                                    </div>
-                                </div>
-
-                                <!-- Model Info Card -->
-                                <div id="ollama-model-info" class="mb-3" style="display:none;">
-                                    <div class="card border-info">
-                                        <div class="card-header bg-info bg-opacity-10 py-2">
-                                            <strong id="model-info-name">Model Info</strong>
-                                        </div>
-                                        <div class="card-body py-2">
-                                            <div class="row small">
-                                                <div class="col-6">
-                                                    <strong>Family:</strong> <span id="model-info-family">-</span>
-                                                </div>
-                                                <div class="col-6">
-                                                    <strong>Size:</strong> <span id="model-info-size">-</span>
-                                                </div>
-                                                <div class="col-6">
-                                                    <strong>Parameters:</strong> <span id="model-info-params">-</span>
-                                                </div>
-                                                <div class="col-6">
-                                                    <strong>Quantization:</strong> <span id="model-info-quant">-</span>
-                                                </div>
-                                            </div>
-                                            <div id="model-info-system" class="mt-2 small" style="display:none;">
-                                                <strong>System Prompt:</strong>
-                                                <pre class="bg-dark text-light p-2 rounded small mb-0" style="max-height:100px;overflow:auto;"></pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="row">
-                                    <div class="col-md-6 mb-2">
-                                        <label class="form-label">Temperature</label>
-                                        <input type="number" class="form-control provider-field" name="config_temperature"
-                                               value="<?= htmlspecialchars($providerConfig['temperature'] ?? '0.7') ?>"
-                                               min="0" max="2" step="0.1">
-                                    </div>
-                                    <div class="col-md-6 mb-2">
-                                        <label class="form-label">Context Length</label>
-                                        <input type="number" class="form-control provider-field" name="config_context_length"
-                                               value="<?= htmlspecialchars($providerConfig['context_length'] ?? '8192') ?>"
-                                               min="1024" max="131072" step="1024">
-                                    </div>
-                                </div>
-
-                                <div class="d-flex gap-2 mt-2">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testOllamaConnection()">
-                                        <i class="bi bi-plug"></i> Test Connection
-                                    </button>
-                                    <span id="ollama-test-result" class="align-self-center"></span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- OpenAI -->
                     <div class="provider-config" id="config-openai" style="display: none;">
                         <div class="card bg-light">
@@ -1050,139 +942,16 @@ function prepareProviderConfig() {
     document.getElementById('provider_config_json').value = JSON.stringify(config);
 }
 
-function testOllamaConnection() {
-    const host = document.querySelector('#config-ollama input[name="config_host"]').value;
-    const resultEl = document.getElementById('ollama-test-result');
-    resultEl.innerHTML = '<span class="text-muted">Testing...</span>';
-
-    fetch('/agents/testConnection', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
-        },
-        body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && data.data.success) {
-            resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + '</span>';
-            // Auto-load models on successful connection
-            loadOllamaModels();
-        } else {
-            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || data.message || 'Failed') + '</span>';
-        }
-    })
-    .catch(e => {
-        resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
-    });
-}
-
-function loadOllamaModels() {
-    const host = document.getElementById('ollama-host').value;
-    const modelSelect = document.getElementById('ollama-model');
-    const loadingEl = document.getElementById('ollama-models-loading');
-    const currentModel = modelSelect.value;
-
-    loadingEl.style.display = 'block';
-
-    fetch('/agents/getModels', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
-        },
-        body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
-    })
-    .then(r => r.json())
-    .then(data => {
-        loadingEl.style.display = 'none';
-        if (data.success && data.data.models) {
-            modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
-            data.data.models.forEach(model => {
-                const opt = document.createElement('option');
-                opt.value = model.name;
-                const details = model.details || {};
-                const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
-                const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
-                opt.textContent = model.name + paramInfo + sizeInfo;
-                opt.dataset.family = details.family || '';
-                opt.dataset.params = details.parameter_size || '';
-                opt.dataset.quant = details.quantization || '';
-                opt.dataset.size = model.size_formatted || '';
-                if (model.name === currentModel) opt.selected = true;
-                modelSelect.appendChild(opt);
-            });
-            // Load info for current selection
-            if (modelSelect.value) {
-                loadModelInfo(modelSelect.value);
-            }
-        } else {
-            modelSelect.innerHTML = '<option value="">Error loading models</option>';
-        }
-    })
-    .catch(e => {
-        loadingEl.style.display = 'none';
-        modelSelect.innerHTML = '<option value="">Error: ' + e.message + '</option>';
-    });
-}
-
-function loadModelInfo(modelName) {
-    const infoCard = document.getElementById('ollama-model-info');
-    if (!modelName) {
-        infoCard.style.display = 'none';
-        return;
-    }
-
-    const host = document.getElementById('ollama-host').value;
-    const modelSelect = document.getElementById('ollama-model');
-    const selectedOpt = modelSelect.options[modelSelect.selectedIndex];
-
-    // Show quick info from dropdown data attributes first
-    document.getElementById('model-info-name').textContent = modelName;
-    document.getElementById('model-info-family').textContent = selectedOpt?.dataset.family || '-';
-    document.getElementById('model-info-size').textContent = selectedOpt?.dataset.size || '-';
-    document.getElementById('model-info-params').textContent = selectedOpt?.dataset.params || '-';
-    document.getElementById('model-info-quant').textContent = selectedOpt?.dataset.quant || '-';
-    infoCard.style.display = 'block';
-
-    // Fetch detailed model info
-    fetch('/agents/getModelInfo', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
-        },
-        body: 'provider=ollama&model=' + encodeURIComponent(modelName) + '&config=' + encodeURIComponent(JSON.stringify({host: host}))
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success && data.data.success) {
-            const info = data.data;
-            // Update with detailed info
-            if (info.details) {
-                document.getElementById('model-info-family').textContent = info.details.family || '-';
-                document.getElementById('model-info-params').textContent = info.details.parameter_size || '-';
-                document.getElementById('model-info-quant').textContent = info.details.quantization_level || '-';
-            }
-            // Show system prompt if present
-            const systemEl = document.getElementById('model-info-system');
-            if (info.system) {
-                systemEl.querySelector('pre').textContent = info.system;
-                systemEl.style.display = 'block';
-            } else {
-                systemEl.style.display = 'none';
-            }
-        }
-    })
-    .catch(e => console.log('Model info error:', e));
-}
-
 // Claude + Ollama backend functions
 function toggleClaudeBackend() {
     const useOllama = document.getElementById('claude-use-ollama').checked;
     document.getElementById('claude-anthropic-config').style.display = useOllama ? 'none' : 'block';
     document.getElementById('claude-ollama-config').style.display = useOllama ? 'block' : 'none';
+
+    // Auto-load models when toggling on
+    if (useOllama) {
+        loadClaudeOllamaModels();
+    }
 }
 
 function loadClaudeOllamaModels() {

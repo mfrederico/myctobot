@@ -15,24 +15,17 @@ class LLMProviderFactory
     public const PROVIDERS = [
         'claude_cli' => [
             'name' => 'Claude CLI',
-            'description' => 'Uses your Claude Code subscription (runs in tmux)',
+            'description' => 'Claude Code CLI - can use Anthropic or local Ollama',
             'class' => null, // Special case - not an API provider
             'can_orchestrate' => true,
             'requires_api_key' => false
         ],
         'claude_api' => [
             'name' => 'Claude API',
-            'description' => 'Uses Anthropic API credits',
+            'description' => 'Uses Anthropic API credits (no CLI)',
             'class' => 'ClaudeApiProvider',
             'can_orchestrate' => false,
             'requires_api_key' => true
-        ],
-        'ollama' => [
-            'name' => 'Ollama (Local)',
-            'description' => 'Local LLM inference via Ollama',
-            'class' => 'OllamaProvider',
-            'can_orchestrate' => false,
-            'requires_api_key' => false
         ],
         'openai' => [
             'name' => 'OpenAI',
@@ -49,6 +42,16 @@ class LLMProviderFactory
             'requires_api_key' => false
         ]
     ];
+
+    /**
+     * Get OllamaProvider for model discovery (used by Claude CLI + Ollama)
+     * Note: 'ollama' is not a standalone provider, but OllamaProvider is used
+     * for fetching model lists when Claude CLI uses Ollama as backend.
+     */
+    public static function getOllamaProvider(array $config): OllamaProvider
+    {
+        return new OllamaProvider($config);
+    }
 
     /**
      * Create a provider instance

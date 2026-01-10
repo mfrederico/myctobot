@@ -610,11 +610,48 @@ class Enterprise extends BaseControls\Control {
             $repo->access_token = $encryptedToken;
             $repo->enabled = 1;
             $repo->updated_at = date('Y-m-d H:i:s');
+
+            // Generate webhook secret and try to create webhook on GitHub
+            $webhookSecret = bin2hex(random_bytes(20));
+            $repo->webhook_secret = $webhookSecret;
+
+            $webhookCreated = false;
+            $webhookError = null;
+            try {
+                $baseUrl = rtrim(Flight::get('app.baseurl') ?? 'https://myctobot.ai', '/');
+                $webhookUrl = $baseUrl . '/webhook/github';
+
+                // Check if webhook already exists
+                $existingHook = $github->findWebhook($owner, $repoName, $webhookUrl);
+                if ($existingHook) {
+                    $repo->webhook_id = $existingHook['id'];
+                    $webhookCreated = true;
+                } else {
+                    // Create webhook
+                    $hook = $github->createWebhook($owner, $repoName, $webhookUrl, $webhookSecret);
+                    $repo->webhook_id = $hook['id'];
+                    $webhookCreated = true;
+                }
+
+                // Ensure ai-dev label exists
+                $github->ensureAiDevLabel($owner, $repoName);
+            } catch (\Exception $e) {
+                $webhookError = $e->getMessage();
+                $this->logger->warning('Failed to create webhook', [
+                    'repo' => $repoFullName,
+                    'error' => $webhookError
+                ]);
+            }
+
             Bean::store($repo);
 
             $this->disconnectUserDb();
 
-            $this->flash('success', "Repository {$repoFullName} connected successfully!");
+            $message = "Repository {$repoFullName} connected successfully!";
+            if (!$webhookCreated) {
+                $message .= " (Webhook setup failed - you may need to set it up manually)";
+            }
+            $this->flash('success', $message);
             $this->logger->info('Repository connected', [
                 'member_id' => $this->member->id,
                 'repo' => $repoFullName
@@ -821,6 +858,7 @@ class Enterprise extends BaseControls\Control {
                 'access_token' => $bean->access_token,
                 'enabled' => $bean->enabled,
                 'issues_enabled' => $bean->issues_enabled ?? 0,
+                'webhook_id' => $bean->webhook_id,
                 'agent_id' => $bean->agent_id,
                 'agent_name' => $agentName,
                 'created_at' => $bean->created_at,

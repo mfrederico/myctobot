@@ -157,7 +157,7 @@ $gitConnected = $gitConnected ?? false;
                         <h5>Manual Repository Setup</h5>
                         <p class="text-muted">You can manually add any git repository using SSH or HTTPS clone URLs.</p>
 
-                        <a href="/enterprise/repos" class="btn btn-primary btn-lg">
+                        <a href="/github/repos" class="btn btn-primary btn-lg">
                             <i class="bi bi-plus-circle me-2"></i>Set Up Repository
                         </a>
 

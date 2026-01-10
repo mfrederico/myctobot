@@ -16,7 +16,7 @@
                     <a href="https://console.anthropic.com/settings/billing" target="_blank" class="btn btn-sm btn-outline-danger me-2">
                         <i class="bi bi-credit-card"></i> Add Credits at Anthropic
                     </a>
-                    <a href="/enterprise/settings" class="btn btn-sm btn-outline-secondary">
+                    <a href="/settings/connections" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-key"></i> Update API Key
                     </a>
                 </div>
@@ -50,7 +50,7 @@
                             </div>
                             <small class="text-muted"><?= $apiKeySet ? 'Configured' : 'Not configured' ?></small>
                             <?php if (!$apiKeySet): ?>
-                                <div><a href="/enterprise/settings" class="btn btn-sm btn-primary mt-2">Configure</a></div>
+                                <div><a href="/settings/connections" class="btn btn-sm btn-primary mt-2">Configure</a></div>
                             <?php endif; ?>
                         </div>
                         <div class="col-md-3 text-center mb-3">
@@ -60,7 +60,7 @@
                             <div class="fw-bold">GitHub</div>
                             <small class="text-muted"><?= $githubConnected ? 'Connected' : 'Not connected' ?></small>
                             <?php if (!$githubConnected && $githubConfigured): ?>
-                                <div><a href="/enterprise/github" class="btn btn-sm btn-dark mt-2"><i class="bi bi-github"></i> Connect</a></div>
+                                <div><a href="/github" class="btn btn-sm btn-dark mt-2"><i class="bi bi-github"></i> Connect</a></div>
                             <?php endif; ?>
                         </div>
                         <div class="col-md-3 text-center mb-3">
@@ -70,7 +70,7 @@
                             <div class="fw-bold">Repositories</div>
                             <small class="text-muted"><?= count($repos) ?> connected</small>
                             <?php if (count($repos) === 0): ?>
-                                <div><a href="/enterprise/repos" class="btn btn-sm btn-primary mt-2">Add Repository</a></div>
+                                <div><a href="/github/repos" class="btn btn-sm btn-primary mt-2">Add Repository</a></div>
                             <?php endif; ?>
                         </div>
                         <div class="col-md-3 text-center mb-3">
@@ -80,7 +80,7 @@
                             <div class="fw-bold">Jira Write</div>
                             <small class="text-muted"><?= $hasWriteScopes ? 'Enabled' : 'Upgrade needed' ?></small>
                             <?php if (!$hasWriteScopes): ?>
-                                <div><a href="/enterprise/upgradescopes" class="btn btn-sm btn-warning mt-2">Upgrade Scopes</a></div>
+                                <div><a href="/atlassian/upgradescopes" class="btn btn-sm btn-warning mt-2">Upgrade Scopes</a></div>
                             <?php endif; ?>
                         </div>
                     </div>
@@ -93,10 +93,10 @@
     <div class="row mb-4">
         <div class="col-12">
             <div class="btn-group w-100" role="group">
-                <a href="/enterprise/repos" class="btn btn-outline-primary">
+                <a href="/github/repos" class="btn btn-outline-primary">
                     <i class="bi bi-folder"></i> Repositories
                 </a>
-                <a href="/enterprise/jobs" class="btn btn-outline-primary">
+                <a href="/jobs" class="btn btn-outline-primary">
                     <i class="bi bi-list-task"></i> Jobs
                 </a>
                 <a href="/agents" class="btn btn-outline-primary">
@@ -105,7 +105,7 @@
                 <a href="/admin/shards" class="btn btn-outline-primary">
                     <i class="bi bi-pc-display-horizontal"></i> Workstations
                 </a>
-                <a href="/enterprise/settings" class="btn btn-outline-primary">
+                <a href="/settings/connections" class="btn btn-outline-primary">
                     <i class="bi bi-gear"></i> Settings
                 </a>
             </div>
@@ -120,7 +120,7 @@
         </div>
         <div class="card-body">
             <?php foreach ($activeJobs as $job): ?>
-            <a href="/enterprise/job/<?= urlencode($job['issue_key']) ?>" class="text-decoration-none text-body">
+            <a href="/jobs/view/<?= urlencode($job['issue_key']) ?>" class="text-decoration-none text-body">
                 <div class="border rounded p-3 mb-2 job-card" id="job-<?= htmlspecialchars($job['issue_key']) ?>">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
@@ -208,7 +208,7 @@
                         <li>AI clones repo, implements changes, creates PR</li>
                         <li>Review and merge the PR</li>
                     </ol>
-                    <a href="/enterprise/jobs" class="btn btn-outline-primary">
+                    <a href="/jobs" class="btn btn-outline-primary">
                         <i class="bi bi-list-ul"></i> View All Jobs
                     </a>
                 </div>
@@ -221,7 +221,7 @@
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <h5 class="card-title mb-0">Recent Jobs</h5>
-            <a href="/enterprise/jobs" class="btn btn-sm btn-outline-primary">View All</a>
+            <a href="/jobs" class="btn btn-sm btn-outline-primary">View All</a>
         </div>
         <div class="table-responsive">
             <table class="table table-hover mb-0">
@@ -236,7 +236,7 @@
                 </thead>
                 <tbody>
                     <?php foreach (array_slice($jobs, 0, 5) as $job): ?>
-                    <tr class="cursor-pointer" onclick="window.location='/enterprise/job/<?= urlencode($job['issue_key']) ?>'">
+                    <tr class="cursor-pointer" onclick="window.location='/jobs/view/<?= urlencode($job['issue_key']) ?>'">
                         <td><strong><?= htmlspecialchars($job['issue_key']) ?></strong></td>
                         <td>
                             <span class="badge <?php
@@ -267,7 +267,7 @@
                             <?php endif; ?>
                         </td>
                         <td><small class="text-muted"><?= htmlspecialchars($job['started_at'] ?? $job['created_at'] ?? '') ?></small></td>
-                        <td><a href="/enterprise/job/<?= urlencode($job['issue_key']) ?>" class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation();"><i class="bi bi-eye"></i></a></td>
+                        <td><a href="/jobs/view/<?= urlencode($job['issue_key']) ?>" class="btn btn-sm btn-outline-secondary" onclick="event.stopPropagation();"><i class="bi bi-eye"></i></a></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -299,7 +299,7 @@
                     <li>Navigate to <strong>API Keys</strong> in your account settings</li>
                     <li>Click <strong>Create Key</strong> to generate a new API key</li>
                     <li>Copy the key (it starts with <code>sk-ant-</code>)</li>
-                    <li>Paste it in the <a href="/enterprise/settings">Enterprise Settings</a> page</li>
+                    <li>Paste it in the <a href="/settings/connections">Settings</a> page</li>
                 </ol>
                 <div class="alert alert-info mb-0">
                     <i class="bi bi-info-circle"></i>
@@ -344,7 +344,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const cloudId = selectedBoardOption.getAttribute('data-cloud-id') || '';
 
             try {
-                const response = await fetch('/enterprise/startjob', {
+                const response = await fetch('/jobs/start', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                     body: new URLSearchParams({

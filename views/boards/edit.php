@@ -199,7 +199,7 @@
                                             </select>
                                             <div class="form-text">
                                                 <?php if (empty($anthropicKeys)): ?>
-                                                    <a href="/enterprise/settings">Add API keys</a> to use remote execution with different models.
+                                                    <a href="/settings/connections">Add API keys</a> to use remote execution with different models.
                                                 <?php else: ?>
                                                     Choose Local Runner for no API charges, or select an API key for remote shard execution.
                                                 <?php endif; ?>

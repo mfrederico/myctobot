@@ -210,7 +210,7 @@ async function retryJob(jobId) {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
-        const response = await fetch('/enterprise/retryjob/' + jobId, {
+        const response = await fetch('/jobs/retry/' + jobId, {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'}
         });
@@ -242,7 +242,7 @@ async function resumeJob(jobId) {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
-        const response = await fetch('/enterprise/resumejob/' + jobId, {
+        const response = await fetch('/jobs/resume/' + jobId, {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'}
         });
@@ -271,7 +271,7 @@ async function showJobLogs(jobId) {
     modal.show();
 
     try {
-        const response = await fetch('/enterprise/joblogs/' + jobId);
+        const response = await fetch('/jobs/logs/' + jobId);
         const data = await response.json();
 
         if (data.success && data.logs) {
@@ -296,7 +296,7 @@ async function showJobLogs(jobId) {
 setInterval(async function() {
     <?php foreach ($activeJobs as $job): ?>
     try {
-        const response = await fetch('/enterprise/jobstatus/<?= htmlspecialchars($job['job_id']) ?>');
+        const response = await fetch('/jobs/status/<?= htmlspecialchars($job['job_id']) ?>');
         const data = await response.json();
 
         if (data.success && data.status) {

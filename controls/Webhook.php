@@ -1063,6 +1063,58 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
+     * Augment a running local Claude session with a GitHub comment
+     *
+     * Similar to Jira's augmentLocalSession, this sends new GitHub issue
+     * comments to running tmux sessions so Claude can react to real-time updates.
+     */
+    private function augmentGitHubLocalSession(string $issueKey, int $memberId, string $author, string $body): void {
+        // Skip bot comments (our own comments)
+        if (strpos(strtolower($author), 'bot') !== false || strpos($body, 'MyCTOBot') !== false) {
+            $this->logger->debug('GitHub: Skipping bot comment', ['author' => $author]);
+            return;
+        }
+
+        // Check if there's a running tmux session for this issue
+        $tmux = new TmuxService($memberId, $issueKey);
+        if (!$tmux->exists()) {
+            $this->logger->debug('GitHub: No running tmux session to augment', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+            return;
+        }
+
+        $this->logger->info('GitHub: Augmenting running session with new comment', [
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'author' => $author
+        ]);
+
+        // Truncate very long comments
+        if (strlen($body) > 2000) {
+            $body = substr($body, 0, 2000) . '... [truncated]';
+        }
+
+        // Build message for Claude
+        $message = "[GITHUB UPDATE] New comment from @{$author}: {$body}";
+
+        // Send to session
+        if ($tmux->sendMessage($message)) {
+            $this->logger->info('Sent GitHub comment to local Claude session', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId,
+                'author' => $author
+            ]);
+        } else {
+            $this->logger->warning('Failed to send GitHub comment to session', [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+        }
+    }
+
+    /**
      * Handle GitHub webhook
      * Endpoint: POST /webhook/github
      *
@@ -1089,6 +1141,18 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Check for workspace query parameter (tenant identifier)
+        $workspace = $_GET['workspace'] ?? null;
+        if ($workspace && $workspace !== 'default') {
+            if (!$this->switchToTenantForWebhook($workspace)) {
+                $this->logger->warning('GitHub webhook: invalid workspace', ['workspace' => $workspace]);
+                Flight::response()->status(400);
+                echo json_encode(['error' => "Invalid workspace: {$workspace}"]);
+                return;
+            }
+            $this->logger->info("GitHub webhook using workspace: {$workspace}");
+        }
+
         // Get repo full name from payload to look up tenant and secret
         $repoFullName = $data['repository']['full_name'] ?? '';
         if (empty($repoFullName)) {
@@ -1098,8 +1162,8 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Find the repo connection and switch to tenant
-        $repoConnection = $this->findGitHubRepoConnection($repoFullName);
+        // Find the repo connection (if workspace was set, searches that tenant's DB first)
+        $repoConnection = $this->findGitHubRepoConnection($repoFullName, $workspace);
         if (!$repoConnection) {
             $this->logger->debug('GitHub webhook: repo not connected', ['repo' => $repoFullName]);
             // Return 200 so GitHub doesn't keep retrying
@@ -1136,8 +1200,36 @@ class Webhook extends BaseControls\Control {
     /**
      * Find GitHub repo connection across all tenants
      * Returns repo data with tenant info if found
+     *
+     * @param string $fullName Repository full name (owner/repo)
+     * @param string|null $workspace If provided, search this tenant first (already switched)
      */
-    private function findGitHubRepoConnection(string $fullName): ?array {
+    private function findGitHubRepoConnection(string $fullName, ?string $workspace = null): ?array {
+        // Split full_name into owner/name
+        $parts = explode('/', $fullName, 2);
+        if (count($parts) !== 2) {
+            return null;
+        }
+        list($repoOwner, $repoName) = $parts;
+
+        // If workspace is provided, we already switched to that tenant's database
+        // Search it first before falling back to all tenants
+        if ($workspace && $workspace !== 'default') {
+            $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
+            if ($repo) {
+                $repoData = $repo->export();
+                $repoData['tenant'] = $workspace;
+                // Use member_id from repo connection if stored, otherwise fall back to tenant lookup
+                if (empty($repoData['member_id'])) {
+                    $repoData['member_id'] = $this->findMemberIdForTenant($workspace);
+                }
+                Flight::set('tenant.slug', $workspace);
+                Flight::set('tenant.active', true);
+                return $repoData;
+            }
+            // Not found in specified workspace, fall through to search all tenants
+        }
+
         // Search all tenant configs for this repo
         $confDir = __DIR__ . '/../conf';
         $configs = glob($confDir . '/config.*.ini');
@@ -1182,20 +1274,17 @@ class Webhook extends BaseControls\Control {
 
                 R::selectDatabase($tenantDbKey);
 
-                // Look for repo connection - split full_name into owner/name
-                $parts = explode('/', $fullName, 2);
-                if (count($parts) !== 2) continue;
-                list($repoOwner, $repoName) = $parts;
-
+                // Look for repo connection (repoOwner/repoName already parsed at top of method)
                 $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
                 if ($repo) {
                     $repoData = $repo->export();
                     $repoData['tenant'] = $tenant;
                     $repoData['tenant_config'] = $tenantConfig;
 
-                    // Find member_id for this tenant (owner of the database)
-                    $memberId = $this->findMemberIdForTenant($tenant);
-                    $repoData['member_id'] = $memberId;
+                    // Use member_id from repo connection if stored, otherwise fall back to tenant lookup
+                    if (empty($repoData['member_id'])) {
+                        $repoData['member_id'] = $this->findMemberIdForTenant($tenant);
+                    }
 
                     // Keep this database selected for subsequent operations
                     Flight::set('tenant.slug', $tenant);
@@ -1388,6 +1477,14 @@ class Webhook extends BaseControls\Control {
         $repoFullName = $data['repository']['full_name'] ?? '';
         $memberId = $repoConnection['member_id'] ?? null;
 
+        // Create issue key format
+        $issueKey = "{$repoFullName}#{$issueNumber}";
+
+        // First, try to augment any running local tmux session with this comment
+        if ($memberId) {
+            $this->augmentGitHubLocalSession($issueKey, $memberId, $commentAuthor, $commentBody);
+        }
+
         // Check if issue has ai-dev label
         $hasAiDevLabel = false;
         foreach (($issue['labels'] ?? []) as $label) {
@@ -1410,9 +1507,6 @@ class Webhook extends BaseControls\Control {
         if (!$memberId) {
             return;
         }
-
-        // Create issue key format
-        $issueKey = "{$repoFullName}#{$issueNumber}";
 
         // Check if there's a job waiting for clarification for this issue
         $jobManager = new AIDevJobManager($memberId);

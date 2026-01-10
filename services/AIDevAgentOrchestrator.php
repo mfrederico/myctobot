@@ -21,6 +21,7 @@ class AIDevAgentOrchestrator {
     private array $shopify;
     private ?string $existingBranch;
     private array $urls;
+    private string $provider;  // 'jira' or 'github'
 
     /**
      * Create orchestrator for a ticket
@@ -34,6 +35,7 @@ class AIDevAgentOrchestrator {
      * @param array $shopify Shopify config with keys: enabled, domain, storefront_password
      * @param string|null $existingBranch Existing branch name for branch affinity
      * @param array $urls URLs found in ticket to check
+     * @param string $provider Issue provider: 'jira' or 'github'
      */
     public function __construct(
         array $ticket,
@@ -43,7 +45,8 @@ class AIDevAgentOrchestrator {
         array $statusSettings = [],
         array $shopify = [],
         ?string $existingBranch = null,
-        array $urls = []
+        array $urls = [],
+        string $provider = 'jira'
     ) {
         $this->ticket = $ticket;
         $this->repo = $repo;
@@ -53,6 +56,147 @@ class AIDevAgentOrchestrator {
         $this->shopify = $shopify;
         $this->existingBranch = $existingBranch;
         $this->urls = $urls;
+        $this->provider = $provider;
+    }
+
+    /**
+     * Check if using GitHub as provider
+     */
+    private function isGitHub(): bool {
+        return $this->provider === 'github';
+    }
+
+    /**
+     * Get the issue tracking system name for display
+     */
+    private function getProviderName(): string {
+        return $this->isGitHub() ? 'GitHub' : 'Jira';
+    }
+
+    /**
+     * Build MCP tools documentation section based on provider
+     */
+    private function buildMcpToolsSection(): string {
+        $issueKey = $this->ticket['key'];
+
+        if ($this->isGitHub()) {
+            // Parse GitHub issue key: owner/repo#number
+            preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches);
+            $owner = $matches[1] ?? '';
+            $repo = $matches[2] ?? '';
+            $issueNumber = $matches[3] ?? '';
+
+            return <<<SECTION
+## GitHub MCP Tools
+
+You have access to GitHub tools via MCP. **ALWAYS use these tools for GitHub operations:**
+
+- `mcp__github__add_issue_comment(owner, repo, issue_number, body)` - Post a comment to the issue
+- `mcp__github__update_issue(owner, repo, issue_number, ...)` - Update issue (add labels, close, etc.)
+- `mcp__github__create_pull_request(owner, repo, title, head, base, body)` - Create a PR
+
+**Example - Post a comment:**
+```
+mcp__github__add_issue_comment(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, body="Your message here")
+```
+
+**Example - Close the issue:**
+```
+mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, state="closed")
+```
+
+## Post Status Updates to GitHub
+
+**You MUST post comments at key milestones** using `mcp__github__add_issue_comment`:
+
+1. **When starting**: "AI Developer starting work on this issue..."
+2. **After implementation**: "Implementation complete, running verification..."
+3. **When PR is created**: Include PR URL, branch name, and summary
+4. **If blocked/failed**: Explain what went wrong and what's needed
+5. **When complete**: Post final summary with PR link
+
+SECTION;
+        } else {
+            return <<<SECTION
+## Jira MCP Tools
+
+You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operations:**
+
+- `jira_comment(issue_key, message)` - Post a comment to the ticket
+- `jira_transition(issue_key, status_name)` - Transition ticket to a new status
+- `jira_upload_attachment(issue_key, file_path)` - Upload a screenshot or file
+- `jira_get_transitions(issue_key)` - Get available status transitions
+
+## Post Status Updates to Jira
+
+**You MUST post comments at key milestones** using `jira_comment`:
+
+1. **When starting**: "AI Developer starting work on this ticket..."
+2. **After implementation**: "Implementation complete, running verification..."
+3. **When PR is created**: Include PR URL, branch name, and summary
+4. **If blocked/failed**: Explain what went wrong and what's needed
+5. **When complete**: Post final summary with PR link
+
+## Upload Screenshots
+
+**When you take screenshots during verification**, upload them using `jira_upload_attachment`:
+- Save the screenshot to a file (e.g., `screenshot.png`)
+- Upload it: `jira_upload_attachment("{$issueKey}", "screenshot.png")`
+- Reference it in a follow-up comment
+
+SECTION;
+        }
+    }
+
+    /**
+     * Build the clarification instructions based on provider
+     */
+    private function buildClarificationInstructions(): string {
+        $issueKey = $this->ticket['key'];
+
+        if ($this->isGitHub()) {
+            preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches);
+            $owner = $matches[1] ?? '';
+            $repo = $matches[2] ?? '';
+            $issueNumber = $matches[3] ?? '';
+
+            return <<<SECTION
+- Post clarifying questions using: `mcp__github__add_issue_comment(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, body="Your question here")`
+- Wait for a response (you'll receive GitHub updates via [GITHUB UPDATE] messages).
+SECTION;
+        } else {
+            return <<<SECTION
+- Post clarifying questions using the MCP tool: `jira_comment("{$issueKey}", "Your question here")`
+- Wait for a response (you'll receive Jira updates via [JIRA UPDATE] messages).
+SECTION;
+        }
+    }
+
+    /**
+     * Build the final summary posting instructions based on provider
+     */
+    private function buildFinalSummaryInstructions(): string {
+        $issueKey = $this->ticket['key'];
+
+        if ($this->isGitHub()) {
+            preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches);
+            $owner = $matches[1] ?? '';
+            $repo = $matches[2] ?? '';
+            $issueNumber = $matches[3] ?? '';
+
+            return "2. **Post final summary to GitHub** - Use the MCP tool:\n" .
+                   "   `mcp__github__add_issue_comment(owner=\"{$owner}\", repo=\"{$repo}\", issue_number={$issueNumber}, body=\"AI Developer completed work.\\n\\nPR: [your PR URL]\\nSummary: [what was done]\")`";
+        } else {
+            return "2. **Post final summary to Jira** - Use the MCP tool:\n" .
+                   "   `jira_comment(\"{$issueKey}\", \"AI Developer completed work.\\n\\nPR: [your PR URL]\\nSummary: [what was done]\")`";
+        }
+    }
+
+    /**
+     * Get the ticket type label based on provider
+     */
+    private function getTicketLabel(): string {
+        return $this->isGitHub() ? 'GitHub issue' : 'Jira ticket';
     }
 
     /**
@@ -80,10 +224,14 @@ class AIDevAgentOrchestrator {
             $commentsSection = "\n**Comments/Clarifications**:\n{$comments}\n";
         }
 
+        $providerName = $this->getProviderName();
+        $ticketLabel = $this->getTicketLabel();
+        $clarificationInstructions = $this->buildClarificationInstructions();
+
         return <<<PROMPT
 # AI Developer Orchestrator
 
-You are orchestrating the implementation and verification of Jira ticket **{$issueKey}**.
+You are orchestrating the implementation and verification of {$ticketLabel} **{$issueKey}**.
 
 ## Ticket Information
 
@@ -111,7 +259,7 @@ You are orchestrating the implementation and verification of Jira ticket **{$iss
 
 The repository has been pre-cloned to `{$repoPath}/` and checked out to `{$defaultBranch}`.
 
-**IMPORTANT: Do NOT `cd {$repoPath}`** - stay in the current directory and reference all files as `{$repoPath}/path/to/file`. This ensures MCP tools (Jira, Playwright) work correctly.
+**IMPORTANT: Do NOT `cd {$repoPath}`** - stay in the current directory and reference all files as `{$repoPath}/path/to/file`. This ensures MCP tools ({$providerName}, Playwright) work correctly.
 
 You can run git commands using `git -C {$repoPath} <command>` to stay in the work directory.
 
@@ -124,8 +272,7 @@ Each agent has fresh context - pass only the essential information it needs.
 
 **Before implementation**, review the ticket requirements carefully.
 - If requirements are unclear, ambiguous, or missing critical details, STOP.
-- Post clarifying questions using the MCP tool: `jira_comment("{$issueKey}", "Your question here")`
-- Wait for a response (you'll receive Jira updates via [JIRA UPDATE] messages).
+{$clarificationInstructions}
 - Example questions: "Which specific element should be modified?", "Should this apply to all pages or just X?"
 
 **Only proceed to Phase 1 after you have clear requirements.**
@@ -193,34 +340,9 @@ cat > result.json << 'RESULT_EOF'
 RESULT_EOF
 ```
 
-2. **Post final summary to Jira** - Use the MCP tool:
-   `jira_comment("{$issueKey}", "AI Developer completed work.\n\nPR: [your PR URL]\nSummary: [what was done]")`
+{$this->buildFinalSummaryInstructions()}
 
-## Jira MCP Tools
-
-You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operations:**
-
-- `jira_comment(issue_key, message)` - Post a comment to the ticket
-- `jira_transition(issue_key, status_name)` - Transition ticket to a new status
-- `jira_upload_attachment(issue_key, file_path)` - Upload a screenshot or file
-- `jira_get_transitions(issue_key)` - Get available status transitions
-
-## Post Status Updates to Jira
-
-**You MUST post comments at key milestones** using `jira_comment`:
-
-1. **When starting**: "AI Developer starting work on this ticket..."
-2. **After implementation**: "Implementation complete, running verification..."
-3. **When PR is created**: Include PR URL, branch name, and summary
-4. **If blocked/failed**: Explain what went wrong and what's needed
-5. **When complete**: Post final summary with PR link
-
-## Upload Screenshots
-
-**When you take screenshots during verification**, upload them using `jira_upload_attachment`:
-- Save the screenshot to a file (e.g., `screenshot.png`)
-- Upload it: `jira_upload_attachment("{$issueKey}", "screenshot.png")`
-- Reference it in a follow-up comment
+{$this->buildMcpToolsSection()}
 
 {$this->buildStatusTransitionSection($issueKey)}
 
@@ -230,7 +352,7 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 2. **Don't repeat history** - Don't include previous agent outputs in new agent prompts.
 3. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 4. **Output JSON** - Final output must be valid JSON for parsing.
-5. **No emojis** - Do NOT use emojis in Jira comments or any communication. Keep messages professional and plain text.
+5. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
 
 ## Start Now
 
@@ -242,6 +364,31 @@ PROMPT;
      * Build status transition section with MCP tool examples
      */
     private function buildStatusTransitionSection(string $issueKey): string {
+        // Status transitions are Jira-specific - GitHub uses labels instead
+        if ($this->isGitHub()) {
+            // For GitHub, we can suggest label updates instead
+            preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches);
+            $owner = $matches[1] ?? '';
+            $repo = $matches[2] ?? '';
+            $issueNumber = $matches[3] ?? '';
+
+            return <<<SECTION
+## Update Issue Labels
+
+You can update issue labels to track progress:
+
+- **When starting**: Add "in-progress" label, remove "ai-dev" label
+- **When PR created**: Add "pr-ready" label
+- **If blocked**: Add "needs-info" label
+
+Example:
+```
+mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, labels=["in-progress", "myctobot-working"])
+```
+
+SECTION;
+        }
+
         if (empty($this->statusSettings)) {
             return '';
         }

@@ -639,7 +639,8 @@ $orchestrator = new \app\services\AIDevAgentOrchestrator(
     $statusSettings,
     $shopifyConfig,
     $existingBranch,
-    $urlsToCheck
+    $urlsToCheck,
+    $provider                     // jira or github
 );
 
 // Build prompt - always use orchestrator pattern for better verification
@@ -651,8 +652,35 @@ file_put_contents($promptFile, $prompt);
 echo "  Prompt saved to: {$promptFile}\n";
 echo "  Prompt length: " . strlen($prompt) . " chars\n\n";
 
-// Create CLAUDE.md for the session
-$claudeMd = <<<MD
+// Create CLAUDE.md for the session (provider-aware)
+$ticketType = ($provider === 'github') ? 'GitHub issue' : 'Jira ticket';
+if ($provider === 'github') {
+    $claudeMd = <<<MD
+# Local AI Developer Session
+
+Working on GitHub issue: {$issueKey}
+{$ticketLink}
+
+## Issue Summary
+{$summary}
+
+## Environment
+- Work directory: {$workDir}
+- Repository: {$repoOwner}/{$repoName}
+
+## Environment Variables Available
+- GITHUB_TOKEN - GitHub access token for git operations and GitHub API
+- GH_TOKEN - Same token for gh CLI
+
+## MCP Tools
+- github MCP - For posting comments, updating issues, creating PRs
+- playwright MCP - For browser testing
+
+## Instructions
+Follow the prompt in prompt.txt to implement the issue.
+MD;
+} else {
+    $claudeMd = <<<MD
 # Local AI Developer Session
 
 Working on Jira ticket: {$issueKey}
@@ -672,40 +700,63 @@ Working on Jira ticket: {$issueKey}
 - JIRA_EMAIL - Jira user email: {$jiraEmail}
 - JIRA_API_TOKEN - Jira OAuth token for API calls
 
+## MCP Tools
+- jira MCP - For posting comments, transitions, attachments
+- playwright MCP - For browser testing
+
 ## Instructions
 Follow the prompt in prompt.txt to implement the ticket.
 MD;
+}
 file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 
 // ============================================
 // Create .mcp.json for MCP servers
 // ============================================
-// Start with defaults (Jira HTTP + Playwright stdio)
-// Use fixed main domain with tenant slug in URL path
-// This ensures MCP works regardless of which subdomain context we're in
-// URL pattern: https://myctobot.ai/mcp/{tenant}/jira
-// Tenant comes from --tenant flag (e.g., 'gwt'), fall back to 'default' if not set
-$mcpTenant = $tenant ?? 'default';
-$mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
-$mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
+// Base servers - Playwright is always included
 $mcpServers = (object) [
     'playwright' => (object) [
         'type' => 'stdio',
         'command' => 'npx',
         'args' => ['@playwright/mcp@latest'],
         'env' => new \stdClass()
-    ],
-    'jira' => (object) [
+    ]
+];
+$enabledMcpServers = ['playwright'];
+$mcpProviderInfo = '';
+
+if ($provider === 'github') {
+    // GitHub provider - use GitHub MCP (stdio via gh CLI or npx)
+    // The GitHub MCP server uses the GH_TOKEN from environment
+    $mcpServers->github = (object) [
+        'type' => 'stdio',
+        'command' => 'npx',
+        'args' => ['-y', '@modelcontextprotocol/server-github'],
+        'env' => (object) [
+            'GITHUB_PERSONAL_ACCESS_TOKEN' => $githubToken ?? ''
+        ]
+    ];
+    $enabledMcpServers[] = 'github';
+    $mcpProviderInfo = "GitHub MCP: stdio transport (npx @modelcontextprotocol/server-github)";
+} else {
+    // Jira provider - use Jira HTTP MCP
+    // Use fixed main domain with tenant slug in URL path
+    // URL pattern: https://myctobot.ai/mcp/{tenant}/jira
+    $mcpTenant = $tenant ?? 'default';
+    $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
+    $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
+    $mcpServers->jira = (object) [
         'type' => 'http',
         'url' => $mcpHttpUrl,
         'headers' => (object) [
             'Authorization' => "Basic {$mcpCredentials}"
         ]
-    ]
-];
+    ];
+    $enabledMcpServers[] = 'jira';
+    $mcpProviderInfo = "MCP Jira: HTTP transport ({$mcpHttpUrl})";
+}
 
 // Merge agent's MCP servers if configured
-$enabledMcpServers = ['jira', 'playwright'];
 if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
     echo "  Loading MCP servers from agent config...\n";
     foreach ($agentConfig['mcp_servers'] as $server) {
@@ -741,7 +792,7 @@ if (is_dir($repoDir)) {
     copy("{$workDir}/.mcp.json", "{$repoDir}/.mcp.json");
     echo "  MCP config copied to repo directory\n";
 }
-echo "  MCP Jira: HTTP transport ({$mcpHttpUrl})\n";
+echo "  {$mcpProviderInfo}\n";
 
 // ============================================
 // Create .claude/settings.json for hooks
@@ -836,16 +887,50 @@ export MYCTOBOT_MEMBER_ID="{$memberId}"
 export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
 HOOK_ENV;
 
-$envScript = <<<BASH
-#!/bin/bash
-# Environment setup for AI Developer session
-# Generated for issue: {$issueKey}
+// Build provider-specific environment section
+$providerEnvSection = '';
+$providerEchoSection = '';
 
+if ($provider === 'github') {
+    // GitHub provider - only GitHub token needed
+    $providerEnvSection = <<<PROVIDER_ENV
+export GITHUB_TOKEN="{$githubToken}"
+export GH_TOKEN="{$githubToken}"
+export MYCTOBOT_PROVIDER="github"
+PROVIDER_ENV;
+
+    $providerEchoSection = <<<PROVIDER_ECHO
+echo "GITHUB_TOKEN: ****\${GITHUB_TOKEN: -4}"
+echo "GH_TOKEN: ****\${GH_TOKEN: -4}"
+echo "Provider: GitHub"
+PROVIDER_ECHO;
+} else {
+    // Jira provider - need both GitHub and Jira tokens
+    $providerEnvSection = <<<PROVIDER_ENV
 export GITHUB_TOKEN="{$githubToken}"
 export GH_TOKEN="{$githubToken}"
 export JIRA_HOST="{$jiraHost}"
 export JIRA_EMAIL="{$jiraEmail}"
 export JIRA_API_TOKEN="{$jiraOAuthToken}"
+export MYCTOBOT_PROVIDER="jira"
+PROVIDER_ENV;
+
+    $providerEchoSection = <<<PROVIDER_ECHO
+echo "GITHUB_TOKEN: ****\${GITHUB_TOKEN: -4}"
+echo "GH_TOKEN: ****\${GH_TOKEN: -4}"
+echo "JIRA_HOST: \$JIRA_HOST"
+echo "JIRA_API_TOKEN: ****\${JIRA_API_TOKEN: -4}"
+echo "Provider: Jira"
+PROVIDER_ECHO;
+}
+
+$envScript = <<<BASH
+#!/bin/bash
+# Environment setup for AI Developer session
+# Generated for issue: {$issueKey}
+# Provider: {$provider}
+
+{$providerEnvSection}
 export GIT_TERMINAL_PROMPT="0"
 export TERM="xterm-256color"
 {$hookEnvSection}
@@ -856,10 +941,7 @@ echo "=== Environment Setup ==="
 echo "Issue: {$issueKey}"
 echo "Summary: {$summary}"
 echo ""
-echo "GITHUB_TOKEN: ****\${GITHUB_TOKEN: -4}"
-echo "GH_TOKEN: ****\${GH_TOKEN: -4}"
-echo "JIRA_HOST: \$JIRA_HOST"
-echo "JIRA_API_TOKEN: ****\${JIRA_API_TOKEN: -4}"
+{$providerEchoSection}
 echo "MYCTOBOT_WORKSPACE: \$MYCTOBOT_WORKSPACE"
 echo "MYCTOBOT_JOB_ID: \$MYCTOBOT_JOB_ID"
 {$shopifyEchoSection}
@@ -870,8 +952,133 @@ cd {$workDir}
 
 BASH;
 
-// Jira update function to be added to bash script
-$jiraUpdateScript = <<<'JIRA_BASH'
+// Post-execution update function - provider-specific
+if ($provider === 'github') {
+    // GitHub provider - use GitHub API to post issue comments
+    $updateScript = <<<'GITHUB_BASH'
+
+# ===========================================
+# Post-Execution GitHub Update
+# ===========================================
+update_github() {
+    local output_file="$1"
+    local log_file="$2"
+
+    echo ""
+    echo "=== Updating GitHub Issue ==="
+
+    # First, check if Claude wrote a clean result.json file (preferred method)
+    local json_result=""
+    if [[ -f "result.json" ]]; then
+        echo "Found result.json - using clean JSON output"
+        json_result=$(cat result.json)
+    elif [[ -f "${WORK_DIR}/result.json" ]]; then
+        echo "Found result.json in work dir"
+        json_result=$(cat "${WORK_DIR}/result.json")
+    else
+        # Fall back to grepping from output files
+        echo "No result.json found, trying to extract from logs..."
+        if [[ -f "$output_file" ]]; then
+            json_result=$(grep -Pzo '(?s)\{[^{}]*"success"[^{}]*("files_changed"\s*:\s*\[[^\]]*\][^{}]*)?\}' "$output_file" 2>/dev/null | tr -d '\0' | tail -1)
+        fi
+
+        if [[ -z "$json_result" && -f "$log_file" ]]; then
+            json_result=$(grep -Pzo '(?s)\{[^{}]*"success"[^{}]*("files_changed"\s*:\s*\[[^\]]*\][^{}]*)?\}' "$log_file" 2>/dev/null | tr -d '\0' | tail -1)
+        fi
+    fi
+
+    if [[ -z "$json_result" ]]; then
+        echo "Warning: Could not find result from Claude output"
+        echo "Claude should have posted its own GitHub comment. Skipping automated update."
+        return 1
+    fi
+
+    # Save JSON for debugging
+    echo "$json_result" > "${WORK_DIR}/claude-output.json"
+    echo "JSON output saved to: ${WORK_DIR}/claude-output.json"
+
+    # Parse JSON fields
+    local success=$(echo "$json_result" | jq -r '.success // "false"')
+    local issue_key=$(echo "$json_result" | jq -r '.issue_key // ""')
+    local branch_name=$(echo "$json_result" | jq -r '.branch_name // ""')
+    local pr_url=$(echo "$json_result" | jq -r '.pr_url // ""')
+    local verification_passed=$(echo "$json_result" | jq -r '.verification_passed // "false"')
+    local summary=$(echo "$json_result" | jq -r '.summary // "No summary provided"')
+    local files_changed=$(echo "$json_result" | jq -r '.files_changed // [] | .[]' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+
+    echo "  Issue: $issue_key"
+    echo "  Success: $success"
+    echo "  PR URL: $pr_url"
+
+    if [[ -z "$issue_key" || "$issue_key" == "null" ]]; then
+        echo "Warning: No issue key found in output"
+        return 1
+    fi
+
+    # Parse owner/repo#number format
+    if [[ "$issue_key" =~ ^([^/]+)/([^#]+)#([0-9]+)$ ]]; then
+        local owner="${BASH_REMATCH[1]}"
+        local repo="${BASH_REMATCH[2]}"
+        local issue_number="${BASH_REMATCH[3]}"
+    else
+        echo "Warning: Could not parse GitHub issue key format: $issue_key"
+        return 1
+    fi
+
+    # Build markdown comment
+    local status_text="completed successfully"
+    [[ "$success" != "true" ]] && status_text="completed with issues"
+
+    local files_list=""
+    for file in $(echo "$json_result" | jq -r '.files_changed // [] | .[]' 2>/dev/null); do
+        files_list="${files_list}- \`$file\`\n"
+    done
+
+    local comment_body="## Implementation ${status_text} by Claude Code automation
+
+**Pull Request:** ${pr_url}
+**Branch:** \`${branch_name}\`
+
+### Files Changed
+${files_list}
+### Summary
+${summary}"
+
+    echo "Adding comment to GitHub issue..."
+    local comment_response=$(gh issue comment "$issue_number" --repo "$owner/$repo" --body "$comment_body" 2>&1)
+    if [[ $? -eq 0 ]]; then
+        echo "  ✓ Comment added"
+    else
+        echo "  ✗ Failed to add comment: $comment_response"
+    fi
+
+    # Update labels based on success
+    if [[ "$success" == "true" && "$verification_passed" == "true" ]]; then
+        echo "Adding 'ready-for-review' label..."
+        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "ready-for-review" --remove-label "ai-dev" 2>/dev/null
+        if [[ $? -eq 0 ]]; then
+            echo "  ✓ Labels updated"
+        else
+            echo "  ✗ Failed to update labels"
+        fi
+    else
+        echo "Adding 'needs-work' label..."
+        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "needs-work" 2>/dev/null
+        if [[ $? -eq 0 ]]; then
+            echo "  ✓ Labels updated"
+        else
+            echo "  ✗ Failed to update labels"
+        fi
+    fi
+
+    echo "=== GitHub Update Complete ==="
+}
+
+GITHUB_BASH;
+    $updateFunction = 'update_github';
+} else {
+    // Jira provider - use Jira API
+    $updateScript = <<<'JIRA_BASH'
 
 # ===========================================
 # Post-Execution Jira Update
@@ -1001,9 +1208,11 @@ COMMENT_EOF
 }
 
 JIRA_BASH;
+    $updateFunction = 'update_jira';
+}
 
-$jiraUpdateScriptWithVars = str_replace('${WORK_DIR}', $workDir, $jiraUpdateScript);
-$envScript .= $jiraUpdateScriptWithVars;
+$updateScriptWithVars = str_replace('${WORK_DIR}', $workDir, $updateScript);
+$envScript .= $updateScriptWithVars;
 
 if ($usePrintMode) {
     // Non-interactive mode with logging
@@ -1015,13 +1224,13 @@ echo "Log file: {$logFile}"
 echo ""
 claude --print --dangerously-skip-permissions < prompt.txt 2>&1 | tee {$logFile}
 
-# Update Jira after Claude completes
-update_jira "{$logFile}" "{$logFile}"
+# Update issue tracker after Claude completes
+{$updateFunction} "{$logFile}" "{$logFile}"
 BASH;
 } else {
     // Interactive TUI mode - pass prompt as argument (not -p flag) to show TUI
     $logFile = "{$workDir}/session.log";
-    $envScript .= <<<'BASH'
+    $envScript .= <<<BASH
 
 echo "Starting Claude with TUI..."
 echo "Environment variables are set - use them for git/API operations."
@@ -1029,11 +1238,11 @@ echo ""
 
 # Use script to capture output while preserving TUI
 # Pass prompt content as argument (without -p) to start with message AND show TUI
-script -q session.log -c 'claude --dangerously-skip-permissions "$(cat prompt.txt)"'
+script -q session.log -c 'claude --dangerously-skip-permissions "\$(cat prompt.txt)"'
 
-# Update Jira after Claude completes
+# Update issue tracker after Claude completes
 BASH;
-    $envScript .= "\nupdate_jira \"{$workDir}/session.log\" \"{$workDir}/session.log\"\n";
+    $envScript .= "\n{$updateFunction} \"{$workDir}/session.log\" \"{$workDir}/session.log\"\n";
 }
 
 $envScriptPath = "{$workDir}/run-claude.sh";

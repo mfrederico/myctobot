@@ -1266,6 +1266,14 @@ class Webhook extends BaseControls\Control {
                 $this->handleCheckRunEvent($data);
                 break;
 
+            case 'ping':
+                // GitHub sends ping when webhook is created or tested
+                $this->logger->info('GitHub webhook: ping received', [
+                    'zen' => $data['zen'] ?? '',
+                    'hook_id' => $data['hook_id'] ?? ''
+                ]);
+                break;
+
             default:
                 $this->logger->debug('GitHub webhook: unhandled event', ['event' => $event]);
         }

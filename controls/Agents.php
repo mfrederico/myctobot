@@ -71,12 +71,15 @@ class Agents extends BaseControls\Control {
             $provider = $bean->provider ?: 'claude_cli';
             $providerInfo = LLMProviderFactory::getProviderInfo($provider);
 
+            $providerConfig = json_decode($bean->provider_config ?: '{}', true);
+
             $agents[] = [
                 'id' => $bean->id,
                 'name' => $bean->name,
                 'description' => $bean->description,
                 'provider' => $provider,
                 'provider_label' => $providerInfo['name'] ?? $provider,
+                'provider_config' => $providerConfig,
                 'runner_type' => $bean->runner_type, // Legacy field
                 'mcp_count' => count($mcpServers),
                 'hooks_count' => $this->countHooks($hooksConfig),
@@ -384,7 +387,19 @@ class Agents extends BaseControls\Control {
 
             case 'claude_cli':
             default:
-                return [];
+                // Check if using Ollama as backend
+                $useOllama = (bool) $this->getParam('use_ollama', false);
+                if ($useOllama) {
+                    return [
+                        'use_ollama' => true,
+                        'ollama_host' => $this->getParam('ollama_host', 'http://localhost:11434'),
+                        'ollama_model' => $this->getParam('ollama_model', '')
+                    ];
+                }
+                // Standard Claude CLI with Anthropic backend
+                return [
+                    'model' => $this->getParam('model', 'sonnet')
+                ];
         }
     }
 

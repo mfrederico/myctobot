@@ -221,18 +221,55 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                 <?php else: ?>
                 <!-- Provider Display for Existing Agent (edit on Provider tab) -->
                 <div class="mb-3">
-                    <label for="provider" class="form-label">Provider <span class="text-danger">*</span></label>
-                    <select class="form-select" id="provider" name="provider" disabled>
-                        <?php foreach ($providers as $p): ?>
-                        <option value="<?= $p['type'] ?>" <?= $provider === $p['type'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($p['name']) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                    <div class="form-text">
-                        Provider configuration is on the <strong>Provider</strong> tab.
+                    <label class="form-label">Runner & LLM Engine</label>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <?php if ($provider === 'claude_cli'): ?>
+                            <?php if (!empty($providerConfig['use_ollama'])): ?>
+                            <span class="badge bg-primary fs-6" title="Runner: Claude Code CLI">
+                                <i class="bi bi-terminal"></i> Claude CLI
+                            </span>
+                            <span class="badge bg-info text-dark fs-6" title="LLM Engine: Ollama">
+                                <i class="bi bi-cpu"></i> Ollama
+                            </span>
+                            <?php else: ?>
+                            <span class="badge bg-primary fs-6" title="Runner: Claude Code CLI">
+                                <i class="bi bi-terminal"></i> Claude CLI
+                            </span>
+                            <span class="badge bg-success fs-6" title="LLM Engine: Anthropic API">
+                                <i class="bi bi-cloud"></i> Anthropic
+                            </span>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <?php
+                            $providerName = 'Unknown';
+                            foreach ($providers as $p) {
+                                if ($p['type'] === $provider) {
+                                    $providerName = $p['name'];
+                                    break;
+                                }
+                            }
+                            ?>
+                            <span class="badge bg-secondary fs-6">
+                                <i class="bi bi-gear"></i> <?= htmlspecialchars($providerName) ?>
+                            </span>
+                        <?php endif; ?>
+                        <a href="/agents/edit/<?= $agentId ?>?tab=provider" class="btn btn-sm btn-outline-secondary">
+                            <i class="bi bi-gear"></i> Configure
+                        </a>
                     </div>
                 </div>
+                <?php if ($provider === 'claude_cli'): ?>
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <div>
+                        <?php if (!empty($providerConfig['use_ollama'])): ?>
+                        <code class="fs-6"><?= htmlspecialchars($providerConfig['ollama_model'] ?? 'not set') ?></code>
+                        <?php else: ?>
+                        <code class="fs-6"><?= htmlspecialchars($providerConfig['model'] ?? 'sonnet') ?></code>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <?php endif; ?>
 
                 <hr>

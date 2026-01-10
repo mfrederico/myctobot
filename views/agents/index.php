@@ -73,10 +73,28 @@
                                     default => 'bg-secondary'
                                 };
                                 ?>
+                                <?php if ($agent['provider'] === 'claude_cli'): ?>
+                                    <?php if (!empty($agent['provider_config']['use_ollama'])): ?>
+                                    <span class="badge bg-primary" title="Runner: Claude Code CLI">
+                                        <i class="bi bi-terminal"></i> Claude CLI
+                                    </span>
+                                    <span class="badge bg-info text-dark" title="LLM Engine: Ollama">
+                                        <i class="bi bi-cpu"></i> Ollama
+                                    </span>
+                                    <?php else: ?>
+                                    <span class="badge bg-primary" title="Runner: Claude Code CLI">
+                                        <i class="bi bi-terminal"></i> Claude CLI
+                                    </span>
+                                    <span class="badge bg-success" title="LLM Engine: Anthropic API">
+                                        <i class="bi bi-cloud"></i> Anthropic
+                                    </span>
+                                    <?php endif; ?>
+                                <?php else: ?>
                                 <span class="badge <?= $providerClass ?>">
                                     <i class="bi bi-<?= $providerIcon ?>"></i>
                                     <?= htmlspecialchars($agent['provider_label']) ?>
                                 </span>
+                                <?php endif; ?>
                                 <?php if ($agent['expose_as_mcp']): ?>
                                 <span class="badge bg-warning text-dark" title="Exposed as MCP tool: <?= htmlspecialchars($agent['mcp_tool_name'] ?? '') ?>">
                                     <i class="bi bi-plug"></i> MCP
@@ -84,6 +102,18 @@
                                 <?php endif; ?>
                             </td>
                         </tr>
+                        <?php if ($agent['provider'] === 'claude_cli'): ?>
+                        <tr>
+                            <td class="text-muted">Model:</td>
+                            <td>
+                                <?php if (!empty($agent['provider_config']['use_ollama'])): ?>
+                                <code><?= htmlspecialchars($agent['provider_config']['ollama_model'] ?? 'not set') ?></code>
+                                <?php else: ?>
+                                <code><?= htmlspecialchars($agent['provider_config']['model'] ?? 'sonnet') ?></code>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <td class="text-muted">MCP Servers:</td>
                             <td>

@@ -1182,8 +1182,12 @@ class Webhook extends BaseControls\Control {
 
                 R::selectDatabase($tenantDbKey);
 
-                // Look for repo connection
-                $repo = R::findOne('repoconnections', 'full_name = ? AND provider = ?', [$fullName, 'github']);
+                // Look for repo connection - split full_name into owner/name
+                $parts = explode('/', $fullName, 2);
+                if (count($parts) !== 2) continue;
+                list($repoOwner, $repoName) = $parts;
+
+                $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
                 if ($repo) {
                     $repoData = $repo->export();
                     $repoData['tenant'] = $tenant;

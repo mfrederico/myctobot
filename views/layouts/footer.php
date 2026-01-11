@@ -6,7 +6,7 @@
             <div class="col-md-4">
                 <h5><?= htmlspecialchars($site_name ?? 'MyCTOBot.ai') ?></h5>
                 <p class="text-muted">
-                    <?= htmlspecialchars($site_description ?? 'A modern PHP application built with Flight, RedBean, and Bootstrap.') ?>
+                    <?= htmlspecialchars($site_description ?? 'Your AI-powered development team. Connect Jira and GitHub, label tickets, and watch the magic happen.') ?>
                 </p>
             </div>
             
@@ -61,10 +61,7 @@
             </div>
             <div class="col-md-6 text-md-end">
                 <p class="text-muted mb-0">
-                    Built with <i class="bi bi-heart-fill text-danger"></i> using 
-                    <a href="https://flightphp.com" class="text-muted" target="_blank">Flight</a> &amp; 
-                    <a href="https://redbeanphp.com" class="text-muted" target="_blank">RedBean</a>
-                    <a href="https://claude.com" class="text-muted" target="_blank">Claude</a>
+                    Powered by <a href="https://claude.ai" class="text-muted" target="_blank">Claude AI</a>
                 </p>
             </div>
         </div>

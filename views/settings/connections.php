@@ -194,7 +194,7 @@
                         <div>
                             <h3 class="mb-1"><?= $agentCount ?? 0 ?></h3>
                             <p class="text-muted mb-0 small">
-                                Agents define <em>how</em> AI Developer jobs run: runner type, MCP servers, and hooks.
+                                Agents define <em>how</em> AI Developer jobs run: AI provider, MCP servers, and automation hooks.
                             </p>
                         </div>
                         <a href="/agents" class="btn btn-outline-success">
@@ -208,14 +208,14 @@
         <div class="col-md-6">
             <div class="card h-100">
                 <div class="card-header bg-secondary text-white">
-                    <i class="bi bi-pc-display-horizontal"></i> Workstation Shards
+                    <i class="bi bi-pc-display-horizontal"></i> Workstations
                 </div>
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h3 class="mb-1"><?= $shardCount ?? 0 ?></h3>
                             <p class="text-muted mb-0 small">
-                                Shards define <em>where</em> AI Developer jobs run: remote servers with Claude installed.
+                                Workstations define <em>where</em> AI Developer jobs run: servers with Claude CLI installed.
                             </p>
                         </div>
                         <a href="/admin/shards" class="btn btn-outline-secondary">

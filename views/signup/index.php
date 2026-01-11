@@ -93,7 +93,7 @@
                     <h5 class="fw-bold">Jira Integration</h5>
                     <p class="text-muted small">Label any ticket with <code>ai-dev</code> and MyCTOBot picks it up automatically. It reads the requirements, understands the context, and gets to work.</p>
                     <div class="screenshot-wrapper">
-                        <img src="/media/screenshots/jira-ticket.png" alt="Jira ticket with ai-dev label" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-image\'></i><span>Jira Board View</span></div>'">
+                        <img src="/media/screenshots/jira-ticket.svg" alt="Jira ticket with ai-dev label" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-image\'></i><span>Jira Board View</span></div>'">
                     </div>
                 </div>
             </div>
@@ -107,7 +107,7 @@
                     <h5 class="fw-bold">AI Implements Your Tickets</h5>
                     <p class="text-muted small">Claude analyzes your codebase, writes the implementation, runs tests, and commits clean code. It even posts progress updates back to Jira.</p>
                     <div class="screenshot-wrapper">
-                        <img src="/media/screenshots/claude-working.png" alt="Claude implementing code" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-terminal\'></i><span>AI at Work</span></div>'">
+                        <img src="/media/screenshots/claude-working.svg" alt="Claude implementing code" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-terminal\'></i><span>AI at Work</span></div>'">
                     </div>
                 </div>
             </div>
@@ -121,7 +121,7 @@
                     <h5 class="fw-bold">Automatic Pull Requests</h5>
                     <p class="text-muted small">When implementation is complete, MyCTOBot creates a GitHub PR with a detailed summary. Perfect for Shopify themes, apps, and any codebase.</p>
                     <div class="screenshot-wrapper">
-                        <img src="/media/screenshots/github-pr.png" alt="GitHub pull request" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-github\'></i><span>Pull Request</span></div>'">
+                        <img src="/media/screenshots/github-pr.svg" alt="GitHub pull request" class="screenshot" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder\'><i class=\'bi bi-github\'></i><span>Pull Request</span></div>'">
                     </div>
                 </div>
             </div>
@@ -134,7 +134,7 @@
             <div class="row align-items-center">
                 <div class="col-lg-6 mb-4 mb-lg-0">
                     <div class="screenshot-wrapper-lg">
-                        <img src="/media/screenshots/shopify-theme.png" alt="Shopify theme code" class="screenshot-lg" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder-lg\'><i class=\'bi bi-shop\'></i><span>Shopify Theme Development</span></div>'">
+                        <img src="/media/screenshots/shopify-theme.svg" alt="Shopify theme code" class="screenshot-lg" onerror="this.parentElement.innerHTML='<div class=\'screenshot-placeholder-lg\'><i class=\'bi bi-shop\'></i><span>Shopify Theme Development</span></div>'">
                     </div>
                 </div>
                 <div class="col-lg-6">

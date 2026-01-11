@@ -82,7 +82,7 @@
                                 <option value="<?= $agent['id'] ?>"
                                         <?= ($repo['agent_id'] ?? null) == $agent['id'] ? 'selected' : '' ?>>
                                     <?= htmlspecialchars($agent['name']) ?>
-                                    (<?= htmlspecialchars($agent['runner_type_label'] ?? $agent['runner_type']) ?>)
+                                    (<?= htmlspecialchars($agent['provider_label'] ?? $agent['provider']) ?>)
                                     <?= $agent['is_default'] ? '[Default]' : '' ?>
                                 </option>
                                 <?php endforeach; ?>

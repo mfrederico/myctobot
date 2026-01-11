@@ -11,7 +11,6 @@ use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\AIDevJobService;
 use \app\services\AIDevJobManager;
-use \app\services\UserDatabase;
 use \app\services\EncryptionService;
 use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
@@ -21,7 +20,6 @@ require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
-require_once __DIR__ . '/../services/UserDatabase.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/MailgunService.php';
@@ -558,7 +556,12 @@ class Webhook extends BaseControls\Control {
         }
 
         // Always remove the working label when session closes
-        if ($cloudId) {
+        // Check if this is a GitHub issue (format: owner/repo#number) or Jira issue
+        if (preg_match('#^([^/]+)/([^#]+)#(\d+)$#', $issueKey, $matches)) {
+            // GitHub issue - remove label via GitHub API
+            $this->removeGitHubWorkingLabel($matches[1], $matches[2], (int) $matches[3], $memberId);
+        } elseif ($cloudId) {
+            // Jira issue - remove label via Jira API
             $this->removeWorkingLabel($issueKey, $memberId, $cloudId);
         }
 
@@ -690,6 +693,54 @@ class Webhook extends BaseControls\Control {
         } catch (\Exception $e) {
             $this->logger->warning('Failed to remove myctobot-working label', [
                 'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Remove myctobot-working label from GitHub issue when session closes
+     */
+    private function removeGitHubWorkingLabel(string $owner, string $repo, int $issueNumber, int $memberId): void {
+        try {
+            // Get GitHub token from repo connection or enterprise settings
+            UserDatabaseService::connect($memberId);
+
+            $repoConnection = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ?', [$owner, $repo]);
+            $githubToken = $repoConnection->access_token ?? null;
+
+            // Fallback to enterprise settings if repo doesn't have token
+            if (empty($githubToken)) {
+                $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+                if ($githubSetting && !empty($githubSetting->setting_value)) {
+                    $encryption = new \app\services\EncryptionService();
+                    $githubToken = $encryption->decrypt($githubSetting->setting_value);
+                }
+            }
+
+            if (empty($githubToken)) {
+                $this->logger->warning('No GitHub token available to remove label', [
+                    'owner' => $owner,
+                    'repo' => $repo,
+                    'issue' => $issueNumber
+                ]);
+                return;
+            }
+
+            $githubClient = new \app\services\GitHubClient($githubToken);
+            $githubClient->removeLabel($owner, $repo, $issueNumber, 'myctobot-working');
+
+            $this->logger->info('Removed myctobot-working label from GitHub issue', [
+                'owner' => $owner,
+                'repo' => $repo,
+                'issue' => $issueNumber,
+                'member_id' => $memberId
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to remove myctobot-working label from GitHub issue', [
+                'owner' => $owner,
+                'repo' => $repo,
+                'issue' => $issueNumber,
                 'error' => $e->getMessage()
             ]);
         }

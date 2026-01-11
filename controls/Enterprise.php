@@ -527,8 +527,8 @@ class Enterprise extends BaseControls\Control {
                 $agents[] = [
                     'id' => $agentBean->id,
                     'name' => $agentBean->name,
-                    'runner_type' => $agentBean->runner_type,
-                    'runner_type_label' => $this->getRunnerTypeLabel($agentBean->runner_type),
+                    'provider' => $agentBean->provider ?: 'claude_cli',
+                    'provider_label' => $this->getProviderLabel($agentBean->provider),
                     'is_default' => (bool) $agentBean->is_default
                 ];
             }
@@ -1611,12 +1611,15 @@ class Enterprise extends BaseControls\Control {
     /**
      * Helper: Get runner type label
      */
-    private function getRunnerTypeLabel(string $runnerType): string {
+    private function getProviderLabel(?string $provider): string {
+        if ($provider === null) {
+            return 'Claude CLI';
+        }
         $labels = [
             'claude_cli' => 'Claude CLI',
             'anthropic_api' => 'Anthropic API',
             'ollama' => 'Ollama'
         ];
-        return $labels[$runnerType] ?? $runnerType;
+        return $labels[$provider] ?? $provider;
     }
 }

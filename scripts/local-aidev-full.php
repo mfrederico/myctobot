@@ -351,8 +351,6 @@ if ($agentId) {
             'name' => $agentBean->name,
             'provider' => $agentBean->provider ?: 'claude_cli',
             'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
-            'runner_type' => $agentBean->runner_type, // Legacy
-            'runner_config' => json_decode($agentBean->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true)
         ];
@@ -373,8 +371,6 @@ if (!$agentConfig) {
             'name' => $defaultAgent->name,
             'provider' => $defaultAgent->provider ?: 'claude_cli',
             'provider_config' => json_decode($defaultAgent->provider_config ?: '{}', true),
-            'runner_type' => $defaultAgent->runner_type,
-            'runner_config' => json_decode($defaultAgent->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($defaultAgent->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($defaultAgent->hooks_config ?: '{}', true)
         ];
@@ -389,15 +385,28 @@ $repoName = $repoBean->repo_name;
 $defaultBranch = $repoBean->default_branch ?? 'main';
 $cloneUrl = $repoBean->clone_url;
 
-// Get GitHub token
+// Get GitHub token - check repoconnections first, then fall back to enterprisesettings
 $githubToken = '';
 if (!empty($repoBean->access_token)) {
     try {
         $encryption = new EncryptionService();
         $githubToken = $encryption->decrypt($repoBean->access_token);
-        echo "  GitHub Token: ****" . substr($githubToken, -4) . "\n";
+        echo "  GitHub Token (from repo): ****" . substr($githubToken, -4) . "\n";
     } catch (Exception $e) {
-        echo "  Warning: Could not decrypt GitHub token\n";
+        echo "  Warning: Could not decrypt repo GitHub token\n";
+    }
+}
+// Fall back to enterprisesettings.github_token if repo doesn't have one
+if (empty($githubToken)) {
+    $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+    if ($githubSetting && !empty($githubSetting->setting_value)) {
+        try {
+            $encryption = new EncryptionService();
+            $githubToken = $encryption->decrypt($githubSetting->setting_value);
+            echo "  GitHub Token (from settings): ****" . substr($githubToken, -4) . "\n";
+        } catch (Exception $e) {
+            echo "  Warning: Could not decrypt settings GitHub token\n";
+        }
     }
 }
 
@@ -684,6 +693,19 @@ Working on GitHub issue: {$issueKey}
 - github MCP - For posting comments, updating issues, creating PRs
 - playwright MCP - For browser testing
 
+## CRITICAL: Label Update Rules
+When updating issue labels, you MUST:
+1. First call get_issue to fetch current labels
+2. Merge your new labels with the existing ones
+3. Always keep "ai-dev" label first in the list (it's the activation label)
+4. Then call update_issue with the COMPLETE merged label list
+
+Example: If issue has ["ai-dev", "bug"] and you want to add "in-progress":
+- Merged list: ["ai-dev", "bug", "in-progress"]
+- NEVER just pass ["in-progress"] - this replaces all labels!
+
+If ai-dev is removed, your session will be terminated.
+
 ## Instructions
 Follow the prompt in prompt.txt to implement the issue.
 MD;
@@ -785,10 +807,23 @@ if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
         }
 
         if ($serverType === 'http') {
+            // Substitute placeholders in headers
+            $serverHeaders = $server['headers'] ?? [];
+            foreach ($serverHeaders as $key => $value) {
+                if (is_string($value)) {
+                    // Replace ${MYCTOBOT_API_KEY} with member's API token
+                    $value = str_replace('${MYCTOBOT_API_KEY}', $member->api_token ?? '', $value);
+                    // Also support other tokens in headers
+                    $value = str_replace('${GITHUB_TOKEN}', $githubToken ?? '', $value);
+                    $value = str_replace('${GH_TOKEN}', $githubToken ?? '', $value);
+                    $value = str_replace('${JIRA_API_TOKEN}', $jiraOAuthToken ?? '', $value);
+                    $serverHeaders[$key] = $value;
+                }
+            }
             $mcpServers->$serverName = (object) [
                 'type' => 'http',
                 'url' => $server['url'] ?? '',
-                'headers' => (object) ($server['headers'] ?? [])
+                'headers' => (object) $serverHeaders
             ];
         } else {
             // stdio type
@@ -814,6 +849,23 @@ if (is_dir($repoDir)) {
     echo "  MCP config copied to repo directory\n";
 }
 echo "  {$mcpProviderInfo}\n";
+
+// ============================================
+// Update CLAUDE.md with actual MCP tools list
+// ============================================
+$mcpToolsList = "";
+foreach ($enabledMcpServers as $serverName) {
+    $mcpToolsList .= "- {$serverName} MCP\n";
+}
+// Read current CLAUDE.md and replace the MCP Tools section
+$claudeMdContent = file_get_contents("{$workDir}/CLAUDE.md");
+$claudeMdContent = preg_replace(
+    '/## MCP Tools\n.*?(?=\n## |\z)/s',
+    "## MCP Tools\n{$mcpToolsList}\n",
+    $claudeMdContent
+);
+file_put_contents("{$workDir}/CLAUDE.md", $claudeMdContent);
+echo "  Updated CLAUDE.md with " . count($enabledMcpServers) . " MCP tools\n";
 
 // ============================================
 // Create .claude/settings.json with attribution and hooks

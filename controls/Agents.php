@@ -84,7 +84,6 @@ class Agents extends BaseControls\Control {
                 'provider_label' => $providerInfo['name'] ?? $provider,
                 'provider_config' => $providerConfig,
                 'llm_capabilities' => $llmCapabilities,
-                'runner_type' => $bean->runner_type, // Legacy field
                 'mcp_count' => count($mcpServers),
                 'hooks_count' => $this->countHooks($hooksConfig),
                 'capabilities_count' => count($capabilities),
@@ -138,7 +137,7 @@ class Agents extends BaseControls\Control {
 
         $name = trim($this->getParam('name', ''));
         $description = trim($this->getParam('description', ''));
-        $runnerType = $this->getParam('runner_type', 'claude_cli');
+        $provider = $this->getParam('provider', 'claude_cli');
         $isDefault = (bool) $this->getParam('is_default', false);
 
         if (empty($name)) {
@@ -148,23 +147,22 @@ class Agents extends BaseControls\Control {
         }
 
         // Validate provider type
-        if (!LLMProviderFactory::getProviderInfo($runnerType)) {
+        if (!LLMProviderFactory::getProviderInfo($provider)) {
             $this->flash('error', 'Invalid provider type');
             Flight::redirect('/agents/create');
             return;
         }
 
-        // Build runner config based on type
-        $runnerConfig = $this->buildRunnerConfig($runnerType);
+        // Build provider config based on type
+        $providerConfig = $this->buildRunnerConfig($provider);
 
         // Create agent
         $agent = R::dispense('aiagents');
         $agent->member_id = $memberId;
         $agent->name = $name;
         $agent->description = $description;
-        $agent->provider = $runnerType;
-        $agent->provider_config = json_encode($runnerConfig);
-        $agent->runner_type = $runnerType; // Legacy field
+        $agent->provider = $provider;
+        $agent->provider_config = json_encode($providerConfig);
         $agent->mcp_servers = '[]';
         $agent->hooks_config = '{}';
         $agent->is_active = 1;
@@ -206,8 +204,6 @@ class Agents extends BaseControls\Control {
             'description' => $agent->description,
             'provider' => $agent->provider ?: 'claude_cli',
             'provider_config' => json_decode($agent->provider_config ?: '{}', true),
-            'runner_type' => $agent->runner_type, // Legacy
-            'runner_config' => json_decode($agent->runner_config ?: '{}', true),
             'mcp_servers' => json_decode($agent->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($agent->hooks_config ?: '{}', true),
             'capabilities' => json_decode($agent->capabilities ?: '[]', true),
@@ -292,7 +288,7 @@ class Agents extends BaseControls\Control {
     private function updateGeneral($agent, int $memberId): void {
         $name = trim($this->getParam('name', ''));
         $description = trim($this->getParam('description', ''));
-        $runnerType = $this->getParam('runner_type', 'claude_cli');
+        $provider = $this->getParam('provider', 'claude_cli');
         $isDefault = (bool) $this->getParam('is_default', false);
         $isActive = (bool) $this->getParam('is_active', true);
 
@@ -301,10 +297,9 @@ class Agents extends BaseControls\Control {
         }
         $agent->description = $description;
 
-        if (LLMProviderFactory::getProviderInfo($runnerType)) {
-            $agent->provider = $runnerType;
-            $agent->provider_config = json_encode($this->buildRunnerConfig($runnerType));
-            $agent->runner_type = $runnerType; // Legacy field
+        if (LLMProviderFactory::getProviderInfo($provider)) {
+            $agent->provider = $provider;
+            $agent->provider_config = json_encode($this->buildRunnerConfig($provider));
         }
 
         $agent->is_active = $isActive ? 1 : 0;
@@ -466,9 +461,6 @@ class Agents extends BaseControls\Control {
         $agent->expose_as_mcp = $exposeAsMcp ? 1 : 0;
         $agent->mcp_tool_name = $mcpToolName;
         $agent->mcp_tool_description = $mcpToolDescription;
-
-        // Also update legacy runner_type for backwards compatibility
-        $agent->runner_type = $provider;
     }
 
     /**

@@ -47,8 +47,8 @@
     <?php else: ?>
     <div class="row">
         <?php foreach ($agents as $agent): ?>
-        <div class="col-md-6 col-lg-4 mb-4">
-            <div class="card h-100 <?= !$agent['is_active'] ? 'border-secondary opacity-75' : '' ?>">
+        <div class="col-md-6 col-lg-4 mb-4" id="agent-<?= $agent['id'] ?>">
+            <div class="card h-100 agent-card <?= !$agent['is_active'] ? 'border-secondary opacity-75' : '' ?>">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>
                         <i class="bi bi-robot"></i>
@@ -236,6 +236,44 @@ function deleteAgent(id, name) {
         alert('Error: ' + error.message);
     });
 }
+
+// Highlight agent from URL hash
+function highlightAgentFromHash() {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#agent-')) {
+        const element = document.querySelector(hash);
+        if (element) {
+            // Scroll to element
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Add highlight (stays until page navigation)
+            const card = element.querySelector('.agent-card');
+            if (card) {
+                // Remove highlight from any previously highlighted cards
+                document.querySelectorAll('.agent-highlighted').forEach(c => c.classList.remove('agent-highlighted'));
+                card.classList.add('agent-highlighted');
+            }
+        }
+    }
+}
+
+// Run on page load and hash change
+document.addEventListener('DOMContentLoaded', highlightAgentFromHash);
+window.addEventListener('hashchange', highlightAgentFromHash);
 </script>
+
+<style>
+.agent-card.agent-highlighted {
+    border: 2px solid #198754 !important;
+    box-shadow: 0 0 15px rgba(25, 135, 84, 0.4);
+    animation: pulse-highlight 0.5s ease-in-out;
+}
+
+@keyframes pulse-highlight {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+</style>
 
 <?php include __DIR__ . '/../partials/agent-setup-wizard.php'; ?>

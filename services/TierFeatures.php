@@ -25,12 +25,18 @@ class TierFeatures {
     const FEATURE_JIRA_WRITE = 'jira_write';
     const FEATURE_WEBHOOKS = 'webhooks';
 
+    // Knowledge Base features
+    const FEATURE_KNOWLEDGE_BASE = 'knowledge_base';
+    const FEATURE_KNOWLEDGE_BASE_CHAT = 'knowledge_base_chat';
+    const FEATURE_KNOWLEDGE_BASE_EMAIL = 'knowledge_base_email';
+
     // Limit names
     const LIMIT_BOARDS = 'boards';
     const LIMIT_ANALYSES_PER_DAY = 'analyses_per_day';
     const LIMIT_DIGEST_RECIPIENTS = 'digest_recipients';
     const LIMIT_AI_DEV_JOBS_PER_DAY = 'ai_dev_jobs_per_day';
     const LIMIT_REPO_CONNECTIONS = 'repo_connections';
+    const LIMIT_KNOWLEDGE_BASE_MB = 'knowledge_base_mb';
 
     /**
      * Feature access by tier
@@ -50,6 +56,9 @@ class TierFeatures {
             self::FEATURE_GIT_INTEGRATION => false,
             self::FEATURE_JIRA_WRITE => false,
             self::FEATURE_WEBHOOKS => false,
+            self::FEATURE_KNOWLEDGE_BASE => true,      // Basic knowledge base
+            self::FEATURE_KNOWLEDGE_BASE_CHAT => false,
+            self::FEATURE_KNOWLEDGE_BASE_EMAIL => false,
         ],
         'pro' => [
             self::FEATURE_PRIORITY_WEIGHTS => true,
@@ -65,6 +74,9 @@ class TierFeatures {
             self::FEATURE_GIT_INTEGRATION => false,
             self::FEATURE_JIRA_WRITE => false,
             self::FEATURE_WEBHOOKS => false,
+            self::FEATURE_KNOWLEDGE_BASE => true,
+            self::FEATURE_KNOWLEDGE_BASE_CHAT => true,
+            self::FEATURE_KNOWLEDGE_BASE_EMAIL => false,
         ],
         'enterprise' => [
             self::FEATURE_PRIORITY_WEIGHTS => true,
@@ -80,6 +92,9 @@ class TierFeatures {
             self::FEATURE_GIT_INTEGRATION => true,
             self::FEATURE_JIRA_WRITE => true,
             self::FEATURE_WEBHOOKS => true,
+            self::FEATURE_KNOWLEDGE_BASE => true,
+            self::FEATURE_KNOWLEDGE_BASE_CHAT => true,
+            self::FEATURE_KNOWLEDGE_BASE_EMAIL => true,
         ],
     ];
 
@@ -93,6 +108,7 @@ class TierFeatures {
             self::LIMIT_DIGEST_RECIPIENTS => 1,
             self::LIMIT_AI_DEV_JOBS_PER_DAY => 0,
             self::LIMIT_REPO_CONNECTIONS => 0,
+            self::LIMIT_KNOWLEDGE_BASE_MB => 500, // Increased for testing
         ],
         'pro' => [
             self::LIMIT_BOARDS => 10,
@@ -100,6 +116,7 @@ class TierFeatures {
             self::LIMIT_DIGEST_RECIPIENTS => 5,
             self::LIMIT_AI_DEV_JOBS_PER_DAY => 0,
             self::LIMIT_REPO_CONNECTIONS => 0,
+            self::LIMIT_KNOWLEDGE_BASE_MB => 100,
         ],
         'enterprise' => [
             self::LIMIT_BOARDS => -1,
@@ -107,6 +124,7 @@ class TierFeatures {
             self::LIMIT_DIGEST_RECIPIENTS => -1,
             self::LIMIT_AI_DEV_JOBS_PER_DAY => -1,
             self::LIMIT_REPO_CONNECTIONS => -1,
+            self::LIMIT_KNOWLEDGE_BASE_MB => 500,
         ],
     ];
 

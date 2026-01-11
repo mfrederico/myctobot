@@ -244,6 +244,7 @@ Flight::map('loadMenu', function() {
     if (Flight::isLoggedIn()) {
         // Member menu items
         $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
+        $menu[] = ['url' => '/knowledge-base', 'label' => 'Knowledge Base', 'icon' => 'book'];
 
         // Enterprise tier - AI Developer
         $member = Flight::get('member');

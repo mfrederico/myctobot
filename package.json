@@ -1,0 +1,15 @@
+{
+  "name": "myctobot-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for MyCTOBot",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:ui": "npx playwright test --ui",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:report": "npx playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

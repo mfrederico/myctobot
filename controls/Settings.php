@@ -197,7 +197,8 @@ class Settings extends BaseControls\Control {
 
         // Show onboarding if any step is incomplete AND user hasn't dismissed it
         $setupComplete = $gitConnected && $repoCount > 0 && $jiraConnected && $boardCount > 0;
-        $wizardDismissed = Flight::getSetting('onboarding_wizard_dismissed') === '1';
+        $wizardDismissedKey = 'onboarding_wizard_dismissed_' . $this->member->id;
+        $wizardDismissed = UserDatabaseService::getSetting($wizardDismissedKey) === '1';
         $showOnboarding = !$setupComplete && !$wizardDismissed;
 
         $this->render('settings/connections', [
@@ -223,12 +224,14 @@ class Settings extends BaseControls\Control {
     /**
      * Dismiss onboarding wizard (AJAX)
      * Stores user preference to not auto-show the wizard
-     * Uses main database since user DB may not exist yet during onboarding
      */
     public function dismissWizard() {
         if (!$this->requireLogin()) return;
 
-        Flight::setSetting('onboarding_wizard_dismissed', '1');
+        // Store in enterprisesettings table (tenant database)
+        // Use member-specific key so each user can have their own preference
+        $key = 'onboarding_wizard_dismissed_' . $this->member->id;
+        UserDatabaseService::setSetting($key, '1');
 
         $this->jsonSuccess([], 'Wizard dismissed');
     }
@@ -240,7 +243,8 @@ class Settings extends BaseControls\Control {
     public function resetWizard() {
         if (!$this->requireLogin()) return;
 
-        Flight::setSetting('onboarding_wizard_dismissed', '0');
+        $key = 'onboarding_wizard_dismissed_' . $this->member->id;
+        UserDatabaseService::setSetting($key, '0');
 
         $this->jsonSuccess([], 'Wizard reset');
     }

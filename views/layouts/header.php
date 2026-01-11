@@ -62,10 +62,10 @@
                             </a>
                         </li>
                     <?php endif; ?>
-                    <!-- Settings Link -->
+                    <!-- Quick Profile Link -->
                     <li class="nav-item">
-                        <a class="nav-link" href="/settings">
-                            <i class="bi bi-gear"></i>
+                        <a class="nav-link" href="/member/edit" title="Edit Profile">
+                            <i class="bi bi-person-gear"></i>
                         </a>
                     </li>
                     <!-- User Dropdown -->
@@ -89,13 +89,8 @@
                             </li>
                             <?php endif; ?>
                             <li>
-                                <a class="dropdown-item" href="/member/profile">
+                                <a class="dropdown-item" href="/member/edit">
                                     <i class="bi bi-person"></i> Profile
-                                </a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="/settings/connections">
-                                    <i class="bi bi-gear"></i> Settings
                                 </a>
                             </li>
                             <?php if (($member['level'] ?? 100) <= 50): ?>

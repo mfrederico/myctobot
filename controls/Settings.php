@@ -191,7 +191,13 @@ class Settings extends BaseControls\Control {
 
         // Check if we should show onboarding wizard (all tiers)
         $gitConnected = $connections['github']['connected'] ?? false;
-        $showOnboarding = !$gitConnected;
+        $jiraConnected = $connections['atlassian']['connected'] ?? false;
+        $repoCount = $connections['github']['details']['repo_count'] ?? 0;
+        $boardCount = $stats['total_boards'] ?? 0;
+
+        // Show onboarding if any step is incomplete
+        $setupComplete = $gitConnected && $repoCount > 0 && $jiraConnected && $boardCount > 0;
+        $showOnboarding = !$setupComplete;
 
         $this->render('settings/connections', [
             'title' => 'Settings',
@@ -206,7 +212,10 @@ class Settings extends BaseControls\Control {
             'agentCount' => $agentCount,
             'shardCount' => $shardCount,
             'showOnboarding' => $showOnboarding,
-            'gitConnected' => $gitConnected
+            'gitConnected' => $gitConnected,
+            'jiraConnected' => $jiraConnected,
+            'repoCount' => $repoCount,
+            'boardCount' => $boardCount
         ]);
     }
 

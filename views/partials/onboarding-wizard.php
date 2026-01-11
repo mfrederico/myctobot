@@ -225,7 +225,7 @@ $isComplete = ($currentStep >= 5);
                     </div>
                     <div>
                         <?php if (!$isComplete): ?>
-                        <button type="button" class="btn btn-link text-muted" data-bs-dismiss="modal">
+                        <button type="button" class="btn btn-link text-muted" onclick="dismissOnboardingWizard()">
                             I'll finish later
                         </button>
                         <?php endif; ?>
@@ -371,5 +371,32 @@ document.addEventListener('DOMContentLoaded', function() {
 function openOnboardingWizard() {
     var wizardModal = new bootstrap.Modal(document.getElementById('onboardingWizard'));
     wizardModal.show();
+}
+
+// Function to dismiss wizard and remember the preference
+function dismissOnboardingWizard() {
+    // Call API to save dismissal preference
+    fetch('/settings/dismissWizard', {
+        method: 'POST',
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Close the modal
+        var modal = bootstrap.Modal.getInstance(document.getElementById('onboardingWizard'));
+        if (modal) {
+            modal.hide();
+        }
+    })
+    .catch(err => {
+        // Still close modal even if API fails
+        var modal = bootstrap.Modal.getInstance(document.getElementById('onboardingWizard'));
+        if (modal) {
+            modal.hide();
+        }
+    });
 }
 </script>

@@ -195,9 +195,10 @@ class Settings extends BaseControls\Control {
         $repoCount = $connections['github']['details']['repo_count'] ?? 0;
         $boardCount = $stats['total_boards'] ?? 0;
 
-        // Show onboarding if any step is incomplete
+        // Show onboarding if any step is incomplete AND user hasn't dismissed it
         $setupComplete = $gitConnected && $repoCount > 0 && $jiraConnected && $boardCount > 0;
-        $showOnboarding = !$setupComplete;
+        $wizardDismissed = UserDatabaseService::getSetting('onboarding_wizard_dismissed') === '1';
+        $showOnboarding = !$setupComplete && !$wizardDismissed;
 
         $this->render('settings/connections', [
             'title' => 'Settings',
@@ -217,6 +218,40 @@ class Settings extends BaseControls\Control {
             'repoCount' => $repoCount,
             'boardCount' => $boardCount
         ]);
+    }
+
+    /**
+     * Dismiss onboarding wizard (AJAX)
+     * Stores user preference to not auto-show the wizard
+     */
+    public function dismissWizard() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            $this->jsonError('User database not initialized');
+            return;
+        }
+
+        UserDatabaseService::setSetting('onboarding_wizard_dismissed', '1');
+
+        $this->jsonSuccess([], 'Wizard dismissed');
+    }
+
+    /**
+     * Reset onboarding wizard (AJAX)
+     * Allows user to see the wizard again
+     */
+    public function resetWizard() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            $this->jsonError('User database not initialized');
+            return;
+        }
+
+        UserDatabaseService::setSetting('onboarding_wizard_dismissed', '0');
+
+        $this->jsonSuccess([], 'Wizard reset');
     }
 
     /**

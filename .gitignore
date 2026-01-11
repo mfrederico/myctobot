@@ -70,6 +70,12 @@ composer.lock
 /tests/coverage/
 .phpunit.result.cache
 
+# Playwright test artifacts
+/tests/results/
+/tests/reports/
+/playwright-report/
+/test-results/
+
 # Build artifacts
 /build/
 /dist/

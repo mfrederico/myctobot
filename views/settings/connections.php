@@ -138,6 +138,17 @@
                         </div>
                     </a>
                 </div>
+                <div class="col-md-3">
+                    <a href="/knowledge-base" class="text-decoration-none">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-book fs-4 text-primary me-3"></i>
+                            <div>
+                                <strong>Knowledge Base</strong>
+                                <small class="d-block text-muted">RAG document storage</small>
+                            </div>
+                        </div>
+                    </a>
+                </div>
                 <?php if ($member->level <= 50): ?>
                 <div class="col-md-3">
                     <a href="/admin/shards" class="text-decoration-none">

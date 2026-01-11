@@ -223,6 +223,17 @@ class Agents extends BaseControls\Control {
         // csrf already set by parent constructor
         $this->viewData['activeTab'] = $this->getParam('tab', 'general');
 
+        // MCP config data for tenant-aware API
+        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
+        // Ensure HTTPS in production
+        if (strpos($baseUrl, 'localhost') === false && strpos($baseUrl, '127.0.0.1') === false) {
+            $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
+        }
+        $this->viewData['tenantSlug'] = $tenantSlug;
+        $this->viewData['apiBaseUrl'] = $baseUrl;
+        $this->viewData['mcpApiUrl'] = "{$baseUrl}/api/mcp/{$tenantSlug}";
+
         $this->render('agents/edit', $this->viewData);
     }
 

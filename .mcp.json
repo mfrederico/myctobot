@@ -7,6 +7,14 @@
     "mantic": {
       "command": "node",
       "args": ["/home/mfrederico/development/Mantic.sh/dist/mcp-server.js"]
+    },
+    "ollama_worker": {
+      "type": "http",
+      "url": "https://myctobot.ai/api/mcp/footest4",
+      "headers": {
+        "X-API-Key": "test_api_key_footest4_mcp_tools_2026",
+        "X-Tenant": "footest4"
+      }
     }
   }
 }

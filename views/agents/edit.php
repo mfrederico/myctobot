@@ -1027,9 +1027,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="row">
                         <div class="col-md-6 mb-3">
                             <label class="form-label">MCP Tool Name</label>
-                            <input type="text" class="form-control" name="mcp_tool_name"
+                            <input type="text" class="form-control" name="mcp_tool_name" id="mcp_tool_name"
                                    value="<?= htmlspecialchars($mcpToolName) ?>"
-                                   placeholder="e.g., ollama_review">
+                                   placeholder="e.g., ollama_review"
+                                   onchange="updateMcpConfig()">
                             <div class="form-text">How Claude will call this agent</div>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -1039,6 +1040,47 @@ document.addEventListener('DOMContentLoaded', function() {
                                    placeholder="Get code review from local Ollama">
                         </div>
                     </div>
+
+                    <?php if (!$isNew): ?>
+                    <div class="card bg-dark border-secondary mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-code-square"></i> MCP Configuration</span>
+                            <button type="button" class="btn btn-sm btn-outline-light" onclick="copyMcpConfig()">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle"></i>
+                                    Tenant: <code><?= htmlspecialchars($tenantSlug ?? 'default') ?></code> |
+                                    API URL: <code><?= htmlspecialchars($mcpApiUrl ?? '') ?></code>
+                                </small>
+                            </div>
+                            <pre class="bg-body-secondary p-3 rounded mb-0" id="mcp-config-preview"><code><?php
+$serverName = $mcpToolName ?: strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $agentName));
+$mcpConfigJson = [
+    'mcpServers' => [
+        $serverName => [
+            'type' => 'http',
+            'url' => ($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default'),
+            'headers' => [
+                'X-API-Key' => '${MYCTOBOT_API_KEY}',
+                'X-Tenant' => ($tenantSlug ?? 'default')
+            ]
+        ]
+    ]
+];
+echo htmlspecialchars(json_encode($mcpConfigJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+?></code></pre>
+                            <div class="form-text mt-2">
+                                <i class="bi bi-lightbulb"></i>
+                                Save this as <code>.mcp.json</code> in your project root.
+                                Set <code>MYCTOBOT_API_KEY</code> env var or replace with your API key.
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <div class="d-flex justify-content-end">
@@ -1247,6 +1289,54 @@ function toggleCreateClaudeBackend() {
     const ollamaEl = document.getElementById('create-claude-ollama');
     if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
     if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
+}
+
+// MCP Config functions
+function copyMcpConfig() {
+    const configEl = document.getElementById('mcp-config-preview');
+    const text = configEl?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => {
+        // Show feedback
+        const btn = document.querySelector('[onclick="copyMcpConfig()"]');
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check"></i> Copied!';
+        btn.classList.remove('btn-outline-light');
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+            btn.innerHTML = origHtml;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-light');
+        }, 2000);
+    }).catch(e => {
+        alert('Failed to copy: ' + e.message);
+    });
+}
+
+function updateMcpConfig() {
+    const toolName = document.getElementById('mcp_tool_name')?.value || '';
+    const agentName = '<?= addslashes($agentName) ?>';
+    const tenantSlug = '<?= addslashes($tenantSlug ?? 'default') ?>';
+    const mcpApiUrl = '<?= addslashes($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default') ?>';
+
+    // Derive server name from tool name or agent name
+    const serverName = toolName || agentName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+    const config = {
+        mcpServers: {}
+    };
+    config.mcpServers[serverName] = {
+        type: 'http',
+        url: mcpApiUrl,
+        headers: {
+            'X-API-Key': '${MYCTOBOT_API_KEY}',
+            'X-Tenant': tenantSlug
+        }
+    };
+
+    const configEl = document.getElementById('mcp-config-preview');
+    if (configEl) {
+        configEl.querySelector('code').textContent = JSON.stringify(config, null, 2);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', function() {

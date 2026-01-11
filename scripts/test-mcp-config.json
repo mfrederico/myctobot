@@ -1,0 +1,11 @@
+{
+  "api_url": "https://myctobot.ai",
+  "tenants": [
+    {
+      "name": "footest4",
+      "api_key": "test_api_key_footest4_mcp_tools_2026",
+      "expected_tools": ["analyze_image", "review_code", "generate_code"],
+      "test_image": "/home/mfrederico/development/myctobot/storage/test/shapes.png"
+    }
+  ]
+}

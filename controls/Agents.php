@@ -181,6 +181,69 @@ class Agents extends BaseControls\Control {
     }
 
     /**
+     * Create agent from wizard (AJAX)
+     *
+     * Accepts wizard data and creates a fully configured agent.
+     */
+    public function createFromWizard($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        // Get JSON body
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!$input) {
+            Flight::jsonError('Invalid request data', 400);
+            return;
+        }
+
+        // Validate CSRF from header
+        $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        $csrfSession = $_SESSION['csrf_token'] ?? '';
+        if (empty($csrfHeader) || $csrfHeader !== $csrfSession) {
+            Flight::jsonError('Invalid security token', 403);
+            return;
+        }
+
+        $memberId = $this->member->id;
+
+        $name = trim($input['name'] ?? '');
+        $description = trim($input['description'] ?? '');
+        $provider = $input['provider'] ?? 'claude_cli';
+        $providerConfig = $input['provider_config'] ?? [];
+        $mcpServers = $input['mcp_servers'] ?? [];
+        $capabilities = $input['capabilities'] ?? [];
+        $isActive = $input['is_active'] ?? true;
+
+        if (empty($name)) {
+            Flight::jsonError('Agent name is required', 400);
+            return;
+        }
+
+        // Validate provider type
+        if (!LLMProviderFactory::getProviderInfo($provider)) {
+            Flight::jsonError('Invalid provider type', 400);
+            return;
+        }
+
+        // Create agent
+        $agent = R::dispense('aiagents');
+        $agent->member_id = $memberId;
+        $agent->name = $name;
+        $agent->description = $description;
+        $agent->provider = $provider;
+        $agent->provider_config = json_encode($providerConfig);
+        $agent->mcp_servers = json_encode($mcpServers);
+        $agent->hooks_config = '{}';
+        $agent->capabilities = json_encode($capabilities);
+        $agent->is_active = $isActive ? 1 : 0;
+        $agent->is_default = 0;
+        $agent->created_at = date('Y-m-d H:i:s');
+
+        $id = R::store($agent);
+
+        Flight::jsonSuccess(['agent_id' => $id], 'Agent created successfully');
+    }
+
+    /**
      * Show edit form
      */
     public function edit($params = []) {

@@ -8,6 +8,9 @@
             <a href="/admin/shards" class="btn btn-outline-secondary me-2">
                 <i class="bi bi-arrow-left"></i> Back to Shards
             </a>
+            <button type="button" class="btn btn-success me-2" onclick="openAgentSetupWizard()">
+                <i class="bi bi-magic"></i> Setup Wizard
+            </button>
             <a href="/agents/create" class="btn btn-primary">
                 <i class="bi bi-plus-lg"></i> Create Agent
             </a>
@@ -25,8 +28,20 @@
     <div class="card">
         <div class="card-body text-center py-5">
             <i class="bi bi-robot display-4 text-muted"></i>
-            <p class="text-muted mt-3">No agent profiles configured yet.</p>
-            <a href="/agents/create" class="btn btn-primary">Create Your First Agent</a>
+            <h4 class="mt-3">No agent profiles configured yet</h4>
+            <p class="text-muted mb-4">
+                AI Agents are intelligent assistants that can write code, review pull requests, and test your applications.
+            </p>
+            <div class="d-flex justify-content-center gap-3">
+                <button type="button" class="btn btn-success btn-lg" onclick="openAgentSetupWizard()">
+                    <i class="bi bi-magic"></i> Setup Wizard
+                    <small class="d-block fw-normal">Guided setup for beginners</small>
+                </button>
+                <a href="/agents/create" class="btn btn-outline-primary btn-lg">
+                    <i class="bi bi-plus-lg"></i> Manual Setup
+                    <small class="d-block fw-normal">Configure every option</small>
+                </a>
+            </div>
         </div>
     </div>
     <?php else: ?>
@@ -222,3 +237,5 @@ function deleteAgent(id, name) {
     });
 }
 </script>
+
+<?php include __DIR__ . '/../partials/agent-setup-wizard.php'; ?>

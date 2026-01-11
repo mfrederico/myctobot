@@ -203,10 +203,11 @@ $isComplete = ($currentStep >= 5);
                             <i class="bi bi-rocket-takeoff me-2"></i>Let's Go!
                         </button>
 
-                        <div class="mt-4">
-                            <a href="/enterprise" class="text-muted">
-                                <i class="bi bi-speedometer2 me-1"></i>
-                                Go to AI Developer Dashboard
+                        <div class="mt-4 pt-3 border-top">
+                            <p class="text-muted small mb-2">Want to customize how your AI works?</p>
+                            <a href="/agents" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-robot me-1"></i>
+                                Configure AI Agents
                             </a>
                         </div>
                     </div>

@@ -364,6 +364,29 @@
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
+
+                        <?php if ($key === 'shopify' && !empty($conn['details']['stores'])): ?>
+                            <div class="mb-3">
+                                <small class="text-muted d-block mb-2">Connected Stores:</small>
+                                <?php foreach ($conn['details']['stores'] as $store): ?>
+                                    <div class="d-flex align-items-center justify-content-between mb-1">
+                                        <div class="d-flex align-items-center">
+                                            <i class="bi bi-shop me-2 text-success"></i>
+                                            <span class="small"><?= htmlspecialchars($store['shop_name']) ?></span>
+                                            <?php if ($store['shared'] && !$store['is_owner']): ?>
+                                                <span class="badge bg-info ms-2" style="font-size: 0.65rem;">Shared</span>
+                                            <?php endif; ?>
+                                            <?php if ($store['repo_linked']): ?>
+                                                <span class="badge bg-primary ms-1" style="font-size: 0.65rem;"><i class="bi bi-link-45deg"></i></span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <?php if (!$store['is_owner']): ?>
+                                            <small class="text-muted"><?= htmlspecialchars($store['owner_name']) ?></small>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                     <?php endif; ?>
 
                     <!-- Features this connection enables -->

@@ -303,51 +303,71 @@ class ConnectionsService {
     }
 
     /**
-     * Get Shopify connection status
+     * Get Shopify connection status (multi-store)
      */
     private function getShopifyStatus(): array {
         $result = [
             'connected' => false,
-            'status' => 'Not configured',
+            'status' => 'No stores connected',
             'details' => null,
             'actions' => [
-                ['label' => 'Configure Shopify', 'url' => '/shopify', 'class' => 'btn-success']
+                ['label' => 'Add Store', 'url' => '/shopify', 'class' => 'btn-success']
             ]
         ];
 
         try {
-            $shopify = new ShopifyClient($this->memberId);
+            // Get all stores visible to this member (owned + shared)
+            $stores = ShopifyClient::getAllConnections($this->memberId);
 
-            if (!$shopify->isConfigured()) {
+            if (empty($stores)) {
                 return $result;
             }
 
-            if (!$shopify->isConnected()) {
-                // Configured but not connected (needs OAuth)
-                return [
-                    'connected' => false,
-                    'status' => 'Configured - needs authorization',
-                    'details' => [
-                        'shop' => $shopify->getShop()
-                    ],
-                    'actions' => [
-                        ['label' => 'Authorize', 'url' => '/shopify/connect', 'class' => 'btn-success'],
-                        ['label' => 'Settings', 'url' => '/shopify', 'class' => 'btn-outline-secondary']
-                    ]
+            // Build store list for display
+            $storeList = [];
+            $ownedCount = 0;
+            $sharedCount = 0;
+
+            foreach ($stores as $store) {
+                $isOwner = ($store->created_by_member_id == $this->memberId);
+                $storeList[] = [
+                    'id' => $store->id,
+                    'shop_domain' => $store->shop_domain,
+                    'shop_name' => $store->shop_name ?: $store->shop_domain,
+                    'enabled' => (bool)$store->enabled,
+                    'shared' => (bool)$store->shared,
+                    'is_owner' => $isOwner,
+                    'owner_name' => $store->created_by_name,
+                    'repo_linked' => !empty($store->repo_connection_id)
                 ];
+
+                if ($isOwner) {
+                    $ownedCount++;
+                } else {
+                    $sharedCount++;
+                }
             }
 
-            // Fully connected
-            $details = $shopify->getConnectionDetails();
-            $shopName = $details['shop_info']['name'] ?? $details['shop'] ?? 'Connected';
+            $statusParts = [];
+            if ($ownedCount > 0) {
+                $statusParts[] = $ownedCount . ' owned';
+            }
+            if ($sharedCount > 0) {
+                $statusParts[] = $sharedCount . ' shared';
+            }
 
             return [
                 'connected' => true,
-                'status' => $shopName,
-                'details' => $details,
+                'status' => count($storeList) . ' store(s) - ' . implode(', ', $statusParts),
+                'details' => [
+                    'stores' => $storeList,
+                    'store_count' => count($storeList),
+                    'owned_count' => $ownedCount,
+                    'shared_count' => $sharedCount
+                ],
                 'actions' => [
-                    ['label' => 'Manage', 'url' => '/shopify', 'class' => 'btn-outline-success'],
-                    ['label' => 'Disconnect', 'url' => '/shopify/disconnect', 'class' => 'btn-outline-danger', 'confirm' => 'Are you sure you want to disconnect Shopify?']
+                    ['label' => 'Manage Stores', 'url' => '/shopify', 'class' => 'btn-outline-success'],
+                    ['label' => 'Add Store', 'url' => '/shopify', 'class' => 'btn-outline-secondary']
                 ]
             ];
 

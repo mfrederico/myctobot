@@ -20,6 +20,7 @@ use \Flight as Flight;
 use GuzzleHttp\Client;
 
 require_once __DIR__ . '/ShopifyClient.php';
+require_once __DIR__ . '/AttachmentService.php';
 
 class AIDevAgent {
     private int $memberId;
@@ -32,10 +33,14 @@ class AIDevAgent {
     private ?GitHubClient $github = null;
     private ?GitOperations $git = null;
     private ?ShopifyClient $shopify = null;
+    private ?AttachmentService $attachmentService = null;
 
     private array $repoConfig = [];
     private string $model = 'claude-sonnet-4-20250514';
     private bool $isShopifyTheme = false;
+
+    /** @var string Tenant slug for RAG integration */
+    private string $tenantSlug = 'default';
 
     /**
      * Create a new AI Developer Agent
@@ -62,11 +67,17 @@ class AIDevAgent {
         // Initialize Jira client
         $this->jira = new JiraClient($memberId, $cloudId);
 
+        // Initialize Attachment service for detecting and acknowledging file attachments
+        $this->attachmentService = new AttachmentService($this->jira);
+
         // Load repository configuration
         $this->loadRepoConfig();
 
         // Initialize Shopify client if connected
         $this->initShopify();
+
+        // Set tenant slug from session if available
+        $this->tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
     }
 
     /**
@@ -578,6 +589,7 @@ class AIDevAgent {
 
     /**
      * Analyze issue requirements using Claude
+     * Enhanced to detect and acknowledge all file attachments (not just images)
      */
     private function analyzeRequirements(array $issue, ?string $additionalContext = null): array {
         $summary = $issue['fields']['summary'] ?? '';
@@ -586,6 +598,7 @@ class AIDevAgent {
         $priority = $issue['fields']['priority']['name'] ?? 'Medium';
         $labelsArray = $issue['fields']['labels'] ?? [];
         $labels = !empty($labelsArray) ? implode(', ', $labelsArray) : 'None';
+        $issueKey = $issue['key'] ?? '';
 
         // Get comments for additional context
         $comments = $issue['fields']['comment']['comments'] ?? [];
@@ -594,17 +607,31 @@ class AIDevAgent {
             $commentText .= JiraClient::extractTextFromAdf($comment['body']) . "\n\n";
         }
 
-        // Get image attachments
-        $images = $this->jira->getIssueImages($issue, 5, 2048); // Max 5 images, 2MB each
-        $imageNote = '';
-        if (!empty($images)) {
-            $imageNote = "\n\nATTACHED IMAGES:\n";
-            $imageNote .= count($images) . " screenshot(s) are attached to this ticket. ";
-            $imageNote .= "Please analyze them carefully as they show the current issue or expected behavior.\n";
-            foreach ($images as $img) {
-                $imageNote .= "- {$img['filename']} ({$img['mimeType']})\n";
-            }
+        // Detect ALL attachments (not just images) using AttachmentService
+        $allAttachments = $this->attachmentService->detectAttachments($issue);
+        $attachmentStats = $this->attachmentService->getStatistics($allAttachments);
+
+        // Log attachment detection
+        $this->log('info', 'Detected attachments in directive', [
+            'issue_key' => $issueKey,
+            'total_attachments' => $attachmentStats['total_count'],
+            'by_type' => $attachmentStats['by_type'],
+            'oversized_count' => $attachmentStats['oversized_count']
+        ]);
+
+        // Post attachment acknowledgment to Jira if attachments exist
+        if (!empty($allAttachments)) {
+            $this->postAttachmentAcknowledgment($issueKey, $allAttachments);
+
+            // Index documents to RAG system (async)
+            $this->indexAttachmentsToRag($allAttachments);
         }
+
+        // Get image attachments for vision analysis
+        $images = $this->jira->getIssueImages($issue, 5, 2048); // Max 5 images, 2MB each
+
+        // Build comprehensive attachment note for the prompt
+        $attachmentNote = $this->buildAttachmentNote($allAttachments, $images);
 
         $prompt = <<<PROMPT
 Analyze this Jira ticket and extract the implementation requirements.
@@ -621,7 +648,7 @@ DESCRIPTION:
 {$description}
 
 COMMENTS:
-{$commentText}{$imageNote}
+{$commentText}{$attachmentNote}
 PROMPT;
 
         if ($additionalContext) {
@@ -642,7 +669,8 @@ Provide your analysis in JSON format with these fields:
     "unclear_aspects": ["List of aspects that need clarification, if any"],
     "questions": ["Specific questions to ask the reporter, if any"],
     "estimated_complexity": "low/medium/high",
-    "image_insights": ["Any insights or requirements derived from the attached images"]
+    "image_insights": ["Any insights or requirements derived from the attached images"],
+    "attachment_insights": ["Any insights from non-image attachments like documents"]
 }
 PROMPT;
 
@@ -662,11 +690,149 @@ PROMPT;
                 'summary' => $summary,
                 'requirements' => [$description],
                 'is_clear' => true,
-                'questions' => []
+                'questions' => [],
+                'attachments' => $allAttachments,
+                'attachment_stats' => $attachmentStats
             ];
         }
 
+        // Add attachment metadata to the requirements for downstream processing
+        $json['attachments'] = $allAttachments;
+        $json['attachment_stats'] = $attachmentStats;
+
         return $json;
+    }
+
+    /**
+     * Build a comprehensive attachment note for the AI prompt
+     *
+     * @param array $allAttachments All detected attachments
+     * @param array $images Image attachments loaded for vision
+     * @return string Attachment note text
+     */
+    private function buildAttachmentNote(array $allAttachments, array $images): string {
+        if (empty($allAttachments)) {
+            return "\n\nATTACHMENTS:\nNo file attachments found in this directive.";
+        }
+
+        $note = "\n\nATTACHMENTS (" . count($allAttachments) . " file(s)):\n";
+
+        // Group by type
+        $byType = [];
+        foreach ($allAttachments as $att) {
+            $type = $att['type'] ?? 'other';
+            $byType[$type][] = $att;
+        }
+
+        // Images section with vision note
+        if (!empty($byType['image'])) {
+            $note .= "\nImages (" . count($byType['image']) . "):\n";
+            foreach ($byType['image'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})";
+                if ($att['is_oversized'] ?? false) {
+                    $note .= " [OVERSIZED - may not be fully processed]";
+                }
+                $note .= "\n";
+            }
+            if (!empty($images)) {
+                $note .= "Note: " . count($images) . " image(s) are being analyzed visually.\n";
+            }
+        }
+
+        // Documents section
+        if (!empty($byType['document'])) {
+            $note .= "\nDocuments (" . count($byType['document']) . "):\n";
+            foreach ($byType['document'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})";
+                if ($att['is_oversized'] ?? false) {
+                    $note .= " [OVERSIZED]";
+                }
+                $note .= "\n";
+            }
+            $note .= "Note: Document attachments have been indexed for reference.\n";
+        }
+
+        // Code files section
+        if (!empty($byType['code'])) {
+            $note .= "\nCode Files (" . count($byType['code']) . "):\n";
+            foreach ($byType['code'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})\n";
+            }
+        }
+
+        // Other files
+        if (!empty($byType['archive']) || !empty($byType['other'])) {
+            $otherFiles = array_merge($byType['archive'] ?? [], $byType['other'] ?? []);
+            $note .= "\nOther Files (" . count($otherFiles) . "):\n";
+            foreach ($otherFiles as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})\n";
+            }
+        }
+
+        return $note;
+    }
+
+    /**
+     * Post attachment acknowledgment comment to Jira
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $attachments Detected attachments
+     */
+    private function postAttachmentAcknowledgment(string $issueKey, array $attachments): void {
+        if (empty($issueKey)) {
+            return;
+        }
+
+        try {
+            $acknowledgment = "**MyCTOBot AI Developer - Attachments Acknowledged**\n\n";
+            $acknowledgment .= $this->attachmentService->formatAcknowledgment($attachments, true);
+
+            $this->jira->addComment($issueKey, $acknowledgment);
+            $this->log('info', 'Posted attachment acknowledgment to Jira', [
+                'issue_key' => $issueKey,
+                'attachment_count' => count($attachments)
+            ]);
+        } catch (\Exception $e) {
+            $this->log('warning', 'Failed to post attachment acknowledgment', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Index document attachments to the tenant's RAG system
+     *
+     * @param array $attachments Detected attachments
+     */
+    private function indexAttachmentsToRag(array $attachments): void {
+        // Filter to only indexable attachments (documents and images)
+        $indexable = array_filter($attachments, function($att) {
+            return ($att['is_indexable'] ?? false) && !($att['is_oversized'] ?? false);
+        });
+
+        if (empty($indexable)) {
+            $this->log('info', 'No attachments eligible for RAG indexing');
+            return;
+        }
+
+        try {
+            $result = $this->attachmentService->indexMultipleToRag(
+                $this->tenantSlug,
+                $indexable,
+                'ceo-directives' // Default knowledge base for CEO directives
+            );
+
+            $this->log('info', 'RAG indexing completed', [
+                'indexed' => $result['indexed'],
+                'skipped' => $result['skipped'],
+                'failed' => $result['failed']
+            ]);
+        } catch (\Exception $e) {
+            $this->log('warning', 'RAG indexing failed', [
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 
     /**

@@ -216,11 +216,17 @@ CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `completed_at` DATETIME,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    -- Delivery confirmation tracking (Issue #26)
+    `confirmation_sent_at` DATETIME DEFAULT NULL COMMENT 'Timestamp when delivery confirmation was successfully sent',
+    `confirmation_method` VARCHAR(100) DEFAULT NULL COMMENT 'Delivery method(s) that succeeded (email, jira, webhook)',
+    `confirmation_attempts` INT DEFAULT 0 COMMENT 'Number of confirmation delivery attempts (max 3)',
+    `confirmation_last_error` TEXT DEFAULT NULL COMMENT 'Last error message from failed confirmation attempt',
     INDEX `idx_member` (`member_id`),
     INDEX `idx_board` (`board_id`),
     INDEX `idx_status` (`status`),
     INDEX `idx_issue` (`issue_key`),
-    INDEX `idx_member_issue` (`member_id`, `issue_key`)
+    INDEX `idx_member_issue` (`member_id`, `issue_key`),
+    INDEX `idx_confirmation_pending` (`confirmation_sent_at`, `confirmation_attempts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- AI Developer job logs
@@ -476,6 +482,189 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('admin', 'members', 50, 'Manage members'),
 ('api', 'crondigest', 1, 'Cron digest endpoint'),
 ('analysis', 'sharddigest', 1, 'Shard digest analysis endpoint')
+ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
+
+-- ============================================================================
+-- AUTONOMOUS CTO SYSTEM TABLES
+-- ============================================================================
+
+-- CEO Directives (email input from CEO)
+CREATE TABLE IF NOT EXISTS `ceodirectives` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `directive_id` VARCHAR(32) NOT NULL UNIQUE,
+    `member_id` INT NOT NULL,
+
+    -- Email metadata
+    `email_from` VARCHAR(255),
+    `email_subject` VARCHAR(500),
+    `email_body` TEXT,
+    `email_message_id` VARCHAR(255),
+
+    -- Parsed content
+    `parsed_intent` ENUM('project', 'feature', 'bug', 'question', 'report') DEFAULT 'project',
+    `parsed_summary` TEXT,
+    `parsed_requirements` JSON,
+
+    -- Processing state
+    `status` ENUM('received', 'parsing', 'planning', 'executing', 'completed', 'failed') DEFAULT 'received',
+    `current_phase` VARCHAR(50),
+    `error_message` TEXT,
+
+    -- Approval mode
+    `approval_mode` ENUM('auto', 'manual') DEFAULT 'auto',
+
+    -- Linked project
+    `project_id` INT,
+
+    -- Response tracking
+    `response_sent_at` DATETIME,
+    `response_content` TEXT,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_status` (`status`),
+    INDEX `idx_member` (`member_id`),
+    INDEX `idx_directive_id` (`directive_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- CTO Projects (strategic decomposition)
+CREATE TABLE IF NOT EXISTS `ctoprojects` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `project_id` VARCHAR(32) NOT NULL UNIQUE,
+    `directive_id` INT,
+    `member_id` INT NOT NULL,
+
+    -- Project info
+    `name` VARCHAR(255) NOT NULL,
+    `description` TEXT,
+    `goals` JSON,
+
+    -- Planning
+    `estimated_effort` VARCHAR(50),
+    `risk_assessment` JSON,
+    `tech_stack` JSON,
+
+    -- Jira/GitHub linking
+    `jira_project_key` VARCHAR(50),
+    `board_id` INT,
+    `github_repo_id` INT,
+
+    -- Status
+    `status` ENUM('planning', 'in_progress', 'blocked', 'completed', 'cancelled') DEFAULT 'planning',
+    `completion_percentage` INT DEFAULT 0,
+
+    -- Milestones
+    `milestones` JSON,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_status` (`status`),
+    INDEX `idx_directive` (`directive_id`),
+    INDEX `idx_project_id` (`project_id`),
+    FOREIGN KEY (`directive_id`) REFERENCES `ceodirectives`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- CTO Epics (PM-level breakdown)
+CREATE TABLE IF NOT EXISTS `ctoepics` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `epic_id` VARCHAR(32) NOT NULL UNIQUE,
+    `project_id` INT NOT NULL,
+
+    -- Epic info
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT,
+    `acceptance_criteria` JSON,
+
+    -- Jira linking
+    `jira_epic_key` VARCHAR(50),
+    `jira_epic_id` VARCHAR(50),
+
+    -- Status tracking
+    `status` ENUM('backlog', 'in_progress', 'review', 'completed') DEFAULT 'backlog',
+    `story_count` INT DEFAULT 0,
+    `stories_completed` INT DEFAULT 0,
+
+    -- Ordering
+    `priority` INT DEFAULT 0,
+    `sequence` INT DEFAULT 0,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_project` (`project_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_epic_id` (`epic_id`),
+    FOREIGN KEY (`project_id`) REFERENCES `ctoprojects`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- CTO Stories (linked to existing aidevjobs)
+CREATE TABLE IF NOT EXISTS `ctostories` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `story_id` VARCHAR(32) NOT NULL UNIQUE,
+    `epic_id` INT NOT NULL,
+
+    -- Story info
+    `title` VARCHAR(255) NOT NULL,
+    `description` TEXT,
+    `acceptance_criteria` JSON,
+    `story_points` INT,
+
+    -- Jira linking
+    `jira_issue_key` VARCHAR(50),
+    `jira_issue_id` VARCHAR(50),
+
+    -- AI Dev job linking
+    `aidev_job_id` VARCHAR(64),
+
+    -- Status (mirrors Jira but cached locally)
+    `status` ENUM('backlog', 'ready', 'in_progress', 'review', 'done', 'blocked') DEFAULT 'backlog',
+    `blocker_reason` TEXT,
+
+    -- Dependencies
+    `depends_on` JSON,
+
+    -- Verification
+    `verified_at` DATETIME,
+    `verification_result` JSON,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_epic` (`epic_id`),
+    INDEX `idx_jira` (`jira_issue_key`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_story_id` (`story_id`),
+    FOREIGN KEY (`epic_id`) REFERENCES `ctoepics`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Directive Processing Log
+CREATE TABLE IF NOT EXISTS `directivelogs` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `directive_id` INT NOT NULL,
+    `phase` VARCHAR(50) NOT NULL,
+    `log_level` ENUM('info', 'warning', 'error') DEFAULT 'info',
+    `message` TEXT NOT NULL,
+    `context_json` JSON,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX `idx_directive` (`directive_id`),
+    FOREIGN KEY (`directive_id`) REFERENCES `ceodirectives`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add authcontrol entries for new controllers
+INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
+('directives', 'index', 100, 'CEO Directives dashboard'),
+('directives', 'view', 100, 'View directive detail'),
+('directives', 'retry', 100, 'Retry failed directive'),
+('directives', 'cancel', 100, 'Cancel directive'),
+('projects', 'index', 100, 'CTO Projects dashboard'),
+('projects', 'view', 100, 'View project detail'),
+('projects', 'report', 100, 'Generate project report'),
+('projects', 'pause', 100, 'Pause project execution'),
+('projects', 'resume', 100, 'Resume project execution'),
+('webhook', 'mailgun', 101, 'Mailgun incoming email webhook')
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
 
 SET FOREIGN_KEY_CHECKS = 1;

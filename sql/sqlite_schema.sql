@@ -155,6 +155,20 @@ CREATE TABLE "usersettings" (
     value TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE "ceodirectivelogs" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    directive_id TEXT NOT NULL,                    -- Unique identifier for grouping related logs
+    member_id INTEGER NOT NULL,                    -- User ID
+    issue_key TEXT,                                -- Jira/GitHub ticket reference
+    action TEXT NOT NULL,                          -- received, processing, completed, error, response_sent
+    message TEXT NOT NULL,                         -- Log message
+    context_json TEXT,                             -- JSON blob for additional data
+    stack_trace TEXT,                              -- For errors
+    recovery_action TEXT,                          -- For errors
+    response_content TEXT,                         -- For responses
+    delivery_status TEXT,                          -- For responses (success, failed, pending)
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 -- Indexes
 CREATE INDEX idx_aidevjoblogs_issue ON aidevjoblogs(issue_key);
 CREATE INDEX idx_aidevjobs_board ON aidevjobs(board_id);
@@ -176,3 +190,8 @@ CREATE INDEX idx_aiagents_member ON "aiagents"(member_id);
 CREATE INDEX idx_aiagents_active ON "aiagents"(is_active);
 CREATE INDEX idx_aiagents_default ON "aiagents"(is_default);
 CREATE INDEX idx_repoconnections_agent ON "repoconnections"(agent_id);
+CREATE INDEX idx_ceodirectivelogs_directive ON "ceodirectivelogs"(directive_id);
+CREATE INDEX idx_ceodirectivelogs_member ON "ceodirectivelogs"(member_id);
+CREATE INDEX idx_ceodirectivelogs_issue ON "ceodirectivelogs"(issue_key);
+CREATE INDEX idx_ceodirectivelogs_action ON "ceodirectivelogs"(action);
+CREATE INDEX idx_ceodirectivelogs_created ON "ceodirectivelogs"(created_at DESC);

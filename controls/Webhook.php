@@ -15,6 +15,7 @@ use \app\services\EncryptionService;
 use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
 use \app\services\TmuxService;
+use \app\services\CeoDirectiveLogger;
 
 require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
@@ -24,8 +25,15 @@ require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/MailgunService.php';
 require_once __DIR__ . '/../services/TmuxService.php';
+require_once __DIR__ . '/../services/CeoDirectiveLogger.php';
 
 class Webhook extends BaseControls\Control {
+
+    /** @var string|null Current CEO directive ID for audit trail */
+    private ?string $currentDirectiveId = null;
+
+    /** @var CeoDirectiveLogger|null Current CEO directive logger instance */
+    private ?CeoDirectiveLogger $currentDirectiveLogger = null;
 
     /**
      * Handle Jira webhook
@@ -85,9 +93,30 @@ class Webhook extends BaseControls\Control {
 
         try {
             $this->processJiraWebhook($data);
+
+            // Log completion if we have a directive logger
+            if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+                $this->currentDirectiveLogger->logCompleted(
+                    $this->currentDirectiveId,
+                    'Jira webhook processed successfully',
+                    ['event' => $data['webhookEvent'] ?? 'unknown']
+                );
+            }
+
             echo json_encode(['success' => true]);
         } catch (\Exception $e) {
             $this->logger->error('Jira webhook processing failed', ['error' => $e->getMessage()]);
+
+            // Log error with full stack trace for audit trail
+            if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+                $this->currentDirectiveLogger->logError(
+                    $this->currentDirectiveId,
+                    'Webhook processing failed: ' . $e->getMessage(),
+                    $e,
+                    'Request failed with 500 error; manual review required'
+                );
+            }
+
             Flight::response()->status(500);
             echo json_encode(['error' => 'Processing failed']);
         }
@@ -201,6 +230,18 @@ class Webhook extends BaseControls\Control {
                 $this->logger->debug('Jira webhook: ignoring bot update', ['issue_key' => $issueKey]);
                 return;
             }
+
+            // Initialize CEO Directive Logger for audit trail
+            $directiveLogger = new CeoDirectiveLogger($memberId);
+            $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'jira', [
+                'event' => $event,
+                'cloud_id' => $cloudId,
+                'user' => $data['user']['displayName'] ?? 'unknown'
+            ]);
+
+            // Store directive ID for use in subsequent processing
+            $this->currentDirectiveId = $directiveId;
+            $this->currentDirectiveLogger = $directiveLogger;
         }
 
         // First, check if there's a local tmux session to augment
@@ -499,6 +540,16 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Log processing step for CEO directive audit trail
+        if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+            $this->currentDirectiveLogger->logProcessingStep(
+                $this->currentDirectiveId,
+                'job_trigger',
+                'Triggering AI Developer job',
+                ['repo_id' => $repoId, 'tenant' => Flight::get('tenant.slug')]
+            );
+        }
+
         // Get tenant slug for multi-tenancy support
         $tenant = Flight::get('tenant.slug');
 
@@ -516,6 +567,20 @@ class Webhook extends BaseControls\Control {
                 'local' => $result['local'] ?? false,
                 'shard' => $result['shard'] ?? null
             ]);
+
+            // Log successful job trigger
+            if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+                $this->currentDirectiveLogger->logProcessingStep(
+                    $this->currentDirectiveId,
+                    'job_started',
+                    'AI Developer job started successfully',
+                    [
+                        'job_id' => $result['job_id'],
+                        'local' => $result['local'] ?? false,
+                        'shard' => $result['shard'] ?? null
+                    ]
+                );
+            }
         } else {
             $this->logger->warning('Failed to trigger AI Developer job via webhook', [
                 'member_id' => $memberId,
@@ -523,6 +588,17 @@ class Webhook extends BaseControls\Control {
                 'repo_id' => $repoId,
                 'error' => $result['error'] ?? 'Unknown error'
             ]);
+
+            // Log job trigger failure
+            if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+                $this->currentDirectiveLogger->logError(
+                    $this->currentDirectiveId,
+                    'Failed to trigger AI Developer job: ' . ($result['error'] ?? 'Unknown error'),
+                    null,
+                    'Will retry on next webhook or manual trigger',
+                    ['repo_id' => $repoId]
+                );
+            }
         }
     }
 

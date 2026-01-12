@@ -618,8 +618,8 @@ CREATE TABLE IF NOT EXISTS `ctostories` (
     -- AI Dev job linking
     `aidev_job_id` VARCHAR(64),
 
-    -- Status (mirrors Jira but cached locally)
-    `status` ENUM('backlog', 'ready', 'in_progress', 'review', 'done', 'blocked') DEFAULT 'backlog',
+    -- Status workflow: pending_review → approved → ready → in_progress → review → done
+    `status` ENUM('pending_review', 'approved', 'backlog', 'ready', 'in_progress', 'review', 'done', 'blocked') DEFAULT 'pending_review',
     `blocker_reason` TEXT,
 
     -- Dependencies

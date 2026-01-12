@@ -118,6 +118,7 @@ PROMPT;
      *
      * @param object $epic The ctoepics bean
      * @param array $options Options:
+     *   - require_approval: If true, stories go to pending_review status (default: true)
      *   - create_jira_issues: Whether to create Jira issues (default: false if no cloudId)
      *   - create_github_issues: Whether to create GitHub issues (default: false)
      *   - project_key: Jira project key (required if create_jira_issues is true)
@@ -126,8 +127,12 @@ PROMPT;
      * @return array Result with stories or error
      */
     public function createStories(object $epic, array $options = []): array {
-        $createJiraIssues = $options['create_jira_issues'] ?? ($this->cloudId !== null);
-        $createGitHubIssues = $options['create_github_issues'] ?? ($this->github !== null);
+        // Default to requiring approval - stories won't create issues until approved
+        $requireApproval = $options['require_approval'] ?? true;
+
+        // If approval is required, don't auto-create issues
+        $createJiraIssues = $requireApproval ? false : ($options['create_jira_issues'] ?? ($this->cloudId !== null));
+        $createGitHubIssues = $requireApproval ? false : ($options['create_github_issues'] ?? ($this->github !== null));
         $projectKey = $options['project_key'] ?? null;
         $jiraEpicKey = $options['epic_key'] ?? null;
         $githubLabels = $options['github_labels'] ?? ['ctobot-generated'];
@@ -135,6 +140,7 @@ PROMPT;
         $this->logger->info('PMAgent: Creating stories from epic', [
             'epic_id' => $epic->epic_id,
             'title' => $epic->title,
+            'require_approval' => $requireApproval,
             'create_jira' => $createJiraIssues,
             'create_github' => $createGitHubIssues
         ]);
@@ -176,7 +182,7 @@ PROMPT;
             $storyDependencies = []; // Track for second pass
 
             foreach ($parsed['stories'] as $index => $storyData) {
-                $story = $this->createStory($epic, $storyData, $index);
+                $story = $this->createStory($epic, $storyData, $index, $requireApproval);
                 $createdStories[] = $story;
 
                 // Track dependencies for later resolution
@@ -275,7 +281,7 @@ PROMPT;
     /**
      * Create a story in the database
      */
-    private function createStory(object $epic, array $storyData, int $sequence): object {
+    private function createStory(object $epic, array $storyData, int $sequence, bool $requireApproval = true): object {
         $storyId = bin2hex(random_bytes(16));
 
         $story = Bean::dispense('ctostories');
@@ -285,7 +291,8 @@ PROMPT;
         $story->description = $storyData['description'] ?? '';
         $story->acceptance_criteria = json_encode($storyData['acceptance_criteria'] ?? []);
         $story->story_points = $storyData['story_points'] ?? 3;
-        $story->status = 'backlog';
+        // Stories go to pending_review by default, requiring approval before issue creation
+        $story->status = $requireApproval ? 'pending_review' : 'backlog';
         $story->sequence = $sequence;
         $story->created_at = date('Y-m-d H:i:s');
 

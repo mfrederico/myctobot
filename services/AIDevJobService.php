@@ -17,6 +17,7 @@ require_once __DIR__ . '/AIDevStatusService.php';
 require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/TmuxService.php';
+require_once __DIR__ . '/CeoDirectiveLogger.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
 use \app\plugins\AtlassianAuth;
@@ -526,6 +527,14 @@ class AIDevJobService {
                 'pr_url' => $prUrl
             ]);
 
+            // Log the response for CEO directive audit trail
+            $this->logCeoDirectiveResponse(
+                $memberId,
+                $issueKey,
+                "PR #{$prNumber} created: {$prUrl}\nBranch: {$branchName}\nSummary: {$summary}",
+                CeoDirectiveLogger::DELIVERY_SUCCESS
+            );
+
             return true;
 
         } catch (\Exception $e) {
@@ -534,6 +543,15 @@ class AIDevJobService {
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
+
+            // Log the failed response attempt
+            $this->logCeoDirectiveResponse(
+                $memberId,
+                $issueKey,
+                'Failed to post PR summary: ' . $e->getMessage(),
+                CeoDirectiveLogger::DELIVERY_FAILED
+            );
+
             return false;
         }
     }
@@ -1034,11 +1052,29 @@ class AIDevJobService {
             // Post failure comment
             $this->postFailureComment($jiraClient, $issueKey, $errorMessage);
 
+            // Log CEO directive error for audit trail
+            $this->logCeoDirectiveError(
+                $memberId,
+                $issueKey,
+                $errorMessage,
+                null,
+                'Posted failure comment to Jira; ticket transitioned to failed status'
+            );
+
         } catch (\Exception $e) {
             $this->logger->error('Error in onJobFailed', [
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
+
+            // Log the secondary error
+            $this->logCeoDirectiveError(
+                $memberId,
+                $issueKey,
+                'Error during failure handling: ' . $e->getMessage(),
+                $e,
+                'Original error: ' . $errorMessage
+            );
         }
     }
 
@@ -1351,5 +1387,91 @@ class AIDevJobService {
         }
 
         return $settings;
+    }
+
+    // ========================================
+    // CEO Directive Logging Helpers
+    // ========================================
+
+    /**
+     * Log a CEO directive response for audit trail
+     * Creates a new directive entry if no active directive is found
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param string $responseContent Content of the response
+     * @param string $deliveryStatus Delivery status (success, failed, pending)
+     */
+    private function logCeoDirectiveResponse(int $memberId, string $issueKey, string $responseContent, string $deliveryStatus): void {
+        try {
+            $directiveLogger = new CeoDirectiveLogger($memberId);
+
+            // Try to find an existing directive for this issue from recent logs
+            $recentLogs = $directiveLogger->getLogsForIssue($issueKey, 1);
+            $directiveId = null;
+
+            if (!empty($recentLogs)) {
+                // Use the most recent directive ID for this issue
+                $directiveId = $recentLogs[0]['directive_id'];
+            } else {
+                // No existing directive found, create a new one
+                $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
+                    'source' => 'AIDevJobService',
+                    'action' => 'response_delivery'
+                ]);
+            }
+
+            $directiveLogger->logResponse($directiveId, $responseContent, $deliveryStatus, [
+                'delivery_method' => 'jira_comment',
+                'member_id' => $memberId
+            ]);
+
+        } catch (\Exception $e) {
+            // Don't let logging failures break the main flow
+            $this->logger->warning('Failed to log CEO directive response', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Log a CEO directive error for audit trail
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param string $errorMessage Error description
+     * @param \Throwable|null $exception Exception for stack trace
+     * @param string|null $recoveryAction Recovery action taken
+     */
+    public function logCeoDirectiveError(int $memberId, string $issueKey, string $errorMessage, ?\Throwable $exception = null, ?string $recoveryAction = null): void {
+        try {
+            $directiveLogger = new CeoDirectiveLogger($memberId);
+
+            // Try to find an existing directive for this issue
+            $recentLogs = $directiveLogger->getLogsForIssue($issueKey, 1);
+            $directiveId = null;
+
+            if (!empty($recentLogs)) {
+                $directiveId = $recentLogs[0]['directive_id'];
+            } else {
+                // No existing directive found, create a new one
+                $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
+                    'source' => 'AIDevJobService',
+                    'action' => 'error_logging'
+                ]);
+            }
+
+            $directiveLogger->logError($directiveId, $errorMessage, $exception, $recoveryAction);
+
+        } catch (\Exception $e) {
+            // Don't let logging failures break the main flow
+            $this->logger->warning('Failed to log CEO directive error', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }

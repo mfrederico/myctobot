@@ -431,3 +431,11 @@ async function deleteProject(projectId) {
     }
 }
 </script>
+
+<?php
+// PM Chatbox - floating assistant for project questions
+$ragServiceUrl = getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501';
+$tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+$projectId = null; // Could be set if viewing a specific project
+include __DIR__ . '/../partials/pm-chatbox.php';
+?>

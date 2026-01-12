@@ -982,4 +982,139 @@ HTML;
             ]);
         }
     }
+
+    /**
+     * Accept invitation - handles both GET (show form) and POST (process)
+     * URL: /auth/invite/{token}?tenant=xxx
+     */
+    public function invite($params = []) {
+        require_once __DIR__ . '/../services/InviteService.php';
+
+        $request = Flight::request();
+        $token = $params['operation']->name ?? '';
+        // Accept both 'tenant' and 'workspace' query params for backwards compatibility
+        $tenant = $request->query->tenant ?? $request->query->workspace ?? $request->data->tenant ?? '';
+
+        if (empty($token)) {
+            $this->render('auth/invite_error', [
+                'title' => 'Invalid Invitation',
+                'error' => 'No invitation token provided'
+            ]);
+            return;
+        }
+
+        // If tenant specified, switch database context
+        if (!empty($tenant)) {
+            if (!TenantResolver::tenantExists($tenant)) {
+                $this->render('auth/invite_error', [
+                    'title' => 'Invalid Workspace',
+                    'error' => "Workspace '{$tenant}' not found"
+                ]);
+                return;
+            }
+
+            if (!$this->switchToTenantDatabase($tenant)) {
+                $this->render('auth/invite_error', [
+                    'title' => 'Connection Error',
+                    'error' => 'Could not connect to workspace database'
+                ]);
+                return;
+            }
+        }
+
+        $inviteService = new \app\services\InviteService();
+
+        // Handle POST - process the form
+        if ($request->method === 'POST') {
+            $password = $request->data->password ?? '';
+            $confirmPassword = $request->data->confirm_password ?? '';
+            $displayName = trim($request->data->display_name ?? '');
+
+            if (empty($password) || strlen($password) < 8) {
+                $this->flash('error', 'Password must be at least 8 characters');
+                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                Flight::redirect($redirectUrl);
+                return;
+            }
+
+            if ($password !== $confirmPassword) {
+                $this->flash('error', 'Passwords do not match');
+                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                Flight::redirect($redirectUrl);
+                return;
+            }
+
+            // Accept the invitation
+            $result = $inviteService->acceptInvite($token, $password, $displayName ?: null);
+
+            if (!$result['success']) {
+                $this->flash('error', $result['error']);
+                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                Flight::redirect($redirectUrl);
+                return;
+            }
+
+            $member = $result['member'];
+
+            $this->logger->info('User accepted invitation', [
+                'member_id' => $member->id,
+                'email' => $member->email,
+                'tenant' => $tenant ?: 'default'
+            ]);
+
+            // Regenerate session ID to prevent session fixation attacks
+            session_regenerate_id(true);
+
+            // Set tenant in session if applicable
+            if (!empty($tenant)) {
+                TenantResolver::setTenant($tenant);
+            }
+
+            // Auto-login the user
+            $_SESSION['member'] = $member->export();
+
+            $this->flash('success', 'Welcome! Your account has been activated.');
+
+            // Redirect to tenant-specific URL if applicable
+            if (!empty($tenant)) {
+                // Build tenant URL from base domain
+                $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
+                $protocol = Flight::get('app.protocol') ?? 'https';
+                Flight::redirect("{$protocol}://{$tenant}.{$baseDomain}/dashboard");
+            } else {
+                Flight::redirect('/dashboard');
+            }
+            return;
+        }
+
+        // Handle GET - show the form
+        $validation = $inviteService->validateToken($token, $tenant);
+
+        if (!$validation['valid']) {
+            $this->render('auth/invite_error', [
+                'title' => 'Invalid Invitation',
+                'error' => $validation['error'],
+                'tenant' => $tenant
+            ]);
+            return;
+        }
+
+        $member = $validation['member'];
+
+        // Get tenant display name for the form
+        $tenantDisplayName = '';
+        if (!empty($tenant)) {
+            $setting = R::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
+            $tenantDisplayName = $setting ? $setting->setting_value : ucwords(str_replace(['-', '_'], ' ', $tenant));
+        }
+
+        $this->render('auth/accept_invite', [
+            'title' => 'Accept Invitation',
+            'token' => $token,
+            'tenant' => $tenant,
+            'tenantDisplayName' => $tenantDisplayName,
+            'email' => $member->email,
+            'displayName' => $member->display_name
+        ]);
+    }
 }

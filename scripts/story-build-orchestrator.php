@@ -145,8 +145,11 @@ class StoryBuildOrchestrator {
     private bool $dryRun;
     private string $baseDir;
 
-    /** @var array<int, array{session: string, story_id: int, issue_key: string, started: int}> */
+    /** @var array<int, array{session: string, story_id: int, issue_key: string, started: int, last_activity: int, last_status: string}> */
     private array $activeSessions = [];
+
+    /** @var int Seconds before considering a session stuck */
+    private int $stuckThreshold = 600; // 10 minutes
 
     public function __construct(string $tenant, int $memberId, int $maxConcurrent, bool $dryRun, string $baseDir) {
         $this->tenant = $tenant;
@@ -154,6 +157,44 @@ class StoryBuildOrchestrator {
         $this->maxConcurrent = max(1, $maxConcurrent);
         $this->dryRun = $dryRun;
         $this->baseDir = $baseDir;
+
+        // Discover any existing running sessions for this tenant
+        $this->discoverExistingSessions();
+    }
+
+    /**
+     * Discover existing tmux sessions that match our pattern
+     */
+    private function discoverExistingSessions(): void {
+        $pattern = "story-{$this->tenant}-";
+        exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $sessions);
+
+        foreach ($sessions as $sessionName) {
+            if (strpos($sessionName, $pattern) === 0) {
+                // Parse story ID from session name: story-{tenant}-{storyId}-{issueKey}
+                if (preg_match('/^story-[^-]+-(\d+)-(.+)$/', $sessionName, $matches)) {
+                    $storyId = (int)$matches[1];
+
+                    // Load story from database
+                    $story = Bean::load('ctostories', $storyId);
+                    if ($story && $story->id && $story->status === 'in_progress') {
+                        $this->activeSessions[$storyId] = [
+                            'session' => $sessionName,
+                            'story_id' => $storyId,
+                            'issue_key' => $story->jira_issue_key,
+                            'started' => time() - 60, // Assume started recently
+                            'last_activity' => time(),
+                            'last_status' => 'discovered'
+                        ];
+                        output("  Discovered existing session: {$sessionName}", true);
+                    }
+                }
+            }
+        }
+
+        if (count($this->activeSessions) > 0) {
+            output("  Found " . count($this->activeSessions) . " existing session(s)", true);
+        }
     }
 
     /**
@@ -256,6 +297,237 @@ class StoryBuildOrchestrator {
     private function isSessionRunning(string $sessionName): bool {
         exec("tmux has-session -t " . escapeshellarg($sessionName) . " 2>/dev/null", $output, $exitCode);
         return $exitCode === 0;
+    }
+
+    /**
+     * Get the Claude process PID for a session
+     */
+    private function getClaudePid(string $sessionName): ?int {
+        // Get the tmux pane PID
+        exec("tmux list-panes -t " . escapeshellarg($sessionName) . " -F '#{pane_pid}' 2>/dev/null", $output);
+        if (empty($output)) {
+            return null;
+        }
+        $panePid = (int)$output[0];
+
+        // Find the claude process under this pane
+        exec("pstree -p {$panePid} 2>/dev/null | grep -o 'claude([0-9]*)' | grep -o '[0-9]*'", $claudePids);
+        if (!empty($claudePids)) {
+            return (int)$claudePids[0];
+        }
+
+        return null;
+    }
+
+    /**
+     * Get CPU time for a process (utime + stime in jiffies)
+     */
+    private function getProcessCpuTime(int $pid): ?int {
+        $statFile = "/proc/{$pid}/stat";
+        if (!file_exists($statFile)) {
+            return null;
+        }
+
+        $stat = @file_get_contents($statFile);
+        if (!$stat) {
+            return null;
+        }
+
+        $parts = explode(' ', $stat);
+        if (count($parts) < 15) {
+            return null;
+        }
+
+        // utime is field 14, stime is field 15 (0-indexed: 13, 14)
+        return (int)$parts[13] + (int)$parts[14];
+    }
+
+    /**
+     * Check if a session's Claude process is actively running
+     */
+    private function isProcessActive(int $storyId): bool {
+        if (!isset($this->activeSessions[$storyId])) {
+            return false;
+        }
+
+        $sessionInfo = &$this->activeSessions[$storyId];
+        $sessionName = $sessionInfo['session'];
+
+        // Get Claude PID if not cached
+        if (!isset($sessionInfo['claude_pid'])) {
+            $sessionInfo['claude_pid'] = $this->getClaudePid($sessionName);
+        }
+
+        $pid = $sessionInfo['claude_pid'];
+        if (!$pid) {
+            return false;
+        }
+
+        // Get current CPU time
+        $cpuTime = $this->getProcessCpuTime($pid);
+        if ($cpuTime === null) {
+            return false;
+        }
+
+        // Compare with last CPU time
+        $lastCpuTime = $sessionInfo['last_cpu_time'] ?? 0;
+        $sessionInfo['last_cpu_time'] = $cpuTime;
+
+        // If CPU time increased, process is active
+        if ($cpuTime > $lastCpuTime) {
+            $sessionInfo['last_activity'] = time();
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Capture recent output from a tmux session
+     */
+    private function captureSessionOutput(string $sessionName, int $lines = 50): string {
+        $output = [];
+        exec("tmux capture-pane -t " . escapeshellarg($sessionName) . " -p -S -{$lines} 2>/dev/null", $output);
+        return implode("\n", $output);
+    }
+
+    /**
+     * Parse session output for progress indicators
+     */
+    private function parseSessionProgress(string $output): array {
+        $status = 'unknown';
+        $phase = '';
+        $details = '';
+
+        // Check for various progress indicators
+        if (preg_match('/Implementation complete/i', $output)) {
+            $status = 'completing';
+            $phase = 'implementation_done';
+        } elseif (preg_match('/PR Created|pull request/i', $output)) {
+            $status = 'pr_created';
+            $phase = 'pr_created';
+        } elseif (preg_match('/Verifying implementation/i', $output)) {
+            $status = 'verifying';
+            $phase = 'verification';
+        } elseif (preg_match('/Spawning.*agent|php-architect-engineer|impl-agent/i', $output)) {
+            $status = 'implementing';
+            $phase = 'implementation';
+        } elseif (preg_match('/Cloning repository/i', $output)) {
+            $status = 'starting';
+            $phase = 'setup';
+        } elseif (preg_match('/Fetching issue details/i', $output)) {
+            $status = 'starting';
+            $phase = 'fetch_issue';
+        } elseif (preg_match('/Error:|Fatal:|Exception:/i', $output)) {
+            $status = 'error';
+            // Try to extract error message
+            if (preg_match('/(?:Error|Fatal|Exception):\s*(.+?)(?:\n|$)/i', $output, $matches)) {
+                $details = trim($matches[1]);
+            }
+        }
+
+        // Check for time indicators in output (e.g., "3m 45s")
+        if (preg_match('/(\d+)m\s*(\d+)s/', $output, $matches)) {
+            $details = "{$matches[1]}m {$matches[2]}s elapsed";
+        }
+
+        return [
+            'status' => $status,
+            'phase' => $phase,
+            'details' => $details
+        ];
+    }
+
+    /**
+     * Monitor a session and update its tracking info
+     */
+    private function monitorSession(int $storyId): void {
+        if (!isset($this->activeSessions[$storyId])) {
+            return;
+        }
+
+        $sessionInfo = &$this->activeSessions[$storyId];
+        $sessionName = $sessionInfo['session'];
+
+        // Check if session is still running
+        if (!$this->isSessionRunning($sessionName)) {
+            return; // Will be handled by checkSessions
+        }
+
+        // Capture and parse output
+        $output = $this->captureSessionOutput($sessionName);
+        $progress = $this->parseSessionProgress($output);
+
+        // Update tracking info if we got meaningful progress from output
+        if ($progress['status'] !== 'unknown') {
+            $sessionInfo['last_activity'] = time();
+            $sessionInfo['last_status'] = $progress['status'];
+
+            // Log progress changes
+            static $lastReported = [];
+            $reportKey = "{$storyId}:{$progress['phase']}";
+            if (!isset($lastReported[$reportKey])) {
+                $lastReported[$reportKey] = true;
+                $elapsed = time() - $sessionInfo['started'];
+                $elapsedStr = sprintf('%dm %ds', floor($elapsed / 60), $elapsed % 60);
+                output("  [{$sessionInfo['issue_key']}] {$progress['status']} ({$elapsedStr})" .
+                    ($progress['details'] ? " - {$progress['details']}" : ''));
+            }
+        } else {
+            // No output progress detected - check process CPU activity
+            // This handles --print mode which buffers all output
+            $processActive = $this->isProcessActive($storyId);
+            if ($processActive) {
+                // Process is actively consuming CPU - it's working
+                static $lastCpuReport = [];
+                $elapsed = time() - $sessionInfo['started'];
+                $cpuReportInterval = 60; // Report CPU activity every 60 seconds
+
+                if (!isset($lastCpuReport[$storyId]) || (time() - $lastCpuReport[$storyId]) >= $cpuReportInterval) {
+                    $lastCpuReport[$storyId] = time();
+                    $elapsedStr = sprintf('%dm %ds', floor($elapsed / 60), $elapsed % 60);
+                    $cpuTime = $sessionInfo['last_cpu_time'] ?? 0;
+                    output("  [{$sessionInfo['issue_key']}] processing ({$elapsedStr}) - CPU: {$cpuTime} jiffies");
+                }
+            }
+        }
+
+        // Check for stuck session - use longer threshold for print mode
+        $timeSinceActivity = time() - $sessionInfo['last_activity'];
+        $effectiveThreshold = $this->stuckThreshold;
+
+        // If we're actively consuming CPU, extend the threshold
+        if (isset($sessionInfo['last_cpu_time']) && $sessionInfo['last_cpu_time'] > 0) {
+            $effectiveThreshold = max($this->stuckThreshold, 900); // 15 min for print mode
+        }
+
+        if ($timeSinceActivity > $effectiveThreshold) {
+            output("  WARNING: Session {$sessionName} may be stuck ({$timeSinceActivity}s since activity)", true);
+        }
+    }
+
+    /**
+     * Check session log file for completion
+     */
+    private function checkSessionLogForCompletion(string $issueKey): bool {
+        $workDir = $this->getWorkDir($issueKey);
+        $resultFile = "{$workDir}/result.json";
+
+        // If result.json exists, session is complete
+        if (file_exists($resultFile)) {
+            return true;
+        }
+
+        // Check session.log for completion markers
+        $logFile = "{$workDir}/session.log";
+        if (file_exists($logFile)) {
+            $log = file_get_contents($logFile);
+            if (preg_match('/Implementation complete|"success"\s*:\s*(true|false)/i', $log)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -369,16 +641,24 @@ class StoryBuildOrchestrator {
      */
     private function checkSessions(): void {
         foreach ($this->activeSessions as $storyId => $sessionInfo) {
-            if (!$this->isSessionRunning($sessionInfo['session'])) {
-                output("Session completed: {$sessionInfo['session']}");
+            $sessionRunning = $this->isSessionRunning($sessionInfo['session']);
+            $logComplete = $this->checkSessionLogForCompletion($sessionInfo['issue_key']);
+
+            if (!$sessionRunning || $logComplete) {
+                // Session ended or completed
+                $elapsed = time() - $sessionInfo['started'];
+                $elapsedStr = sprintf('%dm %ds', floor($elapsed / 60), $elapsed % 60);
+                output("Session completed: {$sessionInfo['session']} ({$elapsedStr})", true);
                 $this->handleCompletion($storyId, $sessionInfo['issue_key']);
                 unset($this->activeSessions[$storyId]);
-            } else {
-                // Show elapsed time for long-running sessions
-                $elapsed = time() - $sessionInfo['started'];
-                if ($elapsed > 300 && $elapsed % 60 < 30) { // Every minute after 5 mins
-                    output("  Session {$sessionInfo['session']} running for " . floor($elapsed / 60) . "m");
+
+                // Kill tmux session if it's still hanging around
+                if ($sessionRunning) {
+                    exec("tmux kill-session -t " . escapeshellarg($sessionInfo['session']) . " 2>/dev/null");
                 }
+            } else {
+                // Session still running - monitor it
+                $this->monitorSession($storyId);
             }
         }
     }
@@ -412,7 +692,9 @@ class StoryBuildOrchestrator {
                         'session' => $sessionName,
                         'story_id' => $story->id,
                         'issue_key' => $story->jira_issue_key,
-                        'started' => time()
+                        'started' => time(),
+                        'last_activity' => time(),
+                        'last_status' => 'spawned'
                     ];
                 }
             }
@@ -479,7 +761,20 @@ class StoryBuildOrchestrator {
             output("Active Sessions:", true);
             foreach ($this->activeSessions as $storyId => $info) {
                 $elapsed = time() - $info['started'];
-                output("  {$info['session']} ({$info['issue_key']}) - {$elapsed}s", true);
+                $elapsedStr = sprintf('%dm %ds', floor($elapsed / 60), $elapsed % 60);
+                $status = $info['last_status'] ?? 'unknown';
+
+                // Get current progress from tmux
+                if ($this->isSessionRunning($info['session'])) {
+                    $output = $this->captureSessionOutput($info['session'], 20);
+                    $progress = $this->parseSessionProgress($output);
+                    if ($progress['status'] !== 'unknown') {
+                        $status = $progress['status'];
+                    }
+                }
+
+                output("  {$info['issue_key']}: {$status} ({$elapsedStr})", true);
+                output("    Session: {$info['session']}", true);
             }
         }
     }

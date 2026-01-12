@@ -78,26 +78,26 @@
                 </div>
                 <div class="card-body">
                     <div class="list-group">
-                        <a href="/reviewboard" class="list-group-item list-group-item-action list-group-item-warning">
-                            <div class="d-flex w-100 justify-content-between">
-                                <h6 class="mb-1">Review Board</h6>
-                                <small>→</small>
-                            </div>
-                            <p class="mb-1 text-muted">Review and approve stories before creating issues</p>
-                        </a>
                         <a href="/directives" class="list-group-item list-group-item-action">
                             <div class="d-flex w-100 justify-content-between">
-                                <h6 class="mb-1">Directives</h6>
+                                <h6 class="mb-1">1. Directives</h6>
                                 <small>→</small>
                             </div>
-                            <p class="mb-1 text-muted">View incoming CEO directives and their status</p>
+                            <p class="mb-1 text-muted">Incoming CEO directives</p>
                         </a>
                         <a href="/projects" class="list-group-item list-group-item-action">
                             <div class="d-flex w-100 justify-content-between">
-                                <h6 class="mb-1">Projects</h6>
+                                <h6 class="mb-1">2. Projects</h6>
                                 <small>→</small>
                             </div>
-                            <p class="mb-1 text-muted">Track project progress and completion</p>
+                            <p class="mb-1 text-muted">Planning & progress</p>
+                        </a>
+                        <a href="/reviewboard" class="list-group-item list-group-item-action list-group-item-warning">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">3. Review Board</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">Approve stories → create issues</p>
                         </a>
                     </div>
                 </div>

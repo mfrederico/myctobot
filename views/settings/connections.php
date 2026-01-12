@@ -84,23 +84,12 @@
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-4">
-                    <a href="/reviewboard" class="text-decoration-none">
-                        <div class="d-flex align-items-center p-2 bg-warning-subtle rounded">
-                            <i class="bi bi-clipboard-check fs-4 text-warning me-3"></i>
-                            <div>
-                                <strong>Review Board</strong>
-                                <small class="d-block text-muted">Approve stories before creating issues</small>
-                            </div>
-                        </div>
-                    </a>
-                </div>
-                <div class="col-md-4">
                     <a href="/directives" class="text-decoration-none">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-envelope-open fs-4 text-primary me-3"></i>
                             <div>
-                                <strong>Directives</strong>
-                                <small class="d-block text-muted">View incoming directives</small>
+                                <strong>1. Directives</strong>
+                                <small class="d-block text-muted">Incoming CEO directives</small>
                             </div>
                         </div>
                     </a>
@@ -110,8 +99,19 @@
                         <div class="d-flex align-items-center">
                             <i class="bi bi-folder fs-4 text-success me-3"></i>
                             <div>
-                                <strong>Projects</strong>
-                                <small class="d-block text-muted">Track project progress</small>
+                                <strong>2. Projects</strong>
+                                <small class="d-block text-muted">Planning & progress</small>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                <div class="col-md-4">
+                    <a href="/reviewboard" class="text-decoration-none">
+                        <div class="d-flex align-items-center p-2 bg-warning-subtle rounded">
+                            <i class="bi bi-clipboard-check fs-4 text-warning me-3"></i>
+                            <div>
+                                <strong>3. Review Board</strong>
+                                <small class="d-block text-muted">Approve stories → create issues</small>
                             </div>
                         </div>
                     </a>

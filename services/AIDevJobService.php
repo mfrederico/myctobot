@@ -17,6 +17,8 @@ require_once __DIR__ . '/AIDevStatusService.php';
 require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/TmuxService.php';
+require_once __DIR__ . '/CeoDirectiveLogger.php';
+require_once __DIR__ . '/DeliveryConfirmationService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
 use \app\plugins\AtlassianAuth;
@@ -526,6 +528,14 @@ class AIDevJobService {
                 'pr_url' => $prUrl
             ]);
 
+            // Log the response for CEO directive audit trail
+            $this->logCeoDirectiveResponse(
+                $memberId,
+                $issueKey,
+                "PR #{$prNumber} created: {$prUrl}\nBranch: {$branchName}\nSummary: {$summary}",
+                CeoDirectiveLogger::DELIVERY_SUCCESS
+            );
+
             return true;
 
         } catch (\Exception $e) {
@@ -534,6 +544,15 @@ class AIDevJobService {
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
+
+            // Log the failed response attempt
+            $this->logCeoDirectiveResponse(
+                $memberId,
+                $issueKey,
+                'Failed to post PR summary: ' . $e->getMessage(),
+                CeoDirectiveLogger::DELIVERY_FAILED
+            );
+
             return false;
         }
     }
@@ -910,14 +929,16 @@ class AIDevJobService {
     }
 
     /**
-     * Handle job completed with PR - remove working label and transition status
+     * Handle job completed with PR - remove working label, transition status, and send confirmation
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
+     * @param string|null $jobId Job ID for confirmation tracking
+     * @param array $result Job result containing pr_url, pr_number, branch_name, files_changed, summary
      */
-    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId): void {
+    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId, ?string $jobId = null, array $result = []): void {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -937,17 +958,22 @@ class AIDevJobService {
             $prCreatedStatus = $settings['aidev_status_pr_created'] ?? null;
 
             if ($prCreatedStatus) {
-                $result = $jiraClient->transitionToStatus($issueKey, $prCreatedStatus);
-                if ($result['success']) {
+                $transitionResult = $jiraClient->transitionToStatus($issueKey, $prCreatedStatus);
+                if ($transitionResult['success']) {
                     $this->logger->info('Transitioned issue to PR created status', [
                         'issue_key' => $issueKey,
-                        'from' => $result['from_status'],
-                        'to' => $result['to_status']
+                        'from' => $transitionResult['from_status'],
+                        'to' => $transitionResult['to_status']
                     ]);
                 } else {
                     // Post comment if transition failed
-                    $this->postTransitionFailureComment($jiraClient, $issueKey, $prCreatedStatus, $result);
+                    $this->postTransitionFailureComment($jiraClient, $issueKey, $prCreatedStatus, $transitionResult);
                 }
+            }
+
+            // Send delivery confirmation to CEO
+            if ($jobId) {
+                $this->sendDeliveryConfirmation($memberId, $jobId, $issueKey, $cloudId, $result, 'success');
             }
 
         } catch (\Exception $e) {
@@ -999,15 +1025,17 @@ class AIDevJobService {
     }
 
     /**
-     * Handle job failed - remove working label and optionally transition status
+     * Handle job failed - remove working label, transition status, and send failure notification
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
      * @param string $errorMessage Error message
+     * @param string|null $jobId Job ID for confirmation tracking
+     * @param array $context Additional context about the failure
      */
-    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage): void {
+    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage, ?string $jobId = null, array $context = []): void {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -1024,21 +1052,47 @@ class AIDevJobService {
             $failedStatus = $settings['aidev_status_failed'] ?? null;
 
             if ($failedStatus) {
-                $result = $jiraClient->transitionToStatus($issueKey, $failedStatus);
+                $transitionResult = $jiraClient->transitionToStatus($issueKey, $failedStatus);
                 $this->logger->info('Transitioned issue after failure', [
                     'issue_key' => $issueKey,
-                    'success' => $result['success']
+                    'success' => $transitionResult['success']
                 ]);
             }
 
             // Post failure comment
             $this->postFailureComment($jiraClient, $issueKey, $errorMessage);
 
+            // Log CEO directive error for audit trail
+            $this->logCeoDirectiveError(
+                $memberId,
+                $issueKey,
+                $errorMessage,
+                null,
+                'Posted failure comment to Jira; ticket transitioned to failed status'
+            );
+
+            // Send failure notification to CEO
+            if ($jobId) {
+                $this->sendDeliveryConfirmation($memberId, $jobId, $issueKey, $cloudId, [
+                    'error_message' => $errorMessage,
+                    'context' => $context
+                ], 'failure');
+            }
+
         } catch (\Exception $e) {
             $this->logger->error('Error in onJobFailed', [
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
+
+            // Log the secondary error
+            $this->logCeoDirectiveError(
+                $memberId,
+                $issueKey,
+                'Error during failure handling: ' . $e->getMessage(),
+                $e,
+                'Original error: ' . $errorMessage
+            );
         }
     }
 
@@ -1351,5 +1405,179 @@ class AIDevJobService {
         }
 
         return $settings;
+    }
+
+    // ========================================
+    // CEO Directive Logging Helpers
+    // ========================================
+
+    /**
+     * Log a CEO directive response for audit trail
+     * Creates a new directive entry if no active directive is found
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param string $responseContent Content of the response
+     * @param string $deliveryStatus Delivery status (success, failed, pending)
+     */
+    private function logCeoDirectiveResponse(int $memberId, string $issueKey, string $responseContent, string $deliveryStatus): void {
+        try {
+            $directiveLogger = new CeoDirectiveLogger($memberId);
+
+            // Try to find an existing directive for this issue from recent logs
+            $recentLogs = $directiveLogger->getLogsForIssue($issueKey, 1);
+            $directiveId = null;
+
+            if (!empty($recentLogs)) {
+                // Use the most recent directive ID for this issue
+                $directiveId = $recentLogs[0]['directive_id'];
+            } else {
+                // No existing directive found, create a new one
+                $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
+                    'source' => 'AIDevJobService',
+                    'action' => 'response_delivery'
+                ]);
+            }
+
+            $directiveLogger->logResponse($directiveId, $responseContent, $deliveryStatus, [
+                'delivery_method' => 'jira_comment',
+                'member_id' => $memberId
+            ]);
+
+        } catch (\Exception $e) {
+            // Don't let logging failures break the main flow
+            $this->logger->warning('Failed to log CEO directive response', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Log a CEO directive error for audit trail
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param string $errorMessage Error description
+     * @param \Throwable|null $exception Exception for stack trace
+     * @param string|null $recoveryAction Recovery action taken
+     */
+    public function logCeoDirectiveError(int $memberId, string $issueKey, string $errorMessage, ?\Throwable $exception = null, ?string $recoveryAction = null): void {
+        try {
+            $directiveLogger = new CeoDirectiveLogger($memberId);
+
+            // Try to find an existing directive for this issue
+            $recentLogs = $directiveLogger->getLogsForIssue($issueKey, 1);
+            $directiveId = null;
+
+            if (!empty($recentLogs)) {
+                $directiveId = $recentLogs[0]['directive_id'];
+            } else {
+                // No existing directive found, create a new one
+                $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
+                    'source' => 'AIDevJobService',
+                    'action' => 'error_logging'
+                ]);
+            }
+
+            $directiveLogger->logError($directiveId, $errorMessage, $exception, $recoveryAction);
+
+        } catch (\Exception $e) {
+            // Don't let logging failures break the main flow
+            $this->logger->warning('Failed to log CEO directive error', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    // ========================================
+    // Delivery Confirmation Support
+    // ========================================
+
+    /**
+     * Send delivery confirmation via DeliveryConfirmationService
+     *
+     * @param int $memberId Member ID
+     * @param string $jobId Job ID
+     * @param string $issueKey Issue key
+     * @param string|null $cloudId Cloud ID for Jira
+     * @param array $data Job result data or error context
+     * @param string $type 'success' or 'failure'
+     */
+    private function sendDeliveryConfirmation(
+        int $memberId,
+        string $jobId,
+        string $issueKey,
+        ?string $cloudId,
+        array $data,
+        string $type
+    ): void {
+        try {
+            $confirmationService = new DeliveryConfirmationService();
+
+            if ($type === 'success') {
+                $result = $confirmationService->sendSuccessConfirmation(
+                    $memberId,
+                    $jobId,
+                    $issueKey,
+                    $cloudId,
+                    $data
+                );
+            } else {
+                $result = $confirmationService->sendFailureNotification(
+                    $memberId,
+                    $jobId,
+                    $issueKey,
+                    $cloudId,
+                    $data['error_message'] ?? 'Unknown error',
+                    $data['context'] ?? []
+                );
+            }
+
+            $this->logger->info('Delivery confirmation sent', [
+                'job_id' => $jobId,
+                'issue_key' => $issueKey,
+                'type' => $type,
+                'success' => $result['success'],
+                'delivery_results' => $result['delivery_results'] ?? []
+            ]);
+
+        } catch (\Exception $e) {
+            // Log but don't fail the job completion/failure flow
+            $this->logger->error('Failed to send delivery confirmation', [
+                'job_id' => $jobId,
+                'issue_key' => $issueKey,
+                'type' => $type,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Process retry queue for failed delivery confirmations
+     * Can be called from a cron job
+     *
+     * @param int|null $memberId Optional member ID to filter
+     * @return array Summary of retry results
+     */
+    public function processConfirmationRetryQueue(?int $memberId = null): array {
+        try {
+            $confirmationService = new DeliveryConfirmationService();
+            return $confirmationService->retryFailedDeliveries($memberId);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to process confirmation retry queue', [
+                'member_id' => $memberId,
+                'error' => $e->getMessage()
+            ]);
+            return [
+                'processed' => 0,
+                'succeeded' => 0,
+                'failed' => 0,
+                'error' => $e->getMessage()
+            ];
+        }
     }
 }

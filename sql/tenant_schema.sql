@@ -253,10 +253,12 @@ CREATE TABLE IF NOT EXISTS `aidevjoblogs` (
 -- REPOSITORY TABLES (from SQLite)
 -- ============================================================================
 
--- GitHub/repo connections
+-- GitHub/repo connections (WORKSPACE-level - shared by all members)
 CREATE TABLE IF NOT EXISTS `repoconnections` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `member_id` INT DEFAULT NULL,
+    `member_id` INT DEFAULT NULL COMMENT 'Deprecated: no longer used for filtering',
+    `created_by_member_id` INT DEFAULT NULL COMMENT 'Audit: who created this connection',
+    `created_by_name` VARCHAR(255) COMMENT 'Audit: display name of creator',
     `connection_name` VARCHAR(255),
     `provider` VARCHAR(30) DEFAULT 'github',
     `repo_owner` VARCHAR(100) NOT NULL,
@@ -272,7 +274,7 @@ CREATE TABLE IF NOT EXISTS `repoconnections` (
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
     INDEX `idx_agent` (`agent_id`),
-    INDEX `idx_member` (`member_id`)
+    INDEX `idx_enabled` (`enabled`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Board to repo mapping
@@ -285,6 +287,27 @@ CREATE TABLE IF NOT EXISTS `boardrepomapping` (
     FOREIGN KEY (`board_id`) REFERENCES `jiraboards`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`repo_connection_id`) REFERENCES `repoconnections`(`id`) ON DELETE CASCADE,
     INDEX `idx_board` (`board_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Shopify store connections (WORKSPACE-level - shared by all members)
+CREATE TABLE IF NOT EXISTS `shopifyconnections` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `created_by_member_id` INT NOT NULL,
+    `created_by_name` VARCHAR(255),
+    `connection_name` VARCHAR(255),              -- Optional friendly name
+    `shop_domain` VARCHAR(255) NOT NULL,         -- e.g., mystore.myshopify.com
+    `access_token` TEXT NOT NULL,                -- Encrypted shpat_* token
+    `shop_name` VARCHAR(255),                    -- Store display name (from API)
+    `shop_email` VARCHAR(255),                   -- Store owner email
+    `storefront_password` TEXT,                  -- Encrypted, for password-protected stores
+    `verify_with_playwright` TINYINT(1) DEFAULT 0,
+    `enabled` TINYINT(1) DEFAULT 1,
+    `repo_connection_id` INT DEFAULT NULL,       -- FK to repoconnections (optional)
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_shop_domain` (`shop_domain`),
+    INDEX `idx_enabled` (`enabled`),
+    INDEX `idx_repo` (`repo_connection_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
@@ -410,10 +433,12 @@ CREATE TABLE IF NOT EXISTS `digestjobs` (
 -- AI AGENT TABLES
 -- ============================================================================
 
--- AI Agent profiles (LLM providers, MCP servers, hooks)
+-- AI Agent profiles (WORKSPACE-level - shared by all members)
 CREATE TABLE IF NOT EXISTS `aiagents` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `member_id` INT NOT NULL,
+    `member_id` INT DEFAULT NULL COMMENT 'Deprecated: no longer used for filtering',
+    `created_by_member_id` INT DEFAULT NULL COMMENT 'Audit: who created this agent',
+    `created_by_name` VARCHAR(255) COMMENT 'Audit: display name of creator',
     `name` VARCHAR(100) NOT NULL,
     `description` TEXT,
     `provider` VARCHAR(50) DEFAULT 'claude_cli',
@@ -430,7 +455,6 @@ CREATE TABLE IF NOT EXISTS `aiagents` (
     `is_default` TINYINT(1) DEFAULT 0,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
-    INDEX `idx_member` (`member_id`),
     INDEX `idx_active` (`is_active`),
     INDEX `idx_default` (`is_default`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -688,15 +712,14 @@ CREATE TABLE IF NOT EXISTS `plugins` (
 -- Directive Processing Log
 CREATE TABLE IF NOT EXISTS `directivelogs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `directive_id` INT NOT NULL,
+    `directive_id` VARCHAR(32) NOT NULL COMMENT 'References ceodirectives.directive_id (UUID)',
     `phase` VARCHAR(50) NOT NULL,
     `log_level` ENUM('info', 'warning', 'error') DEFAULT 'info',
     `message` TEXT NOT NULL,
     `context_json` JSON,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX `idx_directive` (`directive_id`),
-    FOREIGN KEY (`directive_id`) REFERENCES `ceodirectives`(`id`) ON DELETE CASCADE
+    INDEX `idx_directive` (`directive_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Add authcontrol entries for new controllers

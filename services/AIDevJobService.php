@@ -18,6 +18,7 @@ require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/TmuxService.php';
 require_once __DIR__ . '/CeoDirectiveLogger.php';
+require_once __DIR__ . '/DeliveryConfirmationService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
 use \app\plugins\AtlassianAuth;
@@ -928,14 +929,16 @@ class AIDevJobService {
     }
 
     /**
-     * Handle job completed with PR - remove working label and transition status
+     * Handle job completed with PR - remove working label, transition status, and send confirmation
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
+     * @param string|null $jobId Job ID for confirmation tracking
+     * @param array $result Job result containing pr_url, pr_number, branch_name, files_changed, summary
      */
-    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId): void {
+    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId, ?string $jobId = null, array $result = []): void {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -955,17 +958,22 @@ class AIDevJobService {
             $prCreatedStatus = $settings['aidev_status_pr_created'] ?? null;
 
             if ($prCreatedStatus) {
-                $result = $jiraClient->transitionToStatus($issueKey, $prCreatedStatus);
-                if ($result['success']) {
+                $transitionResult = $jiraClient->transitionToStatus($issueKey, $prCreatedStatus);
+                if ($transitionResult['success']) {
                     $this->logger->info('Transitioned issue to PR created status', [
                         'issue_key' => $issueKey,
-                        'from' => $result['from_status'],
-                        'to' => $result['to_status']
+                        'from' => $transitionResult['from_status'],
+                        'to' => $transitionResult['to_status']
                     ]);
                 } else {
                     // Post comment if transition failed
-                    $this->postTransitionFailureComment($jiraClient, $issueKey, $prCreatedStatus, $result);
+                    $this->postTransitionFailureComment($jiraClient, $issueKey, $prCreatedStatus, $transitionResult);
                 }
+            }
+
+            // Send delivery confirmation to CEO
+            if ($jobId) {
+                $this->sendDeliveryConfirmation($memberId, $jobId, $issueKey, $cloudId, $result, 'success');
             }
 
         } catch (\Exception $e) {
@@ -1017,15 +1025,17 @@ class AIDevJobService {
     }
 
     /**
-     * Handle job failed - remove working label and optionally transition status
+     * Handle job failed - remove working label, transition status, and send failure notification
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
      * @param string $errorMessage Error message
+     * @param string|null $jobId Job ID for confirmation tracking
+     * @param array $context Additional context about the failure
      */
-    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage): void {
+    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage, ?string $jobId = null, array $context = []): void {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -1042,10 +1052,10 @@ class AIDevJobService {
             $failedStatus = $settings['aidev_status_failed'] ?? null;
 
             if ($failedStatus) {
-                $result = $jiraClient->transitionToStatus($issueKey, $failedStatus);
+                $transitionResult = $jiraClient->transitionToStatus($issueKey, $failedStatus);
                 $this->logger->info('Transitioned issue after failure', [
                     'issue_key' => $issueKey,
-                    'success' => $result['success']
+                    'success' => $transitionResult['success']
                 ]);
             }
 
@@ -1060,6 +1070,14 @@ class AIDevJobService {
                 null,
                 'Posted failure comment to Jira; ticket transitioned to failed status'
             );
+
+            // Send failure notification to CEO
+            if ($jobId) {
+                $this->sendDeliveryConfirmation($memberId, $jobId, $issueKey, $cloudId, [
+                    'error_message' => $errorMessage,
+                    'context' => $context
+                ], 'failure');
+            }
 
         } catch (\Exception $e) {
             $this->logger->error('Error in onJobFailed', [
@@ -1472,6 +1490,94 @@ class AIDevJobService {
                 'issue_key' => $issueKey,
                 'error' => $e->getMessage()
             ]);
+        }
+    }
+
+    // ========================================
+    // Delivery Confirmation Support
+    // ========================================
+
+    /**
+     * Send delivery confirmation via DeliveryConfirmationService
+     *
+     * @param int $memberId Member ID
+     * @param string $jobId Job ID
+     * @param string $issueKey Issue key
+     * @param string|null $cloudId Cloud ID for Jira
+     * @param array $data Job result data or error context
+     * @param string $type 'success' or 'failure'
+     */
+    private function sendDeliveryConfirmation(
+        int $memberId,
+        string $jobId,
+        string $issueKey,
+        ?string $cloudId,
+        array $data,
+        string $type
+    ): void {
+        try {
+            $confirmationService = new DeliveryConfirmationService();
+
+            if ($type === 'success') {
+                $result = $confirmationService->sendSuccessConfirmation(
+                    $memberId,
+                    $jobId,
+                    $issueKey,
+                    $cloudId,
+                    $data
+                );
+            } else {
+                $result = $confirmationService->sendFailureNotification(
+                    $memberId,
+                    $jobId,
+                    $issueKey,
+                    $cloudId,
+                    $data['error_message'] ?? 'Unknown error',
+                    $data['context'] ?? []
+                );
+            }
+
+            $this->logger->info('Delivery confirmation sent', [
+                'job_id' => $jobId,
+                'issue_key' => $issueKey,
+                'type' => $type,
+                'success' => $result['success'],
+                'delivery_results' => $result['delivery_results'] ?? []
+            ]);
+
+        } catch (\Exception $e) {
+            // Log but don't fail the job completion/failure flow
+            $this->logger->error('Failed to send delivery confirmation', [
+                'job_id' => $jobId,
+                'issue_key' => $issueKey,
+                'type' => $type,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Process retry queue for failed delivery confirmations
+     * Can be called from a cron job
+     *
+     * @param int|null $memberId Optional member ID to filter
+     * @return array Summary of retry results
+     */
+    public function processConfirmationRetryQueue(?int $memberId = null): array {
+        try {
+            $confirmationService = new DeliveryConfirmationService();
+            return $confirmationService->retryFailedDeliveries($memberId);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to process confirmation retry queue', [
+                'member_id' => $memberId,
+                'error' => $e->getMessage()
+            ]);
+            return [
+                'processed' => 0,
+                'succeeded' => 0,
+                'failed' => 0,
+                'error' => $e->getMessage()
+            ];
         }
     }
 }

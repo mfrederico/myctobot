@@ -377,10 +377,24 @@ class DirectiveOrchestrator {
             // Set context based on issue type
             if ($isGitHubIssue) {
                 $job->cloud_id = null;
+                $job->board_id = null;  // GitHub workflows don't have a Jira board
                 $job->issue_source = 'github';
+
+                // Find repo connection for this GitHub repo
+                if ($this->githubConfig) {
+                    $repoFullName = $this->githubConfig['owner'] . '/' . $this->githubConfig['repo'];
+                    $repoConn = Bean::findOne('repoconnections',
+                        'repo_full_name = ? AND member_id = ?',
+                        [$repoFullName, $this->memberId]
+                    );
+                    if ($repoConn) {
+                        $job->repo_connection_id = $repoConn->id;
+                    }
+                }
             } else {
                 $job->cloud_id = $this->cloudId;
                 $job->issue_source = 'jira';
+                // board_id will be set by the processor when it picks up the job
             }
 
             Bean::store($job);

@@ -29,9 +29,10 @@ class ReviewBoard extends BaseControls\Control {
 
     /**
      * Initialize user database connection
+     * Note: UserDatabaseService is now a legacy no-op layer - all data is in single MySQL DB per tenant
      */
     private function initUserDb(): bool {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
+        if (!$this->userDbConnected && $this->member) {
             try {
                 UserDatabaseService::connect($this->member->id);
                 $this->userDbConnected = true;

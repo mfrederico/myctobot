@@ -1170,17 +1170,20 @@ ${summary}"
     fi
 
     # Update labels based on success
+    # Always remove work-in-progress labels when job completes
+    local labels_to_remove="ai-dev,myctobot-working,in-progress"
+
     if [[ "$success" == "true" && "$verification_passed" == "true" ]]; then
-        echo "Adding 'ready-for-review' label..."
-        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "ready-for-review" --remove-label "ai-dev" 2>/dev/null
+        echo "Adding 'ready-for-review' label, removing work labels..."
+        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "ready-for-review" --remove-label "$labels_to_remove" 2>/dev/null
         if [[ $? -eq 0 ]]; then
             echo "  ✓ Labels updated"
         else
             echo "  ✗ Failed to update labels"
         fi
     else
-        echo "Adding 'needs-work' label..."
-        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "needs-work" 2>/dev/null
+        echo "Adding 'needs-work' label, removing work labels..."
+        gh issue edit "$issue_number" --repo "$owner/$repo" --add-label "needs-work" --remove-label "$labels_to_remove" 2>/dev/null
         if [[ $? -eq 0 ]]; then
             echo "  ✓ Labels updated"
         else

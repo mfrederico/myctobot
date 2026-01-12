@@ -1,0 +1,21 @@
+{
+  "name": "Google OAuth Authentication",
+  "slug": "google-auth",
+  "version": "1.0.0",
+  "description": "Handles Google Sign-In authentication for MyCTOBot. Provides OAuth 2.0 integration with Google accounts for user login and registration.",
+  "author": "MyCTOBot",
+  "repository": "https://github.com/mfrederico/myctobot",
+  "homepage": "https://myctobot.ai",
+  "license": "Proprietary",
+  "requires": {
+    "php": ">=8.1"
+  },
+  "provides": {
+    "auth": ["google"]
+  },
+  "config": {
+    "google_client_id": "Required: Google OAuth Client ID",
+    "google_client_secret": "Required: Google OAuth Client Secret",
+    "google_redirect_uri": "Required: OAuth callback URL"
+  }
+}

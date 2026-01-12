@@ -32,8 +32,8 @@ class Shopify extends BaseControls\Control {
     public function index() {
         if (!$this->requireEnterprise()) return;
 
-        // Get all Shopify connections
-        $connections = ShopifyClient::getAllConnections();
+        // Get Shopify connections visible to this member (owned + shared)
+        $connections = ShopifyClient::getAllConnections($this->member->id);
 
         // Get available repos for linking
         $repos = Bean::findAll('repoconnections', ' enabled = 1 ORDER BY repo_name ASC ');
@@ -41,7 +41,8 @@ class Shopify extends BaseControls\Control {
         $this->render('shopify/index', [
             'title' => 'Shopify Stores',
             'connections' => $connections,
-            'repos' => $repos
+            'repos' => $repos,
+            'member_id' => $this->member->id
         ]);
     }
 
@@ -61,6 +62,7 @@ class Shopify extends BaseControls\Control {
         $shop = trim(Flight::request()->data->shop_domain ?? '');
         $accessToken = trim(Flight::request()->data->access_token ?? '');
         $connectionName = trim(Flight::request()->data->connection_name ?? '');
+        $shared = !empty(Flight::request()->data->shared);
 
         if (empty($shop) || empty($accessToken)) {
             $this->flash('error', 'Shop domain and access token are required.');
@@ -74,7 +76,8 @@ class Shopify extends BaseControls\Control {
                 $this->member->display_name ?? $this->member->email,
                 $shop,
                 $accessToken,
-                $connectionName ?: null
+                $connectionName ?: null,
+                $shared
             );
 
             // Test the connection
@@ -136,8 +139,20 @@ class Shopify extends BaseControls\Control {
 
         try {
             $conn = ShopifyClient::getConnection((int)$connectionId);
-            $shopDomain = $conn ? $conn->shop_domain : 'unknown';
+            if (!$conn) {
+                $this->flash('error', 'Connection not found.');
+                Flight::redirect('/shopify');
+                return;
+            }
 
+            // Only owner can disconnect
+            if ($conn->created_by_member_id != $this->member->id) {
+                $this->flash('error', 'You can only disconnect your own stores.');
+                Flight::redirect('/shopify');
+                return;
+            }
+
+            $shopDomain = $conn->shop_domain;
             $success = ShopifyClient::deleteConnection((int)$connectionId);
 
             if ($success) {
@@ -248,6 +263,13 @@ class Shopify extends BaseControls\Control {
         }
 
         try {
+            // Only owner can update connection
+            $conn = ShopifyClient::getConnection((int)$connectionId);
+            if (!$conn || $conn->created_by_member_id != $this->member->id) {
+                $this->json(['success' => false, 'message' => 'You can only update your own connections']);
+                return;
+            }
+
             $data = [];
 
             // Collect updateable fields from request
@@ -269,6 +291,11 @@ class Shopify extends BaseControls\Control {
             $enabled = $this->getParam('enabled');
             if ($enabled !== null) {
                 $data['enabled'] = (int)$enabled;
+            }
+
+            $shared = $this->getParam('shared');
+            if ($shared !== null) {
+                $data['shared'] = (int)$shared;
             }
 
             $accessToken = $this->getParam('access_token');

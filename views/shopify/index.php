@@ -15,12 +15,20 @@
         <?php foreach ($connections as $conn): ?>
         <div class="col-12 mb-3">
             <div class="card <?= $conn->enabled ? 'border-success' : 'border-secondary' ?>">
+                <?php $isOwner = ($conn->created_by_member_id == $member_id); ?>
                 <div class="card-header <?= $conn->enabled ? 'bg-success text-white' : 'bg-secondary text-white' ?> d-flex justify-content-between align-items-center">
                     <span>
                         <i class="bi bi-shop me-2"></i>
                         <?= htmlspecialchars($conn->shop_name ?: $conn->shop_domain) ?>
                         <?php if (!$conn->enabled): ?>
                         <span class="badge bg-warning text-dark ms-2">Disabled</span>
+                        <?php endif; ?>
+                        <?php if ($conn->shared && !$isOwner): ?>
+                        <span class="badge bg-info ms-2" title="Shared by <?= htmlspecialchars($conn->created_by_name ?: 'Unknown') ?>">
+                            <i class="bi bi-people-fill"></i> Shared
+                        </span>
+                        <?php elseif ($conn->shared): ?>
+                        <span class="badge bg-info ms-2"><i class="bi bi-people-fill"></i> Shared</span>
                         <?php endif; ?>
                     </span>
                     <div>
@@ -103,11 +111,25 @@
                             </div>
 
                             <!-- Actions -->
-                            <div class="d-flex justify-content-end">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <?php if ($isOwner): ?>
+                                <!-- Share toggle (owner only) -->
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input share-toggle" type="checkbox"
+                                           data-id="<?= $conn->id ?>"
+                                           <?= $conn->shared ? 'checked' : '' ?>>
+                                    <label class="form-check-label small">Share with workspace</label>
+                                </div>
                                 <a href="/shopify/disconnect/<?= $conn->id ?>" class="btn btn-sm btn-outline-danger"
                                    onclick="return confirm('Disconnect <?= htmlspecialchars($conn->shop_domain) ?>? This cannot be undone.')">
                                     <i class="bi bi-trash"></i> Disconnect
                                 </a>
+                                <?php else: ?>
+                                <span class="text-muted small">
+                                    <i class="bi bi-person"></i> Owned by <?= htmlspecialchars($conn->created_by_name ?: 'Unknown') ?>
+                                </span>
+                                <span></span>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -154,6 +176,16 @@
                             <input type="password" class="form-control" id="access_token" name="access_token"
                                    placeholder="shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
                             <div class="form-text">Starts with <code>shpat_</code></div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="shared" name="shared" value="1">
+                                <label class="form-check-label" for="shared">
+                                    <i class="bi bi-people-fill me-1"></i> Share with workspace members
+                                </label>
+                                <div class="form-text">Allow other workspace members to see and use this store</div>
+                            </div>
                         </div>
 
                         <button type="submit" class="btn btn-success">
@@ -291,6 +323,30 @@ document.addEventListener('DOMContentLoaded', function() {
             } finally {
                 this.disabled = false;
                 this.innerHTML = originalHtml;
+            }
+        });
+    });
+
+    // Share toggle
+    document.querySelectorAll('.share-toggle').forEach(toggle => {
+        toggle.addEventListener('change', async function() {
+            const id = this.dataset.id;
+            const shared = this.checked ? 1 : 0;
+
+            try {
+                const response = await fetch(`/shopify/update/${id}?shared=${shared}`, { method: 'POST' });
+                const data = await response.json();
+
+                if (!data.success) {
+                    alert('Error: ' + data.message);
+                    this.checked = !this.checked; // Revert
+                } else {
+                    // Reload to update badges
+                    location.reload();
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+                this.checked = !this.checked; // Revert
             }
         });
     });

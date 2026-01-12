@@ -782,21 +782,39 @@ class ShopifyClient {
     // =========================================================================
 
     /**
-     * Get all Shopify connections for the workspace
+     * Get all Shopify connections visible to a member
+     * Returns connections owned by the member OR shared with workspace
      *
+     * @param int|null $memberId Member ID (null = all connections for admin)
      * @return array Array of connection beans
      */
-    public static function getAllConnections(): array {
-        return Bean::findAll('shopifyconnections', ' ORDER BY created_at DESC ');
+    public static function getAllConnections(?int $memberId = null): array {
+        if ($memberId === null) {
+            // Admin view - show all
+            return Bean::findAll('shopifyconnections', ' ORDER BY created_at DESC ');
+        }
+        // Member view - show owned + shared
+        return Bean::find('shopifyconnections',
+            ' created_by_member_id = ? OR shared = 1 ORDER BY created_at DESC ',
+            [$memberId]
+        );
     }
 
     /**
-     * Get enabled Shopify connections for the workspace
+     * Get enabled Shopify connections visible to a member
+     * Returns enabled connections owned by the member OR shared with workspace
      *
+     * @param int|null $memberId Member ID (null = all enabled connections)
      * @return array Array of enabled connection beans
      */
-    public static function getEnabledConnections(): array {
-        return Bean::find('shopifyconnections', ' enabled = 1 ORDER BY created_at DESC ');
+    public static function getEnabledConnections(?int $memberId = null): array {
+        if ($memberId === null) {
+            return Bean::find('shopifyconnections', ' enabled = 1 ORDER BY created_at DESC ');
+        }
+        return Bean::find('shopifyconnections',
+            ' enabled = 1 AND (created_by_member_id = ? OR shared = 1) ORDER BY created_at DESC ',
+            [$memberId]
+        );
     }
 
     /**
@@ -839,6 +857,7 @@ class ShopifyClient {
      * @param string $shopDomain Shop domain
      * @param string $accessToken Admin API access token (shpat_*)
      * @param string|null $connectionName Optional friendly name
+     * @param bool $shared Share with workspace members
      * @return object Created connection bean
      */
     public static function createConnection(
@@ -846,7 +865,8 @@ class ShopifyClient {
         string $memberName,
         string $shopDomain,
         string $accessToken,
-        ?string $connectionName = null
+        ?string $connectionName = null,
+        bool $shared = false
     ): object {
         $shopDomain = self::normalizeShopDomainStatic($shopDomain);
 
@@ -869,6 +889,7 @@ class ShopifyClient {
         $conn->shop_domain = $shopDomain;
         $conn->access_token = EncryptionService::encrypt($accessToken);
         $conn->enabled = 1;
+        $conn->shared = $shared ? 1 : 0;
         $conn->created_at = date('Y-m-d H:i:s');
         Bean::store($conn);
 
@@ -902,7 +923,7 @@ class ShopifyClient {
         }
 
         // Update allowed fields
-        $allowedFields = ['connection_name', 'storefront_password', 'verify_with_playwright', 'enabled', 'repo_connection_id'];
+        $allowedFields = ['connection_name', 'storefront_password', 'verify_with_playwright', 'enabled', 'shared', 'repo_connection_id'];
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $data)) {
                 if ($field === 'storefront_password' && !empty($data[$field])) {

@@ -25,8 +25,9 @@ class AtlassianAuth {
     // Required scopes for Jira access (including Agile/Software for boards)
     private static $defaultScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software offline_access';
 
-    // Write scopes for Enterprise tier (AI Developer feature) - includes webhook management
-    private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook offline_access';
+    // Write scopes for Enterprise tier (AI Developer feature) - includes webhook management and dev info
+    // read:source-code:jira - allows reading development panel info (branches, commits, PRs linked to issues)
+    private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook read:source-code:jira offline_access';
 
     /**
      * Get Atlassian OAuth authorization URL

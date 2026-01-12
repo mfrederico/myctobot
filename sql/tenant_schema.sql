@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `job_id` VARCHAR(64) NOT NULL UNIQUE,
     `member_id` INT NOT NULL,
     `issue_key` VARCHAR(50) NOT NULL,
-    `board_id` INT NOT NULL,
+    `board_id` INT DEFAULT NULL COMMENT 'Nullable for GitHub-only workflows',
     `repo_connection_id` INT,
     `cloud_id` VARCHAR(100),
     `status` VARCHAR(30) DEFAULT 'pending',

@@ -266,8 +266,8 @@ class AIDevJobService {
             // Check for existing Shopify theme to reuse
             $existingThemeId = AIDevStatusService::getShopifyThemeForIssue($memberId, $issueKey);
 
-            // Get Shopify settings
-            $shopifySettings = $this->getShopifySettingsForPayload($memberId);
+            // Get Shopify settings (uses repo-linked store if available)
+            $shopifySettings = $this->getShopifySettingsForPayload($memberId, $repoId);
 
             // Build payload for shard
             $payload = [
@@ -1347,19 +1347,49 @@ class AIDevJobService {
                 return $results;
             }
 
-            // Get Shopify client for cleanup
-            $shopifyClient = new ShopifyClient($memberId);
+            // Collect unique repo IDs from jobs to find linked Shopify stores
+            $repoIds = [];
+            foreach ($jobs as $job) {
+                if (!empty($job['repo_id'])) {
+                    $repoIds[$job['repo_id']] = true;
+                }
+            }
 
-            // Cleanup Shopify development themes
-            if ($shopifyClient->isConnected()) {
-                try {
-                    $results['shopify_themes_deleted'] = $shopifyClient->cleanupDevThemes($issueKey);
-                    $this->logger->info('Cleaned up Shopify dev themes', [
-                        'issue_key' => $issueKey,
-                        'themes_deleted' => $results['shopify_themes_deleted']
-                    ]);
-                } catch (\Exception $e) {
-                    $results['errors'][] = 'Shopify cleanup: ' . $e->getMessage();
+            // Cleanup Shopify development themes from all linked stores
+            $cleanedStores = [];
+            foreach (array_keys($repoIds) as $repoId) {
+                $shopifyConn = ShopifyClient::getConnectionByRepo($repoId);
+                if ($shopifyConn && !isset($cleanedStores[$shopifyConn->id])) {
+                    try {
+                        $shopifyClient = new ShopifyClient($shopifyConn->id);
+                        $deleted = $shopifyClient->cleanupDevThemes($issueKey);
+                        $results['shopify_themes_deleted'] += $deleted;
+                        $cleanedStores[$shopifyConn->id] = true;
+
+                        $this->logger->info('Cleaned up Shopify dev themes', [
+                            'issue_key' => $issueKey,
+                            'shop_domain' => $shopifyConn->shop_domain,
+                            'themes_deleted' => $deleted
+                        ]);
+                    } catch (\Exception $e) {
+                        $results['errors'][] = "Shopify cleanup ({$shopifyConn->shop_domain}): " . $e->getMessage();
+                    }
+                }
+            }
+
+            // Also try legacy member-based Shopify cleanup
+            if (empty($cleanedStores)) {
+                $shopifyClient = new ShopifyClient(null, $memberId);
+                if ($shopifyClient->isConnected()) {
+                    try {
+                        $results['shopify_themes_deleted'] = $shopifyClient->cleanupDevThemes($issueKey);
+                        $this->logger->info('Cleaned up Shopify dev themes (legacy)', [
+                            'issue_key' => $issueKey,
+                            'themes_deleted' => $results['shopify_themes_deleted']
+                        ]);
+                    } catch (\Exception $e) {
+                        $results['errors'][] = 'Shopify cleanup: ' . $e->getMessage();
+                    }
                 }
             }
 
@@ -1435,13 +1465,18 @@ class AIDevJobService {
     /**
      * Get Shopify settings for payload (storefront password, etc.)
      *
+     * Multi-store mode: If repoId is provided, looks up the linked Shopify connection.
+     * Legacy fallback: If no repo-linked store found, falls back to member's enterprisesettings.
+     *
      * @param int $memberId Member ID
+     * @param int|null $repoId Repo connection ID (for multi-store mode)
      * @return array Shopify settings
      */
-    public function getShopifySettingsForPayload(int $memberId): array {
+    public function getShopifySettingsForPayload(int $memberId, ?int $repoId = null): array {
         $settings = [
             'enabled' => false,
             'member_id' => $memberId,
+            'connection_id' => null,
             'shop_domain' => null,
             'access_token' => null,
             'storefront_password' => null,
@@ -1449,28 +1484,56 @@ class AIDevJobService {
         ];
 
         try {
-            $shopifyClient = new ShopifyClient($memberId);
+            $shopifyClient = null;
+            $shopifyConn = null;
+
+            // Multi-store mode: Look up Shopify connection linked to this repo
+            if ($repoId) {
+                $shopifyConn = ShopifyClient::getConnectionByRepo($repoId);
+                if ($shopifyConn) {
+                    $shopifyClient = new ShopifyClient($shopifyConn->id);
+                    $settings['connection_id'] = $shopifyConn->id;
+
+                    $this->logger->debug('Found Shopify connection linked to repo', [
+                        'repo_id' => $repoId,
+                        'shopify_connection_id' => $shopifyConn->id,
+                        'shop_domain' => $shopifyConn->shop_domain
+                    ]);
+                }
+            }
+
+            // Legacy fallback: Use member's enterprisesettings if no repo-linked store found
+            if (!$shopifyClient) {
+                $shopifyClient = new ShopifyClient(null, $memberId);
+            }
 
             if ($shopifyClient->isConnected()) {
                 $settings['enabled'] = true;
                 $settings['shop_domain'] = $shopifyClient->getShop();
                 $settings['access_token'] = $shopifyClient->getAccessToken();
 
-                // Get additional settings from user database
-                // Storefront password
-                $passwordSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
-                if ($passwordSetting && $passwordSetting->setting_value) {
-                    $settings['storefront_password'] = EncryptionService::decrypt($passwordSetting->setting_value);
-                }
+                // Get additional settings from shopifyconnections table if using multi-store
+                if ($shopifyConn) {
+                    if ($shopifyConn->storefront_password) {
+                        $settings['storefront_password'] = EncryptionService::decrypt($shopifyConn->storefront_password);
+                    }
+                    $settings['verify_with_playwright'] = (bool)$shopifyConn->verify_with_playwright;
+                } else {
+                    // Legacy: Get settings from enterprisesettings
+                    $passwordSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
+                    if ($passwordSetting && $passwordSetting->setting_value) {
+                        $settings['storefront_password'] = EncryptionService::decrypt($passwordSetting->setting_value);
+                    }
 
-                // Playwright verification setting
-                $verifySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
-                $verifyEnabled = $verifySetting ? $verifySetting->setting_value : null;
-                $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
+                    $verifySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
+                    $verifyEnabled = $verifySetting ? $verifySetting->setting_value : null;
+                    $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
+                }
             }
         } catch (\Exception $e) {
             $this->logger->warning('Could not get Shopify settings', [
                 'member_id' => $memberId,
+                'repo_id' => $repoId,
                 'error' => $e->getMessage()
             ]);
         }

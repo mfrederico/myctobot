@@ -5,6 +5,10 @@
  * Handles API calls to Shopify stores using per-customer credentials.
  * Supports direct Admin API access tokens (shpat_*) for simpler setup.
  *
+ * Connection Modes:
+ * 1. Multi-store (new): Load from shopifyconnections table via connection ID
+ * 2. Legacy (deprecated): Load from enterprisesettings via member ID
+ *
  * Connection Flow:
  * 1. User generates an Admin API access token in Shopify Admin
  * 2. User enters their shop domain and access token in /shopify
@@ -17,14 +21,17 @@ namespace app\services;
 use \Flight as Flight;
 use \GuzzleHttp\Client;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception;
 
 require_once __DIR__ . '/EncryptionService.php';
+require_once __DIR__ . '/../lib/Bean.php';
 
 class ShopifyClient {
 
     private $httpClient;
     private $memberId;
+    private $connectionId;
     private $shop;
     private $accessToken;
 
@@ -32,28 +39,55 @@ class ShopifyClient {
     const API_VERSION = '2024-10';
 
     /**
-     * Create ShopifyClient for a specific member
+     * Create ShopifyClient
      *
-     * @param int $memberId Member ID to load credentials for
+     * @param int|null $connectionId Connection ID from shopifyconnections table (preferred)
+     * @param int|null $memberId Member ID for legacy enterprisesettings lookup
      */
-    public function __construct(int $memberId) {
+    public function __construct(?int $connectionId = null, ?int $memberId = null) {
+        $this->connectionId = $connectionId;
         $this->memberId = $memberId;
         $this->httpClient = new Client([
             'timeout' => 30,
             'http_errors' => false
         ]);
 
-        // Load credentials from database
-        $this->loadCredentials();
+        // Load credentials based on mode
+        if ($connectionId) {
+            $this->loadCredentialsFromConnection($connectionId);
+        } elseif ($memberId) {
+            // Legacy fallback
+            $this->loadCredentialsFromSettings($memberId);
+        }
     }
 
     /**
-     * Load Shopify credentials from database
+     * Load credentials from shopifyconnections table (multi-store mode)
+     *
+     * @param int $connectionId Connection ID
      */
-    private function loadCredentials(): void {
+    private function loadCredentialsFromConnection(int $connectionId): void {
         try {
-            $shop = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $this->memberId]);
-            $token = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $this->memberId]);
+            $conn = Bean::load('shopifyconnections', $connectionId);
+            if (!$conn->id) {
+                throw new Exception('Shopify connection not found');
+            }
+            $this->shop = $conn->shop_domain;
+            $this->accessToken = EncryptionService::decrypt($conn->access_token);
+        } catch (Exception $e) {
+            // Credentials not available
+        }
+    }
+
+    /**
+     * Load Shopify credentials from enterprisesettings (legacy mode)
+     *
+     * @param int $memberId Member ID
+     */
+    private function loadCredentialsFromSettings(int $memberId): void {
+        try {
+            $shop = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $memberId]);
+            $token = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $memberId]);
 
             if ($shop) {
                 $this->shop = $shop->setting_value;
@@ -64,6 +98,13 @@ class ShopifyClient {
         } catch (Exception $e) {
             // Credentials not available
         }
+    }
+
+    /**
+     * Get the connection ID (for multi-store mode)
+     */
+    public function getConnectionId(): ?int {
+        return $this->connectionId;
     }
 
     /**
@@ -734,5 +775,217 @@ class ShopifyClient {
      */
     public function getAccessToken(): ?string {
         return $this->accessToken;
+    }
+
+    // =========================================================================
+    // STATIC METHODS FOR CONNECTION MANAGEMENT (multi-store mode)
+    // =========================================================================
+
+    /**
+     * Get all Shopify connections for the workspace
+     *
+     * @return array Array of connection beans
+     */
+    public static function getAllConnections(): array {
+        return Bean::findAll('shopifyconnections', ' ORDER BY created_at DESC ');
+    }
+
+    /**
+     * Get enabled Shopify connections for the workspace
+     *
+     * @return array Array of enabled connection beans
+     */
+    public static function getEnabledConnections(): array {
+        return Bean::find('shopifyconnections', ' enabled = 1 ORDER BY created_at DESC ');
+    }
+
+    /**
+     * Get a connection by ID
+     *
+     * @param int $connectionId Connection ID
+     * @return object|null Connection bean or null
+     */
+    public static function getConnection(int $connectionId): ?object {
+        $conn = Bean::load('shopifyconnections', $connectionId);
+        return $conn->id ? $conn : null;
+    }
+
+    /**
+     * Get a connection by shop domain
+     *
+     * @param string $shopDomain Shop domain
+     * @return object|null Connection bean or null
+     */
+    public static function getConnectionByShop(string $shopDomain): ?object {
+        $shopDomain = self::normalizeShopDomainStatic($shopDomain);
+        return Bean::findOne('shopifyconnections', ' shop_domain = ? ', [$shopDomain]);
+    }
+
+    /**
+     * Get connection linked to a repo
+     *
+     * @param int $repoId Repo connection ID
+     * @return object|null Connection bean or null
+     */
+    public static function getConnectionByRepo(int $repoId): ?object {
+        return Bean::findOne('shopifyconnections', ' repo_connection_id = ? AND enabled = 1 ', [$repoId]);
+    }
+
+    /**
+     * Create a new Shopify connection
+     *
+     * @param int $memberId Member ID creating the connection
+     * @param string $memberName Member display name
+     * @param string $shopDomain Shop domain
+     * @param string $accessToken Admin API access token (shpat_*)
+     * @param string|null $connectionName Optional friendly name
+     * @return object Created connection bean
+     */
+    public static function createConnection(
+        int $memberId,
+        string $memberName,
+        string $shopDomain,
+        string $accessToken,
+        ?string $connectionName = null
+    ): object {
+        $shopDomain = self::normalizeShopDomainStatic($shopDomain);
+
+        // Check if shop already exists
+        $existing = self::getConnectionByShop($shopDomain);
+        if ($existing) {
+            throw new Exception("Shop {$shopDomain} is already connected");
+        }
+
+        // Validate token format
+        if (!preg_match('/^shpat_/', $accessToken)) {
+            throw new Exception('Invalid token format. Admin API access tokens start with shpat_');
+        }
+
+        // Create connection
+        $conn = Bean::dispense('shopifyconnections');
+        $conn->created_by_member_id = $memberId;
+        $conn->created_by_name = $memberName;
+        $conn->connection_name = $connectionName;
+        $conn->shop_domain = $shopDomain;
+        $conn->access_token = EncryptionService::encrypt($accessToken);
+        $conn->enabled = 1;
+        $conn->created_at = date('Y-m-d H:i:s');
+        Bean::store($conn);
+
+        // Fetch and update shop info
+        try {
+            $client = new self($conn->id);
+            $shopInfo = $client->getShopInfo();
+            if (!empty($shopInfo)) {
+                $conn->shop_name = $shopInfo['name'] ?? null;
+                $conn->shop_email = $shopInfo['email'] ?? null;
+                Bean::store($conn);
+            }
+        } catch (Exception $e) {
+            // Ignore errors fetching shop info
+        }
+
+        return $conn;
+    }
+
+    /**
+     * Update a Shopify connection
+     *
+     * @param int $connectionId Connection ID
+     * @param array $data Fields to update
+     * @return object Updated connection bean
+     */
+    public static function updateConnection(int $connectionId, array $data): object {
+        $conn = Bean::load('shopifyconnections', $connectionId);
+        if (!$conn->id) {
+            throw new Exception('Connection not found');
+        }
+
+        // Update allowed fields
+        $allowedFields = ['connection_name', 'storefront_password', 'verify_with_playwright', 'enabled', 'repo_connection_id'];
+        foreach ($allowedFields as $field) {
+            if (array_key_exists($field, $data)) {
+                if ($field === 'storefront_password' && !empty($data[$field])) {
+                    $conn->$field = EncryptionService::encrypt($data[$field]);
+                } else {
+                    $conn->$field = $data[$field];
+                }
+            }
+        }
+
+        // Handle access token update separately (needs encryption)
+        if (!empty($data['access_token'])) {
+            if (!preg_match('/^shpat_/', $data['access_token'])) {
+                throw new Exception('Invalid token format. Admin API access tokens start with shpat_');
+            }
+            $conn->access_token = EncryptionService::encrypt($data['access_token']);
+        }
+
+        $conn->updated_at = date('Y-m-d H:i:s');
+        Bean::store($conn);
+
+        return $conn;
+    }
+
+    /**
+     * Delete a Shopify connection
+     *
+     * @param int $connectionId Connection ID
+     * @return bool True if deleted
+     */
+    public static function deleteConnection(int $connectionId): bool {
+        $conn = Bean::load('shopifyconnections', $connectionId);
+        if (!$conn->id) {
+            return false;
+        }
+        Bean::trash($conn);
+        return true;
+    }
+
+    /**
+     * Link a connection to a repo
+     *
+     * @param int $connectionId Shopify connection ID
+     * @param int $repoId Repo connection ID
+     * @return object Updated connection bean
+     */
+    public static function linkRepo(int $connectionId, int $repoId): object {
+        return self::updateConnection($connectionId, ['repo_connection_id' => $repoId]);
+    }
+
+    /**
+     * Unlink a connection from its repo
+     *
+     * @param int $connectionId Shopify connection ID
+     * @return object Updated connection bean
+     */
+    public static function unlinkRepo(int $connectionId): object {
+        return self::updateConnection($connectionId, ['repo_connection_id' => null]);
+    }
+
+    /**
+     * Test a connection by ID (static wrapper)
+     *
+     * @param int $connectionId Connection ID
+     * @return array Test result
+     */
+    public static function testConnectionById(int $connectionId): array {
+        $client = new self($connectionId);
+        return $client->testConnection();
+    }
+
+    /**
+     * Normalize shop domain (static version)
+     *
+     * @param string $shop Shop domain
+     * @return string Normalized domain
+     */
+    private static function normalizeShopDomainStatic(string $shop): string {
+        $shop = preg_replace('#^https?://#', '', $shop);
+        $shop = rtrim($shop, '/');
+        if (!str_contains($shop, '.myshopify.com')) {
+            $shop .= '.myshopify.com';
+        }
+        return strtolower($shop);
     }
 }

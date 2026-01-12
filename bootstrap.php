@@ -148,8 +148,12 @@ class Bootstrap {
         try {
             // Construct DSN based on database type
             $type = $dbConfig['type'] ?? 'mysql';
-            
-            if ($type === 'sqlite') {
+
+            // Check if default database already exists (prevents error on Bootstrap re-init)
+            if (R::hasDatabase('default')) {
+                // Already initialized, just select it
+                R::selectDatabase('default');
+            } elseif ($type === 'sqlite') {
                 // SQLite configuration
                 $dbPath = $dbConfig['path'] ?? 'database/tiknix.db';
                 // Create database directory if it doesn't exist
@@ -167,9 +171,9 @@ class Bootstrap {
                 $name = $dbConfig['name'] ?? 'app';
                 $user = $dbConfig['user'] ?? 'root';
                 $pass = $dbConfig['pass'] ?? '';
-                
+
                 $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                
+
                 // Setup RedBean
                 R::setup($dsn, $user, $pass);
             }
@@ -301,18 +305,21 @@ class Bootstrap {
             $dbConfig = $tenantConfig['database'];
             $type = $dbConfig['type'] ?? 'mysql';
 
-            if ($type === 'sqlite') {
-                $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
-                $dsn = "sqlite:{$dbPath}";
-                R::addDatabase($tenantSlug, $dsn);
-            } else {
-                $host = $dbConfig['host'] ?? 'localhost';
-                $port = $dbConfig['port'] ?? 3306;
-                $name = $dbConfig['name'] ?? $tenantSlug;
-                $user = $dbConfig['user'] ?? 'root';
-                $pass = $dbConfig['pass'] ?? '';
-                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                R::addDatabase($tenantSlug, $dsn, $user, $pass);
+            // Only add database if not already registered (prevents error on re-init)
+            if (!R::hasDatabase($tenantSlug)) {
+                if ($type === 'sqlite') {
+                    $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
+                    $dsn = "sqlite:{$dbPath}";
+                    R::addDatabase($tenantSlug, $dsn);
+                } else {
+                    $host = $dbConfig['host'] ?? 'localhost';
+                    $port = $dbConfig['port'] ?? 3306;
+                    $name = $dbConfig['name'] ?? $tenantSlug;
+                    $user = $dbConfig['user'] ?? 'root';
+                    $pass = $dbConfig['pass'] ?? '';
+                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                    R::addDatabase($tenantSlug, $dsn, $user, $pass);
+                }
             }
 
             R::selectDatabase($tenantSlug);

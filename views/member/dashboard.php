@@ -69,6 +69,68 @@
         </div>
     </div>
     
+    <!-- CEO Directives & Project Management -->
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card border-warning">
+                <div class="card-header bg-warning text-dark">
+                    <h5 class="mb-0">CEO Directives</h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group">
+                        <a href="/reviewboard" class="list-group-item list-group-item-action list-group-item-warning">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Review Board</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">Review and approve stories before creating issues</p>
+                        </a>
+                        <a href="/directives" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Directives</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">View incoming CEO directives and their status</p>
+                        </a>
+                        <a href="/projects" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Projects</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">Track project progress and completion</p>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">AI Development</h5>
+                </div>
+                <div class="card-body">
+                    <div class="list-group">
+                        <a href="/aidev" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">AI Dev Jobs</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">Monitor AI developer agent job status</p>
+                        </a>
+                        <a href="/boards" class="list-group-item list-group-item-action">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h6 class="mb-1">Jira Boards</h6>
+                                <small>→</small>
+                            </div>
+                            <p class="mb-1 text-muted">Manage tracked Jira boards</p>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row">
         <!-- Quick Actions -->
         <div class="col-md-6 mb-4">

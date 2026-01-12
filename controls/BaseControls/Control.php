@@ -88,12 +88,18 @@ abstract class Control {
     protected function requireLogin() {
         if (!Flight::isLoggedIn()) {
             $this->logger->debug('Login required');
-            
+
             if (Flight::request()->ajax) {
                 Flight::jsonError('Login required', 401);
             } else {
                 $redirect = urlencode(Flight::request()->url);
-                Flight::redirect("/auth/login?redirect={$redirect}");
+                // Use tenant-aware login URL if tenant is set
+                $tenant = $_SESSION['tenant_slug'] ?? '';
+                if ($tenant && $tenant !== 'default') {
+                    Flight::redirect("/login/{$tenant}?redirect={$redirect}");
+                } else {
+                    Flight::redirect("/login?redirect={$redirect}");
+                }
             }
             return false;
         }

@@ -16,8 +16,10 @@ use \app\services\PMAgent;
 use \app\services\GitHubClient;
 use \app\services\JiraClient;
 use \app\services\EncryptionService;
+use \app\services\AIDevStatusService;
 
 require_once __DIR__ . '/../lib/Bean.php';
+require_once __DIR__ . '/../services/AIDevStatusService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/PMAgent.php';
 require_once __DIR__ . '/../services/GitHubClient.php';
@@ -84,6 +86,17 @@ class ReviewBoard extends BaseControls\Control {
                     } elseif ($story->status === 'approved') {
                         $approvedCount++;
                     }
+
+                    // Attach job data for approved stories with issue keys
+                    $story->_job = null;
+                    if ($story->jira_issue_key) {
+                        $jobs = AIDevStatusService::findAllJobsByIssueKey($this->member->id, $story->jira_issue_key);
+                        if (!empty($jobs)) {
+                            // Get the most recent job
+                            $story->_job = $jobs[0];
+                        }
+                    }
+
                     $storyData[] = $story;
                 }
 
@@ -414,31 +427,67 @@ class ReviewBoard extends BaseControls\Control {
         Flight::jsonSuccess(['deleted' => $deleted], "{$deleted} stories deleted");
     }
 
+    /**
+     * AJAX: Get job details for a story
+     */
+    public function getJobDetails() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $issueKey = $this->getParam('issue_key');
+        if (!$issueKey) {
+            Flight::jsonError('Issue key required', 400);
+            return;
+        }
+
+        $jobs = AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        if (empty($jobs)) {
+            Flight::jsonError('No jobs found for this issue', 404);
+            return;
+        }
+
+        // Get the most recent job with full details
+        $job = $jobs[0];
+
+        // Get logs for this job
+        $logs = AIDevStatusService::getLogs($job['job_id'], $this->member->id);
+
+        Flight::jsonSuccess([
+            'job' => $job,
+            'logs' => $logs,
+            'all_jobs' => $jobs,
+        ]);
+    }
+
     // ==================== Helper Methods ====================
 
     /**
      * Get GitHub configuration for the current user
      */
     private function getGitHubConfig(): ?array {
-        // Check for repo connections
+        // Check for repo connections (for owner/repo info)
         $repo = Bean::findOne('repoconnections', 'member_id = ? AND provider = ?', [$this->member->id, 'github']);
         if (!$repo) {
             return null;
         }
 
-        $encryption = new EncryptionService();
-        $accessToken = $encryption->decrypt($repo->access_token);
-
-        // Parse owner/repo from full name
-        $parts = explode('/', $repo->repo_full_name);
-        if (count($parts) !== 2) {
+        // Get token from enterprisesettings
+        $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+        if (!$tokenSetting || !$tokenSetting->setting_value) {
             return null;
         }
 
+        $encryption = new EncryptionService();
+        $accessToken = $encryption->decrypt($tokenSetting->setting_value);
+
         return [
             'access_token' => $accessToken,
-            'owner' => $parts[0],
-            'repo' => $parts[1],
+            'owner' => $repo->repo_owner,
+            'repo' => $repo->repo_name,
             'repo_id' => $repo->id,
         ];
     }
@@ -473,7 +522,15 @@ class ReviewBoard extends BaseControls\Control {
         if (!empty($criteria)) {
             $body .= "## Acceptance Criteria\n\n";
             foreach ($criteria as $criterion) {
-                $body .= "- [ ] {$criterion}\n";
+                if (is_array($criterion)) {
+                    // BDD format: given/when/then
+                    $given = $criterion['given'] ?? '';
+                    $when = $criterion['when'] ?? '';
+                    $then = $criterion['then'] ?? '';
+                    $body .= "- [ ] **Given** {$given} **When** {$when} **Then** {$then}\n";
+                } else {
+                    $body .= "- [ ] {$criterion}\n";
+                }
             }
             $body .= "\n";
         }

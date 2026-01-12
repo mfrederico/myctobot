@@ -94,6 +94,19 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
+     * Handle Mailgun incoming email webhook
+     * Endpoint: POST /webhook/mailgun
+     *
+     * Receives emails sent to {tenant}@myctobot.ai and creates CEO directives.
+     * Uses the IncomingEmail controller for actual processing.
+     */
+    public function mailgun() {
+        require_once __DIR__ . '/IncomingEmail.php';
+        $handler = new \app\IncomingEmail();
+        $handler->mailgun();
+    }
+
+    /**
      * Switch to tenant database for webhook processing
      */
     private function switchToTenantForWebhook(string $tenant): bool {

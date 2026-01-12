@@ -216,11 +216,17 @@ CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `completed_at` DATETIME,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    -- Delivery confirmation tracking (Issue #26)
+    `confirmation_sent_at` DATETIME DEFAULT NULL COMMENT 'Timestamp when delivery confirmation was successfully sent',
+    `confirmation_method` VARCHAR(100) DEFAULT NULL COMMENT 'Delivery method(s) that succeeded (email, jira, webhook)',
+    `confirmation_attempts` INT DEFAULT 0 COMMENT 'Number of confirmation delivery attempts (max 3)',
+    `confirmation_last_error` TEXT DEFAULT NULL COMMENT 'Last error message from failed confirmation attempt',
     INDEX `idx_member` (`member_id`),
     INDEX `idx_board` (`board_id`),
     INDEX `idx_status` (`status`),
     INDEX `idx_issue` (`issue_key`),
-    INDEX `idx_member_issue` (`member_id`, `issue_key`)
+    INDEX `idx_member_issue` (`member_id`, `issue_key`),
+    INDEX `idx_confirmation_pending` (`confirmation_sent_at`, `confirmation_attempts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- AI Developer job logs

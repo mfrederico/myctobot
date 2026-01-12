@@ -135,47 +135,33 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# Create the processor loop script
-LOOP_SCRIPT=$(cat <<'SCRIPT'
-#!/bin/bash
-TENANT="$1"
-INTERVAL="$2"
-BASE_DIR="$3"
-
-cd "$BASE_DIR"
-
-echo "=========================================="
-echo "Directive Processor Daemon"
-echo "=========================================="
-echo "Tenant:   $TENANT"
-echo "Interval: ${INTERVAL}s"
-echo "Started:  $(date)"
-echo "=========================================="
-echo ""
-echo "Press Ctrl+C to stop, or detach with Ctrl+B D"
-echo ""
-
-run_count=0
-while true; do
-    run_count=$((run_count + 1))
-    echo ""
-    echo "--- Run #${run_count} at $(date '+%Y-%m-%d %H:%M:%S') ---"
-
-    php scripts/cron-directive-processor.php --tenant="$TENANT" --verbose
-
-    echo ""
-    echo "Next run in ${INTERVAL} seconds... (Ctrl+C to stop)"
-    sleep "$INTERVAL"
-done
-SCRIPT
-)
-
-# Create tmux session with the loop
+# Create tmux session with inline loop command
 echo "Starting directive processor for tenant: $TENANT"
 echo "Session: $SESSION_NAME"
 echo "Interval: ${INTERVAL}s"
 
-tmux new-session -d -s "$SESSION_NAME" "bash -c '$LOOP_SCRIPT' _ '$TENANT' '$INTERVAL' '$BASE_DIR'"
+# Use a simple inline command for tmux (more reliable than heredoc)
+tmux new-session -d -s "$SESSION_NAME" \
+    "cd '$BASE_DIR' && echo '=========================================='; \
+     echo 'Directive Processor Daemon'; \
+     echo '=========================================='; \
+     echo 'Tenant:   $TENANT'; \
+     echo 'Interval: ${INTERVAL}s'; \
+     echo 'Started:  '\$(date); \
+     echo '=========================================='; \
+     echo ''; \
+     echo 'Press Ctrl+C to stop, or detach with Ctrl+B D'; \
+     echo ''; \
+     run_count=0; \
+     while true; do \
+         run_count=\$((run_count + 1)); \
+         echo ''; \
+         echo \"--- Run #\${run_count} at \$(date '+%Y-%m-%d %H:%M:%S') ---\"; \
+         php scripts/cron-directive-processor.php --tenant='$TENANT' --verbose; \
+         echo ''; \
+         echo 'Next run in ${INTERVAL} seconds... (Ctrl+C to stop)'; \
+         sleep $INTERVAL; \
+     done"
 
 echo ""
 echo "Session started successfully!"

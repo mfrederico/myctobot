@@ -667,4 +667,33 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('webhook', 'mailgun', 101, 'Mailgun incoming email webhook')
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
 
+-- ============================================================================
+-- PLUGIN REGISTRY TABLES
+-- ============================================================================
+
+-- Plugin metadata (extracted from plugin.json files)
+CREATE TABLE IF NOT EXISTS `pluginmetadata` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `repo_connection_id` INT NOT NULL,
+    `plugin_name` VARCHAR(255),
+    `plugin_version` VARCHAR(100),
+    `description` TEXT,
+    `author` VARCHAR(255),
+    `dependencies` JSON,
+    `tags` JSON,
+    `license` VARCHAR(100),
+    `homepage` VARCHAR(500),
+    `repository_url` VARCHAR(500),
+    `is_valid` TINYINT(1) DEFAULT 0,
+    `validation_errors` JSON,
+    `extracted_at` DATETIME,
+    `validated_at` DATETIME,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`repo_connection_id`) REFERENCES `repoconnections`(`id`) ON DELETE CASCADE,
+    INDEX `idx_repo_connection` (`repo_connection_id`),
+    INDEX `idx_plugin_name` (`plugin_name`),
+    INDEX `idx_is_valid` (`is_valid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

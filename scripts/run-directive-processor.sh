@@ -1,20 +1,57 @@
 #!/bin/bash
 #
+# ============================================================================
 # Directive Processor Daemon
-# Runs the CEO directive processor in a tmux session
+# ============================================================================
+# Runs the CEO directive processor in a persistent tmux session.
+# Processes incoming CEO email directives and creates projects/stories.
 #
-# Usage:
-#   ./scripts/run-directive-processor.sh --tenant=footest4 [--interval=300]
-#   ./scripts/run-directive-processor.sh --tenant=gwt --attach
+# QUICK START:
+# ------------
+#   # Start the daemon for a tenant
+#   ./scripts/run-directive-processor.sh --tenant=footest4
 #
-# Options:
+#   # Start and watch the output
+#   ./scripts/run-directive-processor.sh --tenant=footest4 --attach
+#
+# EXAMPLES:
+# ---------
+#   # Start with default 5-minute interval
+#   ./scripts/run-directive-processor.sh --tenant=gwt
+#
+#   # Start with 1-minute interval for testing
+#   ./scripts/run-directive-processor.sh --tenant=footest4 --interval=60
+#
+#   # Check what's running
+#   ./scripts/run-directive-processor.sh --status
+#
+#   # Stop a running daemon
+#   ./scripts/run-directive-processor.sh --tenant=footest4 --kill
+#
+#   # Attach to see live output
+#   tmux attach -t directive-processor-footest4
+#
+# OPTIONS:
+# --------
 #   --tenant=<name>     Required. Tenant slug (e.g., gwt, footest4)
 #   --interval=<secs>   Seconds between runs (default: 300 = 5 minutes)
 #   --attach            Attach to tmux session after starting
 #   --kill              Kill existing session for this tenant
-#   --status            Show status of running sessions
+#   --status            Show status of all running directive processor sessions
+#   --help              Show this help message
 #
-# The script creates a tmux session named: directive-processor-{tenant}
+# TMUX COMMANDS (while attached):
+# -------------------------------
+#   Ctrl+B then D     Detach from session (keeps it running)
+#   Ctrl+C            Stop the processor loop
+#   Ctrl+B then [     Enter scroll mode (use arrows, q to exit)
+#
+# SESSION NAME:
+# -------------
+#   Sessions are named: directive-processor-{tenant}
+#   Example: directive-processor-footest4
+#
+# ============================================================================
 #
 
 set -e
@@ -47,7 +84,7 @@ for arg in "$@"; do
             STATUS=true
             ;;
         --help)
-            head -25 "$0" | tail -22
+            head -55 "$0" | tail -52
             exit 0
             ;;
     esac

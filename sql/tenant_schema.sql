@@ -667,4 +667,180 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('webhook', 'mailgun', 101, 'Mailgun incoming email webhook')
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
 
+-- ============================================================================
+-- PLUGIN REGISTRY TABLES
+-- ============================================================================
+
+-- Plugin categories for organizing plugins
+CREATE TABLE IF NOT EXISTS `plugincategory` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `slug` VARCHAR(100) NOT NULL UNIQUE,
+    `description` TEXT,
+    `parent_id` INT DEFAULT NULL,
+    `icon` VARCHAR(50) DEFAULT 'bi-puzzle',
+    `plugin_count` INT DEFAULT 0,
+    `display_order` INT DEFAULT 0,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_slug` (`slug`),
+    INDEX `idx_parent` (`parent_id`),
+    INDEX `idx_display_order` (`display_order`),
+    FOREIGN KEY (`parent_id`) REFERENCES `plugincategory`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Plugin tags for filtering
+CREATE TABLE IF NOT EXISTS `plugintag` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(50) NOT NULL,
+    `slug` VARCHAR(50) NOT NULL UNIQUE,
+    `plugin_count` INT DEFAULT 0,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_slug` (`slug`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Plugins in the registry
+CREATE TABLE IF NOT EXISTS `plugin` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `slug` VARCHAR(100) NOT NULL UNIQUE,
+    `description` TEXT,
+    `short_description` VARCHAR(255),
+    `version` VARCHAR(20),
+    `author` VARCHAR(100),
+    `author_url` VARCHAR(255),
+    `icon` VARCHAR(100) DEFAULT 'bi-puzzle-fill',
+    `category_id` INT,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `is_featured` TINYINT(1) DEFAULT 0,
+    `downloads` INT DEFAULT 0,
+    `rating` DECIMAL(2,1) DEFAULT 0.0,
+    `rating_count` INT DEFAULT 0,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_slug` (`slug`),
+    INDEX `idx_category` (`category_id`),
+    INDEX `idx_active` (`is_active`),
+    INDEX `idx_featured` (`is_featured`),
+    INDEX `idx_downloads` (`downloads` DESC),
+    FOREIGN KEY (`category_id`) REFERENCES `plugincategory`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Plugin-tag relationship (many-to-many)
+CREATE TABLE IF NOT EXISTS `plugin_plugintag` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `plugin_id` INT NOT NULL,
+    `plugintag_id` INT NOT NULL,
+    UNIQUE KEY `uk_plugin_tag` (`plugin_id`, `plugintag_id`),
+    FOREIGN KEY (`plugin_id`) REFERENCES `plugin`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`plugintag_id`) REFERENCES `plugintag`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Seed plugin categories
+INSERT INTO `plugincategory` (`name`, `slug`, `description`, `icon`, `display_order`) VALUES
+('User Interface', 'ui', 'Plugins for enhancing user interfaces, themes, and visual components', 'bi-palette', 1),
+('Database', 'database', 'Database connectors, ORM extensions, and data management tools', 'bi-database', 2),
+('Integration', 'integration', 'Third-party service integrations and API connectors', 'bi-plug', 3),
+('Authentication', 'authentication', 'Security, authentication, and authorization plugins', 'bi-shield-lock', 4),
+('Analytics', 'analytics', 'Analytics, reporting, and data visualization tools', 'bi-graph-up', 5),
+('Utilities', 'utilities', 'General-purpose utility libraries and helper tools', 'bi-tools', 6)
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- Seed plugin tags
+INSERT INTO `plugintag` (`name`, `slug`) VALUES
+('PHP', 'php'),
+('JavaScript', 'javascript'),
+('API', 'api'),
+('Frontend', 'frontend'),
+('Backend', 'backend'),
+('Security', 'security'),
+('Performance', 'performance'),
+('Caching', 'caching'),
+('REST', 'rest'),
+('OAuth', 'oauth')
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- Seed sample plugins
+INSERT INTO `plugin` (`name`, `slug`, `short_description`, `description`, `version`, `author`, `icon`, `category_id`, `is_featured`, `downloads`) VALUES
+('Bootstrap Theme Pack', 'bootstrap-theme-pack', 'Collection of Bootstrap 5 themes and components', 'A comprehensive collection of professionally designed Bootstrap 5 themes, components, and UI kits for rapid development.', '2.1.0', 'ThemeCraft', 'bi-brush', 1, 1, 1250),
+('Redis Cache Driver', 'redis-cache-driver', 'High-performance Redis caching for FlightPHP', 'Seamlessly integrate Redis caching into your FlightPHP application for improved performance and scalability.', '1.5.2', 'CacheWorks', 'bi-lightning', 2, 0, 890),
+('Slack Notifier', 'slack-notifier', 'Send notifications to Slack channels', 'Easy-to-use Slack integration for sending notifications, alerts, and messages from your application.', '3.0.1', 'IntegratePro', 'bi-slack', 3, 1, 2100),
+('JWT Authentication', 'jwt-authentication', 'Secure JWT-based authentication system', 'Complete JWT authentication solution with token refresh, blacklisting, and role-based access control.', '2.0.0', 'SecureAuth', 'bi-key', 4, 1, 3200),
+('Google Analytics Bridge', 'google-analytics-bridge', 'Google Analytics 4 integration', 'Track user behavior and generate reports with seamless Google Analytics 4 integration.', '1.2.0', 'AnalyticsPro', 'bi-bar-chart', 5, 0, 780),
+('Form Validator', 'form-validator', 'Comprehensive form validation library', 'Powerful server-side and client-side form validation with customizable rules and error messages.', '4.1.0', 'FormMaster', 'bi-check-square', 6, 1, 1560),
+('MySQL Query Builder', 'mysql-query-builder', 'Fluent MySQL query builder for RedBeanPHP', 'Extend RedBeanPHP with a fluent query builder interface for complex MySQL queries.', '1.8.0', 'DBTools', 'bi-database-gear', 2, 0, 1100),
+('OAuth2 Server', 'oauth2-server', 'Full OAuth2 server implementation', 'Complete OAuth2 server with support for all grant types and token management.', '2.3.0', 'SecureAuth', 'bi-shield-check', 4, 0, 950),
+('Chart.js Dashboard', 'chartjs-dashboard', 'Interactive dashboard components', 'Beautiful, responsive dashboard components using Chart.js for data visualization.', '1.4.2', 'ChartWorks', 'bi-pie-chart', 5, 1, 1890),
+('Email Queue', 'email-queue', 'Async email queue with retry logic', 'Reliable email delivery with queue management, retry logic, and delivery tracking.', '2.0.1', 'MailPro', 'bi-envelope', 6, 0, 670)
+ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
+
+-- Link plugins to tags (after plugins are inserted)
+-- Bootstrap Theme Pack: frontend, javascript
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'bootstrap-theme-pack' AND t.slug IN ('frontend', 'javascript')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Redis Cache Driver: backend, php, caching, performance
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'redis-cache-driver' AND t.slug IN ('backend', 'php', 'caching', 'performance')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Slack Notifier: api, backend, rest
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'slack-notifier' AND t.slug IN ('api', 'backend', 'rest')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- JWT Authentication: security, backend, php, api
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'jwt-authentication' AND t.slug IN ('security', 'backend', 'php', 'api')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Google Analytics Bridge: javascript, frontend, api
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'google-analytics-bridge' AND t.slug IN ('javascript', 'frontend', 'api')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Form Validator: php, frontend, javascript
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'form-validator' AND t.slug IN ('php', 'frontend', 'javascript')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- MySQL Query Builder: php, backend
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'mysql-query-builder' AND t.slug IN ('php', 'backend')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- OAuth2 Server: security, oauth, api, php
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'oauth2-server' AND t.slug IN ('security', 'oauth', 'api', 'php')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Chart.js Dashboard: javascript, frontend
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'chartjs-dashboard' AND t.slug IN ('javascript', 'frontend')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Email Queue: php, backend, performance
+INSERT INTO `plugin_plugintag` (`plugin_id`, `plugintag_id`)
+SELECT p.id, t.id FROM `plugin` p, `plugintag` t WHERE p.slug = 'email-queue' AND t.slug IN ('php', 'backend', 'performance')
+ON DUPLICATE KEY UPDATE `plugin_id` = VALUES(`plugin_id`);
+
+-- Update plugin counts in categories
+UPDATE `plugincategory` pc SET `plugin_count` = (
+    SELECT COUNT(*) FROM `plugin` p WHERE p.category_id = pc.id AND p.is_active = 1
+);
+
+-- Update plugin counts in tags
+UPDATE `plugintag` pt SET `plugin_count` = (
+    SELECT COUNT(*) FROM `plugin_plugintag` pp WHERE pp.plugintag_id = pt.id
+);
+
+-- Add authcontrol entries for plugin registry
+INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
+('plugins', 'index', 101, 'Plugin registry - browse all plugins'),
+('plugins', 'category', 101, 'Plugin registry - browse by category'),
+('plugins', 'view', 101, 'Plugin registry - view plugin details'),
+('plugins', 'search', 101, 'Plugin registry - search plugins')
+ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
+
 SET FOREIGN_KEY_CHECKS = 1;

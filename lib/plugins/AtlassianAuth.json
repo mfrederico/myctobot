@@ -1,0 +1,21 @@
+{
+  "name": "Atlassian OAuth Authentication",
+  "slug": "atlassian-auth",
+  "version": "1.0.0",
+  "description": "Handles Atlassian/Jira authentication for MyCTOBot. Provides OAuth 2.0 integration with Atlassian Cloud for accessing Jira boards and issues.",
+  "author": "MyCTOBot",
+  "repository": "https://github.com/mfrederico/myctobot",
+  "homepage": "https://myctobot.ai",
+  "license": "Proprietary",
+  "requires": {
+    "php": ">=8.1"
+  },
+  "provides": {
+    "auth": ["atlassian", "jira"]
+  },
+  "config": {
+    "atlassian_client_id": "Required: Atlassian OAuth Client ID",
+    "atlassian_client_secret": "Required: Atlassian OAuth Client Secret",
+    "atlassian_redirect_uri": "Required: OAuth callback URL"
+  }
+}

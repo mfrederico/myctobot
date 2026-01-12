@@ -660,6 +660,44 @@ class GitHubClient {
     // ========================================
 
     /**
+     * Create a new issue
+     *
+     * @param string $owner Repository owner
+     * @param string $repo Repository name
+     * @param string $title Issue title
+     * @param string $body Issue body (markdown)
+     * @param array $labels Labels to apply (optional)
+     * @param array $assignees Usernames to assign (optional)
+     * @return array Created issue data
+     */
+    public function createIssue(
+        string $owner,
+        string $repo,
+        string $title,
+        string $body,
+        array $labels = [],
+        array $assignees = []
+    ): array {
+        $payload = [
+            'title' => $title,
+            'body' => $body,
+        ];
+
+        if (!empty($labels)) {
+            $payload['labels'] = $labels;
+        }
+        if (!empty($assignees)) {
+            $payload['assignees'] = $assignees;
+        }
+
+        $response = $this->client->post("/repos/{$owner}/{$repo}/issues", [
+            'json' => $payload,
+        ]);
+
+        return json_decode($response->getBody()->getContents(), true);
+    }
+
+    /**
      * Get an issue
      */
     public function getIssue(string $owner, string $repo, int $issueNumber): array {

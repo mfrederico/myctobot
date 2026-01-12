@@ -28,5 +28,10 @@ Flight::route('GET /api/health', function() {
     Flight::jsonSuccess(['status' => 'ok', 'timestamp' => date('c')]);
 });
 
+// CEO Directive endpoints - secure message reception for CEO directives
+// Requires API key authentication via X-API-Key header or Authorization: Bearer token
+Flight::route('POST /api/ceo/directive', ['\app\CeoDirective', 'receive']);
+Flight::route('GET /api/ceo/directive/@id', ['\app\CeoDirective', 'get']);
+
 // Fall through to default routes for other /api/* paths
 Flight::defaultRoute();

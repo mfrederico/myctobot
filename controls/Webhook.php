@@ -168,7 +168,7 @@ class Webhook extends BaseControls\Control {
             if ($type === 'sqlite') {
                 $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
                 $dsn = "sqlite:{$dbPath}";
-                R::addDatabase($tenant, $dsn);
+                Bean::useDatabase($tenant, $dsn);
             } else {
                 $host = $dbConfig['host'] ?? 'localhost';
                 $port = $dbConfig['port'] ?? 3306;
@@ -176,10 +176,8 @@ class Webhook extends BaseControls\Control {
                 $user = $dbConfig['user'] ?? 'root';
                 $pass = $dbConfig['pass'] ?? '';
                 $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                R::addDatabase($tenant, $dsn, $user, $pass);
+                Bean::useDatabase($tenant, $dsn, $user, $pass);
             }
-
-            R::selectDatabase($tenant);
             Flight::set('tenant.slug', $tenant);
             Flight::set('tenant.active', true);
             return true;
@@ -1480,7 +1478,7 @@ class Webhook extends BaseControls\Control {
                     $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
                     if (!file_exists($dbPath)) continue;
                     $dsn = "sqlite:{$dbPath}";
-                    R::addDatabase($tenantDbKey, $dsn);
+                    Bean::useDatabase($tenantDbKey, $dsn);
                 } else {
                     $host = $dbConfig['host'] ?? 'localhost';
                     $port = $dbConfig['port'] ?? 3306;
@@ -1488,10 +1486,8 @@ class Webhook extends BaseControls\Control {
                     $user = $dbConfig['user'] ?? 'root';
                     $pass = $dbConfig['pass'] ?? '';
                     $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    R::addDatabase($tenantDbKey, $dsn, $user, $pass);
+                    Bean::useDatabase($tenantDbKey, $dsn, $user, $pass);
                 }
-
-                R::selectDatabase($tenantDbKey);
 
                 // Look for repo connection (repoOwner/repoName already parsed at top of method)
                 $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
@@ -1531,7 +1527,7 @@ class Webhook extends BaseControls\Control {
      */
     private function findMemberIdForTenant(string $tenant): ?int {
         // Switch back to default database
-        R::selectDatabase('default');
+        Bean::selectDatabase('default');
 
         // Look up member by their database name pattern
         $dbName = "myctobot_{$tenant}";

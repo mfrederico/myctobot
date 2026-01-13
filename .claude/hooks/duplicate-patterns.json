@@ -1,0 +1,65 @@
+{
+    "description": "Custom patterns for duplicate code detection. Add your own patterns here.",
+    "patterns": {
+        "initUserDb + jsonError": {
+            "pattern": "if\\s*\\(\\s*!\\s*\\$this->initUserDb\\(\\)\\s*\\)\\s*\\{[^}]*jsonError[^}]*\\}",
+            "suggestion": "Consider a trait or base class method that combines these checks",
+            "severity": "medium"
+        },
+        "requireLogin guard": {
+            "pattern": "if\\s*\\(\\s*!\\s*\\$this->requireLogin\\(\\)\\s*\\)\\s*return\\s*;",
+            "suggestion": "Already a pattern, but could use middleware/attribute",
+            "severity": "low"
+        },
+        "JSON input parsing": {
+            "pattern": "\\$\\w+\\s*=\\s*json_decode\\(\\s*file_get_contents\\(\\s*['\"]php:\\/\\/input['\"]\\s*\\)\\s*,\\s*true\\s*\\);",
+            "suggestion": "Use $this->getJsonInput() helper in base controller",
+            "severity": "high"
+        },
+        "Flight jsonError + return": {
+            "pattern": "Flight::jsonError\\([^;]+\\);\\s*\\n\\s*return;",
+            "suggestion": "Use return $this->jsonErrorReturn() that does both",
+            "severity": "high"
+        },
+        "Bean findOne + not found check": {
+            "pattern": "\\$\\w+\\s*=\\s*Bean::findOne\\([^;]+\\);\\s*\\n\\s*if\\s*\\(\\s*!\\s*\\$\\w+\\s*\\)\\s*\\{",
+            "suggestion": "Use Bean::findOneOrFail() that throws on not found",
+            "severity": "high"
+        },
+        "R:: instead of Bean:: for user DB": {
+            "pattern": "R::(dispense|findOne|find|load|store|trash)\\(['\"]?(aidevjob|enterprisesetting|repoconnection|boardrepomapping|jiraboard|analysisresult|digesthistory|aidevjoblog|ctoproject|ctoepic|ctostory|ceodirective|directivelog)",
+            "suggestion": "Use Bean:: wrapper for user database tables (ensures lowercase normalization)",
+            "severity": "critical"
+        },
+        "Direct R::exec for CRUD": {
+            "pattern": "R::exec\\(['\"]\\s*(INSERT|UPDATE|DELETE)\\s+",
+            "suggestion": "Use bean operations (Bean::dispense/store/trash) instead of raw SQL for CRUD",
+            "severity": "high"
+        },
+        "try-catch with logger": {
+            "pattern": "try\\s*\\{[^}]+\\}\\s*catch\\s*\\([^)]+\\$e\\)\\s*\\{\\s*\\n\\s*\\$this->logger->error\\(",
+            "suggestion": "Standard pattern, but consider a withErrorHandling() wrapper",
+            "severity": "low"
+        },
+        "Hardcoded tenant check": {
+            "pattern": "\\$_SESSION\\[['\"]tenant_slug['\"]\\]\\s*(===|==)\\s*['\"]\\w+['\"]",
+            "suggestion": "Avoid hardcoding tenant slugs, use config or constants",
+            "severity": "medium"
+        },
+        "Manual CSRF token access": {
+            "pattern": "\\$_POST\\[['\"]csrf['\"]\\]|\\$_REQUEST\\[['\"]csrf['\"]\\]",
+            "suggestion": "Use Flight::csrf()->validateRequest() instead of manual token access",
+            "severity": "medium"
+        },
+        "tenant_slug usage (refactor to workspace)": {
+            "pattern": "tenant_slug|tenant\\.slug|--tenant=",
+            "suggestion": "TODO: Refactor 'tenant' to 'workspace' for consistency with user-facing terminology",
+            "severity": "low"
+        },
+        "Hyphenated route endpoints": {
+            "pattern": "Flight::route.*[a-z]+-[a-z]+",
+            "suggestion": "Use camelCase for route endpoints (e.g., updateStory not update-story)",
+            "severity": "medium"
+        }
+    }
+}

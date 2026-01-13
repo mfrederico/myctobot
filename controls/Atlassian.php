@@ -9,6 +9,7 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Exception as Exception;
+use \app\Bean;
 use \app\plugins\AtlassianAuth;
 
 // Load Atlassian Auth plugin
@@ -415,33 +416,24 @@ class Atlassian extends BaseControls\Control {
             return;
         }
 
-        // Check if this database connection is already registered
-        // If so, just select it; if not, add it first
-        try {
-            R::selectDatabase($workspace);
-            $this->logger->debug("Workspace database already registered, selected: {$workspace}");
-        } catch (\Exception $e) {
-            // Database not registered yet, add it
-            $dbConfig = $tenantConfig['database'];
-            $type = $dbConfig['type'] ?? 'mysql';
+        // Add (if not already registered) and select workspace database
+        $dbConfig = $tenantConfig['database'];
+        $type = $dbConfig['type'] ?? 'mysql';
 
-            if ($type === 'sqlite') {
-                $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
-                $dsn = "sqlite:{$dbPath}";
-                R::addDatabase($workspace, $dsn);
-            } else {
-                $host = $dbConfig['host'] ?? 'localhost';
-                $port = $dbConfig['port'] ?? 3306;
-                $name = $dbConfig['name'] ?? $workspace;
-                $user = $dbConfig['user'] ?? 'root';
-                $pass = $dbConfig['pass'] ?? '';
-                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                R::addDatabase($workspace, $dsn, $user, $pass);
-            }
-
-            R::selectDatabase($workspace);
-            $this->logger->debug("Registered and selected workspace database: {$workspace}");
+        if ($type === 'sqlite') {
+            $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
+            $dsn = "sqlite:{$dbPath}";
+            Bean::useDatabase($workspace, $dsn);
+        } else {
+            $host = $dbConfig['host'] ?? 'localhost';
+            $port = $dbConfig['port'] ?? 3306;
+            $name = $dbConfig['name'] ?? $workspace;
+            $user = $dbConfig['user'] ?? 'root';
+            $pass = $dbConfig['pass'] ?? '';
+            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+            Bean::useDatabase($workspace, $dsn, $user, $pass);
         }
+        $this->logger->debug("Selected workspace database: {$workspace}");
 
         // Store workspace in session for subsequent requests
         $_SESSION['tenant_slug'] = $workspace;

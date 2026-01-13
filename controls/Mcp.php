@@ -28,6 +28,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\services\ImageService;
 use app\BaseControls\Control;
 use app\services\JiraClient;
@@ -70,7 +71,7 @@ class Mcp extends Control {
                 if ($type === 'sqlite') {
                     $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
                     $dsn = "sqlite:{$dbPath}";
-                    R::addDatabase($tenant, $dsn);
+                    Bean::useDatabase($tenant, $dsn);
                 } else {
                     $host = $dbConfig['host'] ?? 'localhost';
                     $port = $dbConfig['port'] ?? 3306;
@@ -78,9 +79,8 @@ class Mcp extends Control {
                     $user = $dbConfig['user'] ?? 'root';
                     $pass = $dbConfig['pass'] ?? '';
                     $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    R::addDatabase($tenant, $dsn, $user, $pass);
+                    Bean::useDatabase($tenant, $dsn, $user, $pass);
                 }
-                R::selectDatabase($tenant);
                 $this->logger->debug('MCP switched to tenant database', ['tenant' => $tenant]);
             }
         }

@@ -9,6 +9,9 @@ namespace app\services;
 
 use RedBeanPHP\R as R;
 
+require_once __DIR__ . '/../lib/Bean.php';
+use \app\Bean;
+
 class AIDevStatusService {
 
     // Job statuses
@@ -60,6 +63,7 @@ class AIDevStatusService {
             'member_id' => (int) $bean->member_id,
             'board_id' => (int) $bean->board_id,
             'issue_key' => $bean->issue_key,
+            'project_type' => $bean->project_type ?? 'jira',
             'repo_connection_id' => $bean->repo_connection_id ? (int) $bean->repo_connection_id : null,
             'cloud_id' => $bean->cloud_id,
             'status' => $bean->status,
@@ -89,10 +93,11 @@ class AIDevStatusService {
      * Create a new AI Developer job
      *
      * @param int $memberId Member ID
-     * @param int $boardId Board ID
-     * @param string $issueKey Jira issue key
+     * @param int $boardId Board ID (0 for non-Jira projects)
+     * @param string $issueKey Issue key (format varies by project type)
      * @param int|null $repoConnectionId Repository connection ID
-     * @param string|null $cloudId Atlassian Cloud ID
+     * @param string|null $cloudId Atlassian Cloud ID (or identifier for non-Jira sources)
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      * @return string Job ID
      */
     public static function createJob(
@@ -100,15 +105,17 @@ class AIDevStatusService {
         int $boardId,
         string $issueKey,
         ?int $repoConnectionId = null,
-        ?string $cloudId = null
+        ?string $cloudId = null,
+        string $projectType = 'jira'
     ): string {
         $jobId = self::generateJobId();
 
-        $job = R::dispense('aidevjobs');
+        $job = Bean::dispense('aidevjobs');
         $job->job_id = $jobId;
         $job->member_id = $memberId;
         $job->board_id = $boardId;
         $job->issue_key = $issueKey;
+        $job->project_type = $projectType;
         $job->repo_connection_id = $repoConnectionId;
         $job->cloud_id = $cloudId;
         $job->status = self::STATUS_PENDING;
@@ -119,12 +126,13 @@ class AIDevStatusService {
         $job->started_at = date('Y-m-d H:i:s');
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         // Also log the creation
         self::log($jobId, $memberId, 'info', 'Job created', [
             'issue_key' => $issueKey,
-            'board_id' => $boardId
+            'board_id' => $boardId,
+            'project_type' => $projectType
         ]);
 
         return $jobId;
@@ -134,7 +142,7 @@ class AIDevStatusService {
      * Find job by job_id
      */
     private static function findByJobId(int $memberId, string $jobId): ?object {
-        return R::findOne('aidevjobs', 'job_id = ? AND member_id = ?', [$jobId, $memberId]);
+        return Bean::findOne('aidevjobs', 'job_id = ? AND member_id = ?', [$jobId, $memberId]);
     }
 
     /**
@@ -165,7 +173,7 @@ class AIDevStatusService {
         $job->steps_completed = json_encode($stepsCompleted);
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
@@ -194,7 +202,7 @@ class AIDevStatusService {
         }
 
         $job->updated_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
@@ -217,7 +225,7 @@ class AIDevStatusService {
         $job->clarification_questions = json_encode($questions);
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'info', 'Waiting for clarification', [
             'comment_id' => $commentId,
@@ -253,7 +261,7 @@ class AIDevStatusService {
         $job->pr_created_at = date('Y-m-d H:i:s');
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'info', 'PR created, waiting for Jira completion', [
             'pr_url' => $prUrl,
@@ -289,7 +297,7 @@ class AIDevStatusService {
         $job->completed_at = date('Y-m-d H:i:s');
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'info', 'Job completed', [
             'pr_url' => $prUrl,
@@ -311,7 +319,7 @@ class AIDevStatusService {
         $job->completed_at = date('Y-m-d H:i:s');
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'error', 'Job failed', ['error' => $error]);
     }
@@ -330,7 +338,7 @@ class AIDevStatusService {
         $job->completed_at = date('Y-m-d H:i:s');
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'info', 'Job cancelled', ['reason' => $reason]);
     }
@@ -351,7 +359,7 @@ class AIDevStatusService {
      * Get all jobs for a member
      */
     public static function getAllJobs(int $memberId, int $limit = 50): array {
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'member_id = ? ORDER BY updated_at DESC LIMIT ?',
             [$memberId, $limit]
         );
@@ -368,7 +376,7 @@ class AIDevStatusService {
      * Get active jobs for a member
      */
     public static function getActiveJobs(int $memberId): array {
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'member_id = ? AND status IN (?, ?, ?) ORDER BY updated_at DESC',
             [
                 $memberId,
@@ -390,7 +398,7 @@ class AIDevStatusService {
      * Get count of running jobs for a member
      */
     public static function getRunningJobsCount(int $memberId): int {
-        return (int) R::count('aidevjobs',
+        return (int) Bean::count('aidevjobs',
             'member_id = ? AND status = ?',
             [$memberId, self::STATUS_RUNNING]
         );
@@ -400,7 +408,7 @@ class AIDevStatusService {
      * Get jobs waiting for clarification
      */
     public static function getJobsWaitingClarification(int $memberId): array {
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'member_id = ? AND status = ? ORDER BY updated_at DESC',
             [$memberId, self::STATUS_WAITING_CLARIFICATION]
         );
@@ -417,7 +425,7 @@ class AIDevStatusService {
      * Find a job by issue key (for webhook handling - returns active jobs only)
      */
     public static function findJobByIssueKey(int $memberId, string $issueKey): ?array {
-        $job = R::findOne('aidevjobs',
+        $job = Bean::findOne('aidevjobs',
             'member_id = ? AND issue_key = ? AND status IN (?, ?, ?) ORDER BY updated_at DESC',
             [
                 $memberId,
@@ -440,7 +448,7 @@ class AIDevStatusService {
      * Used for branch affinity - reuse existing branches instead of creating new ones
      */
     public static function findBranchForIssueKey(int $memberId, string $issueKey): ?string {
-        $job = R::findOne('aidevjobs',
+        $job = Bean::findOne('aidevjobs',
             'member_id = ? AND issue_key = ? AND branch_name IS NOT NULL AND branch_name != "" ORDER BY updated_at DESC',
             [$memberId, $issueKey]
         );
@@ -452,7 +460,7 @@ class AIDevStatusService {
      * Find all jobs for an issue key (including completed/PR states for cleanup)
      */
     public static function findAllJobsByIssueKey(int $memberId, string $issueKey): array {
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'member_id = ? AND issue_key = ? ORDER BY updated_at DESC',
             [$memberId, $issueKey]
         );
@@ -490,7 +498,7 @@ class AIDevStatusService {
         }
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
 
         self::log($jobId, $memberId, 'info', 'Shopify preview ready', [
             'theme_id' => $shopifyThemeId,
@@ -516,14 +524,14 @@ class AIDevStatusService {
         $job->shopify_preview_url = $previewUrl;
         $job->updated_at = date('Y-m-d H:i:s');
 
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
      * Get Shopify theme ID for an issue (reuse across job runs)
      */
     public static function getShopifyThemeForIssue(int $memberId, string $issueKey): ?int {
-        $job = R::findOne('aidevjobs',
+        $job = Bean::findOne('aidevjobs',
             'member_id = ? AND issue_key = ? AND shopify_theme_id IS NOT NULL ORDER BY updated_at DESC',
             [$memberId, $issueKey]
         );
@@ -549,14 +557,14 @@ class AIDevStatusService {
         $job = self::findByJobId($memberId, $jobId);
         $issueKey = $job ? $job->issue_key : $jobId;
 
-        $log = R::dispense('aidevjoblogs');
+        $log = Bean::dispense('aidevjoblogs');
         $log->issue_key = $issueKey;
         $log->log_level = $level;
         $log->message = $message;
         $log->context_json = !empty($context) ? json_encode($context) : null;
         $log->created_at = date('Y-m-d H:i:s');
 
-        R::store($log);
+        Bean::store($log);
     }
 
     /**
@@ -569,7 +577,7 @@ class AIDevStatusService {
             return [];
         }
 
-        $logs = R::find('aidevjoblogs',
+        $logs = Bean::find('aidevjoblogs',
             'issue_key = ? ORDER BY created_at ASC',
             [$job->issue_key]
         );
@@ -598,7 +606,7 @@ class AIDevStatusService {
         $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
 
         // Get jobs to delete
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'member_id = ? AND status IN (?, ?, ?) AND updated_at < ?',
             [
                 $memberId,
@@ -613,7 +621,7 @@ class AIDevStatusService {
         foreach ($jobs as $job) {
             // Delete associated logs
             R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
-            R::trash($job);
+            Bean::trash($job);
             $count++;
         }
 
@@ -627,7 +635,7 @@ class AIDevStatusService {
         $cutoff = date('Y-m-d H:i:s', strtotime("-{$daysOld} days"));
 
         // Get all old completed/failed/cancelled jobs
-        $jobs = R::find('aidevjobs',
+        $jobs = Bean::find('aidevjobs',
             'status IN (?, ?, ?) AND updated_at < ?',
             [
                 self::STATUS_COMPLETE,
@@ -641,7 +649,7 @@ class AIDevStatusService {
         foreach ($jobs as $job) {
             // Delete associated logs
             R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
-            R::trash($job);
+            Bean::trash($job);
             $count++;
         }
 

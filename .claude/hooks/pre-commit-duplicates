@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# Pre-commit hook for duplicate code detection
+# Install: cp scripts/pre-commit-duplicates .git/hooks/pre-commit
+# Or add to existing pre-commit: source scripts/pre-commit-duplicates
+#
+# Configuration via environment:
+#   SKIP_DUPLICATE_CHECK=1   Skip duplicate checking
+#   DUPLICATE_QUICK=1        Use quick mode (default)
+#   DUPLICATE_VERBOSE=1      Show verbose output
+#
+
+# Colors
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+# Skip if requested
+if [ "$SKIP_DUPLICATE_CHECK" = "1" ]; then
+    echo -e "${YELLOW}Skipping duplicate code check (SKIP_DUPLICATE_CHECK=1)${NC}"
+    exit 0
+fi
+
+# Get the repo root
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$REPO_ROOT" ]; then
+    echo -e "${RED}Error: Not a git repository${NC}"
+    exit 1
+fi
+
+cd "$REPO_ROOT"
+
+# Check if the scanner exists
+if [ ! -f "scripts/check-duplicates.php" ]; then
+    echo -e "${YELLOW}Warning: Duplicate scanner not found, skipping check${NC}"
+    exit 0
+fi
+
+# Build options
+OPTIONS="--quick"
+if [ "$DUPLICATE_VERBOSE" = "1" ]; then
+    OPTIONS="$OPTIONS --verbose"
+fi
+
+echo -e "${YELLOW}Running duplicate code check...${NC}"
+
+# Run the scanner and capture output
+OUTPUT=$(php scripts/check-duplicates.php $OPTIONS 2>&1)
+EXIT_CODE=$?
+
+# Check for critical violations
+if echo "$OUTPUT" | grep -q "\[CRITICAL\]"; then
+    CRITICAL_COUNT=$(echo "$OUTPUT" | grep -c "\[CRITICAL\]")
+    echo -e "${RED}================================${NC}"
+    echo -e "${RED}COMMIT BLOCKED: Critical code patterns detected!${NC}"
+    echo -e "${RED}================================${NC}"
+    echo ""
+    # Show only critical issues
+    echo "$OUTPUT" | grep -A 10 "\[CRITICAL\]"
+    echo ""
+    echo -e "${RED}Please fix these critical issues before committing.${NC}"
+    echo -e "Run: ${YELLOW}php scripts/check-duplicates.php --verbose${NC} for details."
+    echo -e "To skip this check: ${YELLOW}SKIP_DUPLICATE_CHECK=1 git commit${NC}"
+    exit 1
+fi
+
+# Warn about high severity issues but don't block
+if echo "$OUTPUT" | grep -q "\[HIGH\]"; then
+    HIGH_COUNT=$(echo "$OUTPUT" | grep -c "\[HIGH\]")
+    echo -e "${YELLOW}================================${NC}"
+    echo -e "${YELLOW}Warning: High severity patterns detected${NC}"
+    echo -e "${YELLOW}================================${NC}"
+    echo ""
+    # Show only high issues
+    echo "$OUTPUT" | grep -A 5 "\[HIGH\]" | head -30
+    echo ""
+    echo -e "${YELLOW}Consider fixing these issues. Commit will proceed.${NC}"
+fi
+
+echo -e "${GREEN}Duplicate check passed!${NC}"
+exit 0

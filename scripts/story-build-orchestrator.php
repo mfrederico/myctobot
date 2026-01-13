@@ -219,21 +219,38 @@ class StoryBuildOrchestrator {
     }
 
     /**
-     * Get backlog stories ready for processing
+     * Get approved stories ready for processing
+     * Includes stories with no job or failed jobs (for retry)
+     * Excludes stories with running/pending jobs
      */
     private function getBacklogStories(int $limit): array {
-        return Bean::find(
-            'ctostories',
-            ' status = ? ORDER BY sequence ASC, id ASC LIMIT ? ',
-            ['backlog', $limit]
+        // Get approved stories that either:
+        // 1. Have no job record at all
+        // 2. Have a failed/cancelled job (retry eligible)
+        // Exclude stories with running/pending jobs
+        $sql = "SELECT s.* FROM ctostories s
+                LEFT JOIN aidevjobs j ON j.issue_key = s.jira_issue_key
+                WHERE s.status = 'approved'
+                AND (j.id IS NULL OR j.status IN ('failed', 'cancelled'))
+                GROUP BY s.id
+                ORDER BY s.sequence ASC, s.id ASC
+                LIMIT ?";
+
+        return Bean::convertToBeans('ctostories',
+            Bean::getAll($sql, [$limit])
         );
     }
 
     /**
-     * Get count of stories still in queue
+     * Get count of stories still in queue (approved without running job)
      */
     private function getQueueCount(): int {
-        return Bean::count('ctostories', 'status = ?', ['backlog']);
+        $sql = "SELECT COUNT(DISTINCT s.id) as cnt FROM ctostories s
+                LEFT JOIN aidevjobs j ON j.issue_key = s.jira_issue_key
+                WHERE s.status = 'approved'
+                AND (j.id IS NULL OR j.status IN ('failed', 'cancelled'))";
+        $result = Bean::getRow($sql);
+        return (int)($result['cnt'] ?? 0);
     }
 
     /**

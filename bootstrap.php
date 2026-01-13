@@ -9,6 +9,9 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Monolog\Logger;
+
+require_once __DIR__ . '/lib/Bean.php';
+use \app\Bean;
 use \Monolog\Handler\StreamHandler;
 use \Monolog\Handler\RotatingFileHandler;
 use \Monolog\Formatter\LineFormatter;
@@ -150,9 +153,9 @@ class Bootstrap {
             $type = $dbConfig['type'] ?? 'mysql';
 
             // Check if default database already exists (prevents error on Bootstrap re-init)
-            if (R::hasDatabase('default')) {
+            if (Bean::hasDatabase('default')) {
                 // Already initialized, just select it
-                R::selectDatabase('default');
+                Bean::selectDatabase('default');
             } elseif ($type === 'sqlite') {
                 // SQLite configuration
                 $dbPath = $dbConfig['path'] ?? 'database/tiknix.db';
@@ -305,24 +308,20 @@ class Bootstrap {
             $dbConfig = $tenantConfig['database'];
             $type = $dbConfig['type'] ?? 'mysql';
 
-            // Only add database if not already registered (prevents error on re-init)
-            if (!R::hasDatabase($tenantSlug)) {
-                if ($type === 'sqlite') {
-                    $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
-                    $dsn = "sqlite:{$dbPath}";
-                    R::addDatabase($tenantSlug, $dsn);
-                } else {
-                    $host = $dbConfig['host'] ?? 'localhost';
-                    $port = $dbConfig['port'] ?? 3306;
-                    $name = $dbConfig['name'] ?? $tenantSlug;
-                    $user = $dbConfig['user'] ?? 'root';
-                    $pass = $dbConfig['pass'] ?? '';
-                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    R::addDatabase($tenantSlug, $dsn, $user, $pass);
-                }
+            // Add (if not already registered) and select tenant database
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                Bean::useDatabase($tenantSlug, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $tenantSlug;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                Bean::useDatabase($tenantSlug, $dsn, $user, $pass);
             }
-
-            R::selectDatabase($tenantSlug);
             Flight::set('tenant.slug', $tenantSlug);
             Flight::set('tenant.active', true);
             $this->logger->info("Switched to tenant database: {$tenantSlug}");

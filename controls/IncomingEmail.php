@@ -122,16 +122,22 @@ class IncomingEmail extends BaseControls\Control {
         }
 
         if (!$member) {
-            $this->logger->warning('Unknown sender for directive email', [
+            $this->logger->warning('Rejected email from non-workspace member', [
                 'sender' => $sender,
                 'from' => $from,
                 'tenant' => $tenant
             ]);
-            // Still accept the email but log it - could be authorized in future
-            // For now, we'll create the directive with member_id = 0
+            // Return 200 so Mailgun stops retrying, but don't process the email
+            Flight::response()->status(200);
+            echo json_encode([
+                'success' => false,
+                'rejected' => true,
+                'message' => "Email from '{$sender}' rejected. Only workspace members can send directives to this address."
+            ]);
+            return;
         }
 
-        $memberId = $member ? $member->id : 0;
+        $memberId = $member->id;
 
         // Parse approval mode from subject
         // [AUTO] = auto-execute, [REVIEW] = require approval
@@ -300,7 +306,7 @@ class IncomingEmail extends BaseControls\Control {
             if ($type === 'sqlite') {
                 $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
                 $dsn = "sqlite:{$dbPath}";
-                R::addDatabase($tenant, $dsn);
+                Bean::useDatabase($tenant, $dsn);
             } else {
                 $host = $dbConfig['host'] ?? 'localhost';
                 $port = $dbConfig['port'] ?? 3306;
@@ -308,10 +314,8 @@ class IncomingEmail extends BaseControls\Control {
                 $user = $dbConfig['user'] ?? 'root';
                 $pass = $dbConfig['pass'] ?? '';
                 $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                R::addDatabase($tenant, $dsn, $user, $pass);
+                Bean::useDatabase($tenant, $dsn, $user, $pass);
             }
-
-            R::selectDatabase($tenant);
             Flight::set('tenant.slug', $tenant);
             Flight::set('tenant.active', true);
             return true;

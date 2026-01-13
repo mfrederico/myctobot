@@ -962,6 +962,26 @@ HTML;
                 )
             ");
 
+            // Plugin Registry: Repository sources for plugin discovery
+            $userDb->exec("
+                CREATE TABLE IF NOT EXISTS pluginrepositorysource (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    member_id INTEGER,
+                    provider TEXT NOT NULL,
+                    repository_url TEXT NOT NULL,
+                    source_type TEXT DEFAULT 'repository',
+                    access_token TEXT,
+                    validation_status TEXT DEFAULT 'pending',
+                    validation_error TEXT,
+                    last_validated_at TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    description TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT,
+                    UNIQUE(provider, repository_url, member_id)
+                )
+            ");
+
             // Enterprise indexes
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_provider ON repoconnections(provider)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_enabled ON repoconnections(enabled)");
@@ -970,6 +990,11 @@ HTML;
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON aidevjoblogs(job_id)");
+
+            // Plugin Registry indexes
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_provider ON pluginrepositorysource(provider)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_active ON pluginrepositorysource(is_active)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_status ON pluginrepositorysource(validation_status)");
 
             $userDb->close();
 

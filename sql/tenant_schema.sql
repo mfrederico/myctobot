@@ -676,4 +676,78 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('webhook', 'mailgun', 101, 'Mailgun incoming email webhook')
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
 
+-- ============================================================================
+-- PLUGIN DISCOVERY TABLES
+-- ============================================================================
+
+-- Discovered plugins from repository scans
+CREATE TABLE IF NOT EXISTS `discoveredplugins` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `plugin_id` VARCHAR(64) NOT NULL UNIQUE,
+    `repo_connection_id` INT NOT NULL,
+    `repo_owner` VARCHAR(100) NOT NULL,
+    `repo_name` VARCHAR(100) NOT NULL,
+
+    -- Plugin metadata from plugin.json
+    `plugin_name` VARCHAR(255),
+    `plugin_description` TEXT,
+    `plugin_version` VARCHAR(50),
+    `plugin_author` VARCHAR(255),
+    `plugin_main` VARCHAR(500),
+    `plugin_requires` JSON,
+    `plugin_json` JSON,
+
+    -- Status tracking
+    `status` ENUM('discovered', 'validated', 'invalid', 'installed') DEFAULT 'discovered',
+    `validation_error` TEXT,
+
+    -- Timestamps
+    `discovered_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `last_scanned_at` DATETIME,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_repo_connection` (`repo_connection_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_plugin_id` (`plugin_id`),
+    FOREIGN KEY (`repo_connection_id`) REFERENCES `repoconnections`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Plugin scan history
+CREATE TABLE IF NOT EXISTS `pluginscans` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `scan_id` VARCHAR(64) NOT NULL UNIQUE,
+    `repo_connection_id` INT DEFAULT NULL,
+
+    -- Scan status
+    `status` ENUM('running', 'completed', 'failed') DEFAULT 'running',
+
+    -- Statistics
+    `repos_scanned` INT DEFAULT 0,
+    `plugins_found` INT DEFAULT 0,
+    `errors_encountered` INT DEFAULT 0,
+
+    -- Timestamps
+    `started_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` DATETIME,
+
+    -- Error tracking
+    `error_message` TEXT,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX `idx_status` (`status`),
+    INDEX `idx_scan_id` (`scan_id`),
+    INDEX `idx_repo_connection` (`repo_connection_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add authcontrol entries for PluginRegistry controller
+INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
+('pluginregistry', 'index', 100, 'List discovered plugins'),
+('pluginregistry', 'scan', 100, 'Trigger plugin scan'),
+('pluginregistry', 'scanRepo', 100, 'Scan single repository'),
+('pluginregistry', 'scans', 100, 'View scan history'),
+('pluginregistry', 'view', 100, 'View plugin details')
+ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
+
 SET FOREIGN_KEY_CHECKS = 1;

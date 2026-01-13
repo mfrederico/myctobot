@@ -1868,7 +1868,9 @@ document.addEventListener('DOMContentLoaded', function() {
 <?php
 // PM Chatbox - floating assistant for project questions
 // Note: $ragServiceUrl is auto-detected in the partial based on HTTP_HOST
+// $knowledgeBases is passed from controller for KB context dropdown
 $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
 $projectId = null;
+// $knowledgeBases comes from controller
 include __DIR__ . '/../partials/pmchatbox.php';
 ?>

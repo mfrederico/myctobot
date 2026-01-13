@@ -133,6 +133,22 @@ class Reviewboard extends BaseControls\Control {
         $totalDone = Bean::count('ctostories', 'status = ?', ['done']);
         $totalBlocked = Bean::count('ctostories', 'status = ?', ['blocked']);
 
+        // Get knowledge bases for PM chatbox context
+        $knowledgeBases = [];
+        try {
+            $kbs = Bean::find('knowledgebases', ' 1 ORDER BY name ASC ');
+            foreach ($kbs as $kb) {
+                $knowledgeBases[] = [
+                    'id' => $kb->id,
+                    'name' => $kb->name,
+                    'slug' => $kb->slug,
+                ];
+            }
+        } catch (\Exception $e) {
+            // KB table may not exist yet
+            $this->logger->debug('Could not load KBs for PM chat: ' . $e->getMessage());
+        }
+
         $this->render('reviewboard/index', [
             'projects' => $projectData,
             'totalPending' => $totalPending,
@@ -140,6 +156,7 @@ class Reviewboard extends BaseControls\Control {
             'totalInProgress' => $totalInProgress,
             'totalDone' => $totalDone,
             'totalBlocked' => $totalBlocked,
+            'knowledgeBases' => $knowledgeBases,
         ]);
     }
 

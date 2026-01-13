@@ -9,6 +9,7 @@
  *   $ragServiceUrl - WebSocket URL for RAG service (e.g., 'ws://localhost:9501')
  *   $tenantSlug - Current tenant slug from session
  *   $projectId - (optional) Current project ID for context filtering
+ *   $knowledgeBases - (optional) Array of KBs for context selection
  */
 
 // Auto-detect WebSocket URL based on current request
@@ -29,6 +30,7 @@ if ($isLocalhost) {
 
 $tenantSlug = $tenantSlug ?? ($_SESSION['tenant_slug'] ?? 'default');
 $projectId = $projectId ?? null;
+$knowledgeBases = $knowledgeBases ?? [];
 ?>
 
 <!-- PM Chat Toggle Button -->
@@ -41,18 +43,30 @@ $projectId = $projectId ?? null;
 <!-- PM Chat Panel -->
 <div id="pm-chat-panel" class="card shadow-lg"
      style="position: fixed; bottom: 90px; right: 20px; width: 420px; max-height: 600px; z-index: 1049; display: none;">
-    <div class="card-header bg-warning d-flex justify-content-between align-items-center py-2">
-        <span class="fw-semibold">
-            <i class="bi bi-robot me-2"></i>PM Assistant
-        </span>
-        <div>
-            <button class="btn btn-sm btn-link text-dark p-0 me-2" id="pm-chat-clear" title="Clear chat">
-                <i class="bi bi-trash"></i>
-            </button>
-            <button class="btn btn-sm btn-link text-dark p-0" id="pm-chat-close" title="Minimize">
-                <i class="bi bi-dash-lg"></i>
-            </button>
+    <div class="card-header bg-warning py-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+                <i class="bi bi-robot me-2"></i>PM Assistant
+            </span>
+            <div>
+                <button class="btn btn-sm btn-link text-dark p-0 me-2" id="pm-chat-clear" title="Clear chat">
+                    <i class="bi bi-trash"></i>
+                </button>
+                <button class="btn btn-sm btn-link text-dark p-0" id="pm-chat-close" title="Minimize">
+                    <i class="bi bi-dash-lg"></i>
+                </button>
+            </div>
         </div>
+        <?php if (!empty($knowledgeBases)): ?>
+        <div class="mt-2">
+            <select id="pm-chat-kb" class="form-select form-select-sm" title="Knowledge Base context">
+                <option value="">No KB context</option>
+                <?php foreach ($knowledgeBases as $kb): ?>
+                <option value="<?= htmlspecialchars($kb['slug']) ?>"><?= htmlspecialchars($kb['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="card-body p-0 d-flex flex-column" style="height: 450px;">
@@ -169,7 +183,8 @@ $projectId = $projectId ?? null;
         tenant: <?= json_encode($tenantSlug) ?>,
         projectId: <?= json_encode($projectId) ?>,
         ragServiceUrl: <?= json_encode($ragServiceUrl) ?>,
-        reconnectDelay: 3000
+        reconnectDelay: 3000,
+        hasKnowledgeBases: <?= json_encode(!empty($knowledgeBases)) ?>
     };
 
     // State
@@ -187,7 +202,8 @@ $projectId = $projectId ?? null;
         send: document.getElementById('pm-chat-send'),
         close: document.getElementById('pm-chat-close'),
         clear: document.getElementById('pm-chat-clear'),
-        status: document.getElementById('pm-chat-status')
+        status: document.getElementById('pm-chat-status'),
+        kbSelect: document.getElementById('pm-chat-kb')
     };
 
     // Initialize event listeners
@@ -280,10 +296,14 @@ $projectId = $projectId ?? null;
         elements.input.value = '';
         elements.send.disabled = true;
 
+        // Include KB context if selected
+        const kbSlug = elements.kbSelect ? elements.kbSelect.value : null;
+
         ws.send(JSON.stringify({
             type: 'pm_chat',
             message: message,
-            project_id: PM_CONFIG.projectId
+            project_id: PM_CONFIG.projectId,
+            kb_slug: kbSlug || null
         }));
     }
 

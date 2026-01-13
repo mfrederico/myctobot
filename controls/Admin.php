@@ -175,78 +175,93 @@ class Admin extends Control {
     }
 
     /**
-     * Add new member
+     * Add new member (via email invitation)
      */
     public function addMember($params = []) {
+        require_once __DIR__ . '/../services/InviteService.php';
+
         $request = Flight::request();
-        
+
         if ($request->method === 'POST') {
             // Validate CSRF
             if (!Flight::csrf()->validateRequest()) {
                 $this->viewData['error'] = 'Invalid CSRF token';
             } else {
                 // Validate input
-                $username = trim($request->data->username ?? '');
+                $displayName = trim($request->data->display_name ?? '');
                 $email = trim($request->data->email ?? '');
-                $password = $request->data->password ?? '';
                 $level = intval($request->data->level ?? 100);
-                $status = $request->data->status ?? 'active';
-                
-                if (empty($username)) {
-                    $this->viewData['error'] = 'Username is required';
-                } elseif (empty($email)) {
+
+                if (empty($email)) {
                     $this->viewData['error'] = 'Email is required';
-                } elseif (empty($password)) {
-                    $this->viewData['error'] = 'Password is required';
                 } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     $this->viewData['error'] = 'Invalid email format';
-                } elseif (strlen($username) < 3) {
-                    $this->viewData['error'] = 'Username must be at least 3 characters long';
-                } elseif (strlen($password) < 8) {
-                    $this->viewData['error'] = 'Password must be at least 8 characters long';
                 } else {
-                    // Check for duplicate username/email
-                    $existingUsername = R::findOne('member', 'username = ?', [$username]);
-                    $existingEmail = R::findOne('member', 'email = ?', [$email]);
-                    
-                    if ($existingUsername) {
-                        $this->viewData['error'] = 'Username already exists';
-                    } elseif ($existingEmail) {
-                        $this->viewData['error'] = 'Email already exists';
-                    } else {
-                        // Create new member
-                        $member = R::dispense('member');
-                        $member->username = $username;
-                        $member->email = $email;
-                        $member->password = password_hash($password, PASSWORD_DEFAULT);
-                        $member->level = $level;
-                        $member->status = $status;
-                        $member->created_at = date('Y-m-d H:i:s');
-                        $member->updated_at = date('Y-m-d H:i:s');
-                        
-                        try {
-                            R::store($member);
-                            $this->logger->info('New member created by admin', [
-                                'member_id' => $member->id,
-                                'username' => $username,
-                                'created_by' => $this->member->id
-                            ]);
-                            Flight::redirect('/admin/members');
-                            return;
-                        } catch (Exception $e) {
-                            $this->logger->error('Failed to create member', [
-                                'username' => $username,
-                                'error' => $e->getMessage()
-                            ]);
-                            $this->viewData['error'] = 'Error creating member: ' . $e->getMessage();
+                    // Use InviteService to create and send invitation
+                    $inviteService = new \app\services\InviteService();
+                    $result = $inviteService->createInvite(
+                        $email,
+                        $level,
+                        $this->member->id,
+                        $displayName ?: null
+                    );
+
+                    if ($result['success']) {
+                        $this->logger->info('Member invited by admin', [
+                            'member_id' => $result['member']->id,
+                            'email' => $email,
+                            'level' => $level,
+                            'invited_by' => $this->member->id,
+                            'email_sent' => $result['email_sent']
+                        ]);
+
+                        if ($result['email_sent']) {
+                            $this->flash('success', "Invitation sent to {$email}");
+                        } else {
+                            $this->flash('warning', "Member created but email could not be sent: " . ($result['email_error'] ?? 'Unknown error'));
                         }
+
+                        Flight::redirect('/admin/members');
+                        return;
+                    } else {
+                        $this->viewData['error'] = $result['error'];
                     }
                 }
             }
         }
-        
-        $this->viewData['title'] = 'Add New Member';
+
+        $this->viewData['title'] = 'Invite New Member';
         $this->render('admin/add_member', $this->viewData);
+    }
+
+    /**
+     * Resend invitation to a pending member
+     */
+    public function resendInvite($params = []) {
+        require_once __DIR__ . '/../services/InviteService.php';
+
+        $memberId = Flight::request()->query->id ?? null;
+
+        if (!$memberId) {
+            $this->flash('error', 'Member ID required');
+            Flight::redirect('/admin/members');
+            return;
+        }
+
+        $inviteService = new \app\services\InviteService();
+        $result = $inviteService->resendInvite((int)$memberId, $this->member->id);
+
+        if ($result['success']) {
+            if ($result['email_sent']) {
+                $this->flash('success', 'Invitation resent successfully');
+            } else {
+                $this->flash('warning', 'Invitation updated but email could not be sent: ' . ($result['email_error'] ?? 'Unknown error'));
+            }
+        } else {
+            $this->flash('error', $result['error']);
+        }
+
+        Flight::redirect('/admin/members');
     }
 
     /**

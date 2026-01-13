@@ -1148,4 +1148,171 @@ class JiraClient {
             ]
         ];
     }
+
+    /**
+     * Get development info for an issue (branches, commits, PRs)
+     * Requires read:source-code:jira scope
+     *
+     * @param string $issueKey Issue key (e.g., SSI-1913)
+     * @return array Development info with branches, commits, pullRequests
+     */
+    public function getDevInfo(string $issueKey): array {
+        // First get the issue ID
+        $issue = $this->getIssue($issueKey);
+        $issueId = $issue['id'] ?? null;
+
+        if (!$issueId) {
+            throw new \Exception("Could not get issue ID for {$issueKey}");
+        }
+
+        $result = [
+            'branches' => [],
+            'commits' => [],
+            'pullRequests' => []
+        ];
+
+        // Dev-status API uses a different base path than the standard REST API
+        // baseUrl = https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3
+        // devStatusBase = https://api.atlassian.com/ex/jira/{cloudId}/rest/dev-status/latest
+        $devStatusBase = str_replace('/rest/api/3', '/rest/dev-status/latest', $this->baseUrl);
+
+        // Try multiple application types (GitHub, stash/Bitbucket Server, bitbucket Cloud)
+        $appTypes = ['GitHub', 'stash', 'bitbucket'];
+        $logger = Flight::get('log');
+
+        foreach ($appTypes as $appType) {
+            // Get branches
+            try {
+                $branchUrl = "{$devStatusBase}/issue/detail?issueId={$issueId}&applicationType={$appType}&dataType=branch";
+                $logger->debug("Fetching dev branches", ['url' => $branchUrl, 'appType' => $appType]);
+                $response = $this->client->get($branchUrl);
+                $data = json_decode($response->getBody()->getContents(), true);
+                $logger->debug("Dev branch response", ['appType' => $appType, 'data' => $data]);
+
+                foreach ($data['detail'] ?? [] as $detail) {
+                    foreach ($detail['branches'] ?? [] as $branch) {
+                        $result['branches'][] = [
+                            'name' => $branch['name'] ?? '',
+                            'url' => $branch['url'] ?? '',
+                            'repository' => $detail['repository']['name'] ?? '',
+                            'applicationType' => $appType
+                        ];
+                    }
+                }
+            } catch (\Exception $e) {
+                $logger->debug("Dev branch fetch failed", ['appType' => $appType, 'error' => $e->getMessage()]);
+            }
+
+            // Get pull requests
+            try {
+                $prUrl = "{$devStatusBase}/issue/detail?issueId={$issueId}&applicationType={$appType}&dataType=pullrequest";
+                $logger->debug("Fetching dev PRs", ['url' => $prUrl, 'appType' => $appType]);
+                $response = $this->client->get($prUrl);
+                $data = json_decode($response->getBody()->getContents(), true);
+                $logger->debug("Dev PR response", ['appType' => $appType, 'data' => $data]);
+
+                foreach ($data['detail'] ?? [] as $detail) {
+                    foreach ($detail['pullRequests'] ?? [] as $pr) {
+                        $result['pullRequests'][] = [
+                            'id' => $pr['id'] ?? '',
+                            'name' => $pr['name'] ?? '',
+                            'url' => $pr['url'] ?? '',
+                            'status' => $pr['status'] ?? '',
+                            'source' => $pr['source']['branch'] ?? '',
+                            'destination' => $pr['destination']['branch'] ?? '',
+                            'applicationType' => $appType
+                        ];
+                    }
+                }
+            } catch (\Exception $e) {
+                $logger->debug("Dev PR fetch failed", ['appType' => $appType, 'error' => $e->getMessage()]);
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Get the most recent branch for an issue from development info
+     *
+     * @param string $issueKey Issue key
+     * @return string|null Branch name or null if not found
+     */
+    public function getBranchForIssue(string $issueKey): ?string {
+        // Try dev-status API first
+        try {
+            $devInfo = $this->getDevInfo($issueKey);
+
+            // Return the first (most recent) branch
+            if (!empty($devInfo['branches'])) {
+                return $devInfo['branches'][0]['name'];
+            }
+
+            // Fall back to source branch from PR if no direct branch
+            if (!empty($devInfo['pullRequests'])) {
+                return $devInfo['pullRequests'][0]['source'];
+            }
+        } catch (\Exception $e) {
+            // Dev-status API not available, will try comments below
+        }
+
+        // Fall back to parsing comments for branch info (AI Developer posts branches there)
+        try {
+            $branch = $this->getBranchFromComments($issueKey);
+            if ($branch) {
+                return $branch;
+            }
+        } catch (\Exception $e) {
+            // Ignore errors
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract branch name from issue comments
+     * AI Developer posts branch info in comments like "Branch: feature/SSI-123-description"
+     *
+     * @param string $issueKey Issue key
+     * @return string|null Branch name or null if not found
+     */
+    public function getBranchFromComments(string $issueKey): ?string {
+        $comments = $this->getComments($issueKey);
+
+        // Search comments in reverse order (most recent first)
+        $commentList = array_reverse($comments);
+
+        foreach ($commentList as $comment) {
+            $body = $this->extractCommentText($comment);
+
+            // Look for "Branch: xxx" pattern
+            if (preg_match('/Branch:\s*([^\s\n]+)/i', $body, $matches)) {
+                return trim($matches[1]);
+            }
+
+            // Look for branch names in PR URLs like github.com/org/repo/tree/branch-name
+            if (preg_match('/github\.com\/[^\/]+\/[^\/]+\/tree\/([^\s\n\)]+)/i', $body, $matches)) {
+                return trim($matches[1]);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Extract plain text from a comment body (handles Atlassian Document Format)
+     *
+     * @param array $comment Comment data
+     * @return string Plain text content
+     */
+    private function extractCommentText(array $comment): string {
+        $body = $comment['body'] ?? [];
+
+        if (is_string($body)) {
+            return $body;
+        }
+
+        // Use existing static ADF extractor
+        return self::extractTextFromAdf($body);
+    }
 }

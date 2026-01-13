@@ -1,7 +1,10 @@
 <?php
 /**
  * Stripe Controller
- * Handles Stripe checkout and webhooks
+ * Handles Stripe checkout and webhooks for WORKSPACE-level subscriptions
+ *
+ * Subscriptions are per-workspace, not per-member.
+ * Any logged-in admin can manage billing for the workspace.
  */
 
 namespace app;
@@ -15,6 +18,7 @@ class Stripe extends BaseControls\Control {
 
     /**
      * Create checkout session and redirect to Stripe
+     * Uses logged-in user's email as billing contact
      */
     public function checkout() {
         if (!$this->requireLogin()) return;
@@ -36,7 +40,9 @@ class Stripe extends BaseControls\Control {
         }
 
         try {
-            $session = StripeService::createCheckoutSession($this->member->id, $priceId);
+            // Use logged-in user's email as billing contact for the workspace
+            $billingEmail = $this->member->email;
+            $session = StripeService::createCheckoutSession($billingEmail, $priceId);
 
             // Redirect to Stripe Checkout
             Flight::redirect($session->url);
@@ -49,7 +55,7 @@ class Stripe extends BaseControls\Control {
     }
 
     /**
-     * Create portal session for managing subscription
+     * Create portal session for managing workspace subscription
      */
     public function portal() {
         if (!$this->requireLogin()) return;
@@ -62,7 +68,7 @@ class Stripe extends BaseControls\Control {
 
         try {
             $returnUrl = Flight::get('config')['app']['baseurl'] . '/settings/subscription';
-            $session = StripeService::createPortalSession($this->member->id, $returnUrl);
+            $session = StripeService::createPortalSession($returnUrl);
 
             // Redirect to Stripe Customer Portal
             Flight::redirect($session->url);
@@ -117,7 +123,7 @@ class Stripe extends BaseControls\Control {
     }
 
     /**
-     * Cancel subscription (AJAX)
+     * Cancel workspace subscription (AJAX)
      */
     public function cancel() {
         if (!$this->requireLogin()) return;
@@ -128,7 +134,7 @@ class Stripe extends BaseControls\Control {
         }
 
         try {
-            $success = StripeService::cancelSubscription($this->member->id);
+            $success = StripeService::cancelSubscription();
 
             if ($success) {
                 $this->jsonSuccess([], 'Subscription will be canceled at the end of the billing period');
@@ -143,7 +149,7 @@ class Stripe extends BaseControls\Control {
     }
 
     /**
-     * Reactivate canceled subscription (AJAX)
+     * Reactivate canceled workspace subscription (AJAX)
      */
     public function reactivate() {
         if (!$this->requireLogin()) return;
@@ -154,7 +160,7 @@ class Stripe extends BaseControls\Control {
         }
 
         try {
-            $success = StripeService::reactivateSubscription($this->member->id);
+            $success = StripeService::reactivateSubscription();
 
             if ($success) {
                 $this->jsonSuccess([], 'Subscription reactivated');

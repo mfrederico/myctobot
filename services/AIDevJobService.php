@@ -64,9 +64,9 @@ class AIDevJobService {
                 $boardId = $board->id;
             }
 
-            // Auto-detect repo ID if not provided
+            // Auto-detect repo ID if not provided (workspace-level - shared by all members)
             if (!$repoId) {
-                $repo = R::findOne('repoconnections', 'enabled = ? AND member_id = ?', [1, $memberId]);
+                $repo = R::findOne('repoconnections', 'enabled = ?', [1]);
                 if (!$repo) {
                     return ['success' => false, 'error' => 'No enabled repository connections'];
                 }
@@ -112,13 +112,31 @@ class AIDevJobService {
                 return ['success' => false, 'error' => 'Session exists for this issue (no status file)'];
             }
 
-            // Branch affinity: find existing branch from ANY previous job (including completed ones)
-            // This ensures we reuse branches instead of creating duplicates
+            // Branch affinity: find existing branch from multiple sources
+            // 1. First check our database for branches from previous jobs
+            // 2. If not found, check Jira's development panel for linked branches
             $existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
+            $branchSource = 'database';
+
+            if (!$existingBranch) {
+                // Try to get branch from Jira's development info
+                try {
+                    $jiraClient = new JiraClient($memberId, $cloudId);
+                    $existingBranch = $jiraClient->getBranchForIssue($issueKey);
+                    $branchSource = 'jira_dev_panel';
+                } catch (\Exception $e) {
+                    Flight::get('log')->debug('Could not get branch from Jira dev panel', [
+                        'issue_key' => $issueKey,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
             if ($existingBranch) {
                 Flight::get('log')->info('Branch affinity: reusing existing branch', [
                     'issue_key' => $issueKey,
-                    'branch' => $existingBranch
+                    'branch' => $existingBranch,
+                    'source' => $branchSource
                 ]);
             }
 
@@ -137,11 +155,19 @@ class AIDevJobService {
             }
 
             if ($useLocalRunner) {
+                // Check concurrency limits for local runner
+                $concurrencyCheck = $this->checkConcurrency($memberId);
+                if (!$concurrencyCheck['available']) {
+                    return ['success' => false, 'error' => $concurrencyCheck['error']];
+                }
+
                 $this->logger->info('Using local runner for AI Developer job', [
                     'member_id' => $memberId,
                     'issue_key' => $issueKey,
                     'board_key_id' => $boardKeyId,
-                    'source' => 'local_runner'
+                    'source' => 'local_runner',
+                    'running_jobs' => $concurrencyCheck['running_count'],
+                    'max_concurrent' => $concurrencyCheck['max_concurrent']
                 ]);
 
                 $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator);
@@ -341,18 +367,37 @@ class AIDevJobService {
     }
 
     /**
-     * Check shard concurrency limits
+     * Check concurrency limits for AI dev jobs
      *
      * @param int $memberId Member ID
      * @return array ['available' => bool, 'error' => string|null, 'running_count' => int]
      */
     public function checkShardConcurrency(int $memberId): array {
-        // Get member's max concurrent jobs setting (default: 3)
-        $maxConcurrent = 3; // Default
+        return $this->checkConcurrency($memberId);
+    }
 
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
-        if ($setting && $setting->setting_value) {
-            $maxConcurrent = (int)$setting->setting_value;
+    /**
+     * Check concurrency limits for AI dev jobs (works for both local and shard)
+     *
+     * Priority: INI config > enterprisesettings > default (3)
+     *
+     * @param int $memberId Member ID
+     * @return array ['available' => bool, 'error' => string|null, 'running_count' => int]
+     */
+    public function checkConcurrency(int $memberId): array {
+        // Default limit
+        $maxConcurrent = 3;
+
+        // 1. Check INI config first (tenant-level setting)
+        $iniMaxConcurrent = Flight::get('aidev.max_concurrent_jobs');
+        if ($iniMaxConcurrent !== null && $iniMaxConcurrent !== '') {
+            $maxConcurrent = (int)$iniMaxConcurrent;
+        } else {
+            // 2. Fall back to enterprisesettings (member-level setting)
+            $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
+            if ($setting && $setting->setting_value) {
+                $maxConcurrent = (int)$setting->setting_value;
+            }
         }
 
         // Count running jobs for this member
@@ -361,7 +406,7 @@ class AIDevJobService {
         if ($runningJobs >= $maxConcurrent) {
             return [
                 'available' => false,
-                'error' => "Concurrency limit reached: {$runningJobs}/{$maxConcurrent} jobs running",
+                'error' => "Concurrency limit reached: {$runningJobs}/{$maxConcurrent} jobs running. Please wait for current jobs to complete.",
                 'running_count' => $runningJobs,
                 'max_concurrent' => $maxConcurrent
             ];
@@ -669,6 +714,12 @@ class AIDevJobService {
                 ]);
             }
 
+            // Check concurrency limits
+            $concurrencyCheck = $this->checkConcurrency($memberId);
+            if (!$concurrencyCheck['available']) {
+                return ['success' => false, 'error' => $concurrencyCheck['error']];
+            }
+
             // Spawn local runner for GitHub (always local for now)
             return $this->spawnGitHubLocalRunner($memberId, $issueKey, $repoId, $tenant);
 
@@ -835,6 +886,39 @@ class AIDevJobService {
     const WORKING_LABEL = 'myctobot-working';
 
     /**
+     * Remove job-related labels from a Jira issue (myctobot-working, ai-dev, ai-dev-{id})
+     */
+    private function removeJobLabels(JiraClient $jiraClient, string $issueKey): void {
+        // Remove working label
+        try {
+            $jiraClient->removeLabel($issueKey, self::WORKING_LABEL);
+            $this->logger->debug('Removed working label', ['issue_key' => $issueKey]);
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to remove working label', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        // Remove ai-dev labels (ai-dev or ai-dev-{id})
+        try {
+            $issue = $jiraClient->getIssue($issueKey);
+            $labels = $issue['fields']['labels'] ?? [];
+            foreach ($labels as $label) {
+                if ($label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label)) {
+                    $jiraClient->removeLabel($issueKey, $label);
+                    $this->logger->debug('Removed ai-dev label', ['issue_key' => $issueKey, 'label' => $label]);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to remove ai-dev labels', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
      * Get board's AI Developer status settings
      *
      * @param int $memberId Member ID
@@ -942,16 +1026,8 @@ class AIDevJobService {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
-            // Remove working label
-            try {
-                $jiraClient->removeLabel($issueKey, self::WORKING_LABEL);
-                $this->logger->debug('Removed working label', ['issue_key' => $issueKey]);
-            } catch (\Exception $e) {
-                $this->logger->warning('Failed to remove working label', [
-                    'issue_key' => $issueKey,
-                    'error' => $e->getMessage()
-                ]);
-            }
+            // Remove job labels (myctobot-working, ai-dev, ai-dev-{id})
+            $this->removeJobLabels($jiraClient, $issueKey);
 
             // Transition to "PR created" status if configured
             $settings = $this->getBoardStatusSettings($memberId, $boardId);
@@ -1039,13 +1115,8 @@ class AIDevJobService {
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
-            // Remove working label
-            try {
-                $jiraClient->removeLabel($issueKey, self::WORKING_LABEL);
-                $this->logger->debug('Removed working label after failure', ['issue_key' => $issueKey]);
-            } catch (\Exception $e) {
-                // Ignore - label might not exist
-            }
+            // Remove job labels (myctobot-working, ai-dev, ai-dev-{id})
+            $this->removeJobLabels($jiraClient, $issueKey);
 
             // Transition to "failed" status if configured
             $settings = $this->getBoardStatusSettings($memberId, $boardId);

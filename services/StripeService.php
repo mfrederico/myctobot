@@ -1,7 +1,10 @@
 <?php
 /**
  * Stripe Service
- * Handles Stripe payment integration for subscriptions
+ * Handles Stripe payment integration for WORKSPACE-level subscriptions
+ *
+ * In multi-tenant mode, each workspace has ONE subscription.
+ * Any admin can manage billing on behalf of the workspace.
  */
 
 namespace app\services;
@@ -57,48 +60,59 @@ class StripeService {
     }
 
     /**
-     * Get or create Stripe customer for a member
+     * Get or create Stripe customer for the workspace
      *
-     * Uses RedBeanPHP associations: member->ownSubscriptionList
+     * @param string $billingEmail Email for the billing contact
+     * @param string|null $billingName Name for the billing contact
+     * @return string Stripe customer ID
      */
-    public static function getOrCreateCustomer(int $memberId): string {
+    public static function getOrCreateCustomer(string $billingEmail, ?string $billingName = null): string {
         self::init();
 
-        // Get member and their subscriptions via association
-        $member = R::load('member', $memberId);
-        if (!$member->id) {
-            throw new \Exception('Member not found');
-        }
+        // Get workspace subscription
+        $subscription = SubscriptionService::getWorkspaceSubscription();
 
-        // Check for existing subscription with valid Stripe customer ID
-        $subscriptions = $member->ownSubscriptionList;
-        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
-
+        // Check for existing Stripe customer
         if ($subscription && !empty($subscription->stripe_customer_id) &&
-            strpos($subscription->stripe_customer_id, 'stub_') !== 0) {
-            return $subscription->stripe_customer_id;
+            strpos($subscription->stripe_customer_id, 'stub_') !== 0 &&
+            strpos($subscription->stripe_customer_id, 'manual_') !== 0) {
+
+            // Update customer email if different
+            try {
+                $customer = Customer::retrieve($subscription->stripe_customer_id);
+                if ($customer->email !== $billingEmail) {
+                    Customer::update($subscription->stripe_customer_id, [
+                        'email' => $billingEmail,
+                        'name' => $billingName ?? $billingEmail
+                    ]);
+                }
+            } catch (\Exception $e) {
+                // Customer may not exist, create new one
+                Flight::get('log')->warning('Stripe customer not found, creating new', [
+                    'old_customer_id' => $subscription->stripe_customer_id
+                ]);
+            }
+
+            if (isset($customer) && $customer->id) {
+                return $customer->id;
+            }
         }
 
-        // Create new Stripe customer
+        // Create new Stripe customer for workspace
+        $tenant = $_SESSION['tenant_slug'] ?? 'default';
         $customer = Customer::create([
-            'email' => $member->email,
-            'name' => $member->display_name ?? $member->email,
+            'email' => $billingEmail,
+            'name' => $billingName ?? $billingEmail,
             'metadata' => [
-                'member_id' => $memberId
+                'tenant' => $tenant
             ]
         ]);
 
-        // Save customer ID via association
-        if (!$subscription) {
-            $subscription = R::dispense('subscription');
-            $subscription->tier = 'free';
-            $subscription->status = 'active';
-            $subscription->created_at = date('Y-m-d H:i:s');
-            $member->ownSubscriptionList[] = $subscription;
-        }
+        // Save customer ID to workspace subscription
+        $subscription = SubscriptionService::ensureSubscription($billingEmail, $billingName);
         $subscription->stripe_customer_id = $customer->id;
         $subscription->updated_at = date('Y-m-d H:i:s');
-        R::store($member);
+        R::store($subscription);
 
         return $customer->id;
     }
@@ -115,35 +129,37 @@ class StripeService {
     }
 
     /**
-     * Check if member has already used a trial
-     *
-     * Uses RedBeanPHP associations: member->ownSubscriptionList
+     * Check if workspace has already used a trial
      */
-    public static function hasUsedTrial(int $memberId): bool {
-        $member = R::load('member', $memberId);
-        $subscriptions = $member->ownSubscriptionList;
-        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+    public static function hasUsedTrial(): bool {
+        $subscription = SubscriptionService::getWorkspaceSubscription();
         return $subscription && !empty($subscription->trial_used);
     }
 
     /**
-     * Create a Checkout Session for subscription
+     * Create a Checkout Session for workspace subscription
+     *
+     * @param string $billingEmail Billing contact email
+     * @param string $priceId Stripe price ID
+     * @param bool $withTrial Whether to include trial period
+     * @return CheckoutSession
      */
-    public static function createCheckoutSession(int $memberId, string $priceId, bool $withTrial = true): CheckoutSession {
+    public static function createCheckoutSession(string $billingEmail, string $priceId, bool $withTrial = true): CheckoutSession {
         self::init();
 
-        $customerId = self::getOrCreateCustomer($memberId);
+        $customerId = self::getOrCreateCustomer($billingEmail);
         $successUrl = Flight::get('stripe.success_url');
         $cancelUrl = Flight::get('stripe.cancel_url');
+        $tenant = $_SESSION['tenant_slug'] ?? 'default';
 
         $subscriptionData = [
             'metadata' => [
-                'member_id' => $memberId
+                'tenant' => $tenant
             ]
         ];
 
-        // Add trial period if eligible (hasn't used trial before)
-        if ($withTrial && !self::hasUsedTrial($memberId)) {
+        // Add trial period if eligible (workspace hasn't used trial before)
+        if ($withTrial && !self::hasUsedTrial()) {
             $trialDays = self::getTrialDays();
             if ($trialDays > 0) {
                 $subscriptionData['trial_period_days'] = $trialDays;
@@ -161,7 +177,7 @@ class StripeService {
             'success_url' => $successUrl,
             'cancel_url' => $cancelUrl,
             'metadata' => [
-                'member_id' => $memberId
+                'tenant' => $tenant
             ],
             'subscription_data' => $subscriptionData
         ]);
@@ -171,14 +187,20 @@ class StripeService {
 
     /**
      * Create a billing portal session for managing subscription
+     *
+     * @param string $returnUrl URL to return to after portal
+     * @return PortalSession
      */
-    public static function createPortalSession(int $memberId, string $returnUrl): PortalSession {
+    public static function createPortalSession(string $returnUrl): PortalSession {
         self::init();
 
-        $customerId = self::getOrCreateCustomer($memberId);
+        $subscription = SubscriptionService::getWorkspaceSubscription();
+        if (!$subscription || empty($subscription->stripe_customer_id)) {
+            throw new \Exception('No billing account found for this workspace');
+        }
 
         $session = PortalSession::create([
-            'customer' => $customerId,
+            'customer' => $subscription->stripe_customer_id,
             'return_url' => $returnUrl,
         ]);
 
@@ -242,14 +264,10 @@ class StripeService {
      * Handle checkout.session.completed
      */
     private static function handleCheckoutComplete($session): void {
-        $memberId = $session->metadata->member_id ?? null;
-        if (!$memberId) {
-            Flight::get('log')->warning('Checkout complete without member_id', ['session_id' => $session->id]);
-            return;
-        }
+        $tenant = $session->metadata->tenant ?? 'unknown';
 
         Flight::get('log')->info('Checkout completed', [
-            'member_id' => $memberId,
+            'tenant' => $tenant,
             'session_id' => $session->id,
             'subscription_id' => $session->subscription
         ]);
@@ -257,23 +275,15 @@ class StripeService {
 
     /**
      * Handle subscription created/updated
-     *
-     * Uses RedBeanPHP associations: member->ownSubscriptionList
      */
     private static function handleSubscriptionUpdate($stripeSubscription): void {
         $customerId = $stripeSubscription->customer;
-        $memberId = $stripeSubscription->metadata->member_id ?? null;
 
-        // Find member by customer ID if not in metadata (query by external Stripe ID)
-        if (!$memberId) {
-            $existingSub = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
-            if ($existingSub) {
-                $memberId = $existingSub->member_id;
-            }
-        }
+        // Find workspace subscription by Stripe customer ID
+        $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
 
-        if (!$memberId) {
-            Flight::get('log')->warning('Subscription update without member_id', [
+        if (!$subscription) {
+            Flight::get('log')->warning('Subscription update for unknown customer', [
                 'subscription_id' => $stripeSubscription->id,
                 'customer_id' => $customerId
             ]);
@@ -283,19 +293,7 @@ class StripeService {
         // Determine tier from price ID
         $tier = self::getTierFromPriceId($stripeSubscription->items->data[0]->price->id ?? '');
 
-        // Get member and subscription via association
-        $member = R::load('member', $memberId);
-        $subscriptions = $member->ownSubscriptionList;
-        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
-
-        if (!$subscription) {
-            $subscription = R::dispense('subscription');
-            $subscription->created_at = date('Y-m-d H:i:s');
-            $member->ownSubscriptionList[] = $subscription;
-        }
-
         $subscription->tier = $tier;
-        $subscription->stripe_customer_id = $customerId;
         $subscription->stripe_subscription_id = $stripeSubscription->id;
         $subscription->current_period_start = date('Y-m-d H:i:s', $stripeSubscription->current_period_start);
         $subscription->current_period_end = date('Y-m-d H:i:s', $stripeSubscription->current_period_end);
@@ -318,10 +316,9 @@ class StripeService {
             $subscription->cancelled_at = null;
         }
 
-        R::store($member);
+        R::store($subscription);
 
-        Flight::get('log')->info('Subscription updated', [
-            'member_id' => $memberId,
+        Flight::get('log')->info('Workspace subscription updated', [
             'tier' => $tier,
             'status' => $subscription->status
         ]);
@@ -346,9 +343,7 @@ class StripeService {
 
         R::store($subscription);
 
-        Flight::get('log')->info('Subscription canceled', [
-            'member_id' => $subscription->member_id
-        ]);
+        Flight::get('log')->info('Workspace subscription canceled');
     }
 
     /**
@@ -371,7 +366,7 @@ class StripeService {
             'customer_id' => $invoice->customer
         ]);
 
-        // Optionally downgrade or notify user
+        // Mark workspace subscription as past_due
         $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$invoice->customer]);
         if ($subscription) {
             $subscription->status = 'past_due';
@@ -413,23 +408,19 @@ class StripeService {
     }
 
     /**
-     * Cancel subscription at period end
-     *
-     * Uses RedBeanPHP associations: member->ownSubscriptionList
+     * Cancel workspace subscription at period end
      */
-    public static function cancelSubscription(int $memberId): bool {
+    public static function cancelSubscription(): bool {
         self::init();
 
-        $member = R::load('member', $memberId);
-        $subscriptions = $member->ownSubscriptionList;
-        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+        $subscription = SubscriptionService::getWorkspaceSubscription();
 
         if (!$subscription || empty($subscription->stripe_subscription_id)) {
             return false;
         }
 
         try {
-            $stripeSubscription = Subscription::update(
+            Subscription::update(
                 $subscription->stripe_subscription_id,
                 ['cancel_at_period_end' => true]
             );
@@ -441,7 +432,6 @@ class StripeService {
             return true;
         } catch (\Exception $e) {
             Flight::get('log')->error('Failed to cancel subscription', [
-                'member_id' => $memberId,
                 'error' => $e->getMessage()
             ]);
             return false;
@@ -449,23 +439,19 @@ class StripeService {
     }
 
     /**
-     * Reactivate canceled subscription
-     *
-     * Uses RedBeanPHP associations: member->ownSubscriptionList
+     * Reactivate canceled workspace subscription
      */
-    public static function reactivateSubscription(int $memberId): bool {
+    public static function reactivateSubscription(): bool {
         self::init();
 
-        $member = R::load('member', $memberId);
-        $subscriptions = $member->ownSubscriptionList;
-        $subscription = !empty($subscriptions) ? reset($subscriptions) : null;
+        $subscription = SubscriptionService::getWorkspaceSubscription();
 
         if (!$subscription || empty($subscription->stripe_subscription_id)) {
             return false;
         }
 
         try {
-            $stripeSubscription = Subscription::update(
+            Subscription::update(
                 $subscription->stripe_subscription_id,
                 ['cancel_at_period_end' => false]
             );
@@ -477,7 +463,6 @@ class StripeService {
             return true;
         } catch (\Exception $e) {
             Flight::get('log')->error('Failed to reactivate subscription', [
-                'member_id' => $memberId,
                 'error' => $e->getMessage()
             ]);
             return false;

@@ -100,6 +100,7 @@ class PermissionCache {
             'auth::doreset',
             'auth::google',
             'auth::googlecallback',
+            'auth::invite',          // Accept invitation (public)
             'error::notfound',
             'error::forbidden',
             'error::servererror',

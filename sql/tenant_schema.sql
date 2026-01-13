@@ -29,9 +29,14 @@ CREATE TABLE IF NOT EXISTS `member` (
     `login_count` INT DEFAULT 0,
     `reset_token` VARCHAR(64),
     `reset_expires` DATETIME,
+    `invite_token` VARCHAR(64),
+    `invite_sent_at` DATETIME,
+    `invite_expires_at` DATETIME,
+    `invited_by` INT,
     INDEX `idx_google_id` (`google_id`),
     INDEX `idx_email` (`email`),
-    INDEX `idx_status` (`status`)
+    INDEX `idx_status` (`status`),
+    INDEX `idx_invite_token` (`invite_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Atlassian OAuth tokens
@@ -77,10 +82,13 @@ CREATE TABLE IF NOT EXISTS `settings` (
     UNIQUE KEY `uk_member_key` (`member_id`, `setting_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Subscription/tier management
+-- Subscription/tier management (WORKSPACE-level, not per-member)
+-- Each tenant database has ONE subscription that applies to all members
 CREATE TABLE IF NOT EXISTS `subscription` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `member_id` INT NOT NULL UNIQUE,
+    `member_id` INT DEFAULT NULL COMMENT 'Optional: original subscriber (historical)',
+    `billing_email` VARCHAR(255) COMMENT 'Billing contact email',
+    `billing_name` VARCHAR(255) COMMENT 'Billing contact name',
     `tier` VARCHAR(20) NOT NULL DEFAULT 'free',
     `status` VARCHAR(20) NOT NULL DEFAULT 'active',
     `stripe_customer_id` VARCHAR(255),
@@ -88,12 +96,13 @@ CREATE TABLE IF NOT EXISTS `subscription` (
     `current_period_start` DATETIME,
     `current_period_end` DATETIME,
     `trial_ends_at` DATETIME,
+    `trial_used` TINYINT(1) DEFAULT 0,
     `cancelled_at` DATETIME,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (`member_id`) REFERENCES `member`(`id`) ON DELETE CASCADE,
     INDEX `idx_subscription_tier` (`tier`),
-    INDEX `idx_subscription_status` (`status`)
+    INDEX `idx_subscription_status` (`status`),
+    INDEX `idx_subscription_active` (`status`, `tier`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================

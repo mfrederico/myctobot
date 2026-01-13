@@ -495,10 +495,14 @@
                 <div class="d-flex gap-2 align-items-center">
                     <div class="input-group input-group-sm" style="width: 280px;">
                         <span class="input-group-text">Base</span>
-                        <input type="text" class="form-control" id="qa-target-branch" list="branch-list" value="main" placeholder="Select or type branch...">
-                        <datalist id="branch-list">
-                            <option value="main">
-                        </datalist>
+                        <div class="dropdown flex-grow-1">
+                            <input type="text" class="form-control form-control-sm" id="qa-target-branch"
+                                   value="main" placeholder="Type or select branch..."
+                                   data-bs-toggle="dropdown" aria-expanded="false" autocomplete="off">
+                            <ul class="dropdown-menu w-100" id="branch-dropdown" style="max-height: 250px; overflow-y: auto;">
+                                <li><a class="dropdown-item" href="#" data-branch="main">main</a></li>
+                            </ul>
+                        </div>
                         <button class="btn btn-outline-secondary" type="button" onclick="refreshBranches()" title="Refresh branches">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -1257,22 +1261,76 @@ function setupProjectTabs() {
 // QA Release Selection Functions
 let selectedStories = [];
 let branchesLoaded = false;
+let allBranches = ['main'];
 
-// Fetch and populate branch list
+// Fetch and populate branch dropdown
 async function loadBranches() {
     if (branchesLoaded) return;
 
     try {
         const result = await apiCall('/reviewboard/getBranches', {});
         if (result.success && result.data && result.data.branches) {
-            const datalist = document.getElementById('branch-list');
-            datalist.innerHTML = result.data.branches.map(b => `<option value="${b}">`).join('');
+            allBranches = result.data.branches;
+            populateBranchDropdown(allBranches);
             branchesLoaded = true;
         }
     } catch (e) {
         console.error('Failed to load branches:', e);
     }
 }
+
+function populateBranchDropdown(branches) {
+    const dropdown = document.getElementById('branch-dropdown');
+    if (!dropdown) return;
+
+    if (branches.length === 0) {
+        dropdown.innerHTML = '<li><span class="dropdown-item text-muted">No matching branches</span></li>';
+    } else {
+        dropdown.innerHTML = branches.map(b => {
+            const icon = (b === 'main' || b === 'master') ? 'bi-star-fill text-warning' :
+                         b.startsWith('qa/') ? 'bi-box-seam text-info' : 'bi-git';
+            return `<li><a class="dropdown-item branch-option" href="#" data-branch="${b}">
+                <i class="bi ${icon} me-2"></i>${b}
+            </a></li>`;
+        }).join('');
+    }
+}
+
+function filterBranches(query) {
+    const filtered = allBranches.filter(b =>
+        b.toLowerCase().includes(query.toLowerCase())
+    );
+    populateBranchDropdown(filtered);
+}
+
+// Initialize branch dropdown behavior
+document.addEventListener('DOMContentLoaded', function() {
+    const branchInput = document.getElementById('qa-target-branch');
+    const branchDropdown = document.getElementById('branch-dropdown');
+
+    if (branchInput && branchDropdown) {
+        // Filter on input
+        branchInput.addEventListener('input', function() {
+            filterBranches(this.value);
+        });
+
+        // Handle selection
+        branchDropdown.addEventListener('click', function(e) {
+            const item = e.target.closest('.branch-option');
+            if (item) {
+                e.preventDefault();
+                branchInput.value = item.dataset.branch;
+                bootstrap.Dropdown.getInstance(branchInput)?.hide();
+            }
+        });
+
+        // Show all on focus
+        branchInput.addEventListener('focus', function() {
+            if (!branchesLoaded) loadBranches();
+            populateBranchDropdown(allBranches);
+        });
+    }
+});
 
 async function refreshBranches() {
     branchesLoaded = false;
@@ -1283,8 +1341,8 @@ async function refreshBranches() {
     try {
         const result = await apiCall('/reviewboard/getBranches', {});
         if (result.success && result.data && result.data.branches) {
-            const datalist = document.getElementById('branch-list');
-            datalist.innerHTML = result.data.branches.map(b => `<option value="${b}">`).join('');
+            allBranches = result.data.branches;
+            populateBranchDropdown(allBranches);
             branchesLoaded = true;
             showToast(`Loaded ${result.data.branches.length} branches`, 'success');
         }

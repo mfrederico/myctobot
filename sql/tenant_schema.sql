@@ -648,6 +648,43 @@ CREATE TABLE IF NOT EXISTS `ctostories` (
     FOREIGN KEY (`epic_id`) REFERENCES `ctoepics`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ============================================================================
+-- PLUGIN MARKETPLACE TABLES
+-- ============================================================================
+
+-- Plugins table for plugin marketplace
+CREATE TABLE IF NOT EXISTS `plugins` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `member_id` INT NOT NULL,
+    `name` VARCHAR(100) NOT NULL,
+    `slug` VARCHAR(100) NOT NULL,
+    `description` TEXT,
+    `short_description` VARCHAR(255),
+    `tags` JSON DEFAULT '[]',
+    `category` VARCHAR(50) DEFAULT 'general',
+    `version` VARCHAR(20) DEFAULT '1.0.0',
+    `author` VARCHAR(100),
+    `author_url` VARCHAR(255),
+    `icon_url` VARCHAR(500),
+    `homepage_url` VARCHAR(500),
+    `documentation_url` VARCHAR(500),
+    `download_count` INT DEFAULT 0,
+    `rating` DECIMAL(2,1) DEFAULT 0.0,
+    `rating_count` INT DEFAULT 0,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `is_featured` TINYINT(1) DEFAULT 0,
+    `is_verified` TINYINT(1) DEFAULT 0,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_slug` (`slug`),
+    INDEX `idx_member` (`member_id`),
+    INDEX `idx_category` (`category`),
+    INDEX `idx_active` (`is_active`),
+    INDEX `idx_featured` (`is_featured`),
+    INDEX `idx_name` (`name`),
+    FULLTEXT INDEX `ft_search` (`name`, `description`, `short_description`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Directive Processing Log
 CREATE TABLE IF NOT EXISTS `directivelogs` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
@@ -673,7 +710,85 @@ INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
 ('projects', 'report', 100, 'Generate project report'),
 ('projects', 'pause', 100, 'Pause project execution'),
 ('projects', 'resume', 100, 'Resume project execution'),
-('webhook', 'mailgun', 101, 'Mailgun incoming email webhook')
+('webhook', 'mailgun', 101, 'Mailgun incoming email webhook'),
+('plugins', 'index', 100, 'Plugin marketplace listing'),
+('plugins', 'search', 100, 'Search plugins'),
+('plugins', 'autocomplete', 100, 'Plugin name autocomplete'),
+('plugins', 'view', 100, 'View plugin details')
+ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
+
+-- ============================================================================
+-- PLUGIN DISCOVERY TABLES
+-- ============================================================================
+
+-- Discovered plugins from repository scans
+CREATE TABLE IF NOT EXISTS `discoveredplugins` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `plugin_id` VARCHAR(64) NOT NULL UNIQUE,
+    `repo_connection_id` INT NOT NULL,
+    `repo_owner` VARCHAR(100) NOT NULL,
+    `repo_name` VARCHAR(100) NOT NULL,
+
+    -- Plugin metadata from plugin.json
+    `plugin_name` VARCHAR(255),
+    `plugin_description` TEXT,
+    `plugin_version` VARCHAR(50),
+    `plugin_author` VARCHAR(255),
+    `plugin_main` VARCHAR(500),
+    `plugin_requires` JSON,
+    `plugin_json` JSON,
+
+    -- Status tracking
+    `status` ENUM('discovered', 'validated', 'invalid', 'installed') DEFAULT 'discovered',
+    `validation_error` TEXT,
+
+    -- Timestamps
+    `discovered_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `last_scanned_at` DATETIME,
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX `idx_repo_connection` (`repo_connection_id`),
+    INDEX `idx_status` (`status`),
+    INDEX `idx_plugin_id` (`plugin_id`),
+    FOREIGN KEY (`repo_connection_id`) REFERENCES `repoconnections`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Plugin scan history
+CREATE TABLE IF NOT EXISTS `pluginscans` (
+    `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `scan_id` VARCHAR(64) NOT NULL UNIQUE,
+    `repo_connection_id` INT DEFAULT NULL,
+
+    -- Scan status
+    `status` ENUM('running', 'completed', 'failed') DEFAULT 'running',
+
+    -- Statistics
+    `repos_scanned` INT DEFAULT 0,
+    `plugins_found` INT DEFAULT 0,
+    `errors_encountered` INT DEFAULT 0,
+
+    -- Timestamps
+    `started_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `completed_at` DATETIME,
+
+    -- Error tracking
+    `error_message` TEXT,
+
+    `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX `idx_status` (`status`),
+    INDEX `idx_scan_id` (`scan_id`),
+    INDEX `idx_repo_connection` (`repo_connection_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add authcontrol entries for PluginRegistry controller
+INSERT INTO `authcontrol` (`control`, `method`, `level`, `description`) VALUES
+('pluginregistry', 'index', 100, 'List discovered plugins'),
+('pluginregistry', 'scan', 100, 'Trigger plugin scan'),
+('pluginregistry', 'scanRepo', 100, 'Scan single repository'),
+('pluginregistry', 'scans', 100, 'View scan history'),
+('pluginregistry', 'view', 100, 'View plugin details')
 ON DUPLICATE KEY UPDATE `level` = VALUES(`level`);
 
 SET FOREIGN_KEY_CHECKS = 1;

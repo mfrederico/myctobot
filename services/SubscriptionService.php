@@ -1,7 +1,10 @@
 <?php
 /**
  * Subscription Service
- * Manages user subscription tiers and feature access
+ * Manages WORKSPACE-level subscription tiers and feature access
+ *
+ * In multi-tenant mode, each tenant database has ONE subscription
+ * that applies to ALL members in that workspace.
  */
 
 namespace app\services;
@@ -12,15 +15,15 @@ use \RedBeanPHP\R as R;
 class SubscriptionService {
 
     /**
-     * Get subscription tier for a member
+     * Get the workspace subscription tier
      *
-     * Uses RedBeanPHP associations with filtering for active status.
+     * Each tenant database has a single subscription record.
+     * All members in the workspace share this tier.
      *
-     * @param int $memberId Member ID
      * @return string Tier name ('free', 'pro', 'enterprise')
      */
-    public static function getTier(int $memberId): string {
-        $subscription = R::findOne('subscription', 'member_id = ? AND status = ?', [$memberId, 'active']);
+    public static function getTier(): string {
+        $subscription = self::getWorkspaceSubscription();
 
         if ($subscription) {
             // Check if subscription is still valid
@@ -37,35 +40,43 @@ class SubscriptionService {
     }
 
     /**
-     * Check if member has Pro tier or higher
+     * Get subscription tier for a member (legacy compatibility)
      *
-     * @param int $memberId Member ID
+     * @param int $memberId Member ID (ignored - uses workspace subscription)
+     * @return string Tier name
+     * @deprecated Use getTier() instead - subscriptions are workspace-level
+     */
+    public static function getTierForMember(int $memberId): string {
+        return self::getTier();
+    }
+
+    /**
+     * Check if workspace has Pro tier or higher
+     *
      * @return bool
      */
-    public static function isPro(int $memberId): bool {
-        $tier = self::getTier($memberId);
+    public static function isPro(): bool {
+        $tier = self::getTier();
         return in_array($tier, ['pro', 'enterprise']);
     }
 
     /**
-     * Check if member has Enterprise tier
+     * Check if workspace has Enterprise tier
      *
-     * @param int $memberId Member ID
      * @return bool
      */
-    public static function isEnterprise(int $memberId): bool {
-        return self::getTier($memberId) === 'enterprise';
+    public static function isEnterprise(): bool {
+        return self::getTier() === 'enterprise';
     }
 
     /**
-     * Check if member can access a specific feature
+     * Check if workspace can access a specific feature
      *
-     * @param int $memberId Member ID
      * @param string $feature Feature name
      * @return bool
      */
-    public static function canAccessFeature(int $memberId, string $feature): bool {
-        $tier = self::getTier($memberId);
+    public static function canAccessFeature(string $feature): bool {
+        $tier = self::getTier();
         $features = TierFeatures::getFeatures($tier);
 
         return $features[$feature] ?? false;
@@ -74,12 +85,11 @@ class SubscriptionService {
     /**
      * Get remaining quota for a rate-limited feature
      *
-     * @param int $memberId Member ID
      * @param string $feature Feature name
      * @return int Remaining uses (-1 for unlimited)
      */
-    public static function getRemainingQuota(int $memberId, string $feature): int {
-        $tier = self::getTier($memberId);
+    public static function getRemainingQuota(string $feature): int {
+        $tier = self::getTier();
         $limits = TierFeatures::getLimits($tier);
 
         $limit = $limits[$feature] ?? 0;
@@ -93,15 +103,21 @@ class SubscriptionService {
     }
 
     /**
-     * Get subscription details for a member
+     * Get the workspace subscription record
      *
-     * Uses RedBeanPHP associations for lazy loading.
+     * @return object|null RedBeanPHP bean or null
+     */
+    public static function getWorkspaceSubscription(): ?object {
+        return R::findOne('subscription', 'status = ? ORDER BY id DESC', ['active']);
+    }
+
+    /**
+     * Get subscription details for the workspace
      *
-     * @param int $memberId Member ID
      * @return array|null
      */
-    public static function getSubscription(int $memberId): ?array {
-        $subscription = R::findOne('subscription', 'member_id = ?', [$memberId]);
+    public static function getSubscription(): ?array {
+        $subscription = self::getWorkspaceSubscription();
 
         if ($subscription) {
             return $subscription->export();
@@ -111,24 +127,37 @@ class SubscriptionService {
     }
 
     /**
-     * Create or get subscription record for a member
+     * Create or get subscription record for the workspace
      *
-     * @param int $memberId Member ID
+     * @param string|null $billingEmail Optional billing email
+     * @param string|null $billingName Optional billing name
      * @return object RedBeanPHP bean
      */
-    public static function ensureSubscription(int $memberId): object {
-        // Check for existing subscription
-        $existing = R::findOne('subscription', 'member_id = ?', [$memberId]);
+    public static function ensureSubscription(?string $billingEmail = null, ?string $billingName = null): object {
+        // Check for existing active subscription
+        $existing = self::getWorkspaceSubscription();
 
         if ($existing) {
+            // Update billing info if provided
+            if ($billingEmail) {
+                $existing->billing_email = $billingEmail;
+            }
+            if ($billingName) {
+                $existing->billing_name = $billingName;
+            }
+            if ($billingEmail || $billingName) {
+                $existing->updated_at = date('Y-m-d H:i:s');
+                R::store($existing);
+            }
             return $existing;
         }
 
-        // Create new subscription with explicit member_id
+        // Create new workspace subscription
         $subscription = R::dispense('subscription');
-        $subscription->member_id = $memberId;
         $subscription->tier = 'free';
         $subscription->status = 'active';
+        $subscription->billing_email = $billingEmail;
+        $subscription->billing_name = $billingName;
         $subscription->created_at = date('Y-m-d H:i:s');
         R::store($subscription);
 
@@ -136,17 +165,28 @@ class SubscriptionService {
     }
 
     /**
-     * Stub upgrade to Pro tier (for testing without Stripe)
+     * Update billing contact for the workspace
      *
-     * @param int $memberId Member ID
+     * @param string $email Billing email
+     * @param string|null $name Billing name
      * @return bool Success
      */
-    public static function stubUpgrade(int $memberId): bool {
-        $subscription = self::ensureSubscription($memberId);
+    public static function updateBillingContact(string $email, ?string $name = null): bool {
+        $subscription = self::ensureSubscription($email, $name);
+        return $subscription->id > 0;
+    }
+
+    /**
+     * Stub upgrade to Pro tier (for testing without Stripe)
+     *
+     * @return bool Success
+     */
+    public static function stubUpgrade(): bool {
+        $subscription = self::ensureSubscription();
 
         $subscription->tier = 'pro';
         $subscription->status = 'active';
-        $subscription->stripe_customer_id = 'stub_' . $memberId;
+        $subscription->stripe_customer_id = 'stub_workspace';
         $subscription->stripe_subscription_id = 'stub_sub_' . time();
         $subscription->current_period_start = date('Y-m-d H:i:s');
         $subscription->current_period_end = date('Y-m-d H:i:s', strtotime('+1 month'));
@@ -154,7 +194,7 @@ class SubscriptionService {
 
         R::store($subscription);
 
-        Flight::get('log')->info('Stub upgrade to Pro', ['member_id' => $memberId]);
+        Flight::get('log')->info('Stub upgrade workspace to Pro');
 
         return true;
     }
@@ -162,11 +202,10 @@ class SubscriptionService {
     /**
      * Stub downgrade to Free tier (for testing)
      *
-     * @param int $memberId Member ID
      * @return bool Success
      */
-    public static function stubDowngrade(int $memberId): bool {
-        $subscription = self::ensureSubscription($memberId);
+    public static function stubDowngrade(): bool {
+        $subscription = self::ensureSubscription();
 
         $subscription->tier = 'free';
         $subscription->status = 'active';
@@ -175,29 +214,28 @@ class SubscriptionService {
 
         R::store($subscription);
 
-        Flight::get('log')->info('Stub downgrade to Free', ['member_id' => $memberId]);
+        Flight::get('log')->info('Stub downgrade workspace to Free');
 
         return true;
     }
 
     /**
-     * Manually set subscription tier (for Enterprise customers)
+     * Manually set workspace subscription tier (for Enterprise customers)
      *
-     * @param int $memberId Member ID
      * @param string $tier Tier name ('free', 'pro', 'enterprise')
      * @param string|null $expiresAt Optional expiration date (null = never expires)
      * @return bool Success
      */
-    public static function setTier(int $memberId, string $tier, ?string $expiresAt = null): bool {
+    public static function setTier(string $tier, ?string $expiresAt = null): bool {
         if (!in_array($tier, ['free', 'pro', 'enterprise'])) {
             return false;
         }
 
-        $subscription = self::ensureSubscription($memberId);
+        $subscription = self::ensureSubscription();
 
         $subscription->tier = $tier;
         $subscription->status = 'active';
-        $subscription->stripe_customer_id = 'manual_' . $memberId;
+        $subscription->stripe_customer_id = $subscription->stripe_customer_id ?? 'manual_workspace';
         $subscription->stripe_subscription_id = 'manual_' . $tier . '_' . time();
         $subscription->current_period_start = date('Y-m-d H:i:s');
         $subscription->current_period_end = $expiresAt ?? date('Y-m-d H:i:s', strtotime('+100 years'));
@@ -205,30 +243,14 @@ class SubscriptionService {
 
         R::store($subscription);
 
-        Flight::get('log')->info('Manual tier assignment', [
-            'member_id' => $memberId,
+        $tenant = $_SESSION['tenant_slug'] ?? 'default';
+        Flight::get('log')->info('Manual workspace tier assignment', [
+            'tenant' => $tenant,
             'tier' => $tier,
             'expires' => $expiresAt ?? 'never'
         ]);
 
         return true;
-    }
-
-    /**
-     * Set Enterprise tier by email address
-     *
-     * @param string $email Member email
-     * @param string|null $expiresAt Optional expiration date
-     * @return bool Success
-     */
-    public static function setEnterpriseByEmail(string $email, ?string $expiresAt = null): bool {
-        $member = R::findOne('member', 'email = ?', [$email]);
-
-        if (!$member) {
-            return false;
-        }
-
-        return self::setTier($member->id, 'enterprise', $expiresAt);
     }
 
     /**
@@ -288,5 +310,30 @@ class SubscriptionService {
         ];
 
         return $tiers[$tier] ?? $tiers['free'];
+    }
+
+    // =========================================================================
+    // Legacy compatibility methods (member-based calls redirect to workspace)
+    // =========================================================================
+
+    /**
+     * @deprecated Use isPro() instead
+     */
+    public static function isProForMember(int $memberId): bool {
+        return self::isPro();
+    }
+
+    /**
+     * @deprecated Use isEnterprise() instead
+     */
+    public static function isEnterpriseForMember(int $memberId): bool {
+        return self::isEnterprise();
+    }
+
+    /**
+     * @deprecated Use canAccessFeature($feature) instead
+     */
+    public static function canAccessFeatureForMember(int $memberId, string $feature): bool {
+        return self::canAccessFeature($feature);
     }
 }

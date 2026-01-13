@@ -54,7 +54,12 @@ class Atlassian extends BaseControls\Control {
                 return;
             }
 
+            // Debug: log the scopes being used
+            $scopes = Flight::get('atlassian.scopes');
+            $this->logger->info('Atlassian connect scopes', ['scopes' => $scopes]);
+
             $loginUrl = AtlassianAuth::getLoginUrl();
+            $this->logger->info('Atlassian login URL', ['url' => $loginUrl]);
             Flight::redirect($loginUrl);
 
         } catch (Exception $e) {
@@ -75,6 +80,12 @@ class Atlassian extends BaseControls\Control {
             $state = $this->getParam('state');
             $error = $this->getParam('error');
             $errorDescription = $this->getParam('error_description');
+            $workspace = $this->getParam('workspace');
+
+            // Handle workspace parameter for multi-tenant callbacks
+            if ($workspace && $workspace !== 'default') {
+                $this->switchToWorkspace($workspace);
+            }
 
             // Check for errors from Atlassian
             if ($error) {
@@ -383,5 +394,67 @@ class Atlassian extends BaseControls\Control {
 
         $loginUrl = AtlassianAuth::getLoginUrlWithWriteScopes();
         Flight::redirect($loginUrl);
+    }
+
+    /**
+     * Switch to a workspace/tenant database context
+     * Used when callback URL contains ?workspace=xxx parameter
+     *
+     * @param string $workspace Workspace/tenant slug
+     */
+    private function switchToWorkspace(string $workspace): void {
+        $configFile = "conf/config.{$workspace}.ini";
+        if (!file_exists($configFile)) {
+            $this->logger->warning("Workspace config not found: {$workspace}");
+            return;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $this->logger->warning("Invalid workspace config: {$workspace}");
+            return;
+        }
+
+        // Check if this database connection is already registered
+        // If so, just select it; if not, add it first
+        try {
+            R::selectDatabase($workspace);
+            $this->logger->debug("Workspace database already registered, selected: {$workspace}");
+        } catch (\Exception $e) {
+            // Database not registered yet, add it
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                R::addDatabase($workspace, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $workspace;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                R::addDatabase($workspace, $dsn, $user, $pass);
+            }
+
+            R::selectDatabase($workspace);
+            $this->logger->debug("Registered and selected workspace database: {$workspace}");
+        }
+
+        // Store workspace in session for subsequent requests
+        $_SESSION['tenant_slug'] = $workspace;
+
+        // Update Flight config with tenant settings
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        $this->logger->info("Switched to workspace: {$workspace}");
     }
 }

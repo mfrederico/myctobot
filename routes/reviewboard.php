@@ -17,3 +17,4 @@ Flight::route('POST /reviewboard/delete-story', ['\app\ReviewBoard', 'deleteStor
 Flight::route('POST /reviewboard/approve', ['\app\ReviewBoard', 'approveStories']);
 Flight::route('POST /reviewboard/approve-project', ['\app\ReviewBoard', 'approveProject']);
 Flight::route('POST /reviewboard/delete-project', ['\app\ReviewBoard', 'deleteProject']);
+Flight::route('POST /reviewboard/get-job-details', ['\app\ReviewBoard', 'getJobDetails']);

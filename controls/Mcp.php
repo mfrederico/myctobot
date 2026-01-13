@@ -570,6 +570,33 @@ class Mcp extends Control {
                 'updated' => $issue['fields']['updated'] ?? ''
             ];
 
+            // Try to get development info (branches, PRs)
+            try {
+                // First try dev-status API
+                $devInfo = $client->getDevInfo($issueKey);
+                if (!empty($devInfo['branches']) || !empty($devInfo['pullRequests']) || !empty($devInfo['commits'])) {
+                    $formatted['development'] = $devInfo;
+                }
+            } catch (\Exception $e) {
+                // Dev-status API not available
+            }
+
+            // Fall back to extracting branch from comments if no dev info found
+            if (empty($formatted['development'])) {
+                try {
+                    $branch = $client->getBranchFromComments($issueKey);
+                    if ($branch) {
+                        $formatted['development'] = [
+                            'branches' => [['name' => $branch, 'source' => 'comments']],
+                            'pullRequests' => [],
+                            'commits' => []
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Ignore errors
+                }
+            }
+
             return $this->toolSuccessResponse($id, json_encode($formatted, JSON_PRETTY_PRINT));
 
         } catch (\Exception $e) {

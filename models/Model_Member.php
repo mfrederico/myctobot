@@ -4,6 +4,7 @@
  * FUSE model for member table
  *
  * All data is now in a single MySQL database per tenant.
+ * Subscription is WORKSPACE-level, not per-member.
  */
 
 use \RedBeanPHP\R as R;
@@ -23,23 +24,22 @@ class Model_Member extends \RedBeanPHP\SimpleModel {
     /**
      * Check if member has at least the specified tier level
      *
+     * Note: Subscription is workspace-level, so all members in the
+     * same workspace share the same tier.
+     *
      * @param string $requiredTier The minimum tier required ('free', 'pro', 'enterprise')
-     * @return bool True if member's tier is >= required tier
+     * @return bool True if workspace tier is >= required tier
      */
     public function hasTier(string $requiredTier): bool {
-        if (!$this->bean->id) {
-            return $requiredTier === 'free';
-        }
-
-        $memberTier = $this->getTier();
-        $memberLevel = self::TIER_HIERARCHY[$memberTier] ?? 0;
+        $workspaceTier = $this->getTier();
+        $workspaceLevel = self::TIER_HIERARCHY[$workspaceTier] ?? 0;
         $requiredLevel = self::TIER_HIERARCHY[$requiredTier] ?? 0;
 
-        return $memberLevel >= $requiredLevel;
+        return $workspaceLevel >= $requiredLevel;
     }
 
     /**
-     * Check if member has Pro tier or higher
+     * Check if workspace has Pro tier or higher
      *
      * @return bool
      */
@@ -48,7 +48,7 @@ class Model_Member extends \RedBeanPHP\SimpleModel {
     }
 
     /**
-     * Check if member has Enterprise tier
+     * Check if workspace has Enterprise tier
      *
      * @return bool
      */
@@ -57,26 +57,23 @@ class Model_Member extends \RedBeanPHP\SimpleModel {
     }
 
     /**
-     * Get member's subscription tier
+     * Get workspace subscription tier
+     *
+     * Subscription is workspace-level, not per-member.
+     * All members in the workspace share the same tier.
      *
      * @return string
      */
     public function getTier(): string {
-        if (!$this->bean->id) {
-            return 'free';
-        }
-        return SubscriptionService::getTier($this->bean->id);
+        return SubscriptionService::getTier();
     }
 
     /**
-     * Get member's subscription details
+     * Get workspace subscription details
      *
      * @return array|null
      */
     public function getSubscription(): ?array {
-        if (!$this->bean->id) {
-            return null;
-        }
-        return SubscriptionService::getSubscription($this->bean->id);
+        return SubscriptionService::getSubscription();
     }
 }

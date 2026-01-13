@@ -2,73 +2,80 @@
     <div class="row justify-content-center">
         <div class="col-md-6">
             <div class="card">
-                <div class="card-header">
-                    <h4><?= htmlspecialchars($title ?? '') ?></h4>
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="bi bi-envelope-plus"></i> <?= htmlspecialchars($title ?? 'Invite New Member') ?></h4>
                 </div>
                 <div class="card-body">
                     <?php if (!empty($error)): ?>
                         <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
                     <?php endif; ?>
-                    
+
                     <?php if (!empty($success)): ?>
                         <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
                     <?php endif; ?>
-                    
+
+                    <div class="alert alert-info mb-4">
+                        <i class="bi bi-info-circle"></i>
+                        An email invitation will be sent to the user. They will set their own password when accepting the invite.
+                    </div>
+
                     <form method="POST">
                         <?php if (!empty($csrf) && is_array($csrf)): ?>
                             <?php foreach ($csrf as $name => $value): ?>
                                 <input type="hidden" name="<?= htmlspecialchars($name ?? '') ?>" value="<?= htmlspecialchars($value ?? '') ?>">
                             <?php endforeach; ?>
                         <?php endif; ?>
-                        
+
                         <div class="mb-3">
-                            <label for="username" class="form-label">Username *</label>
-                            <input type="text" class="form-control" id="username" name="username" 
-                                   value="<?= htmlspecialchars($_POST['username'] ?? '') ?>" required>
-                            <small class="form-text text-muted">Minimum 3 characters</small>
+                            <label for="email" class="form-label">Email Address *</label>
+                            <input type="email" class="form-control" id="email" name="email"
+                                   value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" required
+                                   placeholder="user@example.com">
+                            <small class="form-text text-muted">Invitation will be sent to this email</small>
                         </div>
-                        
+
                         <div class="mb-3">
-                            <label for="email" class="form-label">Email *</label>
-                            <input type="email" class="form-control" id="email" name="email" 
-                                   value="<?= htmlspecialchars($_POST['email'] ?? '') ?>" required>
+                            <label for="display_name" class="form-label">Display Name</label>
+                            <input type="text" class="form-control" id="display_name" name="display_name"
+                                   value="<?= htmlspecialchars($_POST['display_name'] ?? '') ?>"
+                                   placeholder="John Doe">
+                            <small class="form-text text-muted">Optional - user can set this when accepting invite</small>
                         </div>
-                        
+
                         <div class="mb-3">
-                            <label for="password" class="form-label">Password *</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                            <small class="form-text text-muted">Minimum 8 characters</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="level" class="form-label">User Level</label>
+                            <label for="level" class="form-label">Permission Level *</label>
                             <select class="form-select" id="level" name="level" required>
-                                <option value="0" <?= ($_POST['level'] ?? 100) == 0 ? 'selected' : '' ?>>ROOT (0)</option>
-                                <option value="1" <?= ($_POST['level'] ?? 100) == 1 ? 'selected' : '' ?>>ROOT (1)</option>
-                                <option value="50" <?= ($_POST['level'] ?? 100) == 50 ? 'selected' : '' ?>>ADMIN (50)</option>
-                                <option value="100" <?= ($_POST['level'] ?? 100) == 100 ? 'selected' : '' ?>>MEMBER (100)</option>
-                                <option value="101" <?= ($_POST['level'] ?? 100) == 101 ? 'selected' : '' ?>>PUBLIC (101)</option>
+                                <option value="100" <?= ($_POST['level'] ?? 100) == 100 ? 'selected' : '' ?>>Member (Standard User)</option>
+                                <option value="50" <?= ($_POST['level'] ?? 100) == 50 ? 'selected' : '' ?>>Admin (Can manage members & settings)</option>
+                                <option value="1" <?= ($_POST['level'] ?? 100) == 1 ? 'selected' : '' ?>>Root (Full system access)</option>
                             </select>
-                            <small class="form-text text-muted">
-                                <strong>ROOT:</strong> Full system access<br>
-                                <strong>ADMIN:</strong> Administrative access<br>
-                                <strong>MEMBER:</strong> Regular user access<br>
-                                <strong>PUBLIC:</strong> Limited/guest access
-                            </small>
+                            <div class="form-text">
+                                <table class="table table-sm table-borderless mt-2 mb-0" style="font-size: 0.85em;">
+                                    <tr>
+                                        <td><span class="badge bg-secondary">Member</span></td>
+                                        <td>Can use dashboards, view boards, run analysis</td>
+                                    </tr>
+                                    <tr>
+                                        <td><span class="badge bg-warning text-dark">Admin</span></td>
+                                        <td>+ Manage members, settings, integrations</td>
+                                    </tr>
+                                    <tr>
+                                        <td><span class="badge bg-danger">Root</span></td>
+                                        <td>+ Full system access, can delete admins</td>
+                                    </tr>
+                                </table>
+                            </div>
                         </div>
-                        
-                        <div class="mb-3">
-                            <label for="status" class="form-label">Status</label>
-                            <select class="form-select" id="status" name="status" required>
-                                <option value="active" <?= ($_POST['status'] ?? 'active') === 'active' ? 'selected' : '' ?>>Active</option>
-                                <option value="suspended" <?= ($_POST['status'] ?? 'active') === 'suspended' ? 'selected' : '' ?>>Suspended</option>
-                                <option value="inactive" <?= ($_POST['status'] ?? 'active') === 'inactive' ? 'selected' : '' ?>>Inactive</option>
-                            </select>
-                        </div>
-                        
+
+                        <hr>
+
                         <div class="d-flex justify-content-between">
-                            <a href="/admin/members" class="btn btn-secondary">Cancel</a>
-                            <button type="submit" class="btn btn-primary">Create Member</button>
+                            <a href="/admin/members" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-send"></i> Send Invitation
+                            </button>
                         </div>
                     </form>
                 </div>

@@ -10,6 +10,7 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Exception as Exception;
+use \app\Bean;
 use \app\services\UserDatabaseService;
 use \app\services\LLMProviders\LLMProviderFactory;
 
@@ -90,16 +91,13 @@ class Api extends BaseControls\Control {
             $pass = $dbConfig['pass'] ?? '';
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
 
-            // Check if already added
-            if (!R::hasDatabase($this->tenantSlug)) {
-                R::addDatabase($this->tenantSlug, $dsn, $user, $pass);
-            }
-            R::selectDatabase($this->tenantSlug);
+            // Add and switch to tenant database
+            Bean::useDatabase($this->tenantSlug, $dsn, $user, $pass);
 
             // Get member from tenant by email (main member has same email)
-            $mainMember = R::selectDatabase('default');
+            Bean::selectDatabase('default');
             $mainMember = R::load('member', $mainMemberId);
-            R::selectDatabase($this->tenantSlug);
+            Bean::selectDatabase($this->tenantSlug);
 
             $tenantMember = R::findOne('member', 'email = ?', [$mainMember->email]);
             if ($tenantMember) {
@@ -132,8 +130,8 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get all agents with expose_as_mcp = 1 (use tenant member ID)
-        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+        // Get all agents with expose_as_mcp = 1 (workspace-level - shared by all members)
+        $agents = R::find('aiagents', 'expose_as_mcp = 1 AND is_active = 1');
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -220,9 +218,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Verify agent ownership and get agent config (use tenant member ID)
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id, $this->tenantMemberId]);
+        // Verify agent exists and get agent config (workspace-level)
+        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$tool->agent_id]);
         if (!$agent) {
             Flight::jsonError("Tool's agent not accessible", 403);
             return;
@@ -441,8 +439,8 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get all agents with expose_as_mcp = 1
-        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+        // Get all agents with expose_as_mcp = 1 (workspace-level)
+        $agents = R::find('aiagents', 'expose_as_mcp = 1 AND is_active = 1');
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -517,9 +515,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id, $this->tenantMemberId]);
+        // Verify agent exists (workspace-level)
+        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$tool->agent_id]);
         if (!$agent) {
             $this->jsonRpcError(-32000, "Tool's agent not accessible", $id);
             return;
@@ -657,9 +655,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get the agent
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$agentId, $this->tenantMemberId]);
+        // Get the agent (workspace-level)
+        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$agentId]);
 
         if (!$agent) {
             Flight::jsonError('Agent not found or not exposed as MCP', 404);

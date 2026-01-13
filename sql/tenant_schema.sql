@@ -199,7 +199,8 @@ CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `job_id` VARCHAR(64) NOT NULL UNIQUE,
     `member_id` INT NOT NULL,
     `issue_key` VARCHAR(50) NOT NULL,
-    `board_id` INT DEFAULT NULL COMMENT 'Nullable for GitHub-only workflows',
+    `project_type` VARCHAR(20) NOT NULL DEFAULT 'jira' COMMENT 'Source type: jira, github, monday, zoho',
+    `board_id` INT DEFAULT NULL COMMENT 'Nullable for non-Jira workflows',
     `repo_connection_id` INT,
     `cloud_id` VARCHAR(100),
     `status` VARCHAR(30) DEFAULT 'pending',
@@ -232,6 +233,7 @@ CREATE TABLE IF NOT EXISTS `aidevjobs` (
     `confirmation_last_error` TEXT DEFAULT NULL COMMENT 'Last error message from failed confirmation attempt',
     INDEX `idx_member` (`member_id`),
     INDEX `idx_board` (`board_id`),
+    INDEX `idx_project_type` (`project_type`),
     INDEX `idx_status` (`status`),
     INDEX `idx_issue` (`issue_key`),
     INDEX `idx_member_issue` (`member_id`, `issue_key`),
@@ -328,14 +330,19 @@ CREATE TABLE IF NOT EXISTS `enterprisesettings` (
     INDEX `idx_key` (`setting_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Anthropic API keys (multiple keys per tenant)
+-- Anthropic API keys (member-owned with optional workspace sharing)
 CREATE TABLE IF NOT EXISTS `anthropickeys` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
+    `created_by_member_id` INT NOT NULL,
+    `created_by_name` VARCHAR(255),
     `name` VARCHAR(100) NOT NULL,
     `api_key` TEXT NOT NULL,
     `model` VARCHAR(100) DEFAULT 'claude-sonnet-4-20250514',
+    `shared` TINYINT(1) DEFAULT 0,
     `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP
+    `updated_at` DATETIME ON UPDATE CURRENT_TIMESTAMP,
+    INDEX `idx_member` (`created_by_member_id`),
+    INDEX `idx_shared` (`shared`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- User settings (key-value store)
@@ -573,6 +580,7 @@ CREATE TABLE IF NOT EXISTS `ctoprojects` (
 
     -- Project info
     `name` VARCHAR(255) NOT NULL,
+    `project_type` VARCHAR(20) NOT NULL DEFAULT 'jira' COMMENT 'Source type: jira, github, monday, zoho',
     `description` TEXT,
     `goals` JSON,
 
@@ -599,6 +607,7 @@ CREATE TABLE IF NOT EXISTS `ctoprojects` (
     INDEX `idx_status` (`status`),
     INDEX `idx_directive` (`directive_id`),
     INDEX `idx_project_id` (`project_id`),
+    INDEX `idx_project_type` (`project_type`),
     FOREIGN KEY (`directive_id`) REFERENCES `ceodirectives`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

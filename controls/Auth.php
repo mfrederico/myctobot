@@ -9,6 +9,7 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Exception as Exception;
+use \app\Bean;
 use \app\plugins\GoogleAuth;
 
 // Load Google Auth plugin
@@ -207,11 +208,7 @@ class Auth extends BaseControls\Control {
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
 
             // Add this connection as a secondary database and switch to it
-            // Check if already added (e.g., from previous login attempt)
-            if (!R::hasDatabase($workspace)) {
-                R::addDatabase($workspace, $dsn, $user, $pass);
-            }
-            R::selectDatabase($workspace);
+            Bean::useDatabase($workspace, $dsn, $user, $pass);
 
             $this->logger->debug('Switched to tenant database', ['workspace' => $workspace, 'database' => $name]);
             return true;
@@ -489,7 +486,7 @@ class Auth extends BaseControls\Control {
 
                 // Now switch back to default DB
                 if ($connectedToTenant) {
-                    R::selectDatabase('default');
+                    Bean::selectDatabase('default');
                 }
 
                 // Send reset email via Mailgun - include workspace in URL
@@ -555,7 +552,7 @@ HTML;
             [$token, date('Y-m-d H:i:s')]);
 
         if (!empty($workspace)) {
-            R::selectDatabase('default');
+            Bean::selectDatabase('default');
         }
 
         if (!$member) {
@@ -627,7 +624,7 @@ HTML;
 
             if (!$member) {
                 if (!empty($workspace)) {
-                    R::selectDatabase('default');
+                    Bean::selectDatabase('default');
                 }
                 $this->flash('error', 'Invalid or expired reset link');
                 $loginUrl = $workspace ? "/login/{$workspace}" : '/auth/login';
@@ -642,7 +639,7 @@ HTML;
             R::store($member);
 
             if (!empty($workspace)) {
-                R::selectDatabase('default');
+                Bean::selectDatabase('default');
             }
 
             $this->logger->info('Password reset completed', ['id' => $member->id, 'workspace' => $workspace]);

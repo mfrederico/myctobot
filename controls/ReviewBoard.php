@@ -17,9 +17,11 @@ use \app\services\GitHubClient;
 use \app\services\JiraClient;
 use \app\services\EncryptionService;
 use \app\services\AIDevStatusService;
+use \app\services\AIDevJobService;
 
 require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/AIDevStatusService.php';
+require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/PMAgent.php';
 require_once __DIR__ . '/../services/GitHubClient.php';
@@ -56,6 +58,15 @@ class ReviewBoard extends BaseControls\Control {
             $this->flash('error', 'User database not initialized');
             Flight::redirect('/settings/connections');
             return;
+        }
+
+        // Auto-cleanup stale jobs (running in DB but no tmux session)
+        $staleCleanup = AIDevJobService::cleanupStaleJobs();
+        if ($staleCleanup['cleaned'] > 0) {
+            $this->logger->info('Auto-cleaned stale jobs on Review Board load', [
+                'found' => $staleCleanup['found'],
+                'cleaned' => $staleCleanup['cleaned']
+            ]);
         }
 
         // Get all projects with pending stories
@@ -137,6 +148,9 @@ class ReviewBoard extends BaseControls\Control {
             Flight::jsonError('User database not initialized', 500);
             return;
         }
+
+        // Auto-cleanup stale jobs (running in DB but no tmux session)
+        AIDevJobService::cleanupStaleJobs();
 
         $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
         if (!$project) {
@@ -469,8 +483,8 @@ class ReviewBoard extends BaseControls\Control {
      * Get GitHub configuration for the current user
      */
     private function getGitHubConfig(): ?array {
-        // Check for repo connections (for owner/repo info)
-        $repo = Bean::findOne('repoconnections', 'member_id = ? AND provider = ?', [$this->member->id, 'github']);
+        // Check for repo connections (workspace-level - shared by all members)
+        $repo = Bean::findOne('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
         if (!$repo) {
             return null;
         }
@@ -599,5 +613,493 @@ class ReviewBoard extends BaseControls\Control {
             'created_at' => $story->created_at,
             'updated_at' => $story->updated_at,
         ];
+    }
+
+    /**
+     * AJAX: Get story data
+     */
+    public function getStory() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $storyId = $this->getParam('story_id');
+        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+
+        if (!$story) {
+            Flight::jsonError('Story not found', 404);
+            return;
+        }
+
+        Flight::jsonSuccess($this->storyToArray($story));
+    }
+
+    /**
+     * AJAX: Update project details
+     */
+    public function updateProject() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $projectId = $this->getParam('project_id');
+        $name = $this->getParam('name');
+        $description = $this->getParam('description');
+
+        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        if (!$project) {
+            Flight::jsonError('Project not found', 404);
+            return;
+        }
+
+        if ($name) {
+            $project->name = $name;
+        }
+        $project->description = $description;
+        $project->updated_at = date('Y-m-d H:i:s');
+        Bean::store($project);
+
+        Flight::jsonSuccess(['message' => 'Project updated']);
+    }
+
+    /**
+     * AJAX: Create a new epic
+     */
+    public function createEpic() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $projectId = $this->getParam('project_id');
+        $title = $this->getParam('title');
+        $description = $this->getParam('description');
+
+        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        if (!$project) {
+            Flight::jsonError('Project not found', 404);
+            return;
+        }
+
+        if (empty($title)) {
+            Flight::jsonError('Title is required', 400);
+            return;
+        }
+
+        // Get max sequence for ordering
+        $maxSeq = Bean::getCell('SELECT MAX(sequence) FROM ctoepics WHERE project_id = ?', [$project->id]);
+
+        $epic = Bean::dispense('ctoepics');
+        $epic->epic_id = bin2hex(random_bytes(16));
+        $epic->project_id = $project->id;
+        $epic->title = $title;
+        $epic->description = $description;
+        $epic->status = 'backlog';
+        $epic->sequence = ($maxSeq ?? 0) + 1;
+        $epic->created_at = date('Y-m-d H:i:s');
+        Bean::store($epic);
+
+        Flight::jsonSuccess(['message' => 'Epic created', 'epic_id' => $epic->epic_id]);
+    }
+
+    /**
+     * AJAX: Update an epic
+     */
+    public function updateEpic() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $epicId = $this->getParam('epic_id');
+        $title = $this->getParam('title');
+        $description = $this->getParam('description');
+
+        $epic = Bean::findOne('ctoepics', 'epic_id = ?', [$epicId]);
+        if (!$epic) {
+            Flight::jsonError('Epic not found', 404);
+            return;
+        }
+
+        if ($title) {
+            $epic->title = $title;
+        }
+        $epic->description = $description;
+        $epic->updated_at = date('Y-m-d H:i:s');
+        Bean::store($epic);
+
+        Flight::jsonSuccess(['message' => 'Epic updated']);
+    }
+
+    /**
+     * AJAX: Create a new story
+     */
+    public function createStory() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $epicId = $this->getParam('epic_id');
+        $title = $this->getParam('title');
+        $description = $this->getParam('description');
+        $storyPoints = $this->getParam('story_points');
+        $acceptanceCriteria = $this->getParam('acceptance_criteria');
+
+        $epic = Bean::findOne('ctoepics', 'epic_id = ?', [$epicId]);
+        if (!$epic) {
+            Flight::jsonError('Epic not found', 404);
+            return;
+        }
+
+        if (empty($title)) {
+            Flight::jsonError('Title is required', 400);
+            return;
+        }
+
+        $story = Bean::dispense('ctostories');
+        $story->story_id = bin2hex(random_bytes(16));
+        $story->epic_id = $epic->id;
+        $story->title = $title;
+        $story->description = $description;
+        $story->story_points = $storyPoints ? (int)$storyPoints : null;
+        $story->acceptance_criteria = json_encode($acceptanceCriteria ?: []);
+        $story->status = 'pending_review';
+        $story->created_at = date('Y-m-d H:i:s');
+        Bean::store($story);
+
+        // Update epic story count
+        $epic->story_count = ($epic->story_count ?? 0) + 1;
+        Bean::store($epic);
+
+        Flight::jsonSuccess(['message' => 'Story created', 'story_id' => $story->story_id]);
+    }
+
+    /**
+     * AJAX: Move story to different epic
+     */
+    public function moveStory() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $storyId = $this->getParam('story_id');
+        $targetEpicId = $this->getParam('epic_id');
+
+        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+        if (!$story) {
+            Flight::jsonError('Story not found', 404);
+            return;
+        }
+
+        $targetEpic = Bean::findOne('ctoepics', 'epic_id = ?', [$targetEpicId]);
+        if (!$targetEpic) {
+            Flight::jsonError('Target epic not found', 404);
+            return;
+        }
+
+        // Update old epic's story count
+        $oldEpic = Bean::load('ctoepics', $story->epic_id);
+        if ($oldEpic->id) {
+            $oldEpic->story_count = max(0, ($oldEpic->story_count ?? 1) - 1);
+            Bean::store($oldEpic);
+        }
+
+        // Move story
+        $story->epic_id = $targetEpic->id;
+        $story->updated_at = date('Y-m-d H:i:s');
+        Bean::store($story);
+
+        // Update new epic's story count
+        $targetEpic->story_count = ($targetEpic->story_count ?? 0) + 1;
+        Bean::store($targetEpic);
+
+        Flight::jsonSuccess(['message' => 'Story moved']);
+    }
+
+    // ==================== Runner Limit Endpoints ====================
+
+    /**
+     * AJAX: Get current runner status (running count, max limit, queued jobs)
+     */
+    public function getRunnerStatus() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $status = AIDevJobService::getRunnerStatus();
+        Flight::jsonSuccess($status);
+    }
+
+    /**
+     * AJAX: Update workspace runner limit
+     */
+    public function updateRunnerLimit() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $newLimit = (int)$this->getParam('limit');
+        if ($newLimit < 1) {
+            Flight::jsonError('Limit must be at least 1', 400);
+            return;
+        }
+
+        $result = AIDevJobService::updateRunnerLimit($newLimit);
+
+        if ($result['success']) {
+            $this->logger->info('Runner limit updated', [
+                'member_id' => $this->member->id,
+                'old_limit' => $result['old_limit'] ?? null,
+                'new_limit' => $result['new_limit']
+            ]);
+            Flight::jsonSuccess($result, 'Runner limit updated');
+        } else {
+            Flight::jsonError($result['error'] ?? 'Failed to update runner limit', 400);
+        }
+    }
+
+    // ==================== Stale Job Detection Endpoints ====================
+
+    /**
+     * AJAX: Find jobs that are marked as running but have no live tmux session
+     */
+    public function findStaleJobs() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        try {
+            $staleJobs = AIDevJobService::findStaleJobs();
+
+            $this->logger->debug('Stale job check completed', [
+                'member_id' => $this->member->id,
+                'stale_count' => count($staleJobs)
+            ]);
+
+            Flight::jsonSuccess([
+                'stale_jobs' => $staleJobs,
+                'count' => count($staleJobs)
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->error('Error finding stale jobs', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            Flight::jsonError('Error checking for stale jobs: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * AJAX: Clean up all stale jobs (mark as failed)
+     */
+    public function cleanupStaleJobs() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $result = AIDevJobService::cleanupStaleJobs();
+
+        $this->logger->info('Stale jobs cleaned up', [
+            'member_id' => $this->member->id,
+            'found' => $result['found'],
+            'cleaned' => $result['cleaned']
+        ]);
+
+        if ($result['cleaned'] > 0) {
+            Flight::jsonSuccess($result, "{$result['cleaned']} stale job(s) marked as failed");
+        } else if ($result['found'] === 0) {
+            Flight::jsonSuccess($result, 'No stale jobs found');
+        } else {
+            Flight::jsonError('Failed to clean up some stale jobs', 500);
+        }
+    }
+
+    /**
+     * AJAX: Check if a specific job's tmux session is still alive
+     */
+    public function checkJobSession() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $jobId = $this->getParam('job_id');
+        if (!$jobId) {
+            Flight::jsonError('Job ID required', 400);
+            return;
+        }
+
+        $status = AIDevJobService::checkJobSession($jobId);
+        Flight::jsonSuccess($status);
+    }
+
+    /**
+     * AJAX: Mark a specific job as stale/failed
+     */
+    public function markJobStale() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $jobId = $this->getParam('job_id');
+        if (!$jobId) {
+            Flight::jsonError('Job ID required', 400);
+            return;
+        }
+
+        $reason = $this->getParam('reason') ?? 'Manually marked as crashed';
+        $result = AIDevJobService::markJobAsStale($jobId, $reason);
+
+        if ($result['success']) {
+            $this->logger->info('Job marked as stale', [
+                'member_id' => $this->member->id,
+                'job_id' => $jobId,
+                'issue_key' => $result['issue_key'] ?? null
+            ]);
+            Flight::jsonSuccess($result, 'Job marked as failed');
+        } else {
+            Flight::jsonError($result['error'] ?? 'Failed to mark job as stale', 400);
+        }
+    }
+
+    /**
+     * AJAX: Retry a failed job
+     */
+    public function retryJob() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $jobId = $this->getParam('job_id');
+        if (!$jobId) {
+            Flight::jsonError('Job ID required', 400);
+            return;
+        }
+
+        $tenant = $_SESSION['tenant_slug'] ?? null;
+        $jobService = new AIDevJobService();
+        $result = $jobService->retryJob($jobId, $this->member->id, $tenant);
+
+        if ($result['success']) {
+            $this->logger->info('Job retry initiated', [
+                'member_id' => $this->member->id,
+                'job_id' => $jobId,
+                'issue_key' => $result['issue_key'] ?? null
+            ]);
+            Flight::jsonSuccess($result, 'Job retry started');
+        } else {
+            Flight::jsonError($result['error'] ?? 'Failed to retry job', 400);
+        }
+    }
+
+    /**
+     * AJAX: Start a new job for an approved story that has an issue but no job yet
+     */
+    public function startJob() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $issueKey = $this->getParam('issue_key');
+        if (!$issueKey) {
+            Flight::jsonError('Issue key required', 400);
+            return;
+        }
+
+        // Find the story with this issue key
+        $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$issueKey]);
+        if (!$story) {
+            Flight::jsonError('Story not found for issue: ' . $issueKey, 404);
+            return;
+        }
+
+        // Verify story is approved
+        if ($story->status !== 'approved') {
+            Flight::jsonError('Story must be approved before starting a job', 400);
+            return;
+        }
+
+        // Check if a job already exists
+        $existingJob = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if ($existingJob && !in_array($existingJob->status, ['failed', 'complete', 'pr_created'])) {
+            Flight::jsonError('A job already exists for this issue (status: ' . $existingJob->status . ')', 400);
+            return;
+        }
+
+        // Get GitHub config for repo info
+        $githubConfig = $this->getGitHubConfig();
+        if (!$githubConfig) {
+            Flight::jsonError('GitHub not configured', 400);
+            return;
+        }
+
+        $tenant = $_SESSION['tenant_slug'] ?? null;
+        $repoId = $githubConfig['repo_id'] ?? null;
+
+        // Use AIDevJobService to trigger the job
+        $jobService = new AIDevJobService();
+        $result = $jobService->triggerJob(
+            $this->member->id,
+            $issueKey,
+            '',        // cloudId (not used for GitHub)
+            null,      // boardId (not used for GitHub)
+            $repoId,   // repoId
+            $tenant,
+            false,     // useOrchestrator
+            AIDevJobService::PROJECT_TYPE_GITHUB  // projectType
+        );
+
+        if ($result['success']) {
+            $this->logger->info('New job started from Review Board', [
+                'member_id' => $this->member->id,
+                'issue_key' => $issueKey,
+                'job_id' => $result['job_id'] ?? null
+            ]);
+            Flight::jsonSuccess([
+                'job_id' => $result['job_id'] ?? null,
+                'issue_key' => $issueKey
+            ], 'Job started successfully');
+        } else {
+            Flight::jsonError($result['error'] ?? 'Failed to start job', 500);
+        }
     }
 }

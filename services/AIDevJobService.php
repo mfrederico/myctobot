@@ -20,8 +20,10 @@ require_once __DIR__ . '/TmuxService.php';
 require_once __DIR__ . '/CeoDirectiveLogger.php';
 require_once __DIR__ . '/DeliveryConfirmationService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
+require_once __DIR__ . '/../lib/Bean.php';
 
 use \app\plugins\AtlassianAuth;
+use \app\Bean;
 
 class AIDevJobService {
 
@@ -31,33 +33,45 @@ class AIDevJobService {
         $this->logger = Flight::get('log');
     }
 
+    // Supported project types
+    public const PROJECT_TYPE_JIRA = 'jira';
+    public const PROJECT_TYPE_GITHUB = 'github';
+    public const PROJECT_TYPE_MONDAY = 'monday';
+    public const PROJECT_TYPE_ZOHO = 'zoho';
+
     /**
      * Trigger an AI Developer job on a shard
      *
      * @param int $memberId Member ID
-     * @param string $issueKey Jira issue key (e.g., "SSI-1871")
-     * @param string $cloudId Atlassian cloud ID
-     * @param int|null $boardId Board ID (optional, will be auto-detected from issue key)
+     * @param string $issueKey Issue key (e.g., "SSI-1871" for Jira, "owner/repo#123" for GitHub)
+     * @param string $cloudId Atlassian cloud ID (or identifier for the project source)
+     * @param int|null $boardId Board ID (optional, will be auto-detected for Jira)
      * @param int|null $repoId Repository connection ID (optional, will use first enabled)
      * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Whether to use orchestrator mode
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      * @return array Result with 'success', 'job_id', 'error' keys
      */
-    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false): array {
+    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false, string $projectType = self::PROJECT_TYPE_JIRA): array {
         try {
             // Validate member exists
             $member = R::load('member', $memberId);
             if (!$member || !$member->id) {
                 return ['success' => false, 'error' => 'Member not found'];
             }
-            // All features now available to all tiers
 
-            // API key and model will be determined per-board later (after boardId is resolved)
+            $this->logger->debug('triggerJob called', [
+                'member_id' => $memberId,
+                'issue_key' => $issueKey,
+                'project_type' => $projectType,
+                'board_id' => $boardId,
+                'repo_id' => $repoId
+            ]);
 
-            // Auto-detect board ID from issue key if not provided
-            if (!$boardId) {
+            // Auto-detect board ID from issue key if not provided (Jira only)
+            if (!$boardId && $projectType === self::PROJECT_TYPE_JIRA) {
                 $projectKey = explode('-', $issueKey)[0];
-                $board = R::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
+                $board = Bean::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
                 if (!$board) {
                     return ['success' => false, 'error' => "No board found for project: {$projectKey}"];
                 }
@@ -118,8 +132,8 @@ class AIDevJobService {
             $existingBranch = AIDevStatusService::findBranchForIssueKey($memberId, $issueKey);
             $branchSource = 'database';
 
-            if (!$existingBranch) {
-                // Try to get branch from Jira's development info
+            if (!$existingBranch && $projectType === self::PROJECT_TYPE_JIRA) {
+                // Try to get branch from Jira's development info (Jira only)
                 try {
                     $jiraClient = new JiraClient($memberId, $cloudId);
                     $existingBranch = $jiraClient->getBranchForIssue($issueKey);
@@ -140,22 +154,44 @@ class AIDevJobService {
                 ]);
             }
 
-            // Get board's API key setting: NULL = local runner, ID = use that key
-            $boardBean = R::load('jiraboards', $boardId);
-            $boardKeyId = $boardBean->aidev_anthropic_key_id;
+            // Determine execution mode based on project type and board settings
+            $useLocalRunner = true; // Default to local runner
+            $boardKeyId = null;
 
-            // Determine execution mode: NULL key ID = local runner
-            $useLocalRunner = ($boardKeyId === null || $boardKeyId === '' || !$boardKeyId);
+            if ($projectType === self::PROJECT_TYPE_JIRA && $boardId) {
+                // For Jira, check board's API key setting: NULL = local runner, ID = use that key
+                $boardBean = Bean::load('jiraboards', $boardId);
+                $boardKeyId = $boardBean->aidev_anthropic_key_id;
+                $useLocalRunner = ($boardKeyId === null || $boardKeyId === '' || !$boardKeyId);
 
-            // Fall back to global config if board has no setting
-            if ($useLocalRunner) {
-                // Check if global config overrides to use API
-                $globalUseLocal = Flight::get('aidev.use_local_runner') ?? true;
-                $useLocalRunner = $globalUseLocal;
+                if ($useLocalRunner) {
+                    // Fall back to global config if board has no setting
+                    $globalUseLocal = Flight::get('aidev.use_local_runner') ?? true;
+                    $useLocalRunner = $globalUseLocal;
+                }
             }
+            // Non-Jira project types (github, monday, zoho) always use local runner
 
             if ($useLocalRunner) {
-                // Check concurrency limits for local runner
+                // Check workspace-level runner limit first
+                $wsLimit = self::checkWorkspaceLocalRunnerLimit();
+                if (!$wsLimit['available']) {
+                    $this->logger->info('Workspace runner limit reached', [
+                        'member_id' => $memberId,
+                        'issue_key' => $issueKey,
+                        'running' => $wsLimit['running'],
+                        'max' => $wsLimit['max']
+                    ]);
+                    return [
+                        'success' => false,
+                        'error' => "Workspace runner limit reached ({$wsLimit['running']}/{$wsLimit['max']} running). Please wait for a job to complete or increase the limit.",
+                        'limit_reached' => true,
+                        'running' => $wsLimit['running'],
+                        'max' => $wsLimit['max']
+                    ];
+                }
+
+                // Check per-member concurrency limits for local runner
                 $concurrencyCheck = $this->checkConcurrency($memberId);
                 if (!$concurrencyCheck['available']) {
                     return ['success' => false, 'error' => $concurrencyCheck['error']];
@@ -167,14 +203,18 @@ class AIDevJobService {
                     'board_key_id' => $boardKeyId,
                     'source' => 'local_runner',
                     'running_jobs' => $concurrencyCheck['running_count'],
-                    'max_concurrent' => $concurrencyCheck['max_concurrent']
+                    'max_concurrent' => $concurrencyCheck['max_concurrent'],
+                    'workspace_running' => $wsLimit['running'],
+                    'workspace_max' => $wsLimit['max']
                 ]);
 
-                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator);
+                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator, $projectType);
 
                 if ($result['success']) {
-                    // Add working label and transition status
-                    $this->onJobStarted($memberId, $cloudId, $issueKey, $boardId);
+                    // Add working label and transition status (Jira only)
+                    if ($projectType === self::PROJECT_TYPE_JIRA) {
+                        $this->onJobStarted($memberId, $cloudId, $issueKey, $boardId);
+                    }
                 }
 
                 return $result;
@@ -416,6 +456,110 @@ class AIDevJobService {
             'available' => true,
             'running_count' => $runningJobs,
             'max_concurrent' => $maxConcurrent
+        ];
+    }
+
+    /**
+     * Check workspace-level local runner concurrency limit
+     *
+     * This limits how many tmux-claude-runners can run simultaneously
+     * across the entire workspace (not per-member).
+     *
+     * Priority: INI config > enterprisesettings > default (2)
+     * Hard cap: 4 (will be configurable by payment tier in future)
+     *
+     * @return array ['available' => bool, 'running' => int, 'max' => int, 'hard_cap' => int]
+     */
+    public static function checkWorkspaceLocalRunnerLimit(): array {
+        $maxLocalRunners = 2; // default
+        $hardCap = 4; // absolute max for now (future: up to 8 based on tier)
+
+        // 1. Check INI config first (tenant override)
+        $iniMax = Flight::get('aidev.max_concurrent_local_runners');
+        if ($iniMax !== null && $iniMax !== '') {
+            $maxLocalRunners = min((int)$iniMax, $hardCap);
+        } else {
+            // 2. Check workspace setting in database (no member_id = workspace-level)
+            $setting = Bean::findOne('enterprisesettings',
+                'setting_key = ?',
+                ['max_concurrent_local_runners']
+            );
+            if ($setting && $setting->setting_value) {
+                $maxLocalRunners = min((int)$setting->setting_value, $hardCap);
+            }
+        }
+
+        // Count running LOCAL jobs workspace-wide
+        // Local jobs have shard_id NULL or empty
+        $runningLocal = (int)Bean::count('aidevjobs',
+            'status = ? AND (shard_id IS NULL OR shard_id = ?)',
+            ['running', '']
+        );
+
+        return [
+            'available' => $runningLocal < $maxLocalRunners,
+            'running' => $runningLocal,
+            'max' => $maxLocalRunners,
+            'hard_cap' => $hardCap
+        ];
+    }
+
+    /**
+     * Get current runner status for UI display
+     *
+     * @return array Runner status info
+     */
+    public static function getRunnerStatus(): array {
+        $limit = self::checkWorkspaceLocalRunnerLimit();
+
+        // Also get queued jobs (approved but not yet running)
+        $queuedJobs = (int)Bean::count('aidevjobs',
+            'status = ?',
+            ['pending']
+        );
+
+        return [
+            'running' => $limit['running'],
+            'max' => $limit['max'],
+            'hard_cap' => $limit['hard_cap'],
+            'queued' => $queuedJobs,
+            'available_slots' => max(0, $limit['max'] - $limit['running'])
+        ];
+    }
+
+    /**
+     * Update workspace runner limit setting
+     *
+     * @param int $newLimit New limit (will be capped at hard_cap)
+     * @return array Result with new limit
+     */
+    public static function updateRunnerLimit(int $newLimit): array {
+        $hardCap = 4; // same as in checkWorkspaceLocalRunnerLimit
+        $minLimit = 1;
+
+        // Enforce bounds
+        $newLimit = max($minLimit, min($newLimit, $hardCap));
+
+        // Find or create setting
+        $setting = Bean::findOne('enterprisesettings',
+            'setting_key = ?',
+            ['max_concurrent_local_runners']
+        );
+
+        if (!$setting) {
+            $setting = Bean::dispense('enterprisesettings');
+            $setting->setting_key = 'max_concurrent_local_runners';
+            $setting->created_at = date('Y-m-d H:i:s');
+        }
+
+        $setting->setting_value = (string)$newLimit;
+        $setting->updated_at = date('Y-m-d H:i:s');
+        Bean::store($setting);
+
+        return [
+            'success' => true,
+            'limit' => $newLimit,
+            'hard_cap' => $hardCap
         ];
     }
 
@@ -748,7 +892,7 @@ class AIDevJobService {
         }
 
         // Create job record (use 0 for boardId since GitHub doesn't have boards)
-        $jobId = AIDevStatusService::createJob($memberId, 0, $issueKey, $repoId, 'github');
+        $jobId = AIDevStatusService::createJob($memberId, 0, $issueKey, $repoId, null, 'github');
 
         // Update status to running
         AIDevStatusService::updateStatus(
@@ -810,14 +954,15 @@ class AIDevJobService {
      *
      * @param int $memberId Member ID
      * @param string $issueKey Issue key
-     * @param int $boardId Board ID
-     * @param string $cloudId Cloud ID
+     * @param int $boardId Board ID (0 for non-Jira projects)
+     * @param string $cloudId Cloud ID (or identifier for non-Jira sources)
      * @param int|null $repoId Repository connection ID
      * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Use orchestrator mode
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      * @return array Result with 'success', 'job_id', 'session_name' keys
      */
-    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true): array {
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true, string $projectType = self::PROJECT_TYPE_JIRA): array {
         $tmux = new TmuxService($memberId, $issueKey);
 
         // Check if session already exists
@@ -834,8 +979,8 @@ class AIDevJobService {
             ];
         }
 
-        // Create job record for tracking (include repoId)
-        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, $repoId, $cloudId);
+        // Create job record for tracking (include repoId and projectType)
+        $jobId = AIDevStatusService::createJob($memberId, $boardId, $issueKey, $repoId, $cloudId, $projectType);
 
         // Update status to running
         AIDevStatusService::updateStatus(
@@ -926,7 +1071,7 @@ class AIDevJobService {
      * @return array Status settings (working, pr_created, clarification, failed)
      */
     public function getBoardStatusSettings(int $memberId, int $boardId): array {
-        $board = R::load('jiraboards', $boardId);
+        $board = Bean::load('jiraboards', $boardId);
         if (!$board || !$board->id) {
             return [];
         }
@@ -946,14 +1091,22 @@ class AIDevJobService {
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      */
-    public function onJobStarted(int $memberId, string $cloudId, string $issueKey, int $boardId): void {
+    public function onJobStarted(int $memberId, string $cloudId, string $issueKey, int $boardId, string $projectType = self::PROJECT_TYPE_JIRA): void {
         $this->logger->info('onJobStarted called', [
             'member_id' => $memberId,
             'cloud_id' => $cloudId,
             'issue_key' => $issueKey,
-            'board_id' => $boardId
+            'board_id' => $boardId,
+            'project_type' => $projectType
         ]);
+
+        // Skip Jira operations for non-Jira project types
+        if ($projectType !== self::PROJECT_TYPE_JIRA) {
+            $this->logger->debug('Skipping Jira operations for non-Jira project', ['issue_key' => $issueKey, 'project_type' => $projectType]);
+            return;
+        }
 
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
@@ -1021,8 +1174,15 @@ class AIDevJobService {
      * @param int $boardId Board ID
      * @param string|null $jobId Job ID for confirmation tracking
      * @param array $result Job result containing pr_url, pr_number, branch_name, files_changed, summary
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      */
-    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId, ?string $jobId = null, array $result = []): void {
+    public function onJobCompleted(int $memberId, string $cloudId, string $issueKey, int $boardId, ?string $jobId = null, array $result = [], string $projectType = self::PROJECT_TYPE_JIRA): void {
+        // Skip Jira operations for non-Jira project types
+        if ($projectType !== self::PROJECT_TYPE_JIRA) {
+            $this->logger->debug('Skipping Jira operations for non-Jira project on completion', ['issue_key' => $issueKey, 'project_type' => $projectType]);
+            return;
+        }
+
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -1067,8 +1227,15 @@ class AIDevJobService {
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
      * @param int $boardId Board ID
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      */
-    public function onJobNeedsClarification(int $memberId, string $cloudId, string $issueKey, int $boardId): void {
+    public function onJobNeedsClarification(int $memberId, string $cloudId, string $issueKey, int $boardId, string $projectType = self::PROJECT_TYPE_JIRA): void {
+        // Skip Jira operations for non-Jira project types
+        if ($projectType !== self::PROJECT_TYPE_JIRA) {
+            $this->logger->debug('Skipping Jira operations for non-Jira project on clarification', ['issue_key' => $issueKey, 'project_type' => $projectType]);
+            return;
+        }
+
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -1110,8 +1277,15 @@ class AIDevJobService {
      * @param string $errorMessage Error message
      * @param string|null $jobId Job ID for confirmation tracking
      * @param array $context Additional context about the failure
+     * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      */
-    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage, ?string $jobId = null, array $context = []): void {
+    public function onJobFailed(int $memberId, string $cloudId, string $issueKey, int $boardId, string $errorMessage, ?string $jobId = null, array $context = [], string $projectType = self::PROJECT_TYPE_JIRA): void {
+        // Skip Jira operations for non-Jira project types
+        if ($projectType !== self::PROJECT_TYPE_JIRA) {
+            $this->logger->debug('Skipping Jira operations for non-Jira project on failure', ['issue_key' => $issueKey, 'project_type' => $projectType]);
+            return;
+        }
+
         try {
             $jiraClient = new JiraClient($memberId, $cloudId);
 
@@ -1713,5 +1887,274 @@ class AIDevJobService {
                 'error' => $e->getMessage()
             ];
         }
+    }
+
+    // ========================================
+    // Stale Job Detection & Cleanup
+    // ========================================
+
+    /**
+     * Find jobs that have status='running' but no live tmux session
+     * These are jobs that crashed without updating their status
+     *
+     * @return array Array of stale job info with 'job_id', 'issue_key', 'member_id', 'started_at', 'current_step'
+     */
+    public static function findStaleJobs(): array {
+        require_once __DIR__ . '/../lib/Bean.php';
+
+        // Find all jobs with running status
+        $runningJobs = \app\Bean::find('aidevjobs', 'status = ?', ['running']);
+
+        $staleJobs = [];
+        foreach ($runningJobs as $job) {
+            // Check if tmux session still exists
+            $tmux = new TmuxService($job->member_id, $job->issue_key);
+
+            if (!$tmux->exists()) {
+                // Session is gone - this is a stale job
+                $staleJobs[] = [
+                    'job_id' => $job->job_id,
+                    'id' => $job->id,
+                    'issue_key' => $job->issue_key,
+                    'member_id' => $job->member_id,
+                    'started_at' => $job->started_at,
+                    'updated_at' => $job->updated_at,
+                    'current_step' => $job->current_step,
+                    'progress' => $job->progress,
+                    'session_expected' => $tmux->getSessionName(),
+                ];
+            }
+        }
+
+        return $staleJobs;
+    }
+
+    /**
+     * Mark a specific job as failed due to crash/stale session
+     *
+     * @param string $jobId Job ID (the UUID)
+     * @param string $reason Reason for marking as stale
+     * @return array Result with 'success', 'job_id', 'error' keys
+     */
+    public static function markJobAsStale(string $jobId, string $reason = 'Tmux session crashed or terminated'): array {
+        require_once __DIR__ . '/../lib/Bean.php';
+
+        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        if (!$job) {
+            return ['success' => false, 'error' => 'Job not found'];
+        }
+
+        if ($job->status !== 'running') {
+            return ['success' => false, 'error' => 'Job is not in running status'];
+        }
+
+        // Verify the tmux session is actually dead
+        $tmux = new TmuxService($job->member_id, $job->issue_key);
+        if ($tmux->exists()) {
+            return ['success' => false, 'error' => 'Tmux session still exists - job may still be running'];
+        }
+
+        // Mark as failed
+        $job->status = 'failed';
+        $job->error_message = $reason;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        \app\Bean::store($job);
+
+        // Log the stale job cleanup
+        AIDevStatusService::log($jobId, $job->member_id, 'warning', 'Job marked as stale', [
+            'reason' => $reason,
+            'last_step' => $job->current_step,
+            'last_progress' => $job->progress
+        ]);
+
+        return [
+            'success' => true,
+            'job_id' => $jobId,
+            'issue_key' => $job->issue_key,
+            'message' => 'Job marked as failed'
+        ];
+    }
+
+    /**
+     * Clean up all stale jobs (mark them as failed)
+     *
+     * @return array Summary with 'found', 'cleaned', 'errors'
+     */
+    public static function cleanupStaleJobs(): array {
+        $staleJobs = self::findStaleJobs();
+
+        $results = [
+            'found' => count($staleJobs),
+            'cleaned' => 0,
+            'errors' => [],
+            'jobs' => []
+        ];
+
+        foreach ($staleJobs as $staleJob) {
+            $result = self::markJobAsStale($staleJob['job_id'], 'Tmux session no longer exists - job crashed or was terminated');
+
+            if ($result['success']) {
+                $results['cleaned']++;
+                $results['jobs'][] = [
+                    'job_id' => $staleJob['job_id'],
+                    'issue_key' => $staleJob['issue_key'],
+                    'status' => 'cleaned'
+                ];
+            } else {
+                $results['errors'][] = [
+                    'job_id' => $staleJob['job_id'],
+                    'issue_key' => $staleJob['issue_key'],
+                    'error' => $result['error']
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check if a specific job's tmux session is still alive
+     *
+     * @param string $jobId Job ID
+     * @return array Status with 'exists', 'job_id', 'session_name', 'claude_running'
+     */
+    public static function checkJobSession(string $jobId): array {
+        require_once __DIR__ . '/../lib/Bean.php';
+
+        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        if (!$job) {
+            return ['exists' => false, 'error' => 'Job not found'];
+        }
+
+        $tmux = new TmuxService($job->member_id, $job->issue_key);
+
+        return [
+            'exists' => $tmux->exists(),
+            'job_id' => $jobId,
+            'issue_key' => $job->issue_key,
+            'session_name' => $tmux->getActiveSessionName() ?? $tmux->getSessionName(),
+            'claude_running' => $tmux->isClaudeRunning(),
+            'job_status' => $job->status,
+            'current_step' => $job->current_step,
+            'progress' => $job->progress,
+            'started_at' => $job->started_at,
+            'updated_at' => $job->updated_at
+        ];
+    }
+
+    /**
+     * Retry a failed job - resets status and triggers a new run
+     * Keeps existing job record and logs, appending new log entries
+     *
+     * @param string $jobId Job ID (UUID)
+     * @param int $memberId Member ID (for authorization)
+     * @param string|null $tenant Tenant slug
+     * @return array Result with 'success', 'job_id', 'error' keys
+     */
+    public function retryJob(string $jobId, int $memberId, ?string $tenant = null): array {
+        require_once __DIR__ . '/../lib/Bean.php';
+
+        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        if (!$job) {
+            return ['success' => false, 'error' => 'Job not found'];
+        }
+
+        // Verify ownership
+        if ($job->member_id != $memberId) {
+            return ['success' => false, 'error' => 'Not authorized to retry this job'];
+        }
+
+        // Only allow retry of failed/cancelled jobs
+        if (!in_array($job->status, ['failed', 'cancelled'])) {
+            return ['success' => false, 'error' => "Cannot retry job with status '{$job->status}'"];
+        }
+
+        // Check workspace runner limits before retrying
+        $wsLimit = self::checkWorkspaceLocalRunnerLimit();
+        if (!$wsLimit['available']) {
+            return [
+                'success' => false,
+                'error' => "Workspace runner limit reached ({$wsLimit['running']}/{$wsLimit['max']}). Please wait for a job to complete.",
+                'limit_reached' => true
+            ];
+        }
+
+        // Log the retry attempt
+        AIDevStatusService::log($jobId, $memberId, 'info', 'Job retry initiated', [
+            'previous_status' => $job->status,
+            'previous_error' => $job->error_message
+        ]);
+
+        // Reset job status
+        $job->status = 'running';
+        $job->error_message = null;
+        $job->completed_at = null;
+        $job->current_step = 'Retrying...';
+        $job->progress = 5;
+        $job->started_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        \app\Bean::store($job);
+
+        // Spawn new tmux session for the job
+        $tmux = new TmuxService($memberId, $job->issue_key);
+
+        // Kill any existing session first (shouldn't exist, but just in case)
+        if ($tmux->exists()) {
+            $tmux->kill();
+            sleep(1);
+        }
+
+        // Build the command to spawn the local runner
+        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+        $tenantParam = $tenant ? " --tenant=" . escapeshellarg($tenant) : "";
+
+        $cmd = sprintf(
+            'php %s --issue=%s --member=%d --job-id=%s%s --print 2>&1',
+            escapeshellarg($scriptPath),
+            escapeshellarg($job->issue_key),
+            $memberId,
+            escapeshellarg($jobId),
+            $tenantParam
+        );
+
+        // Spawn in tmux
+        $sessionName = $tmux->getLocalSessionName();
+        $tmuxCmd = sprintf(
+            'tmux new-session -d -s %s %s',
+            escapeshellarg($sessionName),
+            escapeshellarg($cmd)
+        );
+
+        $this->logger->info('Retrying job in tmux', [
+            'job_id' => $jobId,
+            'issue_key' => $job->issue_key,
+            'session_name' => $sessionName
+        ]);
+
+        exec($tmuxCmd, $output, $returnCode);
+
+        if ($returnCode !== 0) {
+            // Failed to spawn - mark as failed again
+            $job->status = 'failed';
+            $job->error_message = 'Failed to spawn tmux session for retry';
+            $job->completed_at = date('Y-m-d H:i:s');
+            \app\Bean::store($job);
+
+            AIDevStatusService::log($jobId, $memberId, 'error', 'Failed to spawn tmux for retry', [
+                'return_code' => $returnCode,
+                'output' => implode("\n", $output)
+            ]);
+
+            return ['success' => false, 'error' => 'Failed to spawn tmux session'];
+        }
+
+        return [
+            'success' => true,
+            'job_id' => $jobId,
+            'issue_key' => $job->issue_key,
+            'session_name' => $sessionName,
+            'message' => 'Job retry started'
+        ];
     }
 }

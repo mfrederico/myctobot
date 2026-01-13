@@ -909,4 +909,128 @@ class Admin extends Control {
         ]);
     }
 
+    // ========================================
+    // Plugin Registry Cache Management
+    // ========================================
+
+    /**
+     * Plugin registry cache management page
+     */
+    public function plugincache($params = []) {
+        // Check admin permission
+        if (!$this->requireLevel(self::ADMIN_LEVEL)) {
+            return;
+        }
+
+        // Handle cache actions
+        if ($this->getParam('action')) {
+            $action = $this->getParam('action');
+
+            switch ($action) {
+                case 'refresh':
+                    // Force refresh the plugin cache
+                    $result = \app\PluginRegistryCache::refresh(true);
+
+                    if ($result['success']) {
+                        $this->flash('success', "Plugin cache refreshed successfully. Found {$result['count']} plugins.");
+                    } else {
+                        $errorCount = count($result['errors']);
+                        $this->flash('warning', "Plugin cache refreshed with {$errorCount} error(s). Found {$result['count']} plugins.");
+                    }
+
+                    $this->logger->info('Plugin cache manually refreshed', [
+                        'admin_id' => $this->member->id,
+                        'plugins_count' => $result['count'],
+                        'errors' => $result['errors']
+                    ]);
+
+                    Flight::redirect('/admin/plugincache');
+                    return;
+
+                case 'invalidate':
+                    // Clear the plugin cache
+                    \app\PluginRegistryCache::invalidate();
+                    $this->flash('success', 'Plugin cache invalidated successfully');
+
+                    $this->logger->info('Plugin cache invalidated', [
+                        'admin_id' => $this->member->id
+                    ]);
+
+                    Flight::redirect('/admin/plugincache');
+                    return;
+
+                case 'warmup':
+                    // Warm up the cache
+                    $stats = \app\PluginRegistryCache::warmup();
+                    $this->flash('success', "Plugin cache warmed up with {$stats['count']} plugins");
+
+                    $this->logger->info('Plugin cache warmed up', [
+                        'admin_id' => $this->member->id,
+                        'stats' => $stats
+                    ]);
+
+                    Flight::redirect('/admin/plugincache');
+                    return;
+            }
+        }
+
+        // Get cache statistics and data for display
+        $this->viewData['title'] = 'Plugin Registry Cache';
+        $this->viewData['cache_stats'] = \app\PluginRegistryCache::getStats();
+        $this->viewData['plugins'] = \app\PluginRegistryCache::getPlugins();
+        $this->viewData['errors'] = \app\PluginRegistryCache::getRefreshErrors();
+
+        // Get configured sources for display
+        $sourcesConfig = Flight::get('plugin_registry.sources') ?? '';
+        $this->viewData['sources'] = array_filter(array_map('trim', explode(',', $sourcesConfig)));
+
+        $this->render('admin/plugin-cache', $this->viewData);
+    }
+
+    /**
+     * API endpoint for plugin cache refresh (for AJAX calls)
+     */
+    public function refreshplugincache($params = []) {
+        // Check admin permission
+        if (!$this->requireLevel(self::ADMIN_LEVEL)) {
+            return;
+        }
+
+        $force = $this->getParam('force', false);
+
+        $result = \app\PluginRegistryCache::refresh((bool)$force);
+
+        $this->logger->info('Plugin cache refresh requested via API', [
+            'admin_id' => $this->member->id,
+            'force' => $force,
+            'result' => $result
+        ]);
+
+        $this->json([
+            'success' => $result['success'],
+            'data' => [
+                'count' => $result['count'],
+                'errors' => $result['errors'],
+                'duration_ms' => $result['duration_ms'] ?? null,
+                'skipped' => $result['skipped'] ?? false,
+                'reason' => $result['reason'] ?? null
+            ]
+        ]);
+    }
+
+    /**
+     * API endpoint for plugin cache statistics
+     */
+    public function plugincachestats($params = []) {
+        // Check admin permission
+        if (!$this->requireLevel(self::ADMIN_LEVEL)) {
+            return;
+        }
+
+        $this->json([
+            'success' => true,
+            'data' => \app\PluginRegistryCache::getStats()
+        ]);
+    }
+
 }

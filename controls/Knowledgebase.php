@@ -134,7 +134,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Create a new knowledge base
      */
-    public function createKb() {
+    public function createkb() {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST') {
@@ -191,7 +191,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Delete a knowledge base and all its documents
      */
-    public function deleteKb() {
+    public function deletekb() {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST' && Flight::request()->method !== 'DELETE') {
@@ -390,7 +390,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Poll job status for async document processing
      */
-    public function pollJob($jobId = null) {
+    public function polljob($jobId = null) {
         if (!$this->requireLogin()) return;
 
         $jobId = $jobId ?? $this->getParam('job_id');
@@ -457,7 +457,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Upload from URL
      */
-    public function uploadUrl() {
+    public function uploadurl() {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST') {
@@ -897,7 +897,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Update knowledge base settings
      */
-    public function updateKb() {
+    public function updatekb() {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST') {

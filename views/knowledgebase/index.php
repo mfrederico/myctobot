@@ -832,7 +832,7 @@ function pollProcessingDocuments() {
 }
 
 function pollSingleJob(jobId, row) {
-    fetch('/knowledgebase/poll-job/' + jobId)
+    fetch('/knowledgebase/polljob/' + jobId)
     .then(res => res.json())
     .then(data => {
         if (data.success && data.data) {
@@ -929,7 +929,7 @@ function uploadUrl() {
         return;
     }
 
-    fetch('/knowledgebase/upload-url', {
+    fetch('/knowledgebase/uploadurl', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ url: url, kb_id: selectedKbId })
@@ -996,7 +996,7 @@ function createKnowledgeBase() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
 
-    fetch('/knowledgebase/create-kb', {
+    fetch('/knowledgebase/createkb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ name: name, description: description, agent_profile_id: agentProfileId || null })
@@ -1023,7 +1023,7 @@ function deleteKnowledgeBase(id, name) {
         return;
     }
 
-    fetch('/knowledgebase/delete-kb', {
+    fetch('/knowledgebase/deletekb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ id: id })
@@ -1054,7 +1054,7 @@ function updateKnowledgeBase() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
 
-    fetch('/knowledgebase/update-kb', {
+    fetch('/knowledgebase/updatekb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({

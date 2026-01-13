@@ -956,45 +956,43 @@ class ReviewBoard extends BaseControls\Control {
 
             $token = \app\services\EncryptionService::decrypt($tokenSetting->setting_value);
 
-            // Parse repo URL to get owner/repo
-            $repoUrl = $repo->clone_url ?? $repo->repo_url ?? '';
-            if (!$repoUrl) {
-                Flight::jsonSuccess(['branches' => ['main']], 'No repo URL configured');
+            // Use repo_owner and repo_name fields directly
+            $owner = $repo->repo_owner ?? '';
+            $repoName = $repo->repo_name ?? '';
+
+            if (!$owner || !$repoName) {
+                Flight::jsonSuccess(['branches' => ['main']], 'Repo owner/name not configured');
                 return;
             }
-            if (preg_match('/github\.com[\/:]([^\/]+)\/([^\/\.]+)/', $repoUrl, $m)) {
-                $owner = $m[1];
-                $repoName = rtrim($m[2], '.git');
 
-                // Fetch branches from GitHub API
-                $ch = curl_init("https://api.github.com/repos/{$owner}/{$repoName}/branches?per_page=100");
-                curl_setopt_array($ch, [
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_HTTPHEADER => [
-                        "Authorization: Bearer {$token}",
-                        "Accept: application/vnd.github.v3+json",
-                        "User-Agent: MyCTOBot"
-                    ]
-                ]);
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
+            // Fetch branches from GitHub API
+            $ch = curl_init("https://api.github.com/repos/{$owner}/{$repoName}/branches?per_page=100");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER => [
+                    "Authorization: Bearer {$token}",
+                    "Accept: application/vnd.github.v3+json",
+                    "User-Agent: MyCTOBot"
+                ]
+            ]);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
 
-                if ($httpCode === 200) {
-                    $branchData = json_decode($response, true);
-                    $branches = array_map(fn($b) => $b['name'], $branchData);
+            if ($httpCode === 200) {
+                $branchData = json_decode($response, true);
+                $branches = array_map(fn($b) => $b['name'], $branchData);
 
-                    // Sort with main/master first, then qa branches, then others
-                    usort($branches, function($a, $b) {
-                        $aScore = ($a === 'main' || $a === 'master') ? 0 : (strpos($a, 'qa') === 0 ? 1 : 2);
-                        $bScore = ($b === 'main' || $b === 'master') ? 0 : (strpos($b, 'qa') === 0 ? 1 : 2);
-                        if ($aScore !== $bScore) return $aScore - $bScore;
-                        return strcmp($a, $b);
-                    });
+                // Sort with main/master first, then qa branches, then others
+                usort($branches, function($a, $b) {
+                    $aScore = ($a === 'main' || $a === 'master') ? 0 : (strpos($a, 'qa') === 0 ? 1 : 2);
+                    $bScore = ($b === 'main' || $b === 'master') ? 0 : (strpos($b, 'qa') === 0 ? 1 : 2);
+                    if ($aScore !== $bScore) return $aScore - $bScore;
+                    return strcmp($a, $b);
+                });
 
-                    Flight::jsonSuccess(['branches' => $branches]);
-                    return;
-                }
+                Flight::jsonSuccess(['branches' => $branches]);
+                return;
             }
 
             Flight::jsonSuccess(['branches' => ['main']]);

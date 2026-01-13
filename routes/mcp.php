@@ -14,7 +14,7 @@ use \Flight as Flight;
 // e.g., /mcp/gwt-myctobot-ai/jira
 Flight::route('POST|GET|OPTIONS /mcp/@tenant/jira', function($tenant) {
     $controller = new \app\Mcp();
-    $controller->jiraWithTenant($tenant);
+    $controller->jirawithtenant($tenant);
 });
 
 // Legacy endpoint without tenant (still works with Basic Auth)
@@ -28,5 +28,5 @@ Flight::route('POST|GET|OPTIONS /mcp/jira', function() {
 // /mcp/{tenant}/jobs - AI Dev runners call this to report completion
 Flight::route('POST|GET|OPTIONS /mcp/@tenant/jobs', function($tenant) {
     $controller = new \app\Mcpjobs();
-    $controller->handleWithTenant($tenant);
+    $controller->handlewithtenant($tenant);
 });

@@ -137,7 +137,7 @@ class Pluginregistry extends BaseControls\Control {
     /**
      * POST /plugins/scan/{id} - Scan a single repository
      */
-    public function scanRepo($params = []): void {
+    public function scanrepo($params = []): void {
         if (!$this->requireLogin()) return;
         if (!$this->validateCSRF()) return;
 

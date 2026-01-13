@@ -353,7 +353,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         modelSelect.innerHTML = '<option value="">Loading models...</option>';
 
         // Fetch via server (Ollama runs on same server)
-        fetch('/agents/getModels', {
+        fetch('/agents/getmodels', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -1147,7 +1147,7 @@ function loadClaudeOllamaModels() {
     modelSelect.innerHTML = '<option value="">Loading models...</option>';
 
     // Fetch via server (Ollama runs on same server)
-    fetch('/agents/getModels', {
+    fetch('/agents/getmodels', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -1247,7 +1247,7 @@ function testClaudeOllamaConnection() {
     resultEl.innerHTML = '<span class="text-muted">Testing connection...</span>';
 
     // Test via server (Ollama runs on same server)
-    fetch('/agents/testConnection', {
+    fetch('/agents/testconnection', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -1752,7 +1752,7 @@ function saveTool() {
         csrf_token: csrfToken
     });
 
-    fetch('/agents/saveTool/' + agentId, {
+    fetch('/agents/savetool/' + agentId, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -1777,7 +1777,7 @@ function saveTool() {
 function deleteTool(toolId) {
     if (!confirm('Are you sure you want to delete this tool?')) return;
 
-    fetch('/agents/deleteTool/' + agentId, {
+    fetch('/agents/deletetool/' + agentId, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -1835,7 +1835,7 @@ function executeTest() {
     document.getElementById('test-result-content').textContent = 'Executing...';
     document.getElementById('test-result').style.display = 'block';
 
-    fetch('/agents/testTool/' + agentId, {
+    fetch('/agents/testtool/' + agentId, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -1879,7 +1879,7 @@ function loadProviderCapabilities() {
     const provider = '<?= $provider ?>';
     const providerConfig = <?= json_encode($providerConfig) ?>;
 
-    fetch('/agents/getCapabilities', {
+    fetch('/agents/getcapabilities', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',

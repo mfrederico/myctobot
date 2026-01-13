@@ -964,7 +964,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * RAG Query interface
      */
-    public function queryInterface() {
+    public function query() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1010,7 +1010,7 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Execute RAG query
      */
-    public function executeQuery() {
+    public function executequery() {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST') {

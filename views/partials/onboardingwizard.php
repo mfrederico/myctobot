@@ -377,7 +377,7 @@ function openOnboardingWizard() {
 // Function to dismiss wizard and remember the preference
 function dismissOnboardingWizard() {
     // Call API to save dismissal preference
-    fetch('/settings/dismissWizard', {
+    fetch('/settings/dismisswizard', {
         method: 'POST',
         headers: {
             'X-Requested-With': 'XMLHttpRequest',

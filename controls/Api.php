@@ -120,7 +120,7 @@ class Api extends BaseControls\Control {
      * List all exposed MCP tools
      * GET /api/mcp/tools
      */
-    public function mcpTools($params = []) {
+    public function mcptools($params = []) {
         $memberId = $this->authenticateApiKey();
         if (!$memberId) {
             Flight::jsonError('Unauthorized - valid API key required', 401);
@@ -183,7 +183,7 @@ class Api extends BaseControls\Control {
      * Execute an MCP tool
      * POST /api/mcp/call
      */
-    public function mcpCall($params = []) {
+    public function mcpcall($params = []) {
         $memberId = $this->authenticateApiKey();
         if (!$memberId) {
             Flight::jsonError('Unauthorized - valid API key required', 401);
@@ -358,7 +358,7 @@ class Api extends BaseControls\Control {
      * Handles MCP protocol requests from Claude Code's HTTP MCP client
      * Methods: initialize, tools/list, tools/call
      */
-    public function mcpJsonRpc($tenant = null) {
+    public function mcpjsonrpc($tenant = null) {
         $urlTenant = $tenant;
         if (empty($urlTenant)) {
             $this->jsonRpcError(-32600, 'Tenant required in URL', null);
@@ -570,7 +570,7 @@ class Api extends BaseControls\Control {
      * List MCP tools with tenant validation from URL
      * GET /api/mcp/{tenant}/tools
      */
-    public function mcpToolsWithTenant($tenant = null) {
+    public function mcptoolswithtenant($tenant = null) {
         $urlTenant = $tenant;
         if (empty($urlTenant)) {
             Flight::jsonError('Tenant required in URL', 400);
@@ -597,7 +597,7 @@ class Api extends BaseControls\Control {
      * Execute MCP tool with tenant validation from URL
      * POST /api/mcp/{tenant}/call
      */
-    public function mcpCallWithTenant($tenant = null) {
+    public function mcpcallwithtenant($tenant = null) {
         $urlTenant = $tenant;
         if (empty($urlTenant)) {
             Flight::jsonError('Tenant required in URL', 400);
@@ -626,7 +626,7 @@ class Api extends BaseControls\Control {
      *
      * Returns a ready-to-use .mcp.json configuration for the specified agent
      */
-    public function mcpConfig($tenant = null, $agentId = 0) {
+    public function mcpconfig($tenant = null, $agentId = 0) {
         $urlTenant = $tenant;
         $agentId = (int) $agentId;
 
@@ -721,7 +721,7 @@ class Api extends BaseControls\Control {
      * GET /api/pm/context/{tenant}
      * GET /api/pm/context/{tenant}?project_id=xxx
      */
-    public function pmContext($tenant = null) {
+    public function pmcontext($tenant = null) {
         if (empty($tenant)) {
             Flight::jsonError('Tenant required in URL', 400);
             return;

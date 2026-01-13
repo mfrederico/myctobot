@@ -234,7 +234,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Update a story
      */
-    public function updateStory() {
+    public function updatestory() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -279,7 +279,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Delete a story
      */
-    public function deleteStory() {
+    public function deletestory() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -316,7 +316,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Approve stories and create issues
      */
-    public function approveStories() {
+    public function approvestories() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -400,7 +400,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Approve all pending stories for a project
      */
-    public function approveProject() {
+    public function approveproject() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -440,7 +440,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Delete all pending stories for a project
      */
-    public function deleteProject() {
+    public function deleteproject() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -492,7 +492,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Get job details for a story
      */
-    public function getJobDetails() {
+    public function getjobdetails() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -666,7 +666,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Get story data
      */
-    public function getStory() {
+    public function getstory() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -688,7 +688,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Update project details
      */
-    public function updateProject() {
+    public function updateproject() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -719,7 +719,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Create a new epic
      */
-    public function createEpic() {
+    public function createepic() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -761,7 +761,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Update an epic
      */
-    public function updateEpic() {
+    public function updateepic() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -792,7 +792,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Create a new story
      */
-    public function createStory() {
+    public function createstory() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -838,7 +838,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Move story to different epic
      */
-    public function moveStory() {
+    public function movestory() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -885,7 +885,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Get current runner status (running count, max limit, queued jobs)
      */
-    public function getRunnerStatus() {
+    public function getrunnerstatus() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -900,7 +900,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Update workspace runner limit
      */
-    public function updateRunnerLimit() {
+    public function updaterunnerlimit() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -931,7 +931,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Get branches from repository for QA release dropdown
      */
-    public function getBranches() {
+    public function getbranches() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1005,7 +1005,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Abandon a PR - close it on GitHub and mark job as failed
      */
-    public function abandonPR() {
+    public function abandonpr() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1104,7 +1104,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Find jobs that are marked as running but have no live tmux session
      */
-    public function findStaleJobs() {
+    public function findstalejobs() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1136,7 +1136,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Clean up all stale jobs (mark as failed)
      */
-    public function cleanupStaleJobs() {
+    public function cleanupstalejobs() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1164,7 +1164,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Check if a specific job's tmux session is still alive
      */
-    public function checkJobSession() {
+    public function checkjobsession() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1185,7 +1185,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Mark a specific job as stale/failed
      */
-    public function markJobStale() {
+    public function markjobstale() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1217,7 +1217,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Retry a failed job
      */
-    public function retryJob() {
+    public function retryjob() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1250,7 +1250,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Build QA release with selected stories
      */
-    public function buildQARelease() {
+    public function buildqarelease() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1353,7 +1353,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Check QA release build status
      */
-    public function qaReleaseStatus() {
+    public function qareleasestatus() {
         if (!$this->requireLogin()) return;
 
         $workDir = $this->getParam('work_dir');
@@ -1417,7 +1417,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Batch approve selected pending stories
      */
-    public function batchApprove() {
+    public function batchapprove() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1460,7 +1460,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Batch approve and start jobs for selected pending stories
      */
-    public function batchApproveAndRun() {
+    public function batchapproveandrun() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {
@@ -1564,7 +1564,7 @@ class Reviewboard extends BaseControls\Control {
     /**
      * AJAX: Start a new job for an approved story that has an issue but no job yet
      */
-    public function startJob() {
+    public function startjob() {
         if (!$this->requireLogin()) return;
 
         if (!$this->initUserDb()) {

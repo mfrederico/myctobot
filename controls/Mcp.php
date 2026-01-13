@@ -56,7 +56,7 @@ class Mcp extends Control {
      *
      * @param string $tenant Domain ID from the URL
      */
-    public function jiraWithTenant(string $tenant) {
+    public function jirawithtenant(string $tenant) {
         // Store tenant for logging purposes
         $this->logger->debug('MCP Jira request with tenant', ['tenant' => $tenant]);
 

@@ -215,7 +215,7 @@ function executeQuery() {
     document.getElementById('queryBtn').disabled = true;
     document.getElementById('queryBtn').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching...';
 
-    fetch('/knowledgebase/query', {
+    fetch('/knowledgebase/executequery', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(options)

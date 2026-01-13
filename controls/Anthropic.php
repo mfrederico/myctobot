@@ -193,7 +193,7 @@ class Anthropic extends BaseControls\Control {
     /**
      * Clear credit balance warning (AJAX)
      */
-    public function clearWarning() {
+    public function clearwarning() {
         if (!$this->requireLogin()) return;
 
         $memberId = $this->member->id;

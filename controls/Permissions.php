@@ -17,7 +17,7 @@ class Permissions extends BaseControls\Control {
     /**
      * Check permission for a controller/method combination
      */
-    public function permFor($control, $method, $level = LEVELS['PUBLIC'], $wholeclass = false) {
+    public function permfor($control, $method, $level = LEVELS['PUBLIC'], $wholeclass = false) {
         // Normalize names
         $control = strtolower($control);
         $method = strtolower($method);

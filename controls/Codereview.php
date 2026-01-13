@@ -91,7 +91,7 @@ class Codereview extends BaseControls\Control {
      * Update patterns configuration
      * POST /codereview/patterns
      */
-    public function updatePatterns() {
+    public function updatepatterns() {
         if (!$this->requireLogin()) return;
 
         if (!Flight::hasLevel(LEVELS['ADMIN'])) {

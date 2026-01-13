@@ -6,7 +6,7 @@ use app\services\InviteService;
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2"><i class="bi bi-people"></i> Member Management</h1>
-        <a href="/admin/addMember" class="btn btn-primary">
+        <a href="/admin/addmember" class="btn btn-primary">
             <i class="bi bi-envelope-plus"></i> Invite New Member
         </a>
     </div>
@@ -160,14 +160,14 @@ use app\services\InviteService;
                                 <td>
                                     <?php if (!$isSystemUser): ?>
                                         <?php if ($member->status === 'pending'): ?>
-                                            <a href="/admin/resendInvite?id=<?= $member->id ?>"
+                                            <a href="/admin/resendinvite?id=<?= $member->id ?>"
                                                class="btn btn-sm btn-outline-primary"
                                                title="Resend Invitation"
                                                onclick="return confirm('Resend invitation to <?= htmlspecialchars($member->email) ?>?')">
                                                 <i class="bi bi-envelope-arrow-up"></i>
                                             </a>
                                         <?php endif; ?>
-                                        <a href="/admin/editMember?id=<?= $member->id ?>"
+                                        <a href="/admin/editmember?id=<?= $member->id ?>"
                                            class="btn btn-sm btn-outline-secondary"
                                            title="Edit Member">
                                             <i class="bi bi-pencil"></i>

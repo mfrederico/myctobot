@@ -86,7 +86,7 @@ class Admin extends Control {
     /**
      * Edit member
      */
-    public function editMember($params = []) {
+    public function editmember($params = []) {
         $request = Flight::request();
         $memberId = $request->query->id ?? null;
         
@@ -177,7 +177,7 @@ class Admin extends Control {
     /**
      * Add new member (via email invitation)
      */
-    public function addMember($params = []) {
+    public function addmember($params = []) {
         require_once __DIR__ . '/../services/InviteService.php';
 
         $request = Flight::request();
@@ -237,7 +237,7 @@ class Admin extends Control {
     /**
      * Resend invitation to a pending member
      */
-    public function resendInvite($params = []) {
+    public function resendinvite($params = []) {
         require_once __DIR__ . '/../services/InviteService.php';
 
         $memberId = Flight::request()->query->id ?? null;
@@ -299,7 +299,7 @@ class Admin extends Control {
     /**
      * Edit permission
      */
-    public function editPermission($params = []) {
+    public function editpermission($params = []) {
         $request = Flight::request();
         $permId = $request->query->id ?? null;
         

@@ -516,7 +516,7 @@ class Directives extends BaseControls\Control {
      *
      * Useful for testing directive format before sending
      */
-    public function validateOnly() {
+    public function validateonly() {
         // Only accept POST requests
         if (Flight::request()->method !== 'POST') {
             Flight::response()->status(405);

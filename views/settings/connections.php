@@ -518,7 +518,7 @@ function testConnection(type, url) {
 
 function dismissCreditWarning() {
     const alert = document.getElementById('credit-warning');
-    fetch('/anthropic/clearWarning', {
+    fetch('/anthropic/clearwarning', {
         method: 'POST',
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
     }).then(() => {

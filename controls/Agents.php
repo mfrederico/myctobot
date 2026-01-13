@@ -182,7 +182,7 @@ class Agents extends BaseControls\Control {
      *
      * Accepts wizard data and creates a fully configured agent.
      */
-    public function createFromWizard($params = []) {
+    public function createfromwizard($params = []) {
         if (!$this->requireEnterprise()) return;
 
         // Get JSON body
@@ -545,7 +545,7 @@ class Agents extends BaseControls\Control {
     /**
      * Test provider connection (AJAX endpoint)
      */
-    public function testConnection($params = []) {
+    public function testconnection($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -568,7 +568,7 @@ class Agents extends BaseControls\Control {
     /**
      * Get available models for a provider (AJAX endpoint)
      */
-    public function getModels($params = []) {
+    public function getmodels($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -625,7 +625,7 @@ class Agents extends BaseControls\Control {
     /**
      * Get detailed info about a specific model (AJAX endpoint)
      */
-    public function getModelInfo($params = []) {
+    public function getmodelinfo($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -673,7 +673,7 @@ class Agents extends BaseControls\Control {
      * Get provider capabilities (AJAX endpoint)
      * For Ollama backend, queries the model info to derive capabilities
      */
-    public function getCapabilities($params = []) {
+    public function getcapabilities($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -761,7 +761,7 @@ class Agents extends BaseControls\Control {
     /**
      * Save a tool (create or update) (AJAX)
      */
-    public function saveTool($params = []) {
+    public function savetool($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -858,7 +858,7 @@ class Agents extends BaseControls\Control {
     /**
      * Delete a tool (AJAX)
      */
-    public function deleteTool($params = []) {
+    public function deletetool($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;
@@ -894,7 +894,7 @@ class Agents extends BaseControls\Control {
     /**
      * Test a tool execution (AJAX)
      */
-    public function testTool($params = []) {
+    public function testtool($params = []) {
         if (!$this->requireEnterprise()) {
             Flight::jsonError('Unauthorized', 401);
             return;

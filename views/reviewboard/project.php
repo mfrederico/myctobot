@@ -321,7 +321,7 @@ async function saveProject() {
     const name = document.getElementById('edit-project-name').value;
     const description = document.getElementById('edit-project-description').value;
 
-    const result = await apiCall('/reviewboard/updateProject', {
+    const result = await apiCall('/reviewboard/updateproject', {
         project_id: projectId,
         name: name,
         description: description
@@ -355,7 +355,7 @@ async function saveEpic() {
     const title = document.getElementById('edit-epic-title').value;
     const description = document.getElementById('edit-epic-description').value;
 
-    const endpoint = epicId ? '/reviewboard/updateEpic' : '/reviewboard/createEpic';
+    const endpoint = epicId ? '/reviewboard/updateepic' : '/reviewboard/createepic';
     const result = await apiCall(endpoint, {
         project_id: projectId,
         epic_id: epicId || undefined,
@@ -386,7 +386,7 @@ function editStory(storyId) {
 }
 
 async function fetchStoryData(storyId) {
-    const result = await apiCall('/reviewboard/getStory', { story_id: storyId });
+    const result = await apiCall('/reviewboard/getstory', { story_id: storyId });
     if (result.success) {
         const story = result.data;
         document.getElementById('edit-story-title').value = story.title || '';
@@ -432,7 +432,7 @@ async function saveStory() {
         }
     });
 
-    const endpoint = storyId ? '/reviewboard/updateStory' : '/reviewboard/createStory';
+    const endpoint = storyId ? '/reviewboard/updatestory' : '/reviewboard/createstory';
     const result = await apiCall(endpoint, {
         story_id: storyId || undefined,
         epic_id: epicId || undefined,
@@ -465,7 +465,7 @@ async function approveStory(storyId) {
 async function deleteStory(storyId) {
     if (!confirm('Delete this story? This cannot be undone.')) return;
 
-    const result = await apiCall('/reviewboard/deleteStory', { story_id: storyId });
+    const result = await apiCall('/reviewboard/deletestory', { story_id: storyId });
     if (result.success) {
         document.getElementById('story-row-' + storyId)?.remove();
     } else {
@@ -482,7 +482,7 @@ async function confirmMoveStory() {
     const storyId = document.getElementById('move-story-id').value;
     const epicId = document.getElementById('move-story-epic').value;
 
-    const result = await apiCall('/reviewboard/moveStory', {
+    const result = await apiCall('/reviewboard/movestory', {
         story_id: storyId,
         epic_id: epicId
     });

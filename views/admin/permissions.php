@@ -1,7 +1,7 @@
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2">Permission Management</h1>
-        <a href="/admin/editPermission" class="btn btn-primary">Add Permission</a>
+        <a href="/admin/editpermission" class="btn btn-primary">Add Permission</a>
     </div>
     
     <?php if (empty($authControls)): ?>
@@ -59,7 +59,7 @@
                                         <td><?= htmlspecialchars($perm['description'] ?? '') ?></td>
                                         <td><?= $perm['validcount'] ?? 0 ?></td>
                                         <td>
-                                            <a href="/admin/editPermission?id=<?= $perm['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
+                                            <a href="/admin/editpermission?id=<?= $perm['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
                                             <a href="/admin/permissions?delete=<?= $perm['id'] ?>" 
                                                class="btn btn-sm btn-outline-danger"
                                                onclick="return confirm('Delete this permission?')">Delete</a>

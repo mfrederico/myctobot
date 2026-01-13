@@ -817,7 +817,7 @@ function escapeHtml(text) {
 // Runner Status Functions
 async function loadRunnerStatus() {
     try {
-        const result = await apiCall('/reviewboard/getRunnerStatus', {});
+        const result = await apiCall('/reviewboard/getrunnerstatus', {});
         if (result.success) {
             updateRunnerUI(result.data);
         }
@@ -848,7 +848,7 @@ function updateRunnerUI(status) {
 
 document.getElementById('runner-limit-select').addEventListener('change', async function() {
     const newLimit = parseInt(this.value);
-    const result = await apiCall('/reviewboard/updateRunnerLimit', { limit: newLimit });
+    const result = await apiCall('/reviewboard/updaterunnerlimit', { limit: newLimit });
     if (result.success) {
         loadRunnerStatus();
     } else {
@@ -872,7 +872,7 @@ async function approveStory(storyId) {
 async function deleteStory(storyId) {
     if (!confirm('Delete this story? This cannot be undone.')) return;
 
-    const result = await apiCall('/reviewboard/deleteStory', { story_id: storyId });
+    const result = await apiCall('/reviewboard/deletestory', { story_id: storyId });
     if (result.success) {
         document.querySelector(`[data-story-id="${storyId}"]`)?.remove();
     } else {
@@ -884,7 +884,7 @@ async function retryJob(jobId) {
     if (!confirm('Retry this failed job? It will start a new tmux session and append to the existing logs.')) return;
 
     try {
-        const result = await apiCall('/reviewboard/retryJob', { job_id: jobId });
+        const result = await apiCall('/reviewboard/retryjob', { job_id: jobId });
         if (result.success) {
             showToast(`Job retry started for ${result.data.issue_key}`, 'success');
             setTimeout(() => location.reload(), 1500);
@@ -901,7 +901,7 @@ async function startJob(issueKey) {
     if (!confirm(`Start a new AI Developer job for ${issueKey}?`)) return;
 
     try {
-        const result = await apiCall('/reviewboard/startJob', { issue_key: issueKey });
+        const result = await apiCall('/reviewboard/startjob', { issue_key: issueKey });
         if (result.success) {
             showToast(`Job started for ${issueKey}`, 'success');
             setTimeout(() => location.reload(), 1500);
@@ -926,7 +926,7 @@ function editStory(storyId) {
 }
 
 async function fetchStoryData(storyId) {
-    const result = await apiCall('/reviewboard/getStory', { story_id: storyId });
+    const result = await apiCall('/reviewboard/getstory', { story_id: storyId });
     if (result.success) {
         const story = result.data;
         document.getElementById('edit-story-title').value = story.title || '';
@@ -955,7 +955,7 @@ async function saveStory() {
         }
     });
 
-    const result = await apiCall('/reviewboard/updateStory', {
+    const result = await apiCall('/reviewboard/updatestory', {
         story_id: storyId,
         title: title,
         description: description,
@@ -1002,7 +1002,7 @@ function addCriterionWithValue(value) {
 // Job Results Modal
 async function viewJobResults(issueKey) {
     try {
-        const result = await apiCall('/reviewboard/getJobDetails', { issue_key: issueKey });
+        const result = await apiCall('/reviewboard/getjobdetails', { issue_key: issueKey });
         if (result.success && result.data.job) {
             // Only show modal if we have job data
             document.getElementById('job-results-loading').style.display = 'none';
@@ -1119,7 +1119,7 @@ function toggleJobLogs() {
 // Stale Job Detection Functions
 async function checkStaleJobs(showSuccessToast = true) {
     try {
-        const result = await apiCall('/reviewboard/findStaleJobs', {});
+        const result = await apiCall('/reviewboard/findstalejobs', {});
         if (result.success) {
             const staleJobs = result.data.stale_jobs || [];
             const alert = document.getElementById('stale-jobs-alert');
@@ -1154,7 +1154,7 @@ async function cleanupStaleJobs() {
     }
 
     try {
-        const result = await apiCall('/reviewboard/cleanupStaleJobs', {});
+        const result = await apiCall('/reviewboard/cleanupstalejobs', {});
         if (result.success) {
             const alert = document.getElementById('stale-jobs-alert');
             alert.classList.add('d-none');
@@ -1270,7 +1270,7 @@ async function loadBranches() {
     if (branchesLoaded) return;
 
     try {
-        const result = await apiCall('/reviewboard/getBranches', {});
+        const result = await apiCall('/reviewboard/getbranches', {});
         if (result.success && result.data && result.data.branches) {
             allBranches = result.data.branches;
             populateBranchDropdown(allBranches);
@@ -1341,7 +1341,7 @@ async function refreshBranches() {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
 
     try {
-        const result = await apiCall('/reviewboard/getBranches', {});
+        const result = await apiCall('/reviewboard/getbranches', {});
         if (result.success && result.data && result.data.branches) {
             allBranches = result.data.branches;
             populateBranchDropdown(allBranches);
@@ -1433,7 +1433,7 @@ async function buildQARelease() {
     buildBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Building...';
 
     try {
-        const result = await apiCall('/reviewboard/buildQARelease', {
+        const result = await apiCall('/reviewboard/buildqarelease', {
             story_ids: storyIds,
             target_branch: targetBranch
         });
@@ -1488,7 +1488,7 @@ async function pollQABuildStatus(workDir, qaReleaseInfo) {
     const poll = async () => {
         attempts++;
         try {
-            const result = await apiCall('/reviewboard/qaReleaseStatus', { work_dir: workDir });
+            const result = await apiCall('/reviewboard/qareleasestatus', { work_dir: workDir });
 
             if (result.success && result.data) {
                 const status = result.data.status;
@@ -1645,7 +1645,7 @@ async function abandonPR(issueKey, prUrl) {
     }
 
     try {
-        const result = await apiCall('/reviewboard/abandonPR', {
+        const result = await apiCall('/reviewboard/abandonpr', {
             issue_key: issueKey,
             pr_url: prUrl
         });
@@ -1791,7 +1791,7 @@ async function batchApproveOnly() {
 
     try {
         const storyIds = selectedPendingStories.map(s => s.story_id);
-        const result = await apiCall('/reviewboard/batchApprove', { story_ids: storyIds });
+        const result = await apiCall('/reviewboard/batchapprove', { story_ids: storyIds });
 
         if (result.success) {
             showToast(`${result.data?.approved || selectedPendingStories.length} stories approved!`, 'success');
@@ -1828,7 +1828,7 @@ async function batchApproveAndRun() {
 
     try {
         const storyIds = selectedPendingStories.map(s => s.story_id);
-        const result = await apiCall('/reviewboard/batchApproveAndRun', { story_ids: storyIds });
+        const result = await apiCall('/reviewboard/batchapproveandrun', { story_ids: storyIds });
 
         if (result.success) {
             const msg = `${result.data?.approved || 0} approved, ${result.data?.jobs_started || 0} jobs started`;

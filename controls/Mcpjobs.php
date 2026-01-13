@@ -52,7 +52,7 @@ class Mcpjobs extends Control {
      *
      * @param string $tenant Domain ID from the URL
      */
-    public function handleWithTenant(string $tenant) {
+    public function handlewithtenant(string $tenant) {
         $this->tenant = $tenant;
         $this->logger->debug('MCP Jobs request', ['tenant' => $tenant]);
 

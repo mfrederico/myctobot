@@ -225,7 +225,7 @@ class Settings extends BaseControls\Control {
      * Dismiss onboarding wizard (AJAX)
      * Stores user preference to not auto-show the wizard
      */
-    public function dismissWizard() {
+    public function dismisswizard() {
         if (!$this->requireLogin()) return;
 
         // Store in enterprisesettings table (tenant database)
@@ -240,7 +240,7 @@ class Settings extends BaseControls\Control {
      * Reset onboarding wizard (AJAX)
      * Allows user to see the wizard again
      */
-    public function resetWizard() {
+    public function resetwizard() {
         if (!$this->requireLogin()) return;
 
         $key = 'onboarding_wizard_dismissed_' . $this->member->id;

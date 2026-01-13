@@ -855,7 +855,7 @@ $csrf = $csrf['csrf_token'] ?? '';
         nextBtn.disabled = true;
         nextBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Creating...';
 
-        fetch('/agents/createFromWizard', {
+        fetch('/agents/createfromwizard', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

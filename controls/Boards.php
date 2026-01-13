@@ -15,8 +15,6 @@ use \app\services\UserDatabaseService;
 // Load plugins and services
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
-require_once __DIR__ . '/../lib/Bean.php';
-
 use \app\Bean;
 
 class Boards extends BaseControls\Control {

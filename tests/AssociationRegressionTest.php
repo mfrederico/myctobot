@@ -10,9 +10,8 @@
 
 namespace app\tests;
 
-// Bootstrap
+// Bootstrap - vendor/autoload.php loads Bean.php via files autoload
 require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 use RedBeanPHP\R as R;
 use app\Bean;

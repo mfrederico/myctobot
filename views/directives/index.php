@@ -4,6 +4,9 @@
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h1><i class="bi bi-envelope-paper"></i> CEO Directives</h1>
                 <div>
+                    <a href="/reviewboard" class="btn btn-outline-primary me-2">
+                        <i class="bi bi-kanban"></i> Review Board
+                    </a>
                     <a href="/dashboard" class="btn btn-outline-secondary">
                         <i class="bi bi-speedometer2"></i> Dashboard
                     </a>
@@ -143,12 +146,16 @@
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                             <?php endif; ?>
-                                            <?php if ($directive->status !== 'completed'): ?>
-                                            <button type="button" class="btn btn-outline-danger cancel-directive"
+                                            <?php if (!in_array($directive->status, ['completed', 'failed'])): ?>
+                                            <button type="button" class="btn btn-outline-secondary cancel-directive"
                                                     data-id="<?= htmlspecialchars($directive->directive_id) ?>" title="Cancel">
                                                 <i class="bi bi-x-lg"></i>
                                             </button>
                                             <?php endif; ?>
+                                            <button type="button" class="btn btn-outline-danger delete-directive"
+                                                    data-id="<?= htmlspecialchars($directive->directive_id) ?>" title="Delete">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -224,6 +231,27 @@ document.querySelectorAll('.cancel-directive').forEach(btn => {
                     location.reload();
                 } else {
                     alert(data.message || 'Failed to cancel directive');
+                }
+            });
+        }
+    });
+});
+
+// Delete directive
+document.querySelectorAll('.delete-directive').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const id = this.dataset.id;
+        if (confirm('DELETE this directive permanently? This will also delete any associated projects, epics, and stories. This cannot be undone!')) {
+            fetch('/directives/delete/' + id, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'}
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.message || 'Failed to delete directive');
                 }
             });
         }

@@ -249,57 +249,82 @@ class ConnectionsService {
     }
 
     /**
-     * Get Anthropic API connection status
+     * Get Anthropic API connection status (multi-key)
      */
     private function getAnthropicStatus(): array {
         $result = [
             'connected' => false,
-            'status' => 'Not configured',
+            'status' => 'No API keys configured',
             'details' => null,
             'actions' => [
-                ['label' => 'Configure API Key', 'url' => '/anthropic', 'class' => 'btn-warning']
+                ['label' => 'Add API Key', 'url' => '/anthropic/keys', 'class' => 'btn-warning']
             ]
         ];
 
         try {
-            $keySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
+            // Get all keys visible to this member (owned + shared)
+            $keys = Bean::find('anthropickeys',
+                ' created_by_member_id = ? OR shared = 1 ORDER BY created_at DESC ',
+                [$this->memberId]
+            );
 
-            if (!$keySetting || empty($keySetting->setting_value)) {
+            if (empty($keys)) {
                 return $result;
             }
 
-            // Decrypt the key and mask it like Anthropic console: sk-ant-api03-XXX...YYYY
-            $decryptedKey = EncryptionService::decrypt($keySetting->setting_value);
-            $maskedKey = $this->maskAnthropicKey($decryptedKey);
+            // Build key list for display
+            $keyList = [];
+            $ownedCount = 0;
+            $sharedCount = 0;
 
-            // Check for credit balance errors
-            $creditSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $this->memberId]);
+            foreach ($keys as $key) {
+                $decrypted = EncryptionService::decrypt($key->api_key);
+                $isOwner = ($key->created_by_member_id == $this->memberId);
 
-            $status = 'Configured';
-            $statusClass = 'success';
-            if ($creditSetting && !empty($creditSetting->setting_value)) {
-                $status = 'Low Credits Warning';
-                $statusClass = 'warning';
+                $keyList[] = [
+                    'id' => $key->id,
+                    'name' => $key->name,
+                    'model' => $key->model,
+                    'masked_key' => $this->maskAnthropicKey($decrypted),
+                    'shared' => (bool)$key->shared,
+                    'is_owner' => $isOwner,
+                    'owner_name' => $key->created_by_name
+                ];
+
+                if ($isOwner) {
+                    $ownedCount++;
+                } else {
+                    $sharedCount++;
+                }
             }
 
-            $result = [
+            $statusParts = [];
+            if ($ownedCount > 0) {
+                $statusParts[] = $ownedCount . ' owned';
+            }
+            if ($sharedCount > 0) {
+                $statusParts[] = $sharedCount . ' shared';
+            }
+
+            return [
                 'connected' => true,
-                'status' => $status,
-                'status_class' => $statusClass,
+                'status' => count($keyList) . ' key(s) - ' . implode(', ', $statusParts),
                 'details' => [
-                    'masked_key' => $maskedKey,
-                    'has_credit_warning' => $creditSetting && !empty($creditSetting->setting_value)
+                    'keys' => $keyList,
+                    'key_count' => count($keyList),
+                    'owned_count' => $ownedCount,
+                    'shared_count' => $sharedCount
                 ],
                 'actions' => [
-                    ['label' => 'Update Key', 'url' => '/anthropic', 'class' => 'btn-outline-warning'],
-                    ['label' => 'Test Key', 'url' => '/anthropic/test', 'class' => 'btn-outline-secondary', 'ajax' => true]
+                    ['label' => 'Manage Keys', 'url' => '/anthropic/keys', 'class' => 'btn-outline-warning'],
+                    ['label' => 'Add Key', 'url' => '/anthropic/keys', 'class' => 'btn-outline-secondary']
                 ]
             ];
-        } catch (\Exception $e) {
-            // Database error
-        }
 
-        return $result;
+        } catch (\Exception $e) {
+            // Database error - likely table doesn't exist yet
+            return $result;
+        }
     }
 
     /**

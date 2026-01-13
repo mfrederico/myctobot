@@ -49,7 +49,6 @@ chdir(dirname(__DIR__));
 // Bootstrap
 require_once 'vendor/autoload.php';
 require_once 'lib/FlightMap.php';
-require_once 'lib/Bean.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;

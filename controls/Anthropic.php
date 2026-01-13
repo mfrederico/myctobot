@@ -14,8 +14,6 @@ use \app\services\EncryptionService;
 
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
-require_once __DIR__ . '/../lib/Bean.php';
-
 use \app\Bean;
 
 class Anthropic extends BaseControls\Control {
@@ -217,27 +215,39 @@ class Anthropic extends BaseControls\Control {
     // ========================================
 
     /**
-     * List all API keys
+     * List all API keys visible to this member (owned + shared)
      */
     public function keys() {
         if (!$this->requireEnterprise()) return;
 
+        $memberId = $this->member->id;
         $keys = [];
-        $keyBeans = Bean::findAll('anthropickeys', ' ORDER BY created_at DESC ');
+
+        // Get keys owned by member OR shared with workspace
+        $keyBeans = Bean::find('anthropickeys',
+            ' created_by_member_id = ? OR shared = 1 ORDER BY created_at DESC ',
+            [$memberId]
+        );
+
         foreach ($keyBeans as $key) {
             $decrypted = EncryptionService::decrypt($key->api_key);
+            $isOwner = ($key->created_by_member_id == $memberId);
             $keys[] = [
                 'id' => $key->id,
                 'name' => $key->name,
                 'model' => $key->model,
                 'masked_key' => $this->maskAnthropicKey($decrypted),
+                'shared' => (bool)$key->shared,
+                'is_owner' => $isOwner,
+                'owner_name' => $key->created_by_name,
                 'created_at' => $key->created_at
             ];
         }
 
         $this->render('anthropic/keys', [
             'title' => 'API Keys',
-            'keys' => $keys
+            'keys' => $keys,
+            'member_id' => $memberId
         ]);
     }
 
@@ -257,6 +267,7 @@ class Anthropic extends BaseControls\Control {
         $name = trim(Flight::request()->data->key_name ?? '');
         $apiKey = trim(Flight::request()->data->api_key ?? '');
         $model = Flight::request()->data->key_model ?? 'claude-sonnet-4-20250514';
+        $shared = !empty(Flight::request()->data->shared);
 
         if (empty($name) || empty($apiKey)) {
             $this->flash('error', 'Name and API key are required.');
@@ -274,14 +285,17 @@ class Anthropic extends BaseControls\Control {
             $encrypted = EncryptionService::encrypt($apiKey);
 
             $key = Bean::dispense('anthropickeys');
+            $key->created_by_member_id = $this->member->id;
+            $key->created_by_name = $this->member->display_name ?? $this->member->email;
             $key->name = $name;
             $key->api_key = $encrypted;
             $key->model = $model;
+            $key->shared = $shared ? 1 : 0;
             $key->created_at = date('Y-m-d H:i:s');
             Bean::store($key);
 
             $this->flash('success', 'API key added successfully.');
-            $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name]);
+            $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name, 'shared' => $shared]);
 
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
@@ -291,7 +305,7 @@ class Anthropic extends BaseControls\Control {
     }
 
     /**
-     * Delete an API key
+     * Delete an API key (owner only)
      */
     public function deletekey($params = []) {
         if (!$this->requireEnterprise()) return;
@@ -305,23 +319,71 @@ class Anthropic extends BaseControls\Control {
 
         try {
             $key = Bean::load('anthropickeys', $keyId);
-            if ($key && $key->id) {
-                $keyName = $key->name;
-                Bean::trash($key);
-
-                // Reset any boards using this key to NULL (local runner)
-                Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
-
-                $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
-                $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);
-            } else {
+            if (!$key || !$key->id) {
                 $this->flash('error', 'Key not found.');
+                Flight::redirect('/anthropic/keys');
+                return;
             }
+
+            // Only owner can delete
+            if ($key->created_by_member_id != $this->member->id) {
+                $this->flash('error', 'You can only delete your own API keys.');
+                Flight::redirect('/anthropic/keys');
+                return;
+            }
+
+            $keyName = $key->name;
+            Bean::trash($key);
+
+            // Reset any boards using this key to NULL (local runner)
+            Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
+
+            $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
+            $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);
+
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
         }
 
         Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Toggle sharing for an API key (AJAX, owner only)
+     */
+    public function toggleshare($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $params['operation']->name ?? $this->getParam('id');
+        if (!$keyId) {
+            $this->json(['success' => false, 'message' => 'No key specified']);
+            return;
+        }
+
+        try {
+            $key = Bean::load('anthropickeys', $keyId);
+            if (!$key || !$key->id) {
+                $this->json(['success' => false, 'message' => 'Key not found']);
+                return;
+            }
+
+            // Only owner can change sharing
+            if ($key->created_by_member_id != $this->member->id) {
+                $this->json(['success' => false, 'message' => 'You can only modify your own API keys']);
+                return;
+            }
+
+            // Toggle shared status
+            $key->shared = $key->shared ? 0 : 1;
+            $key->updated_at = date('Y-m-d H:i:s');
+            Bean::store($key);
+
+            $status = $key->shared ? 'shared with workspace' : 'private';
+            $this->json(['success' => true, 'message' => "Key is now {$status}", 'shared' => (bool)$key->shared]);
+
+        } catch (\Exception $e) {
+            $this->json(['success' => false, 'message' => $e->getMessage()]);
+        }
     }
 
     /**

@@ -15,7 +15,6 @@ use \app\Bean;
 
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/ShopifyClient.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class Shopify extends BaseControls\Control {
 

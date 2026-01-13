@@ -353,15 +353,23 @@
                             </div>
                         <?php endif; ?>
 
-                        <?php if ($key === 'anthropic' && !empty($conn['details']['masked_key'])): ?>
+                        <?php if ($key === 'anthropic' && !empty($conn['details']['keys'])): ?>
                             <div class="mb-3">
-                                <code class="small"><?= htmlspecialchars($conn['details']['masked_key']) ?></code>
-                                <?php if ($conn['details']['has_credit_warning']): ?>
-                                    <div class="alert alert-warning alert-dismissible py-1 px-2 mt-2 mb-0 small" role="alert" id="credit-warning">
-                                        <i class="bi bi-exclamation-triangle me-1"></i>Low credit balance detected
-                                        <button type="button" class="btn-close btn-close-sm p-2" aria-label="Dismiss" onclick="dismissCreditWarning()"></button>
+                                <small class="text-muted d-block mb-2">API Keys:</small>
+                                <?php foreach ($conn['details']['keys'] as $apiKey): ?>
+                                    <div class="d-flex align-items-center justify-content-between mb-1">
+                                        <div class="d-flex align-items-center">
+                                            <i class="bi bi-key me-2 text-warning"></i>
+                                            <span class="small"><?= htmlspecialchars($apiKey['name']) ?></span>
+                                            <?php if ($apiKey['shared'] && !$apiKey['is_owner']): ?>
+                                                <span class="badge bg-info ms-2" style="font-size: 0.65rem;">Shared</span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <?php if (!$apiKey['is_owner']): ?>
+                                            <small class="text-muted"><?= htmlspecialchars($apiKey['owner_name']) ?></small>
+                                        <?php endif; ?>
                                     </div>
-                                <?php endif; ?>
+                                <?php endforeach; ?>
                             </div>
                         <?php endif; ?>
 

@@ -20,8 +20,6 @@ require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 require_once __DIR__ . '/../services/LLMProviders/OllamaProvider.php';
 require_once __DIR__ . '/../services/LLMProviders/OpenAIProvider.php';
-require_once __DIR__ . '/../lib/Bean.php';
-
 use \app\Bean;
 
 class Agents extends BaseControls\Control {
@@ -53,10 +51,8 @@ class Agents extends BaseControls\Control {
     public function index($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $memberId = $this->member->id;
-
-        // Get all agents for this member
-        $agentBeans = R::findAll('aiagents', 'member_id = ? ORDER BY name ASC', [$memberId]);
+        // Get all agents for this workspace (workspace-level - shared by all members)
+        $agentBeans = R::findAll('aiagents', ' ORDER BY name ASC');
 
         $agents = [];
         foreach ($agentBeans as $bean) {
@@ -156,9 +152,10 @@ class Agents extends BaseControls\Control {
         // Build provider config based on type
         $providerConfig = $this->buildRunnerConfig($provider);
 
-        // Create agent
+        // Create agent (workspace-level - track who created it)
         $agent = R::dispense('aiagents');
-        $agent->member_id = $memberId;
+        $agent->created_by_member_id = $memberId;
+        $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
         $agent->description = $description;
         $agent->provider = $provider;
@@ -169,9 +166,9 @@ class Agents extends BaseControls\Control {
         $agent->is_default = $isDefault ? 1 : 0;
         $agent->created_at = date('Y-m-d H:i:s');
 
-        // If setting as default, unset other defaults
+        // If setting as default, unset other defaults (workspace-level)
         if ($isDefault) {
-            R::exec('UPDATE aiagents SET is_default = 0 WHERE member_id = ?', [$memberId]);
+            R::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
         }
 
         $id = R::store($agent);
@@ -224,9 +221,10 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        // Create agent
+        // Create agent (workspace-level - track who created it)
         $agent = R::dispense('aiagents');
-        $agent->member_id = $memberId;
+        $agent->created_by_member_id = $memberId;
+        $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
         $agent->description = $description;
         $agent->provider = $provider;
@@ -251,9 +249,9 @@ class Agents extends BaseControls\Control {
 
         // ID comes from URL: /agents/edit/{id}
         $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
-        $memberId = $this->member->id;
 
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$id, $memberId]);
+        // Workspace-level - all members can edit agents
+        $agent = R::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             $this->flash('error', 'Agent not found');
             Flight::redirect('/agents');
@@ -309,9 +307,9 @@ class Agents extends BaseControls\Control {
 
         // ID comes from URL: /agents/update/{id}
         $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
-        $memberId = $this->member->id;
 
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$id, $memberId]);
+        // Workspace-level - all members can update agents
+        $agent = R::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             $this->flash('error', 'Agent not found');
             Flight::redirect('/agents');
@@ -368,7 +366,8 @@ class Agents extends BaseControls\Control {
         $agent->is_active = $isActive ? 1 : 0;
 
         if ($isDefault) {
-            R::exec('UPDATE aiagents SET is_default = 0 WHERE member_id = ?', [$memberId]);
+            // Workspace-level - unset all other defaults
+            R::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
             $agent->is_default = 1;
         } else {
             $agent->is_default = 0;
@@ -419,9 +418,9 @@ class Agents extends BaseControls\Control {
 
         // ID comes from URL: /agents/delete/{id}
         $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
-        $memberId = $this->member->id;
 
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$id, $memberId]);
+        // Workspace-level - all members can delete agents
+        $agent = R::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -732,10 +731,9 @@ class Agents extends BaseControls\Control {
         }
 
         $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
-        $memberId = $this->member->id;
 
-        // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        // Workspace-level - all members can view agent tools
+        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -776,10 +774,9 @@ class Agents extends BaseControls\Control {
 
         $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
-        $memberId = $this->member->id;
 
-        // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        // Workspace-level - all members can manage agent tools
+        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -874,10 +871,9 @@ class Agents extends BaseControls\Control {
 
         $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
-        $memberId = $this->member->id;
 
-        // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        // Workspace-level - all members can delete agent tools
+        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -907,10 +903,9 @@ class Agents extends BaseControls\Control {
         $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
         $testParams = $this->getParam('test_params', '{}');
-        $memberId = $this->member->id;
 
-        // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+        // Workspace-level - all members can test agent tools
+        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;

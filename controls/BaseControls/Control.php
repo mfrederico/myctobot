@@ -248,6 +248,38 @@ abstract class Control {
     protected function jsonError($message = 'Error', $code = 400) {
         Flight::jsonError($message, $code);
     }
+
+    /**
+     * Send error JSON response and return (for early exit)
+     * Reduces duplicate pattern: Flight::jsonError(...); return;
+     *
+     * Usage:
+     *   return $this->jsonErrorReturn('Error message', 400);
+     */
+    protected function jsonErrorReturn($message = 'Error', $code = 400) {
+        Flight::jsonError($message, $code);
+        return;
+    }
+
+    /**
+     * Get JSON input from request body
+     * Reduces duplicate pattern: json_decode(file_get_contents('php://input'), true)
+     *
+     * @param bool $assoc Return as associative array (default true)
+     * @return array|object|null Decoded JSON or null on failure
+     */
+    protected function getJsonInput(bool $assoc = true) {
+        $raw = file_get_contents('php://input');
+        if (empty($raw)) {
+            return $assoc ? [] : null;
+        }
+        $decoded = json_decode($raw, $assoc);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->logger->warning('Failed to parse JSON input: ' . json_last_error_msg());
+            return $assoc ? [] : null;
+        }
+        return $decoded;
+    }
     
     /**
      * Log and handle exceptions

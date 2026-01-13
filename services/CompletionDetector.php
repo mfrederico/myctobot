@@ -16,7 +16,6 @@ use \Flight as Flight;
 use \app\Bean;
 
 require_once __DIR__ . '/UserDatabaseService.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class CompletionDetector {
     private int $memberId;

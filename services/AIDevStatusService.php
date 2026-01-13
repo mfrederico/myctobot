@@ -9,7 +9,6 @@ namespace app\services;
 
 use RedBeanPHP\R as R;
 
-require_once __DIR__ . '/../lib/Bean.php';
 use \app\Bean;
 
 class AIDevStatusService {

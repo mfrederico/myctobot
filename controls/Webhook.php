@@ -17,7 +17,6 @@ use \app\services\MailgunService;
 use \app\services\TmuxService;
 use \app\services\CeoDirectiveLogger;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';

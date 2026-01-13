@@ -23,8 +23,22 @@ class ClaudeClient {
      * @param string|null $model Optional model override (uses Flight config if null)
      */
     public function __construct(?string $apiKey = null, ?string $model = null) {
-        $this->apiKey = $apiKey ?? Flight::get('anthropic.api_key');
-        $this->model = $model ?? Flight::get('anthropic.model') ?? 'claude-sonnet-4-20250514';
+        // Priority: 1) Explicit parameter, 2) Database key, 3) Config file
+        if ($apiKey) {
+            $this->apiKey = $apiKey;
+            $this->model = $model ?? Flight::get('anthropic.model') ?? 'claude-sonnet-4-20250514';
+        } else {
+            // Try database first (prioritize managed keys over config)
+            $dbKey = $this->getKeyFromDatabase();
+            if ($dbKey) {
+                $this->apiKey = $dbKey['api_key'];
+                $this->model = $model ?? $dbKey['model'] ?? 'claude-sonnet-4-20250514';
+            } else {
+                // Fall back to config file
+                $this->apiKey = Flight::get('anthropic.api_key') ?? '';
+                $this->model = $model ?? Flight::get('anthropic.model') ?? 'claude-sonnet-4-20250514';
+            }
+        }
 
         if (empty($this->apiKey)) {
             throw new \Exception('Anthropic API key not configured');
@@ -315,9 +329,47 @@ class ClaudeClient {
     }
 
     /**
-     * Check if Claude is configured
+     * Get the first available API key from the anthropickeys table
+     * Returns decrypted key and model if found
+     */
+    private function getKeyFromDatabase(): ?array {
+        try {
+            require_once dirname(__DIR__) . '/services/EncryptionService.php';
+
+            // Get any shared key or first available key
+            $key = \app\Bean::findOne('anthropickeys', ' shared = 1 OR 1=1 ORDER BY shared DESC, id ASC ');
+
+            if ($key && !empty($key->api_key)) {
+                $decrypted = EncryptionService::decrypt($key->api_key);
+                if ($decrypted) {
+                    return [
+                        'api_key' => $decrypted,
+                        'model' => $key->model ?? null
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            // Table might not exist or encryption issue - fall through
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if Claude is configured (database keys take priority)
      */
     public static function isConfigured(): bool {
+        // Check database first (priority)
+        try {
+            $count = \app\Bean::count('anthropickeys');
+            if ($count > 0) {
+                return true;
+            }
+        } catch (\Exception $e) {
+            // Table might not exist - fall through to config check
+        }
+
+        // Fall back to config file
         return !empty(Flight::get('anthropic.api_key'));
     }
 }

@@ -11,7 +11,22 @@
  *   $projectId - (optional) Current project ID for context filtering
  */
 
-$ragServiceUrl = $ragServiceUrl ?? (getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501');
+// Auto-detect WebSocket URL based on current request
+// In production (via nginx), use wss://{domain}/ws - nginx proxies to RAG service
+// In development (localhost), use ws://localhost:9501 directly
+$isLocalhost = isset($_SERVER['HTTP_HOST']) && (
+    strpos($_SERVER['HTTP_HOST'], 'localhost') !== false ||
+    strpos($_SERVER['HTTP_HOST'], '127.0.0.1') !== false
+);
+
+if ($isLocalhost) {
+    $ragServiceUrl = $ragServiceUrl ?? (getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501');
+} else {
+    // Production: use current domain with /ws path (nginx proxies to RAG service)
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $ragServiceUrl = $ragServiceUrl ?? "{$scheme}://{$_SERVER['HTTP_HOST']}";
+}
+
 $tenantSlug = $tenantSlug ?? ($_SESSION['tenant_slug'] ?? 'default');
 $projectId = $projectId ?? null;
 ?>
@@ -392,11 +407,42 @@ $projectId = $projectId ?? null;
             .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
             // Italic
             .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-            // Story/Epic IDs as badges
-            .replace(/\[([A-Z0-9_-]+)\]/g, '<span class="badge bg-secondary">$1</span>')
+            // Merge action links: [Add to merge](merge:issue-key)
+            .replace(/\[Add to merge\]\(merge:([^)]+)\)/g,
+                '<button class="btn btn-sm btn-outline-success ms-1" onclick="window.pmSelectForMerge(\'$1\')">' +
+                '<i class="bi bi-plus-circle"></i> Add to merge</button>')
+            // Story/Epic IDs as badges (with optional # prefix)
+            .replace(/#?\[([^\]]+)\]/g, '<span class="badge bg-secondary">$1</span>')
             // Line breaks
             .replace(/\n/g, '<br>');
     }
+
+    // Global function to select a story for merge from PM chat
+    window.pmSelectForMerge = function(issueKey) {
+        // Find checkbox with matching issue key
+        const checkbox = document.querySelector(`.qa-select-checkbox[data-issue-key="${issueKey}"]`);
+        if (checkbox) {
+            if (!checkbox.checked) {
+                checkbox.checked = true;
+                // Trigger the update function if it exists
+                if (typeof updateQASelection === 'function') {
+                    updateQASelection();
+                }
+            }
+            // Scroll to the Complete column
+            const card = checkbox.closest('.kanban-card');
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('border-warning');
+                setTimeout(() => card.classList.remove('border-warning'), 2000);
+            }
+            return true;
+        } else {
+            console.warn('Story not found in Complete column:', issueKey);
+            alert('Story not found in Complete column. It may not have a PR yet.');
+            return false;
+        }
+    };
 
     // Initialize
     init();

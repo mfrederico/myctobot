@@ -11,6 +11,7 @@ use \Flight as Flight;
 Flight::route('POST /directives/receive', ['\app\Directives', 'receive']);
 Flight::route('GET /directives/schema', ['\app\Directives', 'schema']);
 Flight::route('POST /directives/validate', ['\app\Directives', 'validateOnly']);
+Flight::route('POST /directives/delete/@id', ['\app\Directives', 'delete']);
 
 // Fall through to default routes for other /directives/* paths
 Flight::defaultRoute();

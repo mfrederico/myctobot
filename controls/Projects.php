@@ -12,7 +12,6 @@ use \app\Bean;
 use \app\services\UserDatabaseService;
 use \app\services\CompletionDetector;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/CompletionDetector.php';
 

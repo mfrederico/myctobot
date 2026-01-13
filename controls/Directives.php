@@ -14,7 +14,6 @@ use \app\Bean;
 use \app\services\UserDatabaseService;
 use \app\services\CeoDirectiveService;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/CeoDirectiveService.php';
 
@@ -32,7 +31,7 @@ class Directives extends BaseControls\Control {
      * Initialize user database connection
      */
     private function initUserDb(): bool {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
+        if (!$this->userDbConnected && $this->member) {
             try {
                 UserDatabaseService::connect($this->member->id);
                 $this->userDbConnected = true;
@@ -272,6 +271,66 @@ class Directives extends BaseControls\Control {
         ]);
 
         Flight::jsonSuccess(['directive_id' => $directive->directive_id], 'Directive cancelled');
+    }
+
+    /**
+     * Delete a directive permanently
+     */
+    public function delete($params = []) {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized');
+            return;
+        }
+
+        // Get directive ID from URL
+        $directiveId = $params['operation']->name ?? $this->getParam('id');
+        if (!$directiveId) {
+            Flight::jsonError('No directive specified');
+            return;
+        }
+
+        // Find directive
+        $directive = is_numeric($directiveId)
+            ? Bean::load('ceodirectives', $directiveId)
+            : Bean::findOne('ceodirectives', 'directive_id = ?', [$directiveId]);
+
+        if (!$directive || !$directive->id) {
+            Flight::jsonError('Directive not found');
+            return;
+        }
+
+        // Delete associated logs
+        $logs = Bean::find('directivelogs', 'directive_id = ?', [$directive->id]);
+        foreach ($logs as $log) {
+            Bean::trash($log);
+        }
+
+        // Delete associated project if exists (cascade to epics and stories)
+        $project = Bean::findOne('ctoprojects', 'directive_id = ?', [$directive->id]);
+        if ($project) {
+            // Delete stories in each epic
+            $epics = Bean::find('ctoepics', 'project_id = ?', [$project->id]);
+            foreach ($epics as $epic) {
+                $stories = Bean::find('ctostories', 'epic_id = ?', [$epic->id]);
+                foreach ($stories as $story) {
+                    Bean::trash($story);
+                }
+                Bean::trash($epic);
+            }
+            Bean::trash($project);
+        }
+
+        $this->logger->info('Directive deleted', [
+            'directive_id' => $directive->directive_id,
+            'member_id' => $this->member->id
+        ]);
+
+        // Delete the directive
+        Bean::trash($directive);
+
+        Flight::jsonSuccess([], 'Directive deleted');
     }
 
     /**

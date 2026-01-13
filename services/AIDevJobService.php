@@ -20,7 +20,6 @@ require_once __DIR__ . '/TmuxService.php';
 require_once __DIR__ . '/CeoDirectiveLogger.php';
 require_once __DIR__ . '/DeliveryConfirmationService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 use \app\plugins\AtlassianAuth;
 use \app\Bean;
@@ -1900,8 +1899,6 @@ class AIDevJobService {
      * @return array Array of stale job info with 'job_id', 'issue_key', 'member_id', 'started_at', 'current_step'
      */
     public static function findStaleJobs(): array {
-        require_once __DIR__ . '/../lib/Bean.php';
-
         // Find all jobs with running status
         $runningJobs = \app\Bean::find('aidevjobs', 'status = ?', ['running']);
 
@@ -1937,8 +1934,6 @@ class AIDevJobService {
      * @return array Result with 'success', 'job_id', 'error' keys
      */
     public static function markJobAsStale(string $jobId, string $reason = 'Tmux session crashed or terminated'): array {
-        require_once __DIR__ . '/../lib/Bean.php';
-
         $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return ['success' => false, 'error' => 'Job not found'];
@@ -2020,8 +2015,6 @@ class AIDevJobService {
      * @return array Status with 'exists', 'job_id', 'session_name', 'claude_running'
      */
     public static function checkJobSession(string $jobId): array {
-        require_once __DIR__ . '/../lib/Bean.php';
-
         $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return ['exists' => false, 'error' => 'Job not found'];
@@ -2053,8 +2046,6 @@ class AIDevJobService {
      * @return array Result with 'success', 'job_id', 'error' keys
      */
     public function retryJob(string $jobId, int $memberId, ?string $tenant = null): array {
-        require_once __DIR__ . '/../lib/Bean.php';
-
         $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
         if (!$job) {
             return ['success' => false, 'error' => 'Job not found'];

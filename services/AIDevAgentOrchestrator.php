@@ -115,6 +115,16 @@ mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issue
 4. **If blocked/failed**: Explain what went wrong and what's needed
 5. **When complete**: Post final summary with PR link
 
+## Job Completion
+
+When your work is complete, run the `finish_job.sh` script (in the work directory) to signal completion:
+
+```bash
+./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+```
+
+This handles everything: saves results, notifies the orchestrator, captures terminal snapshot, and terminates the session.
+
 SECTION;
         } else {
             return <<<SECTION
@@ -143,6 +153,16 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 - Save the screenshot to a file (e.g., `screenshot.png`)
 - Upload it: `jira_upload_attachment("{$issueKey}", "screenshot.png")`
 - Reference it in a follow-up comment
+
+## Job Completion
+
+When your work is complete, run the `finish_job.sh` script (in the work directory) to signal completion:
+
+```bash
+./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+```
+
+This handles everything: saves results, notifies the orchestrator, captures terminal snapshot, and terminates the session.
 
 SECTION;
         }
@@ -342,6 +362,18 @@ RESULT_EOF
 
 {$this->buildFinalSummaryInstructions()}
 
+3. **Signal completion to orchestrator** - IMPORTANT: Run the finish_job.sh script to signal completion:
+```bash
+./finish_job.sh '{"success": true, "issue_key": "{$issueKey}", "pr_url": "https://github.com/owner/repo/pull/123", "pr_number": 123, "branch_name": "feature/issue-description", "files_changed": ["file1.js", "file2.js"], "summary": "Brief description of what was done", "verification_passed": true}'
+```
+This script:
+- Saves result.json locally
+- Posts completion to the orchestrator webhook
+- Captures a terminal snapshot for debugging
+- Terminates the session automatically
+
+You do NOT need to call `/exit` after running this script - it handles termination.
+
 {$this->buildMcpToolsSection()}
 
 {$this->buildStatusTransitionSection($issueKey)}
@@ -354,6 +386,7 @@ RESULT_EOF
 4. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 5. **Output JSON** - Final output must be valid JSON for parsing.
 6. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
+7. **Signal completion via finish_job.sh** - After posting to the issue tracker, run `./finish_job.sh '{...}'` with your results JSON. This notifies the orchestrator and terminates the session automatically.
 
 ## Start Now
 

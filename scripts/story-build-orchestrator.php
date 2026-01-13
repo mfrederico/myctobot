@@ -61,7 +61,6 @@ $verbose = isset($options['verbose']);
 // Bootstrap
 require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/lib/FlightMap.php';
-require_once $baseDir . '/lib/Bean.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
@@ -598,6 +597,9 @@ class StoryBuildOrchestrator {
 
         $result = $this->checkResult($storyId, $issueKey);
 
+        // Update the aidevjobs record with result data
+        $this->updateJobWithResult($issueKey, $result);
+
         if (!empty($result['success'])) {
             $story->status = 'done';
             $story->verified_at = date('Y-m-d H:i:s');
@@ -626,6 +628,48 @@ class StoryBuildOrchestrator {
 
         // Update epic progress
         $this->updateEpicProgress($story->epic_id);
+    }
+
+    /**
+     * Update aidevjobs record with result.json data
+     */
+    private function updateJobWithResult(string $issueKey, array $result): void {
+        // Find the most recent job for this issue
+        $job = Bean::findOne('aidevjobs',
+            'issue_key = ? ORDER BY updated_at DESC',
+            [$issueKey]
+        );
+
+        if (!$job) {
+            output("  Warning: No aidevjobs record found for {$issueKey}", true);
+            return;
+        }
+
+        // Update job with result data
+        if (!empty($result['success'])) {
+            $job->status = 'pr_created';
+            $job->branch_name = $result['branch_name'] ?? null;
+            $job->pr_url = $result['pr_url'] ?? null;
+            $job->pr_number = $result['pr_number'] ?? null;
+            $job->pr_created_at = date('Y-m-d H:i:s');
+            $job->files_changed = !empty($result['files_changed'])
+                ? json_encode($result['files_changed'])
+                : null;
+            $job->commit_sha = $result['commit_sha'] ?? null;
+            // current_step is VARCHAR(100) - use simple status, store summary in logs
+            $job->current_step = 'Complete';
+            $job->progress = 100;
+            $job->completed_at = date('Y-m-d H:i:s');
+        } else {
+            $job->status = 'failed';
+            $job->error_message = $result['error'] ?? 'Build failed - check logs';
+            $job->completed_at = date('Y-m-d H:i:s');
+        }
+
+        $job->updated_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
+        output("  Updated aidevjobs record: {$job->job_id} -> {$job->status}", true);
     }
 
     /**

@@ -20,7 +20,6 @@ require_once __DIR__ . '/ClaudeClient.php';
 require_once __DIR__ . '/JiraClient.php';
 require_once __DIR__ . '/GitHubClient.php';
 require_once __DIR__ . '/UserDatabaseService.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class PMAgent {
     private int $memberId;

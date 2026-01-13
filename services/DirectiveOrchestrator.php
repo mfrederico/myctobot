@@ -18,7 +18,6 @@ use \app\Bean;
 require_once __DIR__ . '/CTOAgent.php';
 require_once __DIR__ . '/PMAgent.php';
 require_once __DIR__ . '/UserDatabaseService.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class DirectiveOrchestrator {
     private int $memberId;

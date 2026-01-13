@@ -23,7 +23,11 @@ Flight::route('POST /api/mcp/@tenant', ['\app\Api', 'mcpJsonRpc']);
 // MCP config endpoint - returns ready-to-use .mcp.json for an agent
 Flight::route('GET /api/mcp/@tenant/config/@agentId', ['\app\Api', 'mcpConfig']);
 
-// API Health check
+// API index/health check
+Flight::route('GET /api', function() {
+    Flight::jsonSuccess(['status' => 'ok', 'service' => 'myctobot-api', 'timestamp' => date('c')]);
+});
+
 Flight::route('GET /api/health', function() {
     Flight::jsonSuccess(['status' => 'ok', 'timestamp' => date('c')]);
 });
@@ -33,5 +37,6 @@ Flight::route('GET /api/health', function() {
 Flight::route('POST /api/ceo/directive', ['\app\CeoDirective', 'receive']);
 Flight::route('GET /api/ceo/directive/@id', ['\app\CeoDirective', 'get']);
 
-// Fall through to default routes for other /api/* paths
-Flight::defaultRoute();
+// PM Assistant context endpoint - returns project/epic/story data for PM chatbot
+// Used by RAG service to fetch live data instead of duplicating queries
+Flight::route('GET /api/pm/context/@tenant', ['\app\Api', 'pmContext']);

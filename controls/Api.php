@@ -10,7 +10,6 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Exception as Exception;
-use \app\Bean;
 use \app\services\UserDatabaseService;
 use \app\services\LLMProviders\LLMProviderFactory;
 
@@ -91,13 +90,16 @@ class Api extends BaseControls\Control {
             $pass = $dbConfig['pass'] ?? '';
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
 
-            // Add and switch to tenant database
-            Bean::useDatabase($this->tenantSlug, $dsn, $user, $pass);
+            // Check if already added
+            if (!R::hasDatabase($this->tenantSlug)) {
+                R::addDatabase($this->tenantSlug, $dsn, $user, $pass);
+            }
+            R::selectDatabase($this->tenantSlug);
 
             // Get member from tenant by email (main member has same email)
-            Bean::selectDatabase('default');
+            $mainMember = R::selectDatabase('default');
             $mainMember = R::load('member', $mainMemberId);
-            Bean::selectDatabase($this->tenantSlug);
+            R::selectDatabase($this->tenantSlug);
 
             $tenantMember = R::findOne('member', 'email = ?', [$mainMember->email]);
             if ($tenantMember) {
@@ -130,8 +132,8 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get all agents with expose_as_mcp = 1 (workspace-level - shared by all members)
-        $agents = R::find('aiagents', 'expose_as_mcp = 1 AND is_active = 1');
+        // Get all agents with expose_as_mcp = 1 (use tenant member ID)
+        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -218,9 +220,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Verify agent exists and get agent config (workspace-level)
-        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id]);
+        // Verify agent ownership and get agent config (use tenant member ID)
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$tool->agent_id, $this->tenantMemberId]);
         if (!$agent) {
             Flight::jsonError("Tool's agent not accessible", 403);
             return;
@@ -439,8 +441,8 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get all agents with expose_as_mcp = 1 (workspace-level)
-        $agents = R::find('aiagents', 'expose_as_mcp = 1 AND is_active = 1');
+        // Get all agents with expose_as_mcp = 1
+        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -515,9 +517,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Verify agent exists (workspace-level)
-        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id]);
+        // Verify agent ownership
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$tool->agent_id, $this->tenantMemberId]);
         if (!$agent) {
             $this->jsonRpcError(-32000, "Tool's agent not accessible", $id);
             return;
@@ -655,9 +657,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Get the agent (workspace-level)
-        $agent = R::findOne('aiagents', 'id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$agentId]);
+        // Get the agent
+        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+            [$agentId, $this->tenantMemberId]);
 
         if (!$agent) {
             Flight::jsonError('Agent not found or not exposed as MCP', 404);
@@ -712,5 +714,286 @@ class Api extends BaseControls\Control {
         header('Content-Type: application/json');
         echo json_encode($mcpConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         exit;
+    }
+
+    /**
+     * Get PM Assistant context data
+     * GET /api/pm/context/{tenant}
+     * GET /api/pm/context/{tenant}?project_id=xxx
+     */
+    public function pmContext($tenant = null) {
+        if (empty($tenant)) {
+            Flight::jsonError('Tenant required in URL', 400);
+            return;
+        }
+
+        $memberId = $this->authenticateApiKey();
+        if (!$memberId) {
+            Flight::jsonError('Unauthorized - valid API key required', 401);
+            return;
+        }
+
+        if ($this->tenantSlug !== $tenant) {
+            Flight::jsonError("Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$tenant}'", 403);
+            return;
+        }
+
+        if (!$this->switchToMemberDatabase($memberId)) {
+            Flight::jsonError('Failed to access tenant database', 500);
+            return;
+        }
+
+        $projectId = $this->getParam('project_id');
+
+        try {
+            $context = $this->buildPmContext($projectId);
+            Flight::jsonSuccess($context);
+        } catch (Exception $e) {
+            Flight::get('log')->error('PM Context error: ' . $e->getMessage());
+            Flight::jsonError('Failed to build PM context: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Build PM context from database using RedBeanPHP
+     */
+    private function buildPmContext(?string $projectId = null): array {
+        $projects = $this->getPmProjects($projectId);
+        $epics = $this->getPmEpicsWithStats($projectId);
+        $stories = $this->getPmPendingStories($projectId);
+        $completed = $this->getPmCompletedStories($projectId);
+        $blocked = $this->getPmBlockedItems($projectId);
+        $archived = $this->getPmArchivedStories($projectId);
+        $summary = $this->buildPmSummary($projects, $epics, $stories, $completed, $blocked, $archived);
+
+        return compact('projects', 'epics', 'stories', 'completed', 'blocked', 'archived', 'summary');
+    }
+
+    /**
+     * Get active projects using Bean::find()
+     */
+    private function getPmProjects(?string $projectId): array {
+        $condition = 'status IN (?, ?) ORDER BY created_at DESC LIMIT 10';
+        $params = ['planning', 'in_progress'];
+
+        if ($projectId) {
+            $condition = 'status IN (?, ?) AND project_id = ? ORDER BY created_at DESC LIMIT 10';
+            $params[] = $projectId;
+        }
+
+        $beans = Bean::find('ctoprojects', $condition, $params);
+
+        return array_values(array_map(fn($p) => [
+            'project_id' => $p->project_id,
+            'name' => $p->name,
+            'description' => $p->description,
+            'status' => $p->status,
+            'created_at' => $p->created_at
+        ], $beans));
+    }
+
+    /**
+     * Get epics with stats - uses raw SQL for GROUP BY aggregations
+     */
+    private function getPmEpicsWithStats(?string $projectId): array {
+        // GROUP BY with aggregations requires raw SQL
+        $sql = "SELECT e.id, e.epic_id, e.title, e.description, e.priority, e.sequence,
+                       e.project_id, p.name as project_name,
+                       COUNT(s.id) as total_stories,
+                       SUM(CASE WHEN s.status = 'done' THEN 1 ELSE 0 END) as completed_stories,
+                       SUM(CASE WHEN s.status = 'pending_review' THEN 1 ELSE 0 END) as pending_stories,
+                       SUM(CASE WHEN s.status = 'approved' THEN 1 ELSE 0 END) as approved_stories,
+                       SUM(CASE WHEN s.status = 'blocked' THEN 1 ELSE 0 END) as blocked_stories,
+                       SUM(COALESCE(s.story_points, 0)) as total_points,
+                       SUM(CASE WHEN s.status = 'done' THEN COALESCE(s.story_points, 0) ELSE 0 END) as completed_points
+                FROM ctoepics e
+                JOIN ctoprojects p ON e.project_id = p.id
+                LEFT JOIN ctostories s ON s.epic_id = e.id
+                WHERE p.status IN ('planning', 'in_progress')";
+
+        $params = [];
+        if ($projectId) {
+            $sql .= " AND p.project_id = ?";
+            $params[] = $projectId;
+        }
+
+        $sql .= " GROUP BY e.id ORDER BY e.priority ASC, e.sequence ASC LIMIT 50";
+
+        return Bean::getAll($sql, $params);
+    }
+
+    /**
+     * Get pending stories using Bean::find() with Bean::load() for relations
+     */
+    private function getPmPendingStories(?string $projectId): array {
+        $beans = Bean::find('ctostories',
+            'status IN (?, ?, ?, ?, ?) ORDER BY sequence ASC LIMIT 100',
+            ['pending_review', 'approved', 'backlog', 'ready', 'in_progress']
+        );
+
+        $result = [];
+        foreach ($beans as $s) {
+            $epic = Bean::load('ctoepics', $s->epic_id);
+            if (!$epic->id) continue;
+
+            $project = Bean::load('ctoprojects', $epic->project_id);
+            if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
+            if ($projectId && $project->project_id !== $projectId) continue;
+
+            $result[] = [
+                'id' => $s->id,
+                'story_id' => $s->story_id,
+                'title' => $s->title,
+                'description' => $s->description,
+                'status' => $s->status,
+                'story_points' => $s->story_points,
+                'jira_issue_key' => $s->jira_issue_key,
+                'epic_title' => $epic->title,
+                'epic_id' => $epic->epic_id,
+                'project_name' => $project->name
+            ];
+        }
+
+        // Sort by status priority
+        $order = ['in_progress' => 1, 'ready' => 2, 'approved' => 3, 'pending_review' => 4, 'backlog' => 5];
+        usort($result, fn($a, $b) => ($order[$a['status']] ?? 99) - ($order[$b['status']] ?? 99));
+
+        return $result;
+    }
+
+    /**
+     * Get completed stories - those with jobs that have PRs (what Review Board shows)
+     * Uses Bean::find() to get jobs, then loads related story/epic/project
+     */
+    private function getPmCompletedStories(?string $projectId): array {
+        // Get jobs with PRs - this is what Review Board shows as "Complete"
+        $jobs = Bean::find('aidevjobs',
+            'status IN (?, ?) ORDER BY completed_at ASC LIMIT 50',
+            ['pr_created', 'complete']
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            // Find the story by jira_issue_key (job.issue_key matches story.jira_issue_key)
+            $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$job->issue_key]);
+            if (!$story) continue;
+
+            $epic = Bean::load('ctoepics', $story->epic_id);
+            if (!$epic->id) continue;
+
+            $project = Bean::load('ctoprojects', $epic->project_id);
+            if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
+            if ($projectId && $project->project_id !== $projectId) continue;
+
+            $result[] = [
+                'id' => $story->id,
+                'story_id' => $story->story_id,
+                'title' => $story->title,
+                'status' => $story->status,
+                'story_points' => $story->story_points,
+                'jira_issue_key' => $story->jira_issue_key,
+                'updated_at' => $story->updated_at,
+                'epic_title' => $epic->title,
+                'epic_id' => $epic->epic_id,
+                'epic_sequence' => $epic->sequence,
+                'project_name' => $project->name,
+                'job_status' => $job->status,
+                'branch_name' => $job->branch_name,
+                'pr_url' => $job->pr_url,
+                'completed_at' => $job->completed_at
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Get blocked items using Bean::find() with Bean::load() for relations
+     */
+    private function getPmBlockedItems(?string $projectId): array {
+        $beans = Bean::find('ctostories', 'status = ? LIMIT 20', ['blocked']);
+
+        $result = [];
+        foreach ($beans as $s) {
+            $epic = Bean::load('ctoepics', $s->epic_id);
+            if (!$epic->id) continue;
+
+            $project = Bean::load('ctoprojects', $epic->project_id);
+            if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
+            if ($projectId && $project->project_id !== $projectId) continue;
+
+            $result[] = [
+                'id' => $s->id,
+                'story_id' => $s->story_id,
+                'title' => $s->title,
+                'description' => $s->description,
+                'jira_issue_key' => $s->jira_issue_key,
+                'epic_title' => $epic->title,
+                'project_name' => $project->name
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Get archived/merged stories using Bean::find()
+     * These are stories that have been included in a QA release branch
+     */
+    private function getPmArchivedStories(?string $projectId): array {
+        // Get jobs with merged status
+        $jobs = Bean::find(
+            'aidevjobs',
+            'status = ? ORDER BY merged_at DESC LIMIT 100',
+            ['merged']
+        );
+
+        $result = [];
+        foreach ($jobs as $job) {
+            // Find the story by jira_issue_key
+            $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$job->issue_key]);
+            if (!$story) continue;
+
+            $epic = Bean::load('ctoepics', $story->epic_id);
+            if (!$epic->id) continue;
+
+            $project = Bean::load('ctoprojects', $epic->project_id);
+            if (!$project->id) continue;
+            if ($projectId && $project->project_id !== $projectId) continue;
+
+            $result[] = [
+                'id' => $story->id,
+                'story_id' => $story->story_id,
+                'title' => $story->title,
+                'story_points' => $story->story_points,
+                'jira_issue_key' => $story->jira_issue_key,
+                'epic_title' => $epic->title,
+                'project_name' => $project->name,
+                'qa_branch' => $job->qa_branch,
+                'merged_at' => $job->merged_at
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Build summary text
+     */
+    private function buildPmSummary(array $projects, array $epics, array $stories, array $completed, array $blocked, array $archived = []): string {
+        $parts = [];
+        $parts[] = count($projects) . ' active project(s)';
+        $parts[] = count($epics) . ' epic(s)';
+        $parts[] = count($stories) . ' pending story(ies)';
+        if (count($completed) > 0) {
+            $parts[] = count($completed) . ' completed (ready to merge)';
+        }
+        if (count($blocked) > 0) {
+            $parts[] = count($blocked) . ' blocked';
+        }
+        if (count($archived) > 0) {
+            $parts[] = count($archived) . ' archived/merged';
+        }
+        return implode(', ', $parts);
     }
 }

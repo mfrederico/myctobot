@@ -11,7 +11,6 @@ use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\UserDatabaseService;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 
 class IncomingEmail extends BaseControls\Control {

@@ -14,8 +14,6 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Exception as Exception;
 
-require_once __DIR__ . '/../lib/Bean.php';
-
 class CeoDirective extends BaseControls\Control {
 
     /**

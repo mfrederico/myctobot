@@ -10,7 +10,6 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \Monolog\Logger;
 
-require_once __DIR__ . '/lib/Bean.php';
 use \app\Bean;
 use \Monolog\Handler\StreamHandler;
 use \Monolog\Handler\RotatingFileHandler;

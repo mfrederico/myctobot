@@ -25,7 +25,6 @@ use \app\Bean;
 use \Exception;
 
 require_once __DIR__ . '/EncryptionService.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class ShopifyClient {
 

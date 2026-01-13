@@ -19,7 +19,6 @@ require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class Jobs extends BaseControls\Control {
 

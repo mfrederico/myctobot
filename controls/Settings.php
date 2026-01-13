@@ -178,8 +178,8 @@ class Settings extends BaseControls\Control {
         $tier = SubscriptionService::getTier($this->member->id);
         $tierInfo = SubscriptionService::getTierInfo($tier);
 
-        // Get agent and shard counts (available to all users)
-        $agentCount = Bean::count('aiagents', 'member_id = ?', [$this->member->id]);
+        // Get agent and shard counts (workspace-level - shared by all members)
+        $agentCount = Bean::count('aiagents', '1');
         $shardCount = 0;
 
         // Shards are admin-level (not per-member)

@@ -237,19 +237,17 @@ Flight::map('jsonError', function($message = 'Error', $code = 400) {
  */
 Flight::map('loadMenu', function() {
     $menu = [];
-    
-    // Public menu items
-    $menu[] = ['url' => '/', 'label' => 'Home', 'icon' => 'home'];
-    
+
     if (Flight::isLoggedIn()) {
-        // Member menu items
+        // Member menu items (no Home link when logged in)
         $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
+        $menu[] = ['url' => '/directives', 'label' => 'Directives', 'icon' => 'envelope-paper'];
         $menu[] = ['url' => '/knowledge-base', 'label' => 'Knowledge Base', 'icon' => 'book'];
 
         // Enterprise tier - AI Developer
         $member = Flight::get('member');
         if ($member && $member->isEnterprise()) {
-            $menu[] = ['url' => '/enterprise', 'label' => 'AI Developer', 'icon' => 'robot'];
+            $menu[] = ['url' => '/enterprise', 'label' => 'AI Developer', 'icon' => 'cpu'];
         }
 
         // Admin menu items
@@ -257,10 +255,12 @@ Flight::map('loadMenu', function() {
             $menu[] = ['url' => '/admin', 'label' => 'Admin', 'icon' => 'gear'];
         }
     } else {
+        // Public menu items
+        $menu[] = ['url' => '/', 'label' => 'Home', 'icon' => 'house'];
         $menu[] = ['url' => '/auth/login', 'label' => 'Login', 'icon' => 'sign-in'];
         $menu[] = ['url' => '/auth/register', 'label' => 'Register', 'icon' => 'user-plus'];
     }
-    
+
     return $menu;
 });
 

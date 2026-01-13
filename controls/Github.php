@@ -138,8 +138,10 @@ class Github extends BaseControls\Control {
             // Generate webhook secret for this repo
             $webhookSecret = bin2hex(random_bytes(20));
 
+            // Create repo (workspace-level - track who created it)
             $repo = Bean::dispense('repoconnections');
-            $repo->member_id = $this->member->id;  // Store owner for webhook callbacks
+            $repo->created_by_member_id = $this->member->id;
+            $repo->created_by_name = $this->member->display_name ?? $this->member->email;
             $repo->provider = 'github';
             $repo->repo_owner = $owner;
             $repo->repo_name = $repoName;
@@ -421,9 +423,9 @@ class Github extends BaseControls\Control {
                 }
             }
 
-            // Get agents for dropdown
+            // Get agents for dropdown (workspace-level - shared by all members)
             $agents = [];
-            $agentBeans = \RedBeanPHP\R::findAll('aiagents', 'member_id = ? AND is_active = 1 ORDER BY name ASC', [$this->member->id]);
+            $agentBeans = \RedBeanPHP\R::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
             foreach ($agentBeans as $agentBean) {
                 $agents[] = [
                     'id' => $agentBean->id,
@@ -544,9 +546,9 @@ class Github extends BaseControls\Control {
             return;
         }
 
-        // If agent_id provided, verify it belongs to this member
+        // If agent_id provided, verify it exists (workspace-level)
         if ($agentId) {
-            $agent = \RedBeanPHP\R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+            $agent = \RedBeanPHP\R::findOne('aiagents', 'id = ?', [$agentId]);
             if (!$agent) {
                 Flight::jsonError('Agent not found', 404);
                 return;

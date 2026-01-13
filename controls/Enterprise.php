@@ -26,8 +26,6 @@ require_once __DIR__ . '/../services/AIDevAgent.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
-require_once __DIR__ . '/../lib/Bean.php';
-
 use \app\Bean;
 
 class Enterprise extends BaseControls\Control {
@@ -71,8 +69,8 @@ class Enterprise extends BaseControls\Control {
         $apiKeySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
         $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
-        // Check GitHub connections
-        $githubCount = R::count('repoconnections', 'provider = ? AND enabled = ? AND member_id = ?', ['github', 1, $memberId]);
+        // Check GitHub connections (workspace-level - all members share repos)
+        $githubCount = R::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
         $githubConnected = $githubCount > 0;
 
         // Check credit balance errors (within last 24 hours)
@@ -520,9 +518,9 @@ class Enterprise extends BaseControls\Control {
                 }
             }
 
-            // Get agents for dropdown
+            // Get agents for dropdown (workspace-level - all members share agents)
             $agents = [];
-            $agentBeans = R::findAll('aiagents', 'member_id = ? AND is_active = 1 ORDER BY name ASC', [$this->member->id]);
+            $agentBeans = R::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
             foreach ($agentBeans as $agentBean) {
                 $agents[] = [
                     'id' => $agentBean->id,
@@ -595,11 +593,13 @@ class Enterprise extends BaseControls\Control {
             // Encrypt the token for storage
             $encryptedToken = EncryptionService::encrypt($token);
 
-            // Find or create repo connection
+            // Find or create repo connection (workspace-level - track who created it)
             $repo = Bean::findOne('repoconnections', 'provider = ? AND repo_owner = ? AND repo_name = ?',
                 [$provider, $owner, $repoName]);
             if (!$repo) {
                 $repo = Bean::dispense('repoconnections');
+                $repo->created_by_member_id = $this->member->id;
+                $repo->created_by_name = $this->member->display_name ?? $this->member->email;
                 $repo->created_at = date('Y-m-d H:i:s');
             }
             $repo->provider = $provider;
@@ -1589,9 +1589,9 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        // If agent_id provided, verify it belongs to this member (aiagents is in MySQL)
+        // If agent_id provided, verify it exists (workspace-level - all members share agents)
         if ($agentId) {
-            $agent = R::findOne('aiagents', 'id = ? AND member_id = ?', [$agentId, $memberId]);
+            $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
             if (!$agent) {
                 $this->disconnectUserDb();
                 Flight::jsonError('Agent not found', 404);

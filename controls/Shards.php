@@ -15,7 +15,6 @@ use \app\services\ShardRouter;
 
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class Shards extends BaseControls\Control {
 

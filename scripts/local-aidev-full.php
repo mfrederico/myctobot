@@ -56,7 +56,6 @@ require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/bootstrap.php';
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/lib/TmuxManager.php';
-require_once $baseDir . '/lib/Bean.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/GitHubClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
@@ -362,9 +361,9 @@ if ($agentId) {
     }
 }
 
-// If no agent assigned, check for default agent
+// If no agent assigned, check for default agent (workspace-level)
 if (!$agentConfig) {
-    $defaultAgent = R::findOne('aiagents', 'member_id = ? AND is_default = 1 AND is_active = 1', [$memberId]);
+    $defaultAgent = R::findOne('aiagents', 'is_default = 1 AND is_active = 1');
     if ($defaultAgent) {
         $agentConfig = [
             'id' => $defaultAgent->id,
@@ -786,6 +785,20 @@ if ($provider === 'github') {
     $mcpProviderInfo = "MCP Jira: HTTP transport ({$mcpHttpUrl})";
 }
 
+// Add MyCTOBot Jobs MCP for completion callbacks
+$mcpTenant = $tenant ?? 'default';
+$mcpJobsUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jobs";
+$mcpJobsCredentials = base64_encode("{$memberId}:{$jobId}");
+$mcpServers->myctobot = (object) [
+    'type' => 'http',
+    'url' => $mcpJobsUrl,
+    'headers' => (object) [
+        'Authorization' => "Basic {$mcpJobsCredentials}"
+    ]
+];
+$enabledMcpServers[] = 'myctobot';
+echo "  MyCTOBot Jobs MCP: {$mcpJobsUrl}\n";
+
 // Merge agent's MCP servers if configured
 if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
     echo "  Loading MCP servers from agent config...\n";
@@ -959,6 +972,10 @@ echo "SHOPIFY_CLI_THEME_TOKEN: ****\${SHOPIFY_CLI_THEME_TOKEN: -4}"
 SHOPIFY_ECHO;
 }
 
+// Get API key for webhook auth
+$apiKey = Flight::get('cron.api_key') ?? '';
+$webhookUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
+
 // Hook environment variables for multi-tenant support
 $hookEnvSection = <<<HOOK_ENV
 
@@ -968,7 +985,18 @@ export MYCTOBOT_WORKSPACE="{$tenant}"
 export MYCTOBOT_JOB_ID="{$jobId}"
 export MYCTOBOT_MEMBER_ID="{$memberId}"
 export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
+export MYCTOBOT_API_KEY="{$apiKey}"
+export MYCTOBOT_WEBHOOK_URL="{$webhookUrl}"
 HOOK_ENV;
+
+// Copy finish_job.sh to work directory
+$finishJobSrc = "{$baseDir}/scripts/finish_job.sh";
+$finishJobDst = "{$workDir}/finish_job.sh";
+if (file_exists($finishJobSrc)) {
+    copy($finishJobSrc, $finishJobDst);
+    chmod($finishJobDst, 0755);
+    echo "  Copied finish_job.sh to work directory\n";
+}
 
 // Build provider-specific environment section
 $providerEnvSection = '';

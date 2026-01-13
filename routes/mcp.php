@@ -23,3 +23,10 @@ Flight::route('POST|GET|OPTIONS /mcp/jira', function() {
     $controller = new \app\Mcp();
     $controller->jira();
 });
+
+// MCP Jobs endpoint for job status callbacks
+// /mcp/{tenant}/jobs - AI Dev runners call this to report completion
+Flight::route('POST|GET|OPTIONS /mcp/@tenant/jobs', function($tenant) {
+    $controller = new \app\McpJobs();
+    $controller->handleWithTenant($tenant);
+});

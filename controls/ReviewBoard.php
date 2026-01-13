@@ -19,7 +19,6 @@ use \app\services\EncryptionService;
 use \app\services\AIDevStatusService;
 use \app\services\AIDevJobService;
 
-require_once __DIR__ . '/../lib/Bean.php';
 require_once __DIR__ . '/../services/AIDevStatusService.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/UserDatabaseService.php';
@@ -69,8 +68,8 @@ class ReviewBoard extends BaseControls\Control {
             ]);
         }
 
-        // Get all projects with pending stories
-        $projects = Bean::find('ctoprojects', 'status IN (?, ?) ORDER BY created_at DESC', ['planning', 'in_progress']);
+        // Get all active projects (planning, in_progress, and completed for visibility)
+        $projects = Bean::find('ctoprojects', 'status IN (?, ?, ?) ORDER BY created_at DESC', ['planning', 'in_progress', 'completed']);
 
         $projectData = [];
         foreach ($projects as $project) {
@@ -130,11 +129,60 @@ class ReviewBoard extends BaseControls\Control {
         // Summary stats
         $totalPending = Bean::count('ctostories', 'status = ?', ['pending_review']);
         $totalApproved = Bean::count('ctostories', 'status = ?', ['approved']);
+        $totalInProgress = Bean::count('ctostories', 'status = ?', ['in_progress']);
+        $totalDone = Bean::count('ctostories', 'status = ?', ['done']);
+        $totalBlocked = Bean::count('ctostories', 'status = ?', ['blocked']);
 
         $this->render('reviewboard/index', [
             'projects' => $projectData,
             'totalPending' => $totalPending,
             'totalApproved' => $totalApproved,
+            'totalInProgress' => $totalInProgress,
+            'totalDone' => $totalDone,
+            'totalBlocked' => $totalBlocked,
+        ]);
+    }
+
+    /**
+     * View merged/archived stories history
+     */
+    public function history() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            $this->flash('error', 'User database not initialized');
+            Flight::redirect('/settings/connections');
+            return;
+        }
+
+        // Get all merged jobs
+        $mergedJobs = Bean::find('aidevjobs', 'status = ? ORDER BY merged_at DESC', ['merged']);
+
+        // Build merged stories data
+        $mergedStories = [];
+        foreach ($mergedJobs as $job) {
+            // Find the story for this job
+            $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$job->issue_key]);
+            $project = null;
+            $epic = null;
+
+            if ($story) {
+                $epic = Bean::load('ctoepics', $story->epic_id);
+                if ($epic && $epic->id) {
+                    $project = Bean::load('ctoprojects', $epic->project_id);
+                }
+            }
+
+            $mergedStories[] = [
+                'job' => $job,
+                'story' => $story,
+                'project' => $project,
+                'epic' => $epic,
+            ];
+        }
+
+        $this->render('reviewboard/history', [
+            'mergedStories' => $mergedStories,
         ]);
     }
 
@@ -880,6 +928,175 @@ class ReviewBoard extends BaseControls\Control {
         }
     }
 
+    /**
+     * AJAX: Get branches from repository for QA release dropdown
+     */
+    public function getBranches() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        // Get the first enabled repo connection
+        $repo = Bean::findOne('repoconnections', 'enabled = 1 ORDER BY id ASC');
+        if (!$repo) {
+            Flight::jsonSuccess(['branches' => ['main']], 'No repo connected');
+            return;
+        }
+
+        try {
+            // Get GitHub token from settings
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            if (!$tokenSetting) {
+                Flight::jsonSuccess(['branches' => ['main']], 'No GitHub token');
+                return;
+            }
+
+            $token = \app\services\EncryptionService::decrypt($tokenSetting->setting_value);
+
+            // Parse repo URL to get owner/repo
+            $repoUrl = $repo->repo_url;
+            if (preg_match('/github\.com[\/:]([^\/]+)\/([^\/\.]+)/', $repoUrl, $m)) {
+                $owner = $m[1];
+                $repoName = rtrim($m[2], '.git');
+
+                // Fetch branches from GitHub API
+                $ch = curl_init("https://api.github.com/repos/{$owner}/{$repoName}/branches?per_page=100");
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_HTTPHEADER => [
+                        "Authorization: Bearer {$token}",
+                        "Accept: application/vnd.github.v3+json",
+                        "User-Agent: MyCTOBot"
+                    ]
+                ]);
+                $response = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if ($httpCode === 200) {
+                    $branchData = json_decode($response, true);
+                    $branches = array_map(fn($b) => $b['name'], $branchData);
+
+                    // Sort with main/master first, then qa branches, then others
+                    usort($branches, function($a, $b) {
+                        $aScore = ($a === 'main' || $a === 'master') ? 0 : (strpos($a, 'qa') === 0 ? 1 : 2);
+                        $bScore = ($b === 'main' || $b === 'master') ? 0 : (strpos($b, 'qa') === 0 ? 1 : 2);
+                        if ($aScore !== $bScore) return $aScore - $bScore;
+                        return strcmp($a, $b);
+                    });
+
+                    Flight::jsonSuccess(['branches' => $branches]);
+                    return;
+                }
+            }
+
+            Flight::jsonSuccess(['branches' => ['main']]);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to fetch branches', ['error' => $e->getMessage()]);
+            Flight::jsonSuccess(['branches' => ['main']]);
+        }
+    }
+
+    /**
+     * AJAX: Abandon a PR - close it on GitHub and mark job as failed
+     */
+    public function abandonPR() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $issueKey = $this->getParam('issue_key');
+        $prUrl = $this->getParam('pr_url');
+
+        if (!$issueKey) {
+            Flight::jsonError('Issue key required', 400);
+            return;
+        }
+
+        // Find the job
+        $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+        if (!$job) {
+            Flight::jsonError('Job not found for ' . $issueKey, 404);
+            return;
+        }
+
+        // Close PR on GitHub if we have the URL
+        $prClosed = false;
+        if ($prUrl && preg_match('/github\.com\/([^\/]+)\/([^\/]+)\/pull\/(\d+)/', $prUrl, $m)) {
+            $owner = $m[1];
+            $repo = $m[2];
+            $prNumber = $m[3];
+
+            // Get GitHub token
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            if ($tokenSetting) {
+                try {
+                    $token = \app\services\EncryptionService::decrypt($tokenSetting->setting_value);
+
+                    // Close the PR via GitHub API
+                    $ch = curl_init("https://api.github.com/repos/{$owner}/{$repo}/pulls/{$prNumber}");
+                    curl_setopt_array($ch, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_CUSTOMREQUEST => 'PATCH',
+                        CURLOPT_POSTFIELDS => json_encode(['state' => 'closed']),
+                        CURLOPT_HTTPHEADER => [
+                            "Authorization: Bearer {$token}",
+                            "Accept: application/vnd.github.v3+json",
+                            "User-Agent: MyCTOBot",
+                            "Content-Type: application/json"
+                        ]
+                    ]);
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+
+                    $prClosed = ($httpCode === 200);
+
+                    $this->logger->info('Closed PR on GitHub', [
+                        'issue_key' => $issueKey,
+                        'pr_url' => $prUrl,
+                        'http_code' => $httpCode
+                    ]);
+                } catch (\Exception $e) {
+                    $this->logger->error('Failed to close PR', [
+                        'issue_key' => $issueKey,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+        }
+
+        // Mark job as failed/abandoned
+        $job->status = 'failed';
+        $job->error_message = 'Abandoned by user';
+        $job->updated_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
+        // Also update the story status if it exists
+        $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$issueKey]);
+        if ($story) {
+            $story->status = 'blocked';
+            Bean::store($story);
+        }
+
+        $this->logger->info('PR abandoned', [
+            'issue_key' => $issueKey,
+            'pr_closed' => $prClosed,
+            'member_id' => $this->member->id
+        ]);
+
+        Flight::jsonSuccess([
+            'pr_closed' => $prClosed,
+            'job_status' => 'failed'
+        ], $prClosed ? 'PR closed and job marked as failed' : 'Job marked as failed (PR may need manual closure)');
+    }
+
     // ==================== Stale Job Detection Endpoints ====================
 
     /**
@@ -1026,6 +1243,320 @@ class ReviewBoard extends BaseControls\Control {
         } else {
             Flight::jsonError($result['error'] ?? 'Failed to retry job', 400);
         }
+    }
+
+    /**
+     * AJAX: Build QA release with selected stories
+     */
+    public function buildQARelease() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $storyIds = $this->getParam('story_ids');
+        $targetBranch = $this->getParam('target_branch') ?? 'main';
+
+        if (!is_array($storyIds) || empty($storyIds)) {
+            Flight::jsonError('No stories selected', 400);
+            return;
+        }
+
+        // Validate story IDs exist and are completed
+        $validStoryIds = [];
+        foreach ($storyIds as $storyId) {
+            $story = Bean::findOne('ctostories', 'id = ?', [$storyId]);
+            if ($story && in_array($story->status, ['done', 'approved'])) {
+                // Check for completed job
+                $job = Bean::findOne('aidevjobs', 'issue_key = ? AND status IN (?, ?)',
+                    [$story->jira_issue_key, 'pr_created', 'complete']);
+                if ($job) {
+                    $validStoryIds[] = $storyId;
+                }
+            }
+        }
+
+        if (empty($validStoryIds)) {
+            Flight::jsonError('No valid completed stories found', 400);
+            return;
+        }
+
+        // Determine project from first story
+        $firstStory = Bean::findOne('ctostories', 'id = ?', [$validStoryIds[0]]);
+        $epic = Bean::load('ctoepics', $firstStory->epic_id);
+        $projectId = $epic->project_id ?? null;
+
+        if (!$projectId) {
+            Flight::jsonError('Could not determine project', 400);
+            return;
+        }
+
+        // Get tenant
+        $tenant = $_SESSION['tenant_slug'] ?? null;
+
+        // Build the command to run qa-release-builder.php in background
+        $storyIdList = implode(',', $validStoryIds);
+        $tenantParam = $tenant ? sprintf(' --tenant=%s', escapeshellarg($tenant)) : '';
+
+        // If user enters "main", generate a unique QA branch name
+        // Otherwise use their custom branch name (e.g., "qa/rc1")
+        if ($targetBranch === 'main') {
+            $qaBranch = 'qa/release-' . date('Y-m-d-His');
+        } else {
+            $qaBranch = $targetBranch;
+        }
+        $logFile = "log/qa-release-" . date('Y-m-d') . ".log";
+
+        // Add --push to auto-push and --verbose for logging
+        $baseDir = dirname(__DIR__);
+        $cmd = sprintf(
+            'php %s/scripts/qa-release-builder.php --project=%d --stories=%s --target=main --branch=%s --push --verbose%s >> %s 2>&1 &',
+            escapeshellarg($baseDir),
+            $projectId,
+            escapeshellarg($storyIdList),
+            escapeshellarg($qaBranch),
+            $tenantParam,
+            escapeshellarg($baseDir . '/' . $logFile)
+        );
+
+        $this->logger->info('Starting QA release build', [
+            'member_id' => $this->member->id,
+            'project_id' => $projectId,
+            'story_ids' => $validStoryIds,
+            'target_branch' => $targetBranch,
+            'qa_branch' => $qaBranch,
+            'command' => $cmd
+        ]);
+
+        // Generate a unique build ID for tracking
+        $buildId = date('Ymd-His');
+        $workDir = "/tmp/qa-release-{$tenant}-{$projectId}-{$buildId}";
+
+        // Execute in background
+        exec($cmd);
+
+        Flight::jsonSuccess([
+            'story_count' => count($validStoryIds),
+            'project_id' => $projectId,
+            'target_branch' => $targetBranch,
+            'qa_branch' => $qaBranch,
+            'log_file' => $logFile,
+            'build_id' => $buildId,
+            'work_dir' => $workDir,
+        ], 'QA release build started - check status for results');
+    }
+
+    /**
+     * AJAX: Check QA release build status
+     */
+    public function qaReleaseStatus() {
+        if (!$this->requireLogin()) return;
+
+        $workDir = $this->getParam('work_dir');
+        if (!$workDir || !is_dir($workDir)) {
+            Flight::jsonSuccess(['status' => 'running', 'message' => 'Build in progress...']);
+            return;
+        }
+
+        $reportFile = $workDir . '/qa-report.json';
+        if (!file_exists($reportFile)) {
+            Flight::jsonSuccess(['status' => 'running', 'message' => 'Build in progress...']);
+            return;
+        }
+
+        $report = json_decode(file_get_contents($reportFile), true);
+        if (!$report) {
+            Flight::jsonSuccess(['status' => 'running', 'message' => 'Build in progress...']);
+            return;
+        }
+
+        // Extract key info from report
+        $mergeResults = $report['merge_results'] ?? [];
+        $stories = $report['stories'] ?? [];
+        $successful = count(array_filter($mergeResults, fn($r) => $r['success'] ?? false));
+        $failed = count(array_filter($mergeResults, fn($r) => !($r['success'] ?? false)));
+
+        // Build a map of issue_key => pr_url from stories
+        $prUrls = [];
+        foreach ($stories as $story) {
+            if (!empty($story['issue_key']) && !empty($story['pr_url'])) {
+                $prUrls[$story['issue_key']] = $story['pr_url'];
+            }
+        }
+
+        $conflicts = [];
+        foreach ($mergeResults as $issueKey => $result) {
+            if (!($result['success'] ?? false)) {
+                $conflicts[$issueKey] = [
+                    'files' => $result['conflicts'] ?? [],
+                    'error' => $result['error'] ?? 'Merge failed',
+                    'pr_url' => $prUrls[$issueKey] ?? null,
+                ];
+            }
+        }
+
+        Flight::jsonSuccess([
+            'status' => $report['success'] ? 'success' : 'failed',
+            'qa_branch' => $report['qa_branch'] ?? null,
+            'target_branch' => $report['target_branch'] ?? null,
+            'merged' => $successful,
+            'failed' => $failed,
+            'conflicts' => $conflicts,
+            'build_passed' => empty(array_filter($report['build_results'] ?? [], fn($r) => !$r['success'])),
+            'tests_passed' => empty(array_filter($report['test_results'] ?? [], fn($r) => !$r['success'])),
+            'message' => $report['success']
+                ? "QA branch pushed to GitHub"
+                : ($failed > 0 ? "{$failed} merge conflict(s)" : "Build or tests failed"),
+        ]);
+    }
+
+    /**
+     * AJAX: Batch approve selected pending stories
+     */
+    public function batchApprove() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $storyIds = $this->getParam('story_ids');
+        if (!is_array($storyIds) || empty($storyIds)) {
+            Flight::jsonError('No stories selected', 400);
+            return;
+        }
+
+        $approved = 0;
+        $errors = [];
+
+        foreach ($storyIds as $storyId) {
+            $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+            if (!$story) {
+                $errors[] = "Story not found: {$storyId}";
+                continue;
+            }
+
+            if ($story->status !== 'pending_review') {
+                continue; // Skip already approved
+            }
+
+            $story->status = 'approved';
+            $story->updated_at = date('Y-m-d H:i:s');
+            Bean::store($story);
+            $approved++;
+        }
+
+        Flight::jsonSuccess([
+            'approved' => $approved,
+            'errors' => $errors
+        ], "{$approved} stories approved");
+    }
+
+    /**
+     * AJAX: Batch approve and start jobs for selected pending stories
+     */
+    public function batchApproveAndRun() {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->initUserDb()) {
+            Flight::jsonError('User database not initialized', 500);
+            return;
+        }
+
+        $storyIds = $this->getParam('story_ids');
+        if (!is_array($storyIds) || empty($storyIds)) {
+            Flight::jsonError('No stories selected', 400);
+            return;
+        }
+
+        $approved = 0;
+        $jobsStarted = 0;
+        $errors = [];
+
+        // Get GitHub config for job creation
+        $githubConfig = $this->getGitHubConfig();
+
+        foreach ($storyIds as $storyId) {
+            $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+            if (!$story) {
+                $errors[] = "Story not found: {$storyId}";
+                continue;
+            }
+
+            // Approve if pending
+            if ($story->status === 'pending_review') {
+                $story->status = 'approved';
+                $story->updated_at = date('Y-m-d H:i:s');
+                Bean::store($story);
+                $approved++;
+            }
+
+            // Create GitHub issue if needed
+            if (empty($story->jira_issue_key) && $githubConfig) {
+                try {
+                    $issueKey = $this->createGitHubIssue($story, $githubConfig);
+                    $story->jira_issue_key = $issueKey;
+                    Bean::store($story);
+                } catch (\Exception $e) {
+                    $errors[] = "Failed to create issue for: {$story->title}";
+                    continue;
+                }
+            }
+
+            // Start job if story has an issue key
+            if ($story->jira_issue_key) {
+                try {
+                    // Check if job already exists
+                    $existingJob = Bean::findOne('aidevjobs', 'issue_key = ?', [$story->jira_issue_key]);
+                    if ($existingJob && !in_array($existingJob->status, ['failed', 'complete', 'pr_created'])) {
+                        continue; // Job already running
+                    }
+
+                    // Queue the job
+                    $this->queueJobForStory($story);
+                    $jobsStarted++;
+                } catch (\Exception $e) {
+                    $errors[] = "Failed to start job for: {$story->jira_issue_key}";
+                }
+            }
+        }
+
+        Flight::jsonSuccess([
+            'approved' => $approved,
+            'jobs_started' => $jobsStarted,
+            'errors' => $errors
+        ], "{$approved} approved, {$jobsStarted} jobs queued");
+    }
+
+    /**
+     * Helper: Queue a job for a story
+     */
+    private function queueJobForStory($story) {
+        $githubConfig = $this->getGitHubConfig();
+        if (!$githubConfig) {
+            throw new \Exception('GitHub not configured');
+        }
+
+        // Create job record
+        $job = Bean::dispense('aidevjobs');
+        $job->job_id = bin2hex(random_bytes(16));
+        $job->member_id = $this->member->id;
+        $job->issue_key = $story->jira_issue_key;
+        $job->project_type = 'github';
+        $job->status = 'pending';
+        $job->progress = 0;
+        $job->current_step = 'Queued';
+        $job->created_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
+        // Link job to story
+        $story->aidev_job_id = $job->job_id;
+        Bean::store($story);
+
+        return $job;
     }
 
     /**

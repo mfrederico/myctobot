@@ -18,7 +18,6 @@ use \app\Bean;
 
 require_once __DIR__ . '/ClaudeClient.php';
 require_once __DIR__ . '/UserDatabaseService.php';
-require_once __DIR__ . '/../lib/Bean.php';
 
 class CTOAgent {
     private int $memberId;

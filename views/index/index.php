@@ -4,65 +4,119 @@ $proMonthlyPrice = \app\services\SubscriptionService::getProMonthlyPrice();
 $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
 ?>
 <!-- Hero Section -->
-<div class="bg-primary text-white py-5">
+<div class="bg-dark text-white py-5" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
     <div class="container">
-        <div class="row align-items-center">
-            <div class="col-lg-6">
-                <h1 class="display-4 fw-bold">MyCTOBot</h1>
-                <p class="lead">AI-powered daily sprint digests for Jira. Get intelligent prioritization and actionable insights delivered to your inbox every morning.</p>
+        <div class="row align-items-center py-4">
+            <div class="col-lg-7">
+                <span class="badge bg-primary mb-3">End-to-End AI Development</span>
+                <h1 class="display-4 fw-bold mb-4">From Idea to Production<br><span class="text-primary">with AI That Follows Your Rules</span></h1>
+                <p class="lead mb-4 text-light opacity-75">
+                    MyCTOBot is a complete AI development platform that transforms your ideas into working code&mdash;within the guardrails you define. Connect your infrastructure, set your guidelines, and let AI handle the implementation.
+                </p>
+                <div class="d-flex flex-wrap gap-3 mb-4">
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-shield-check text-success me-2"></i>
+                        <span class="small">Security-First Architecture</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-git text-info me-2"></i>
+                        <span class="small">GitHub & Jira Integration</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-shop text-warning me-2"></i>
+                        <span class="small">Shopify Ready</span>
+                    </div>
+                </div>
                 <div class="d-grid gap-2 d-md-flex">
                     <?php if (\app\TenantResolver::isDefault()): ?>
-                        <a href="/signup" class="btn btn-light btn-lg">
-                            <i class="bi bi-building"></i> Create Your Workspace
+                        <a href="/signup" class="btn btn-primary btn-lg">
+                            <i class="bi bi-play-fill"></i> Start Building
                         </a>
-                        <a href="#" class="btn btn-outline-light btn-lg" data-bs-toggle="modal" data-bs-target="#existingTeamModal">
-                            Already have a team?
+                        <a href="#how-it-works" class="btn btn-outline-light btn-lg">
+                            See How It Works
                         </a>
                     <?php elseif (!$isLoggedIn): ?>
-                        <a href="/auth/login" class="btn btn-light btn-lg">Sign In</a>
+                        <a href="/auth/login" class="btn btn-primary btn-lg">Sign In</a>
                     <?php else: ?>
-                        <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
+                        <a href="/dashboard" class="btn btn-primary btn-lg">Go to Dashboard</a>
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="col-lg-6 text-center">
-                <i class="bi bi-kanban-fill" style="font-size: 12rem; opacity: 0.3;"></i>
+            <div class="col-lg-5 text-center d-none d-lg-block">
+                <div class="position-relative">
+                    <div class="card bg-dark border-secondary shadow-lg" style="transform: rotate(-3deg);">
+                        <div class="card-header bg-secondary bg-opacity-25 border-secondary py-2">
+                            <div class="d-flex align-items-center">
+                                <span class="text-danger me-2">&#9679;</span>
+                                <span class="text-warning me-2">&#9679;</span>
+                                <span class="text-success me-2">&#9679;</span>
+                                <span class="text-muted small ms-2">CEO Directive</span>
+                            </div>
+                        </div>
+                        <div class="card-body text-start" style="font-family: monospace; font-size: 0.8rem;">
+                            <p class="text-info mb-1"># Build a plugin marketplace</p>
+                            <p class="text-light mb-2">Create a system where users can browse, install, and manage plugins from multiple repositories...</p>
+                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> 6 epics created</p>
+                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> 24 stories generated</p>
+                            <p class="text-primary mb-0"><i class="bi bi-play-circle"></i> AI implementing...</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Features Section -->
-<div class="py-5">
+<!-- The Problem Section -->
+<div class="py-5 bg-light">
     <div class="container">
-        <h2 class="text-center mb-5">How It Works</h2>
+        <div class="row justify-content-center">
+            <div class="col-lg-8 text-center">
+                <h2 class="mb-4">AI Without Guardrails is Chaos</h2>
+                <p class="lead text-muted mb-5">
+                    Generic AI coding assistants produce inconsistent results, ignore your architecture, and create security vulnerabilities.
+                    You need AI that understands your codebase, follows your patterns, and builds within your framework.
+                </p>
+            </div>
+        </div>
         <div class="row g-4">
             <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-link-45deg text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">1. Connect Your Jira</h4>
-                        <p class="card-text">Securely link your Atlassian account using OAuth. No API keys to manage.</p>
+                <div class="card h-100 border-danger border-opacity-25">
+                    <div class="card-body">
+                        <div class="text-danger mb-3"><i class="bi bi-exclamation-triangle" style="font-size: 2rem;"></i></div>
+                        <h5>Generic AI</h5>
+                        <ul class="text-muted small mb-0">
+                            <li>Ignores your coding standards</li>
+                            <li>Creates security vulnerabilities</li>
+                            <li>Reinvents existing utilities</li>
+                            <li>No context of your architecture</li>
+                        </ul>
                     </div>
                 </div>
             </div>
-
             <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-kanban text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">2. Select Your Boards</h4>
-                        <p class="card-text">Choose which Jira boards to track and customize your digest schedule.</p>
+                <div class="card h-100 border-warning border-opacity-25">
+                    <div class="card-body">
+                        <div class="text-warning mb-3"><i class="bi bi-arrow-right" style="font-size: 2rem;"></i></div>
+                        <h5>The Gap</h5>
+                        <p class="text-muted small mb-0">
+                            Between your ideas and production-ready code, there's infrastructure to connect,
+                            patterns to follow, and security to maintain. AI needs structure to be useful.
+                        </p>
                     </div>
                 </div>
             </div>
-
             <div class="col-md-4">
-                <div class="card h-100 shadow-sm">
-                    <div class="card-body text-center">
-                        <i class="bi bi-envelope-check text-primary" style="font-size: 3rem;"></i>
-                        <h4 class="card-title mt-3">3. Get Daily Insights</h4>
-                        <p class="card-text">Receive AI-powered priority analysis and recommendations every morning.</p>
+                <div class="card h-100 border-success border-opacity-25">
+                    <div class="card-body">
+                        <div class="text-success mb-3"><i class="bi bi-check-circle" style="font-size: 2rem;"></i></div>
+                        <h5>MyCTOBot</h5>
+                        <ul class="text-muted small mb-0">
+                            <li>Learns your codebase patterns</li>
+                            <li>Follows CLAUDE.md guidelines</li>
+                            <li>Uses your existing utilities</li>
+                            <li>Security-first by design</li>
+                        </ul>
                     </div>
                 </div>
             </div>
@@ -70,257 +124,394 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
     </div>
 </div>
 
-<!-- Benefits Section -->
-<div class="bg-light py-5">
+<!-- How It Works Section -->
+<div class="py-5" id="how-it-works">
     <div class="container">
-        <h2 class="text-center mb-5">Why MyCTOBot?</h2>
+        <h2 class="text-center mb-2">From Directive to Deployment</h2>
+        <p class="text-center text-muted mb-5">A complete workflow that turns your vision into production code</p>
+
         <div class="row g-4">
-            <div class="col-md-6">
-                <div class="d-flex">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-robot text-primary" style="font-size: 2rem;"></i>
-                    </div>
-                    <div class="ms-3">
-                        <h5>AI-Powered Analysis</h5>
-                        <p class="text-muted">Claude AI analyzes your sprint backlog to identify customer-impacting priorities and potential blockers.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6">
-                <div class="d-flex">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-clock-history text-primary" style="font-size: 2rem;"></i>
-                    </div>
-                    <div class="ms-3">
-                        <h5>Save Time Every Day</h5>
-                        <p class="text-muted">No more morning stand-up prep. Get a curated summary of what matters most.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6">
-                <div class="d-flex">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-shield-check text-primary" style="font-size: 2rem;"></i>
-                    </div>
-                    <div class="ms-3">
-                        <h5>Secure OAuth Integration</h5>
-                        <p class="text-muted">Your Jira data stays safe with industry-standard OAuth 2.0 authentication.</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6">
-                <div class="d-flex">
-                    <div class="flex-shrink-0">
-                        <i class="bi bi-calendar-check text-primary" style="font-size: 2rem;"></i>
-                    </div>
-                    <div class="ms-3">
-                        <h5>Customizable Schedule</h5>
-                        <p class="text-muted">Set your preferred digest time for each board. Get insights when you need them.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Go Pro Section -->
-<div class="py-5">
-    <div class="container">
-        <div class="row align-items-center">
-            <div class="col-lg-5">
-                <span class="badge bg-warning text-dark mb-3">PRO</span>
-                <h2 class="mb-4">Unlock Advanced AI Analysis</h2>
-                <p class="lead">Engineering managers save 30+ minutes daily with Pro features that align AI recommendations to your team's goals.</p>
-
-                <div class="d-flex align-items-center mb-4">
-                    <div class="text-center me-4">
-                        <div class="display-6 fw-bold text-primary">20x</div>
-                        <small class="text-muted">ROI vs a CTO</small>
-                    </div>
-                    <div class="text-center me-4">
-                        <div class="display-6 fw-bold text-primary">30</div>
-                        <small class="text-muted">min/day saved</small>
-                    </div>
-                    <div class="text-center">
-                        <div class="display-6 fw-bold text-primary">$<?= number_format($proMonthlyPrice) ?></div>
-                        <small class="text-muted">/month</small>
-                    </div>
-                </div>
-
-                <a href="/settings/subscription" class="btn btn-warning btn-lg">
-                    <i class="bi bi-gift"></i> Try 1 Sprint Free
-                </a>
-                <p class="text-muted small mt-2 mb-0">14-day free trial. No charge until it ends.</p>
-            </div>
-            <div class="col-lg-7">
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <div class="card h-100 border-warning">
-                            <div class="card-body">
-                                <i class="bi bi-sliders text-warning" style="font-size: 1.5rem;"></i>
-                                <h6 class="card-title mt-2">Priority Weights</h6>
-                                <p class="card-text small text-muted">Tune AI recommendations: quick wins, tech debt, customer focus, risk mitigation.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card h-100 border-warning">
-                            <div class="card-body">
-                                <i class="bi bi-bullseye text-warning" style="font-size: 1.5rem;"></i>
-                                <h6 class="card-title mt-2">Engineering Goals</h6>
-                                <p class="card-text small text-muted">Set velocity targets, tech debt allocation, and quality gates.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card h-100 border-warning">
-                            <div class="card-body">
-                                <i class="bi bi-search text-warning" style="font-size: 1.5rem;"></i>
-                                <h6 class="card-title mt-2">Clarity Analysis</h6>
-                                <p class="card-text small text-muted">AI identifies vague tickets and suggests clarifying questions.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card h-100 border-warning">
-                            <div class="card-body">
-                                <i class="bi bi-infinity text-warning" style="font-size: 1.5rem;"></i>
-                                <h6 class="card-title mt-2">Unlimited Analysis</h6>
-                                <p class="card-text small text-muted">Run on-demand analysis anytime. Up to 5 boards.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Cost Savings Section -->
-<div class="py-5" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
-    <div class="container">
-        <h2 class="text-center mb-2">The Math is Simple</h2>
-        <p class="text-center text-secondary mb-5">Get CTO-level sprint insights at a fraction of the cost</p>
-
-        <div class="row justify-content-center g-4">
-            <!-- CTO Cost -->
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div class="card h-100 shadow-sm border-0">
                     <div class="card-body text-center">
-                        <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 70px; height: 70px;">
-                            <i class="bi bi-person-badge text-secondary" style="font-size: 2rem;"></i>
+                        <div class="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                            <span class="fw-bold text-primary">1</span>
                         </div>
-                        <h5 class="card-title">Hire a CTO</h5>
-                        <div class="display-6 fw-bold text-dark my-3">$275,000</div>
-                        <p class="text-muted small mb-3">per year (industry average)</p>
-                        <ul class="list-unstyled text-start small text-muted mb-0">
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> 6+ month hiring process</li>
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> Benefits add 30%+ to cost</li>
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> Single point of failure</li>
-                            <li><i class="bi bi-dash-circle opacity-50"></i> Limited to one perspective</li>
-                        </ul>
+                        <h5>CEO Directive</h5>
+                        <p class="text-muted small mb-0">
+                            Describe what you want to build in plain English. AI breaks it down into projects, epics, and implementable stories.
+                        </p>
                     </div>
                 </div>
             </div>
-
-            <!-- Engineering Manager Cost -->
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div class="card h-100 shadow-sm border-0">
                     <div class="card-body text-center">
-                        <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center mb-3" style="width: 70px; height: 70px;">
-                            <i class="bi bi-person-gear text-secondary" style="font-size: 2rem;"></i>
+                        <div class="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                            <span class="fw-bold text-primary">2</span>
                         </div>
-                        <h5 class="card-title">Hire an EM</h5>
-                        <div class="display-6 fw-bold text-dark my-3">$185,000</div>
-                        <p class="text-muted small mb-3">per year (industry average)</p>
-                        <ul class="list-unstyled text-start small text-muted mb-0">
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> 3+ month hiring process</li>
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> Benefits add 30%+ to cost</li>
-                            <li class="mb-2"><i class="bi bi-dash-circle opacity-50"></i> Manual analysis takes hours</li>
-                            <li><i class="bi bi-dash-circle opacity-50"></i> No coverage on days off</li>
-                        </ul>
+                        <h5>Review & Approve</h5>
+                        <p class="text-muted small mb-0">
+                            Review the generated stories on a Kanban board. Approve what you want built, edit requirements, set priorities.
+                        </p>
                     </div>
                 </div>
             </div>
-
-            <!-- MyCTOBot Cost -->
-            <div class="col-md-4">
-                <div class="card h-100 shadow border-0 position-relative overflow-hidden">
-                    <div class="position-absolute top-0 start-0 end-0" style="height: 4px; background: linear-gradient(90deg, #0d6efd, #0dcaf0);"></div>
-                    <span class="position-absolute top-0 end-0 badge bg-primary m-2">Best Value</span>
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-0">
                     <div class="card-body text-center">
-                        <div class="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style="width: 70px; height: 70px;">
-                            <i class="bi bi-robot text-primary" style="font-size: 2rem;"></i>
+                        <div class="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                            <span class="fw-bold text-primary">3</span>
                         </div>
-                        <h5 class="card-title">MyCTOBot Pro</h5>
-                        <div class="display-6 fw-bold text-primary my-3">$<?= number_format($proYearlyPrice) ?></div>
-                        <p class="text-muted small mb-3">per year ($<?= number_format($proMonthlyPrice) ?>/month)</p>
-                        <ul class="list-unstyled text-start small mb-0">
-                            <li class="mb-2"><i class="bi bi-check-circle-fill text-primary"></i> Start in 2 minutes</li>
-                            <li class="mb-2"><i class="bi bi-check-circle-fill text-primary"></i> No hiring, no benefits</li>
-                            <li class="mb-2"><i class="bi bi-check-circle-fill text-primary"></i> AI analysis every day</li>
-                            <li><i class="bi bi-check-circle-fill text-primary"></i> Never takes a day off</li>
-                        </ul>
+                        <h5>AI Implements</h5>
+                        <p class="text-muted small mb-0">
+                            Claude Code agents implement each story following your CLAUDE.md guidelines, creating branches and PRs automatically.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card h-100 shadow-sm border-0">
+                    <div class="card-body text-center">
+                        <div class="rounded-circle bg-primary bg-opacity-10 d-inline-flex align-items-center justify-content-center mb-3" style="width: 60px; height: 60px;">
+                            <span class="fw-bold text-primary">4</span>
+                        </div>
+                        <h5>QA & Deploy</h5>
+                        <p class="text-muted small mb-0">
+                            Build QA releases with selected stories, merge to release branches, and deploy with confidence.
+                        </p>
                     </div>
                 </div>
             </div>
         </div>
-
-        <!-- Savings Highlight -->
-        <div class="row mt-5">
-            <div class="col-12 text-center">
-                <div class="card border-0 shadow-sm d-inline-block">
-                    <div class="card-body px-5 py-4">
-                        <p class="mb-1 text-muted small text-uppercase fw-semibold">Annual savings vs. hiring an Engineering Manager</p>
-                        <span class="display-5 fw-bold text-primary">$184,412</span>
-                        <div class="mt-2">
-                            <span class="badge bg-primary bg-opacity-10 text-primary fs-6 fw-normal px-3 py-2">99.7% Cost Reduction</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <p class="text-center text-muted mt-4 small mb-0">
-            <i class="bi bi-info-circle"></i> Salary figures based on 2024-2025 US averages from Glassdoor, Comparably, and Built In
-        </p>
     </div>
 </div>
 
-<!-- Sample Digest Section -->
-<div class="bg-light py-5">
+<!-- Framework & Guidelines Section -->
+<div class="py-5 bg-dark text-white">
     <div class="container">
         <div class="row align-items-center">
             <div class="col-lg-6">
-                <h2 class="mb-4">Sample Daily Digest</h2>
-                <p class="lead">Every morning, you'll receive an email like this with prioritized action items and risk alerts.</p>
+                <span class="badge bg-info mb-3">Your Rules, AI's Execution</span>
+                <h2 class="mb-4">CLAUDE.md: Your AI Constitution</h2>
+                <p class="lead text-light opacity-75 mb-4">
+                    Define your coding standards, architectural patterns, and security requirements in a single file.
+                    Every AI agent follows these guidelines religiously.
+                </p>
                 <ul class="list-unstyled">
-                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Customer-first prioritization</li>
-                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Blocked ticket identification</li>
-                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Risk alerts and recommendations</li>
-                    <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Direct links to Jira tickets</li>
+                    <li class="mb-3 d-flex align-items-start">
+                        <i class="bi bi-check-circle-fill text-success me-3 mt-1"></i>
+                        <div>
+                            <strong>Framework Conventions</strong>
+                            <p class="text-light opacity-50 small mb-0">RedBeanPHP relationships, FlightPHP patterns, your custom utilities</p>
+                        </div>
+                    </li>
+                    <li class="mb-3 d-flex align-items-start">
+                        <i class="bi bi-check-circle-fill text-success me-3 mt-1"></i>
+                        <div>
+                            <strong>Security Requirements</strong>
+                            <p class="text-light opacity-50 small mb-0">CSRF protection, input validation, authentication patterns</p>
+                        </div>
+                    </li>
+                    <li class="mb-3 d-flex align-items-start">
+                        <i class="bi bi-check-circle-fill text-success me-3 mt-1"></i>
+                        <div>
+                            <strong>Code Style</strong>
+                            <p class="text-light opacity-50 small mb-0">Naming conventions, file structure, documentation standards</p>
+                        </div>
+                    </li>
                 </ul>
             </div>
             <div class="col-lg-6">
-                <div class="card shadow">
-                    <div class="card-header bg-primary text-white">
-                        <i class="bi bi-envelope"></i> [PROJ] Daily Sprint Digest
+                <div class="card bg-dark border-secondary">
+                    <div class="card-header bg-secondary bg-opacity-25 border-secondary py-2">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-file-earmark-code text-info me-2"></i>
+                            <span class="text-muted small">CLAUDE.md</span>
+                        </div>
                     </div>
-                    <div class="card-body" style="font-family: monospace; font-size: 0.85rem;">
-                        <p><strong>Priority 1: Customer-Impacting</strong></p>
-                        <ul class="small">
-                            <li>PROJ-123: Fix login timeout issue</li>
-                            <li>PROJ-145: Payment gateway error handling</li>
+                    <div class="card-body" style="font-family: monospace; font-size: 0.75rem;">
+<pre class="text-light mb-0" style="white-space: pre-wrap;"># Project Development Standards
+
+## RedBeanPHP Rules (CRITICAL)
+- Use Bean:: wrapper for user database
+- ALWAYS use associations over manual FKs
+- Bean operations for CRUD, never R::exec
+
+## Security Requirements
+- Validate CSRF on all POST requests
+- Use $this->sanitize() for user input
+- Check permissions with Flight::hasLevel()
+
+## File Structure
+/controls  - Controllers (auto-routed)
+/views     - PHP view templates
+/services  - Business logic</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Shopify Highlight Section -->
+<div class="py-5" style="background: linear-gradient(135deg, #95bf47 0%, #5e8e3e 100%);">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-6 text-white">
+                <span class="badge bg-dark mb-3">E-Commerce Ready</span>
+                <h2 class="mb-4">Build Shopify Apps with AI</h2>
+                <p class="lead mb-4" style="opacity: 0.9;">
+                    MyCTOBot understands Shopify's ecosystem. Build themes, apps, and integrations
+                    with AI that knows Liquid templates, Admin API, and Storefront patterns.
+                </p>
+                <ul class="list-unstyled mb-4">
+                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Theme customization & sections</li>
+                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Custom app development</li>
+                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Webhook integrations</li>
+                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Metafield management</li>
+                </ul>
+                <a href="/shopify" class="btn btn-light btn-lg">
+                    <i class="bi bi-shop"></i> Explore Shopify Features
+                </a>
+            </div>
+            <div class="col-lg-6 d-none d-lg-block text-center">
+                <i class="bi bi-shop-window" style="font-size: 15rem; opacity: 0.2; color: white;"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Use Cases Section -->
+<div class="py-5 bg-light">
+    <div class="container">
+        <h2 class="text-center mb-2">Build Any Software System</h2>
+        <p class="text-center text-muted mb-5">From MVPs to enterprise applications, MyCTOBot scales with your ambitions</p>
+
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                <i class="bi bi-cloud text-primary"></i>
+                            </div>
+                            <h5 class="mb-0">SaaS Applications</h5>
+                        </div>
+                        <p class="text-muted small">
+                            Multi-tenant architectures, subscription billing, user management, API integrations.
+                            Build production-ready SaaS with security baked in.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle bg-success bg-opacity-10 d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                <i class="bi bi-shop text-success"></i>
+                            </div>
+                            <h5 class="mb-0">E-Commerce</h5>
+                        </div>
+                        <p class="text-muted small">
+                            Shopify apps, custom storefronts, inventory systems, payment integrations.
+                            AI that understands commerce patterns.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle bg-info bg-opacity-10 d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                <i class="bi bi-gear text-info"></i>
+                            </div>
+                            <h5 class="mb-0">Internal Tools</h5>
+                        </div>
+                        <p class="text-muted small">
+                            Admin dashboards, workflow automation, reporting systems.
+                            Turn operational ideas into working software overnight.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Security Section -->
+<div class="py-5">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-6 order-lg-2">
+                <span class="badge bg-danger mb-3">Enterprise Ready</span>
+                <h2 class="mb-4">Security-Driven Development</h2>
+                <p class="lead text-muted mb-4">
+                    AI-generated code follows security best practices by default. Your CLAUDE.md defines
+                    the security requirements, and every line of code is checked against them.
+                </p>
+                <div class="row g-3">
+                    <div class="col-6">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-shield-lock text-danger me-2"></i>
+                            <span class="small">OWASP Compliance</span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-key text-danger me-2"></i>
+                            <span class="small">OAuth 2.0 / CSRF</span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-database-lock text-danger me-2"></i>
+                            <span class="small">SQL Injection Prevention</span>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-incognito text-danger me-2"></i>
+                            <span class="small">XSS Protection</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6 order-lg-1">
+                <div class="card border-0 shadow-lg">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-4">
+                            <div class="rounded-circle bg-success d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px;">
+                                <i class="bi bi-check-lg text-white"></i>
+                            </div>
+                            <div>
+                                <h6 class="mb-0">Security Audit Passed</h6>
+                                <small class="text-muted">All checks validated</small>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small>CSRF Protection</small>
+                                <small class="text-success">Implemented</small>
+                            </div>
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar bg-success" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small>Input Validation</small>
+                                <small class="text-success">Implemented</small>
+                            </div>
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar bg-success" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1">
+                                <small>Authentication</small>
+                                <small class="text-success">Implemented</small>
+                            </div>
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar bg-success" style="width: 100%"></div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="d-flex justify-content-between mb-1">
+                                <small>Permission Checks</small>
+                                <small class="text-success">Implemented</small>
+                            </div>
+                            <div class="progress" style="height: 4px;">
+                                <div class="progress-bar bg-success" style="width: 100%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Integrations Section -->
+<div class="py-5 bg-light">
+    <div class="container">
+        <h2 class="text-center mb-2">Connect Your Infrastructure</h2>
+        <p class="text-center text-muted mb-5">MyCTOBot integrates with the tools you already use</p>
+
+        <div class="row justify-content-center g-4">
+            <div class="col-auto">
+                <div class="card border-0 shadow-sm text-center px-4 py-3">
+                    <i class="bi bi-github" style="font-size: 2.5rem;"></i>
+                    <small class="text-muted mt-2">GitHub</small>
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="card border-0 shadow-sm text-center px-4 py-3">
+                    <img src="https://cdn.worldvectorlogo.com/logos/jira-1.svg" alt="Jira" style="height: 2.5rem;">
+                    <small class="text-muted mt-2">Jira</small>
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="card border-0 shadow-sm text-center px-4 py-3">
+                    <img src="https://cdn.worldvectorlogo.com/logos/shopify.svg" alt="Shopify" style="height: 2.5rem;">
+                    <small class="text-muted mt-2">Shopify</small>
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="card border-0 shadow-sm text-center px-4 py-3">
+                    <img src="https://cdn.worldvectorlogo.com/logos/claude-ai-icon.svg" alt="Claude" style="height: 2.5rem;" onerror="this.outerHTML='<i class=\'bi bi-robot\' style=\'font-size: 2.5rem;\'></i>'">
+                    <small class="text-muted mt-2">Claude AI</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pricing Section -->
+<div class="py-5">
+    <div class="container">
+        <h2 class="text-center mb-2">Simple, Transparent Pricing</h2>
+        <p class="text-center text-muted mb-5">Start free, scale as you grow</p>
+
+        <div class="row justify-content-center g-4">
+            <div class="col-md-5">
+                <div class="card h-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <h5 class="text-muted">Free</h5>
+                        <div class="display-5 fw-bold mb-3">$0<small class="fs-6 fw-normal text-muted">/month</small></div>
+                        <ul class="list-unstyled mb-4">
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> 1 project</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Daily digest emails</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> GitHub integration</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Basic AI analysis</li>
                         </ul>
-                        <p class="mt-3"><strong>Blocked Tickets</strong></p>
-                        <ul class="small text-danger">
-                            <li>PROJ-156: Awaiting API documentation</li>
+                        <?php if (\app\TenantResolver::isDefault()): ?>
+                        <a href="/signup" class="btn btn-outline-primary w-100">Get Started</a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-5">
+                <div class="card h-100 shadow border-primary">
+                    <div class="card-header bg-primary text-white text-center py-2">
+                        <small class="fw-semibold">RECOMMENDED</small>
+                    </div>
+                    <div class="card-body p-4">
+                        <h5 class="text-primary">Pro</h5>
+                        <div class="display-5 fw-bold mb-3">$<?= number_format($proMonthlyPrice) ?><small class="fs-6 fw-normal text-muted">/month</small></div>
+                        <ul class="list-unstyled mb-4">
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Unlimited projects</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> AI Developer agents</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> CEO Directives</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Review Board & QA releases</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Shopify integration</li>
+                            <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Priority support</li>
                         </ul>
-                        <p class="mt-3"><strong>Recommendations</strong></p>
-                        <p class="small text-muted">Consider pairing on PROJ-123 to expedite resolution...</p>
+                        <?php if (\app\TenantResolver::isDefault()): ?>
+                        <a href="/signup" class="btn btn-primary w-100">Start 14-Day Trial</a>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -329,18 +520,23 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
 </div>
 
 <!-- CTA Section -->
-<div class="bg-primary text-white py-5">
-    <div class="container text-center">
-        <h2 class="mb-4">Start Getting Smarter Sprint Insights Today</h2>
-        <p class="lead mb-4">Create your team workspace in under 2 minutes.</p>
+<div class="py-5" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
+    <div class="container text-center text-white">
+        <h2 class="mb-3">Ready to Let Your Ideas Flow?</h2>
+        <p class="lead mb-4 opacity-75">
+            Connect your infrastructure, define your guidelines, and start building with AI that follows your rules.
+        </p>
         <?php if (\app\TenantResolver::isDefault()): ?>
-            <a href="/signup" class="btn btn-light btn-lg">
-                <i class="bi bi-building"></i> Create Your Workspace
+            <a href="/signup" class="btn btn-primary btn-lg me-2">
+                <i class="bi bi-plus-circle"></i> Create Your Workspace
+            </a>
+            <a href="#" class="btn btn-outline-light btn-lg" data-bs-toggle="modal" data-bs-target="#existingTeamModal">
+                Sign In to Existing Team
             </a>
         <?php elseif (!$isLoggedIn): ?>
-            <a href="/auth/login" class="btn btn-light btn-lg">Sign In</a>
+            <a href="/auth/login" class="btn btn-primary btn-lg">Sign In</a>
         <?php else: ?>
-            <a href="/dashboard" class="btn btn-light btn-lg">Go to Dashboard</a>
+            <a href="/dashboard" class="btn btn-primary btn-lg">Go to Dashboard</a>
         <?php endif; ?>
     </div>
 </div>

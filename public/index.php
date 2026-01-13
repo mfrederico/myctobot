@@ -117,7 +117,7 @@ if (isset($_SERVER['REQUEST_URI'])) {
         require_once $specificRoute;
     } else {
         // Load default routes
-        Flight::get('log')->debug("Loading default routes (no route file for: {$firstSegment})");
+        Flight::get('log')->debug("Loading default routes for: {$firstSegment}");
         require_once $routePath . '/default.php';
     }
 }

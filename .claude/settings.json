@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-tiknix-php.py",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-tiknix-php.php",
             "timeout": 30
           }
         ]

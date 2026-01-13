@@ -957,7 +957,11 @@ class ReviewBoard extends BaseControls\Control {
             $token = \app\services\EncryptionService::decrypt($tokenSetting->setting_value);
 
             // Parse repo URL to get owner/repo
-            $repoUrl = $repo->repo_url;
+            $repoUrl = $repo->clone_url ?? $repo->repo_url ?? '';
+            if (!$repoUrl) {
+                Flight::jsonSuccess(['branches' => ['main']], 'No repo URL configured');
+                return;
+            }
             if (preg_match('/github\.com[\/:]([^\/]+)\/([^\/\.]+)/', $repoUrl, $m)) {
                 $owner = $m[1];
                 $repoName = rtrim($m[2], '.git');

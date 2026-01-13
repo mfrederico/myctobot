@@ -1380,6 +1380,13 @@ claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt 2>&1 | t
 
 # Update issue tracker after Claude completes
 {$updateFunction} "{$logFile}" "{$logFile}"
+
+# Cleanup orphaned Playwright processes (PPID=1 means parent died)
+echo "Cleaning up orphaned Playwright processes..."
+ps -eo pid,ppid,args | grep -E "playwright|mcp-server-playwright" | awk '\$2 == 1 {print \$1}' | while read pid; do
+    echo "  Killing orphaned playwright (PID \$pid)"
+    kill \$pid 2>/dev/null || true
+done
 BASH;
 } else {
     // Interactive TUI mode - pass prompt as argument (not -p flag) to show TUI
@@ -1397,6 +1404,15 @@ script -q session.log -c 'claude --dangerously-skip-permissions {$modelFlag} "\$
 # Update issue tracker after Claude completes
 BASH;
     $envScript .= "\n{$updateFunction} \"{$workDir}/session.log\" \"{$workDir}/session.log\"\n";
+    $envScript .= <<<'BASH'
+
+# Cleanup orphaned Playwright processes (PPID=1 means parent died)
+echo "Cleaning up orphaned Playwright processes..."
+ps -eo pid,ppid,args | grep -E "playwright|mcp-server-playwright" | awk '$2 == 1 {print $1}' | while read pid; do
+    echo "  Killing orphaned playwright (PID $pid)"
+    kill $pid 2>/dev/null || true
+done
+BASH;
 }
 
 $envScriptPath = "{$workDir}/run-claude.sh";

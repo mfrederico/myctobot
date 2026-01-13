@@ -5,4 +5,4 @@
 
 use \Flight as Flight;
 
-Flight::route('GET /pluginregistry', ['\\app\\PluginRegistry', 'index']);
+Flight::route('GET /pluginregistry', ['\\app\\Pluginregistry', 'index']);

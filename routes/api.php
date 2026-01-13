@@ -34,8 +34,8 @@ Flight::route('GET /api/health', function() {
 
 // CEO Directive endpoints - secure message reception for CEO directives
 // Requires API key authentication via X-API-Key header or Authorization: Bearer token
-Flight::route('POST /api/ceo/directive', ['\app\CeoDirective', 'receive']);
-Flight::route('GET /api/ceo/directive/@id', ['\app\CeoDirective', 'get']);
+Flight::route('POST /api/ceo/directive', ['\app\Ceodirective', 'receive']);
+Flight::route('GET /api/ceo/directive/@id', ['\app\Ceodirective', 'get']);
 
 // PM Assistant context endpoint - returns project/epic/story data for PM chatbot
 // Used by RAG service to fetch live data instead of duplicating queries

@@ -486,11 +486,13 @@
     <!-- QA Release Action Bar (shown when stories selected) - fixed at bottom -->
     <div id="qa-action-bar" class="card border-primary d-none" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1040; width: 90%; max-width: 900px; box-shadow: 0 -4px 20px rgba(0,0,0,0.15);">
         <div class="card-body py-2">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <i class="bi bi-box-seam text-primary me-2"></i>
-                    <strong><span id="qa-selected-count">0</span> stories selected for QA Release</strong>
-                    <small class="text-muted ms-2" id="qa-selected-list"></small>
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1 me-3">
+                    <div class="mb-1">
+                        <i class="bi bi-box-seam text-primary me-2"></i>
+                        <strong><span id="qa-selected-count">0</span> stories selected for QA Release</strong>
+                    </div>
+                    <div id="qa-selected-list" class="d-flex flex-wrap gap-1"></div>
                 </div>
                 <div class="d-flex gap-2 align-items-center">
                     <div class="input-group input-group-sm" style="width: 280px;">
@@ -1377,13 +1379,12 @@ function updateQASelection() {
         actionBar.classList.remove('d-none');
         countEl.textContent = selectedStories.length;
 
-        // Show first 3 issue keys
-        const keys = selectedStories.map(s => s.issue_key).filter(k => k);
-        if (keys.length <= 3) {
-            listEl.textContent = keys.join(', ');
-        } else {
-            listEl.textContent = keys.slice(0, 3).join(', ') + ` +${keys.length - 3} more`;
-        }
+        // Show issue keys as badges
+        listEl.innerHTML = selectedStories.map(s => {
+            const key = s.issue_key || `Story #${s.story_id}`;
+            const title = s.title ? ` title="${s.title.replace(/"/g, '&quot;')}"` : '';
+            return `<span class="badge bg-light text-dark border"${title}>${key}</span>`;
+        }).join('');
 
         // Load branches on first selection
         loadBranches();

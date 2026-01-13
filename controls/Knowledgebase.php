@@ -640,13 +640,38 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
+        if (!$this->initUserDb()) {
+            $this->flash('error', 'Database not initialized');
+            Flight::redirect('/knowledgebase');
+            return;
+        }
+
         $tenantSlug = $this->getTenantSlug();
 
+        // Get selected KB from query param
+        $kbId = $this->getParam('kb');
+        $selectedKb = null;
+        $kbSlug = null;
+
+        if ($kbId) {
+            $selectedKb = Bean::load('knowledgebases', (int)$kbId);
+            if ($selectedKb->id) {
+                $kbSlug = $selectedKb->slug;
+            }
+        }
+
+        // Build chat URL with KB slug if available
+        $chatUrl = "{$this->ragServiceUrl}/chat/{$tenantSlug}";
+        if ($kbSlug) {
+            $chatUrl .= "/{$kbSlug}";
+        }
+
         $this->render('knowledgebase/chat', [
-            'title' => 'Knowledge Base Chat',
+            'title' => 'Knowledge Base Chat' . ($selectedKb ? ': ' . $selectedKb->name : ''),
             'tenantSlug' => $tenantSlug,
             'ragServiceUrl' => $this->ragServiceUrl,
-            'chatUrl' => "{$this->ragServiceUrl}/chat/{$tenantSlug}"
+            'chatUrl' => $chatUrl,
+            'selectedKb' => $selectedKb
         ]);
     }
 

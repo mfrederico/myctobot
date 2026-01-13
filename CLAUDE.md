@@ -262,6 +262,42 @@ If you use R::exec for simple CRUD, the ORM becomes useless and models are ignor
 4. Use `$this->sanitize()` for input sanitization
 5. Always validate CSRF with `$this->validateCSRF()` on POST requests
 
+### Routing and Naming (IMPORTANT - Security Implications)
+
+FlightPHP auto-routes URLs to controllers by converting URLs to lowercase class names.
+This has **security implications** for naming:
+
+**Controller Class Names:**
+- URL `/pluginsources` maps to class `Pluginsources` (not `PluginSources`)
+- CamelCase controllers like `PluginSources` need **explicit route files**
+- Create `routes/pluginsources.php` with explicit routes for CamelCase controllers
+
+**Method Names (SECURITY FEATURE):**
+- URL `/controller/method` maps to lowercase method `method()`
+- CamelCase methods like `internalHelper()` are **NOT routable** via URL
+- This is an **implicit security feature** - use CamelCase for internal/private methods
+
+```php
+class MyController extends BaseControls\Control {
+    // PUBLIC - routable via /mycontroller/index
+    public function index() { }
+
+    // PUBLIC - routable via /mycontroller/search
+    public function search() { }
+
+    // PROTECTED from routing - CamelCase won't match URL /mycontroller/processdata
+    private function processData() { }
+
+    // PROTECTED from routing - internal helper, not exposed
+    private function validateInput() { }
+}
+```
+
+**Best Practice:**
+- Use lowercase method names for public endpoints: `index()`, `store()`, `delete()`
+- Use CamelCase for internal methods: `processData()`, `validateInput()`
+- Always create route files for CamelCase controller class names
+
 ### Response Methods
 
 ```php

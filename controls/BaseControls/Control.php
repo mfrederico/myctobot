@@ -12,10 +12,11 @@ use \app\Bean;
 use \Exception as Exception;
 
 abstract class Control {
-    
+
     protected $logger;
     protected $member;
     protected $viewData = [];
+    protected $routeParams = [];
     
     public function __construct() {
         $this->logger = Flight::get('log');
@@ -105,7 +106,56 @@ abstract class Control {
         }
         return true;
     }
-    
+
+    /**
+     * Require POST method - returns false and sends error if not POST
+     * Use at the start of methods that should only accept POST requests
+     */
+    protected function requirePost() {
+        if (Flight::request()->method !== 'POST') {
+            $this->logger->warning('POST required but got: ' . Flight::request()->method);
+            if (Flight::request()->ajax) {
+                Flight::jsonError('Method not allowed', 405);
+            } else {
+                Flight::halt(405, 'Method Not Allowed');
+            }
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Set route params from FlightMap (called automatically)
+     */
+    public function setRouteParams($params) {
+        $this->routeParams = $params;
+    }
+
+    /**
+     * Get operation ID from route params
+     * URL: /controller/method/{opId}/{opType}
+     * Example: /pluginsources/delete/123 -> opId() returns "123"
+     */
+    protected function opId() {
+        return $this->routeParams['operation']->name ?? null;
+    }
+
+    /**
+     * Get operation type from route params
+     * URL: /controller/method/{opId}/{opType}
+     * Example: /pluginsources/action/123/edit -> opType() returns "edit"
+     */
+    protected function opType() {
+        return $this->routeParams['operation']->type ?? null;
+    }
+
+    /**
+     * Get the route splat (remaining path after op/opid)
+     */
+    protected function opRoute() {
+        return $this->routeParams['route'] ?? null;
+    }
+
     /**
      * Validate CSRF token
      */

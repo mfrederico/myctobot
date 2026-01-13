@@ -120,7 +120,7 @@ class Permissions extends BaseControls\Control {
             return;
         }
         
-        $id = $params['operation']->type ?? 0;
+        $id = $this->opType() ?? 0;
         
         if ($id) {
             $permission = R::load('authcontrol', $id);

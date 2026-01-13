@@ -456,7 +456,7 @@ class Github extends BaseControls\Control {
     public function disconnectrepo($params = []) {
         if (!$this->requireLogin()) return;
 
-        $repoId = $params['operation']->name ?? 0;
+        $repoId = $this->opId() ?? 0;
         if (empty($repoId)) {
             Flight::redirect('/github/repolist');
             return;

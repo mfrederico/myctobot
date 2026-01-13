@@ -45,7 +45,7 @@ class Jobs extends BaseControls\Control {
     public function view($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->flash('error', 'Issue key required');
             Flight::redirect('/jobs');
@@ -267,7 +267,7 @@ class Jobs extends BaseControls\Control {
     public function status($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -294,7 +294,7 @@ class Jobs extends BaseControls\Control {
     public function logs($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -343,7 +343,7 @@ class Jobs extends BaseControls\Control {
     public function resume($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -399,7 +399,7 @@ class Jobs extends BaseControls\Control {
     public function retry($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -495,7 +495,7 @@ class Jobs extends BaseControls\Control {
     public function complete($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;

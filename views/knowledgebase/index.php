@@ -35,12 +35,12 @@
                 <?php endif; ?>
             </div>
             <?php if ($selectedKbId): ?>
-            <a href="/knowledge-base/query?kb=<?= $selectedKbId ?>" class="btn btn-outline-info">
+            <a href="/knowledgebase/query?kb=<?= $selectedKbId ?>" class="btn btn-outline-info">
                 <i class="bi bi-search me-1"></i> Query
             </a>
             <?php endif; ?>
             <?php if ($chatAvailable && $selectedKbId): ?>
-            <a href="/knowledge-base/chat?kb=<?= $selectedKbId ?>" class="btn btn-outline-primary">
+            <a href="/knowledgebase/chat?kb=<?= $selectedKbId ?>" class="btn btn-outline-primary">
                 <i class="bi bi-chat-dots me-1"></i> Chat
             </a>
             <?php endif; ?>
@@ -708,7 +708,7 @@ function uploadSingleFile(file) {
         formData.append('document', file);
         formData.append('kb_id', selectedKbId);
 
-        fetch('/knowledge-base/upload', {
+        fetch('/knowledgebase/upload', {
             method: 'POST',
             body: formData
         })
@@ -832,7 +832,7 @@ function pollProcessingDocuments() {
 }
 
 function pollSingleJob(jobId, row) {
-    fetch('/knowledge-base/poll-job/' + jobId)
+    fetch('/knowledgebase/poll-job/' + jobId)
     .then(res => res.json())
     .then(data => {
         if (data.success && data.data) {
@@ -855,7 +855,7 @@ function pollSingleJob(jobId, row) {
 }
 
 function pollDocumentStatus(docId, row) {
-    fetch('/knowledge-base/status/' + docId)
+    fetch('/knowledgebase/status/' + docId)
     .then(res => res.json())
     .then(data => {
         if (data.success && data.data) {
@@ -929,7 +929,7 @@ function uploadUrl() {
         return;
     }
 
-    fetch('/knowledge-base/upload-url', {
+    fetch('/knowledgebase/upload-url', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ url: url, kb_id: selectedKbId })
@@ -959,7 +959,7 @@ function deleteDocument(id) {
         return;
     }
 
-    fetch('/knowledge-base/delete', {
+    fetch('/knowledgebase/delete', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ id: id })
@@ -978,7 +978,7 @@ function deleteDocument(id) {
 // Knowledge Base Management Functions
 function switchKnowledgeBase(kbId) {
     if (kbId) {
-        window.location.href = '/knowledge-base?kb=' + kbId;
+        window.location.href = '/knowledgebase?kb=' + kbId;
     }
 }
 
@@ -996,7 +996,7 @@ function createKnowledgeBase() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
 
-    fetch('/knowledge-base/create-kb', {
+    fetch('/knowledgebase/create-kb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ name: name, description: description, agent_profile_id: agentProfileId || null })
@@ -1004,7 +1004,7 @@ function createKnowledgeBase() {
     .then(res => res.json())
     .then(data => {
         if (data.success && data.data && data.data.id) {
-            window.location.href = '/knowledge-base?kb=' + data.data.id;
+            window.location.href = '/knowledgebase?kb=' + data.data.id;
         } else {
             alert(data.message || data.error || 'Failed to create knowledge base');
             btn.disabled = false;
@@ -1023,7 +1023,7 @@ function deleteKnowledgeBase(id, name) {
         return;
     }
 
-    fetch('/knowledge-base/delete-kb', {
+    fetch('/knowledgebase/delete-kb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ id: id })
@@ -1031,7 +1031,7 @@ function deleteKnowledgeBase(id, name) {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            window.location.href = '/knowledge-base';
+            window.location.href = '/knowledgebase';
         } else {
             alert(data.error || 'Failed to delete knowledge base');
         }
@@ -1054,7 +1054,7 @@ function updateKnowledgeBase() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
 
-    fetch('/knowledge-base/update-kb', {
+    fetch('/knowledgebase/update-kb', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({

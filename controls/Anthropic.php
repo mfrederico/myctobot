@@ -310,7 +310,7 @@ class Anthropic extends BaseControls\Control {
     public function deletekey($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $params['operation']->name ?? null;
+        $keyId = $this->opId() ?? null;
         if (!$keyId) {
             $this->flash('error', 'No key specified.');
             Flight::redirect('/anthropic/keys');
@@ -354,7 +354,7 @@ class Anthropic extends BaseControls\Control {
     public function toggleshare($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $params['operation']->name ?? $this->getParam('id');
+        $keyId = $this->opId() ?? $this->getParam('id');
         if (!$keyId) {
             $this->json(['success' => false, 'message' => 'No key specified']);
             return;
@@ -392,7 +392,7 @@ class Anthropic extends BaseControls\Control {
     public function testkey($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $params['operation']->name ?? null;
+        $keyId = $this->opId() ?? null;
         if (!$keyId) {
             Flight::json(['success' => false, 'error' => 'No key specified']);
             return;

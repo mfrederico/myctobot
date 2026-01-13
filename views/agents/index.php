@@ -276,4 +276,4 @@ window.addEventListener('hashchange', highlightAgentFromHash);
 }
 </style>
 
-<?php include __DIR__ . '/../partials/agent-setup-wizard.php'; ?>
+<?php include __DIR__ . '/../partials/agentsetupwizard.php'; ?>

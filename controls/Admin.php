@@ -694,7 +694,7 @@ class Admin extends Control {
     public function editshard($params = []) {
         require_once __DIR__ . '/../services/ShardService.php';
 
-        $shardId = (int)($params['operation']->name ?? 0);
+        $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
             Flight::redirect('/admin/shards');
             return;
@@ -774,7 +774,7 @@ class Admin extends Control {
     public function deleteshard($params = []) {
         require_once __DIR__ . '/../services/ShardService.php';
 
-        $shardId = (int)($params['operation']->name ?? 0);
+        $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
             Flight::redirect('/admin/shards');
             return;
@@ -798,7 +798,7 @@ class Admin extends Control {
         require_once __DIR__ . '/../services/ShardService.php';
         require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
-        $shardId = (int)($params['operation']->name ?? 0);
+        $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
             $this->json(['success' => false, 'error' => 'Shard ID required']);
             return;
@@ -864,7 +864,7 @@ class Admin extends Control {
         require_once __DIR__ . '/../services/ShardService.php';
         require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
-        $shardId = (int)($params['operation']->name ?? 0);
+        $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
             $this->json(['success' => false, 'error' => 'Shard ID required']);
             return;
@@ -984,7 +984,7 @@ class Admin extends Control {
         $sourcesConfig = Flight::get('plugin_registry.sources') ?? '';
         $this->viewData['sources'] = array_filter(array_map('trim', explode(',', $sourcesConfig)));
 
-        $this->render('admin/plugin-cache', $this->viewData);
+        $this->render('admin/plugincache', $this->viewData);
     }
 
     /**

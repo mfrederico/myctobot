@@ -25,7 +25,7 @@ class Auth extends BaseControls\Control {
         // Redirect /auth/login to /login (clean URLs)
         $isAuthRoute = !isset($params['workspace']) && isset($params['operation']);
         if ($isAuthRoute) {
-            $workspace = $params['operation']->name ?? '';
+            $workspace = $this->opId() ?? '';
             $redirect = Flight::request()->query->redirect ?? '';
             $url = $workspace ? "/login/{$workspace}" : '/login';
             if ($redirect) {
@@ -1013,7 +1013,7 @@ HTML;
         require_once __DIR__ . '/../services/InviteService.php';
 
         $request = Flight::request();
-        $token = $params['operation']->name ?? '';
+        $token = $this->opId() ?? '';
         // Accept both 'tenant' and 'workspace' query params for backwards compatibility
         $tenant = $request->query->tenant ?? $request->query->workspace ?? $request->data->tenant ?? '';
 

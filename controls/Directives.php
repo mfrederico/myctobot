@@ -117,7 +117,7 @@ class Directives extends BaseControls\Control {
         }
 
         // Get directive ID from URL
-        $directiveId = $params['operation']->name ?? $this->getParam('id');
+        $directiveId = $this->opId() ?? $this->getParam('id');
         if (!$directiveId) {
             $this->flash('error', 'No directive specified');
             Flight::redirect('/directives');
@@ -174,7 +174,7 @@ class Directives extends BaseControls\Control {
         }
 
         // Get directive ID from URL
-        $directiveId = $params['operation']->name ?? $this->getParam('id');
+        $directiveId = $this->opId() ?? $this->getParam('id');
         if (!$directiveId) {
             Flight::jsonError('No directive specified');
             return;
@@ -229,7 +229,7 @@ class Directives extends BaseControls\Control {
         }
 
         // Get directive ID from URL
-        $directiveId = $params['operation']->name ?? $this->getParam('id');
+        $directiveId = $this->opId() ?? $this->getParam('id');
         if (!$directiveId) {
             Flight::jsonError('No directive specified');
             return;
@@ -285,7 +285,7 @@ class Directives extends BaseControls\Control {
         }
 
         // Get directive ID from URL
-        $directiveId = $params['operation']->name ?? $this->getParam('id');
+        $directiveId = $this->opId() ?? $this->getParam('id');
         if (!$directiveId) {
             Flight::jsonError('No directive specified');
             return;

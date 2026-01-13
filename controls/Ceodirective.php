@@ -198,7 +198,7 @@ class Ceodirective extends BaseControls\Control {
         }
 
         // Get directive ID from route parameters
-        $directiveId = isset($params['operation']) ? (int) $params['operation']->name : 0;
+        $directiveId = (int) $this->opId();
 
         if ($directiveId <= 0) {
             Flight::jsonError('Invalid directive ID', 400);

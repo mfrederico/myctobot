@@ -146,7 +146,7 @@ class Pluginregistry extends BaseControls\Control {
             return;
         }
 
-        $repoId = $params['operation']->name ?? $this->getParam('id');
+        $repoId = $this->opId() ?? $this->getParam('id');
 
         if (!$repoId || !is_numeric($repoId)) {
             $this->jsonError('Invalid repository ID');
@@ -236,7 +236,7 @@ class Pluginregistry extends BaseControls\Control {
             return;
         }
 
-        $pluginId = $params['operation']->name ?? $this->getParam('id');
+        $pluginId = $this->opId() ?? $this->getParam('id');
 
         if (!$pluginId || !is_numeric($pluginId)) {
             $this->flash('error', 'Invalid plugin ID');

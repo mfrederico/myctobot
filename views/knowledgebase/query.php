@@ -12,7 +12,7 @@
             <p class="text-muted mb-0">Search and query your documents using RAG</p>
         </div>
         <div class="d-flex gap-2 align-items-center">
-            <a href="/knowledge-base<?= $selectedKbId ? '?kb=' . $selectedKbId : '' ?>" class="btn btn-outline-secondary">
+            <a href="/knowledgebase<?= $selectedKbId ? '?kb=' . $selectedKbId : '' ?>" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i> Back to Documents
             </a>
         </div>
@@ -215,7 +215,7 @@ function executeQuery() {
     document.getElementById('queryBtn').disabled = true;
     document.getElementById('queryBtn').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching...';
 
-    fetch('/knowledge-base/query', {
+    fetch('/knowledgebase/query', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(options)

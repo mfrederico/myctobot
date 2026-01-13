@@ -114,7 +114,7 @@ class Knowledgebase extends BaseControls\Control {
             $selectedAgent = $this->getAgentInfo((int)$selectedKb->agent_profile_id);
         }
 
-        $this->render('knowledge-base/index', [
+        $this->render('knowledgebase/index', [
             'title' => 'Knowledge Base',
             'knowledgeBases' => $knowledgeBases,
             'selectedKb' => $selectedKb,
@@ -636,13 +636,13 @@ class Knowledgebase extends BaseControls\Control {
         $tier = SubscriptionService::getTier($this->member->id);
         if (!TierFeatures::hasFeature($tier, 'knowledge_base_chat')) {
             $this->flash('warning', 'Chat feature requires an upgraded plan');
-            Flight::redirect('/knowledge-base');
+            Flight::redirect('/knowledgebase');
             return;
         }
 
         $tenantSlug = $this->getTenantSlug();
 
-        $this->render('knowledge-base/chat', [
+        $this->render('knowledgebase/chat', [
             'title' => 'Knowledge Base Chat',
             'tenantSlug' => $tenantSlug,
             'ragServiceUrl' => $this->ragServiceUrl,
@@ -969,7 +969,7 @@ class Knowledgebase extends BaseControls\Control {
 
         if (!$this->initUserDb()) {
             $this->flash('error', 'Database not initialized');
-            Flight::redirect('/knowledge-base');
+            Flight::redirect('/knowledgebase');
             return;
         }
 
@@ -996,7 +996,7 @@ class Knowledgebase extends BaseControls\Control {
             }
         }
 
-        $this->render('knowledge-base/query', [
+        $this->render('knowledgebase/query', [
             'title' => 'Query Knowledge Base',
             'knowledgeBases' => $knowledgeBases,
             'selectedKb' => $selectedKb,

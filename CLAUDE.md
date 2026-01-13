@@ -267,10 +267,24 @@ If you use R::exec for simple CRUD, the ORM becomes useless and models are ignor
 FlightPHP auto-routes URLs to controllers by converting URLs to lowercase class names.
 This has **security implications** for naming:
 
-**Controller Class Names:**
-- URL `/pluginsources` maps to class `Pluginsources` (not `PluginSources`)
-- CamelCase controllers like `PluginSources` need **explicit route files**
-- Create `routes/pluginsources.php` with explicit routes for CamelCase controllers
+**Controller Class Names - ALL LOWERCASE, NO HYPHENS:**
+- URL `/pluginsources` maps to class `Pluginsources`
+- **NEVER use CamelCase** for controller class names (e.g., `PluginSources`)
+- **NEVER use hyphens** in controller names, URLs, or route files
+- Hyphens in URLs like `/knowledge-base` require explicit route files - avoid this pattern
+
+**WRONG:**
+```php
+class PluginSources { }     // CamelCase - won't auto-route
+class Knowledge-Base { }    // Invalid PHP - hyphens not allowed in class names
+// routes/knowledge-base.php  // Requires manual routing - avoid
+```
+
+**CORRECT:**
+```php
+class Pluginsources { }     // All lowercase - auto-routes from /pluginsources
+class Knowledgebase { }     // All lowercase - auto-routes from /knowledgebase
+```
 
 **Method Names (SECURITY FEATURE):**
 - URL `/controller/method` maps to lowercase method `method()`
@@ -278,7 +292,7 @@ This has **security implications** for naming:
 - This is an **implicit security feature** - use CamelCase for internal/private methods
 
 ```php
-class MyController extends BaseControls\Control {
+class Mycontroller extends BaseControls\Control {
     // PUBLIC - routable via /mycontroller/index
     public function index() { }
 
@@ -294,9 +308,9 @@ class MyController extends BaseControls\Control {
 ```
 
 **Best Practice:**
-- Use lowercase method names for public endpoints: `index()`, `store()`, `delete()`
-- Use CamelCase for internal methods: `processData()`, `validateInput()`
-- Always create route files for CamelCase controller class names
+- Controller class names: all lowercase, no hyphens (e.g., `Pluginsources`, `Knowledgebase`)
+- Public method names: all lowercase (e.g., `index()`, `store()`, `delete()`)
+- Internal methods: use CamelCase for implicit protection (e.g., `processData()`, `validateInput()`)
 
 ### Response Methods
 

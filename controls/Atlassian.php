@@ -143,7 +143,7 @@ class Atlassian extends BaseControls\Control {
 
         try {
             // Cloud ID comes from URL: /atlassian/disconnect/{cloud_id}
-            $cloudId = $params['operation']->name ?? $this->getParam('cloud_id');
+            $cloudId = $this->opId() ?? $this->getParam('cloud_id');
 
             if (empty($cloudId)) {
                 if (Flight::request()->ajax) {
@@ -209,7 +209,7 @@ class Atlassian extends BaseControls\Control {
 
         try {
             // Cloud ID comes from URL: /atlassian/refresh/{cloud_id}
-            $cloudId = $params['operation']->name ?? $this->getParam('cloud_id');
+            $cloudId = $this->opId() ?? $this->getParam('cloud_id');
 
             if (empty($cloudId)) {
                 $this->jsonError('No cloud ID specified', 400);

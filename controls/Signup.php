@@ -292,7 +292,7 @@ class Signup extends BaseControls\Control {
      * URL: /signup/verify/{token}
      */
     public function verify($params) {
-        $token = $params['operation']->name ?? '';
+        $token = $this->opId() ?? '';
 
         if (empty($token)) {
             $this->render('signup/verify_error', [

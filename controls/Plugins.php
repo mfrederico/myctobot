@@ -158,7 +158,7 @@ class Plugins extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Get plugin ID or slug from URL
-        $idOrSlug = $params['operation']->name ?? $this->getParam('id') ?? null;
+        $idOrSlug = $this->opId() ?? $this->getParam('id') ?? null;
 
         if (empty($idOrSlug)) {
             $this->flash('error', 'Plugin not found');

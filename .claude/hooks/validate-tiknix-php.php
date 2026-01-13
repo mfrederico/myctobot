@@ -7,7 +7,8 @@
  * 1. Bean type names must be all lowercase (no underscores) for R::dispense
  * 2. R::exec should almost NEVER be used - only in extreme situations
  * 3. Prefer RedBeanPHP associations (ownBeanList/sharedBeanList) over manual FK management
- * 4. CamelCase controllers need explicit route files
+ * 4. Controller class names must be all lowercase - NO CamelCase, NO hyphens
+ * 5. Route files must not contain hyphens
  */
 
 /**
@@ -83,24 +84,26 @@ function findManualFkAssignments(string $content): array {
 }
 
 /**
- * Check if a controller file uses CamelCase and warn about route file.
+ * Check controller naming - BLOCKS CamelCase and hyphens
+ * Returns: [blockingIssues, warningIssues]
  */
-function checkCamelCaseController(string $filePath): array {
-    $issues = [];
+function checkControllerNaming(string $filePath): array {
+    $blocking = [];
+    $warnings = [];
 
     // Only check files in controls/ directory
     if (strpos($filePath, '/controls/') === false) {
-        return [];
+        return [[], []];
     }
 
     // Skip BaseControls subdirectory
     if (strpos($filePath, 'BaseControls') !== false) {
-        return [];
+        return [[], []];
     }
 
     $filename = basename($filePath);
     if (!str_ends_with($filename, '.php')) {
-        return [];
+        return [[], []];
     }
 
     $controllerName = substr($filename, 0, -4); // Remove .php
@@ -113,22 +116,39 @@ function checkCamelCaseController(string $filePath): array {
         }
     }
 
-    // If CamelCase (more than one capital letter total)
+    // BLOCKING: CamelCase controllers
     if ($capitalCount > 0) {
-        $routeName = strtolower($controllerName);
-        $projectDir = getenv('CLAUDE_PROJECT_DIR') ?: dirname(__DIR__, 2);
-        $routeFile = $projectDir . '/routes/' . $routeName . '.php';
-
-        if (!file_exists($routeFile)) {
-            $issues[] = "CamelCase controller '{$controllerName}' detected without route file. " .
-                "FlightPHP auto-routing converts URLs to lowercase class names, so " .
-                "'/{$routeName}' maps to '{$routeName}' not '{$controllerName}'. " .
-                "Create 'routes/{$routeName}.php' with explicit routes like: " .
-                "Flight::route('GET /{$routeName}', ['\\app\\{$controllerName}', 'index']);";
-        }
+        $lowercase = strtolower($controllerName);
+        $blocking[] = "CamelCase controller '{$controllerName}' is FORBIDDEN. " .
+            "FlightPHP auto-routing requires all lowercase controller names. " .
+            "Rename to '{$lowercase}' (file: {$lowercase}.php, class: {$lowercase}).";
     }
 
-    return $issues;
+    return [$blocking, $warnings];
+}
+
+/**
+ * Check route file naming - BLOCKS hyphens
+ */
+function checkRouteFileNaming(string $filePath): array {
+    $blocking = [];
+
+    // Only check files in routes/ directory
+    if (strpos($filePath, '/routes/') === false) {
+        return [];
+    }
+
+    $filename = basename($filePath);
+
+    // BLOCKING: Hyphens in route file names
+    if (strpos($filename, '-') !== false) {
+        $fixed = str_replace('-', '', $filename);
+        $blocking[] = "Hyphenated route file '{$filename}' is FORBIDDEN. " .
+            "Hyphens in URLs require explicit route files, which defeats auto-routing. " .
+            "Rename controller and route file to remove hyphens: '{$fixed}'.";
+    }
+
+    return $blocking;
 }
 
 /**
@@ -138,10 +158,17 @@ function validatePhpCode(string $content, string $filePath): array {
     $blockingIssues = [];
     $warningIssues = [];
 
-    // Skip if not PHP
+    // File path based checks (always run)
+    [$controllerBlocking, $controllerWarnings] = checkControllerNaming($filePath);
+    $blockingIssues = array_merge($blockingIssues, $controllerBlocking);
+    $warningIssues = array_merge($warningIssues, $controllerWarnings);
+
+    $blockingIssues = array_merge($blockingIssues, checkRouteFileNaming($filePath));
+
+    // Skip content checks if not PHP
     if (strpos($content, '<?php') === false && strpos($content, '<?=') === false) {
         if (strpos($content, 'R::') === false && strpos($content, 'Bean::') === false) {
-            return [[], []];
+            return [$blockingIssues, $warningIssues];
         }
     }
 
@@ -151,7 +178,6 @@ function validatePhpCode(string $content, string $filePath): array {
     // Warning issues - suggestions for better practices
     $warningIssues = array_merge($warningIssues, findExecUsage($content));
     $warningIssues = array_merge($warningIssues, findManualFkAssignments($content));
-    $warningIssues = array_merge($warningIssues, checkCamelCaseController($filePath));
 
     return [$blockingIssues, $warningIssues];
 }

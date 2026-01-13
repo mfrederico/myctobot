@@ -74,7 +74,7 @@ class Shards extends BaseControls\Control {
     public function jobstatus($params = []) {
         if (!$this->requireLogin()) return;
 
-        $jobId = $params['operation']->name ?? '';
+        $jobId = $this->opId() ?? '';
         if (empty($jobId)) {
             $this->json(['success' => false, 'error' => 'Job ID required']);
             return;
@@ -105,7 +105,7 @@ class Shards extends BaseControls\Control {
     public function joboutput($params = []) {
         if (!$this->requireLogin()) return;
 
-        $jobId = $params['operation']->name ?? '';
+        $jobId = $this->opId() ?? '';
         if (empty($jobId)) {
             $this->json(['success' => false, 'error' => 'Job ID required']);
             return;

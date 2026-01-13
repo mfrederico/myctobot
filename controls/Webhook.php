@@ -43,7 +43,7 @@ class Webhook extends BaseControls\Control {
      */
     public function jira($params = []) {
         // Check for tenant parameter (from URL: /webhook/jira/{tenant})
-        $tenant = $params['operation']->name ?? null;
+        $tenant = $this->opId() ?? null;
 
         // If tenant specified, switch to tenant database
         if ($tenant) {

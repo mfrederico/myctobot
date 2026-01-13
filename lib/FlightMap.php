@@ -68,6 +68,11 @@ Flight::map('defaultRoute', function($prefix = '') {
 
                 $instance = new $classname;
 
+                // Store route params on instance for helper access
+                if (method_exists($instance, 'setRouteParams')) {
+                    $instance->setRouteParams($params);
+                }
+
                 // Check if method exists and is callable
                 if (method_exists($instance, $function)) {
                     $reflection = new ReflectionMethod($instance, $function);
@@ -242,7 +247,7 @@ Flight::map('loadMenu', function() {
         // Member menu items (no Home link when logged in)
         $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
         $menu[] = ['url' => '/directives', 'label' => 'Directives', 'icon' => 'envelope-paper'];
-        $menu[] = ['url' => '/knowledge-base', 'label' => 'Knowledge Base', 'icon' => 'book'];
+        $menu[] = ['url' => '/knowledgebase', 'label' => 'Knowledge Base', 'icon' => 'book'];
 
         // Enterprise tier - AI Developer
         $member = Flight::get('member');

@@ -1870,5 +1870,5 @@ document.addEventListener('DOMContentLoaded', function() {
 // Note: $ragServiceUrl is auto-detected in the partial based on HTTP_HOST
 $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
 $projectId = null;
-include __DIR__ . '/../partials/pm-chatbox.php';
+include __DIR__ . '/../partials/pmchatbox.php';
 ?>

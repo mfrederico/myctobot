@@ -84,7 +84,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Board ID comes from URL: /analysis/run/{board_id}
-        $boardId = $params['operation']->name ?? $this->getParam('board_id');
+        $boardId = $this->opId() ?? $this->getParam('board_id');
         if (!$boardId) {
             $this->flash('error', 'No board specified');
             Flight::redirect('/analysis');
@@ -179,7 +179,7 @@ class Analysis extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Job ID comes from URL: /analysis/progress/{job_id}
-        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        $jobId = $this->opId() ?? $this->getParam('job_id');
         if (!$jobId) {
             $this->flash('error', 'No job specified');
             Flight::redirect('/analysis');
@@ -222,7 +222,7 @@ class Analysis extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Job ID comes from URL: /analysis/status/{job_id}
-        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        $jobId = $this->opId() ?? $this->getParam('job_id');
         if (!$jobId) {
             $this->jsonError('No job specified');
             return;
@@ -251,7 +251,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Analysis ID comes from URL: /analysis/view/{id}
-        $analysisId = $params['operation']->name ?? $this->getParam('id');
+        $analysisId = $this->opId() ?? $this->getParam('id');
         if (!$analysisId) {
             $this->flash('error', 'No analysis specified');
             Flight::redirect('/analysis');
@@ -300,7 +300,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Analysis ID comes from URL: /analysis/email/{id}
-        $analysisId = $params['operation']->name ?? $this->getParam('id');
+        $analysisId = $this->opId() ?? $this->getParam('id');
         if (!$analysisId) {
             if ($isAjax) {
                 $this->jsonError('No analysis specified');
@@ -405,7 +405,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Board ID comes from URL: /analysis/runshard/{board_id}
-        $boardId = $params['operation']->name ?? $this->getParam('board_id');
+        $boardId = $this->opId() ?? $this->getParam('board_id');
         if (!$boardId) {
             $this->flash('error', 'No board specified');
             Flight::redirect('/analysis');
@@ -475,7 +475,7 @@ class Analysis extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Job ID comes from URL: /analysis/shardprogress/{job_id}
-        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        $jobId = $this->opId() ?? $this->getParam('job_id');
         if (!$jobId) {
             $this->flash('error', 'No job specified');
             Flight::redirect('/analysis');
@@ -536,7 +536,7 @@ class Analysis extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Job ID comes from URL: /analysis/shardstatus/{job_id}
-        $jobId = $params['operation']->name ?? $this->getParam('job_id');
+        $jobId = $this->opId() ?? $this->getParam('job_id');
         if (!$jobId) {
             $this->jsonError('No job specified');
             return;

@@ -237,7 +237,7 @@ class Enterprise extends BaseControls\Control {
     public function deletekey($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $params['operation']->name ?? null;
+        $keyId = $this->opId() ?? null;
         if (!$keyId) {
             $this->flash('error', 'No key specified.');
             Flight::redirect('/enterprise/settings');
@@ -274,7 +274,7 @@ class Enterprise extends BaseControls\Control {
     public function testkey($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $params['operation']->name ?? null;
+        $keyId = $this->opId() ?? null;
         if (!$keyId) {
             Flight::json(['success' => false, 'error' => 'No key specified']);
             return;
@@ -675,7 +675,7 @@ class Enterprise extends BaseControls\Control {
     public function disconnectrepo($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $repoId = $params['operation']->name ?? 0;
+        $repoId = $this->opId() ?? 0;
         if (empty($repoId)) {
             Flight::redirect('/enterprise/repos');
             return;
@@ -880,7 +880,7 @@ class Enterprise extends BaseControls\Control {
     public function job($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->flash('error', 'Issue key required');
             Flight::redirect('/enterprise');
@@ -1171,7 +1171,7 @@ class Enterprise extends BaseControls\Control {
     public function shardjobstatus($params = []) {
         if (!$this->requireLogin()) return;
 
-        $jobId = $params['operation']->name ?? '';
+        $jobId = $this->opId() ?? '';
         if (empty($jobId)) {
             $this->json(['success' => false, 'error' => 'Job ID required']);
             return;
@@ -1202,7 +1202,7 @@ class Enterprise extends BaseControls\Control {
     public function shardjoboutput($params = []) {
         if (!$this->requireLogin()) return;
 
-        $jobId = $params['operation']->name ?? '';
+        $jobId = $this->opId() ?? '';
         if (empty($jobId)) {
             $this->json(['success' => false, 'error' => 'Job ID required']);
             return;
@@ -1255,7 +1255,7 @@ class Enterprise extends BaseControls\Control {
     public function jobstatus($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -1285,7 +1285,7 @@ class Enterprise extends BaseControls\Control {
     public function joblogs($params = []) {
         if (!$this->requireLogin()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -1337,7 +1337,7 @@ class Enterprise extends BaseControls\Control {
     public function resumejob($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -1396,7 +1396,7 @@ class Enterprise extends BaseControls\Control {
     public function retryjob($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;
@@ -1504,7 +1504,7 @@ class Enterprise extends BaseControls\Control {
     public function completejob($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $issueKey = $params['operation']->name ?? '';
+        $issueKey = $this->opId() ?? '';
         if (empty($issueKey)) {
             $this->json(['success' => false, 'error' => 'Issue key required']);
             return;

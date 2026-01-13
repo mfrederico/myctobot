@@ -15,13 +15,13 @@ $this->layout('layouts/app', [
         <div>
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0">
-                    <li class="breadcrumb-item"><a href="/knowledge-base">Knowledge Base</a></li>
+                    <li class="breadcrumb-item"><a href="/knowledgebase">Knowledge Base</a></li>
                     <li class="breadcrumb-item active">Chat</li>
                 </ol>
             </nav>
         </div>
         <div>
-            <a href="/knowledge-base" class="btn btn-outline-secondary btn-sm">
+            <a href="/knowledgebase" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-arrow-left me-1"></i> Back to Documents
             </a>
             <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="openFullScreen()">

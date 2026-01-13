@@ -107,7 +107,7 @@ class Shopify extends BaseControls\Control {
     public function test($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
 
         if (empty($connectionId)) {
             $this->json(['success' => false, 'message' => 'No connection specified']);
@@ -128,7 +128,7 @@ class Shopify extends BaseControls\Control {
     public function disconnect($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
 
         if (empty($connectionId)) {
             $this->flash('error', 'No connection specified.');
@@ -179,7 +179,7 @@ class Shopify extends BaseControls\Control {
     public function linkrepo($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
         $repoId = $this->getParam('repo_id');
 
         if (empty($connectionId)) {
@@ -223,7 +223,7 @@ class Shopify extends BaseControls\Control {
     public function unlinkrepo($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
 
         if (empty($connectionId)) {
             $this->json(['success' => false, 'message' => 'No connection specified']);
@@ -254,7 +254,7 @@ class Shopify extends BaseControls\Control {
     public function update($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
 
         if (empty($connectionId)) {
             $this->json(['success' => false, 'message' => 'No connection specified']);
@@ -325,7 +325,7 @@ class Shopify extends BaseControls\Control {
     public function themes($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $connectionId = $params['operation']->name ?? $this->getParam('id');
+        $connectionId = $this->opId() ?? $this->getParam('id');
 
         if (empty($connectionId)) {
             $this->json(['success' => false, 'message' => 'No connection specified', 'themes' => []]);

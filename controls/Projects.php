@@ -100,7 +100,7 @@ class Projects extends BaseControls\Control {
         }
 
         // Get project ID
-        $projectId = $params['operation']->name ?? $this->getParam('id');
+        $projectId = $this->opId() ?? $this->getParam('id');
         if (!$projectId) {
             $this->flash('error', 'No project specified');
             Flight::redirect('/projects');
@@ -168,7 +168,7 @@ class Projects extends BaseControls\Control {
             return;
         }
 
-        $projectId = $params['operation']->name ?? $this->getParam('id');
+        $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
             : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
@@ -206,7 +206,7 @@ class Projects extends BaseControls\Control {
             return;
         }
 
-        $projectId = $params['operation']->name ?? $this->getParam('id');
+        $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
             : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
@@ -244,7 +244,7 @@ class Projects extends BaseControls\Control {
             return;
         }
 
-        $projectId = $params['operation']->name ?? $this->getParam('id');
+        $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
             : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);

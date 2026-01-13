@@ -265,7 +265,7 @@ class Boards extends BaseControls\Control {
         }
 
         // Board ID comes from URL: /boards/edit/{id}
-        $id = $params['operation']->name ?? $this->getParam('id');
+        $id = $this->opId() ?? $this->getParam('id');
         if (!$id) {
             $this->flash('error', 'No board specified');
             Flight::redirect('/boards');
@@ -447,7 +447,7 @@ class Boards extends BaseControls\Control {
         }
 
         // Board ID comes from URL: /boards/remove/{id}
-        $id = $params['operation']->name ?? $this->getParam('id');
+        $id = $this->opId() ?? $this->getParam('id');
         if (!$id) {
             if (Flight::request()->ajax) {
                 $this->jsonError('No board specified');
@@ -504,7 +504,7 @@ class Boards extends BaseControls\Control {
         }
 
         // Board ID comes from URL: /boards/toggle/{id}
-        $id = $params['operation']->name ?? $this->getParam('id');
+        $id = $this->opId() ?? $this->getParam('id');
         if (!$id) {
             $this->jsonError('No board specified');
             return;

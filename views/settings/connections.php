@@ -183,7 +183,7 @@
                     </a>
                 </div>
                 <div class="col-md-3">
-                    <a href="/knowledge-base" class="text-decoration-none">
+                    <a href="/knowledgebase" class="text-decoration-none">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-book fs-4 text-primary me-3"></i>
                             <div>
@@ -531,5 +531,5 @@ function dismissCreditWarning() {
 
 <?php
 // Include onboarding wizard modal
-include __DIR__ . '/../partials/onboarding-wizard.php';
+include __DIR__ . '/../partials/onboardingwizard.php';
 ?>

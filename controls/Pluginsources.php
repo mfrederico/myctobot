@@ -73,12 +73,7 @@ class Pluginsources extends BaseControls\Control {
      */
     public function store() {
         if (!$this->requireLogin()) return;
-
-        if (Flight::request()->method !== 'POST') {
-            Flight::redirect('/pluginsources/add');
-            return;
-        }
-
+        if (!$this->requirePost()) return;
         if (!$this->validateCSRF()) return;
 
         $memberId = $this->member->id;
@@ -180,8 +175,9 @@ class Pluginsources extends BaseControls\Control {
      */
     public function validate($params = []) {
         if (!$this->requireLogin()) return;
+        if (!$this->requirePost()) return;
 
-        $sourceId = $params['operation']->name ?? 0;
+        $sourceId = $this->opId();
         $memberId = $this->member->id;
 
         if (empty($sourceId)) {
@@ -234,8 +230,9 @@ class Pluginsources extends BaseControls\Control {
      */
     public function delete($params = []) {
         if (!$this->requireLogin()) return;
+        if (!$this->requirePost()) return;
 
-        $sourceId = $params['operation']->name ?? 0;
+        $sourceId = $this->opId();
         $memberId = $this->member->id;
 
         if (empty($sourceId)) {
@@ -277,8 +274,9 @@ class Pluginsources extends BaseControls\Control {
      */
     public function toggle($params = []) {
         if (!$this->requireLogin()) return;
+        if (!$this->requirePost()) return;
 
-        $sourceId = $params['operation']->name ?? 0;
+        $sourceId = $this->opId();
         $memberId = $this->member->id;
 
         if (empty($sourceId)) {

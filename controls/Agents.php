@@ -248,7 +248,7 @@ class Agents extends BaseControls\Control {
         if (!$this->requireEnterprise()) return;
 
         // ID comes from URL: /agents/edit/{id}
-        $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can edit agents
         $agent = R::findOne('aiagents', 'id = ?', [$id]);
@@ -306,7 +306,7 @@ class Agents extends BaseControls\Control {
         }
 
         // ID comes from URL: /agents/update/{id}
-        $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can update agents
         $agent = R::findOne('aiagents', 'id = ?', [$id]);
@@ -417,7 +417,7 @@ class Agents extends BaseControls\Control {
         }
 
         // ID comes from URL: /agents/delete/{id}
-        $id = (int) ($params['operation']->name ?? $this->getParam('id') ?? 0);
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can delete agents
         $agent = R::findOne('aiagents', 'id = ?', [$id]);
@@ -730,7 +730,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
 
         // Workspace-level - all members can view agent tools
         $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
@@ -772,7 +772,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
 
         // Workspace-level - all members can manage agent tools
@@ -869,7 +869,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
 
         // Workspace-level - all members can delete agent tools
@@ -900,7 +900,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $agentId = (int) ($params['operation']->name ?? $this->getParam('agent_id') ?? 0);
+        $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
         $toolId = (int) $this->getParam('tool_id', 0);
         $testParams = $this->getParam('test_params', '{}');
 

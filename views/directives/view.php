@@ -237,7 +237,7 @@
                                 <dd class="col-7"><code class="small"><?= htmlspecialchars(substr($directive->directive_uid, 0, 16)) ?>...</code></dd>
 
                                 <dt class="col-5">Message ID</dt>
-                                <dd class="col-7"><small class="text-muted"><?= htmlspecialchars($directive->email_message_id ?: '-') ?></small></dd>
+                                <dd class="col-7"><small class="text-muted"><?= htmlspecialchars($directive->email_message_uid ?: '-') ?></small></dd>
 
                                 <?php if ($member): ?>
                                 <dt class="col-5">Member</dt>

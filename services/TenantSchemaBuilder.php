@@ -366,7 +366,7 @@ class TenantSchemaBuilder {
         $bean->email_from = 'ceo@example.com';
         $bean->email_subject = 'Schema directive subject';
         $bean->email_body = 'Schema directive body';
-        $bean->email_message_id = 'schema-message-id';
+        $bean->email_message_uid = 'schema-message-id';
         $bean->parsed_intent = 'project';
         $bean->parsed_summary = 'Schema summary';
         $bean->parsed_requirements = '[]';

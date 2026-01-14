@@ -182,7 +182,7 @@ class IncomingEmailService {
             $directive->email_from = $from;
             $directive->email_subject = $subject;
             $directive->email_body = $strippedText ?: $bodyPlain;
-            $directive->email_message_id = $messageId;
+            $directive->email_message_uid = $messageId;
             $directive->approval_mode = $approvalMode;
             $directive->status = 'received';
             $directive->created_at = date('Y-m-d H:i:s');

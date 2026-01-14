@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS `ceodirectives` (
     `email_from` VARCHAR(191),
     `email_subject` VARCHAR(191),
     `email_body` TEXT,
-    `email_message_id` VARCHAR(191),
+    `email_message_uid` VARCHAR(191),
     `parsed_intent` VARCHAR(191),
     `parsed_summary` TEXT,
     `parsed_requirements` JSON,

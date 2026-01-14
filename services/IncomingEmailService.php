@@ -16,10 +16,26 @@ require_once __DIR__ . '/CeoDirectiveService.php';
 
 class IncomingEmailService {
 
-    private $logger;
+    private $logger = null;
 
-    public function __construct() {
-        $this->logger = Flight::get('logger');
+    /**
+     * Get logger instance (lazy initialization)
+     */
+    private function getLogger() {
+        if ($this->logger === null) {
+            $this->logger = Flight::get('logger');
+        }
+        return $this->logger;
+    }
+
+    /**
+     * Log helper that safely handles null logger
+     */
+    private function log(string $level, string $message, array $context = []): void {
+        $logger = $this->getLogger();
+        if ($logger) {
+            $logger->$level($message, $context);
+        }
     }
 
     /**
@@ -42,7 +58,7 @@ class IncomingEmailService {
     public function handleMailgun() {
         // Debug: Log raw input
         $rawInput = file_get_contents('php://input');
-        $this->logger->debug('Mailgun raw input', [
+        $this->log('debug','Mailgun raw input', [
             'content_type' => $_SERVER['CONTENT_TYPE'] ?? 'not set',
             'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'not set',
             'post_count' => count($_POST),
@@ -68,7 +84,7 @@ class IncomingEmailService {
         // Parse tenant from recipient email (e.g., gwt@myctobot.ai -> gwt)
         $tenant = $this->parseTenantFromRecipient($recipient);
 
-        $this->logger->info('Mailgun webhook received', [
+        $this->log('info','Mailgun webhook received', [
             'recipient' => $recipient,
             'sender' => $sender,
             'subject' => $subject,
@@ -83,7 +99,7 @@ class IncomingEmailService {
         if ($queryKey && $configuredKey) {
             // Key-based authentication
             if ($queryKey !== $configuredKey) {
-                $this->logger->warning('Mailgun webhook: invalid key');
+                $this->log('warning','Mailgun webhook: invalid key');
                 Flight::response()->status(401);
                 echo json_encode(['error' => 'Invalid key']);
                 return;
@@ -91,7 +107,7 @@ class IncomingEmailService {
         } elseif (!empty($mailgunConfig['key'])) {
             // Fall back to Mailgun signature verification
             if (!$this->verifyMailgunSignature($mailgunConfig['key'], $timestamp, $token, $signature)) {
-                $this->logger->warning('Mailgun webhook: invalid signature', [
+                $this->log('warning','Mailgun webhook: invalid signature', [
                     'recipient' => $recipient,
                     'sender' => $sender
                 ]);
@@ -104,13 +120,13 @@ class IncomingEmailService {
         // Switch to tenant database if tenant found
         if ($tenant) {
             if (!TenantResolver::switchDatabase($tenant)) {
-                $this->logger->warning("Invalid tenant for incoming email: {$tenant}");
+                $this->log('warning',"Invalid tenant for incoming email: {$tenant}");
                 Flight::response()->status(400);
                 echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
                 return;
             }
         } else {
-            $this->logger->warning('No tenant found in recipient email', [
+            $this->log('warning','No tenant found in recipient email', [
                 'recipient' => $recipient
             ]);
             Flight::response()->status(400);
@@ -128,7 +144,7 @@ class IncomingEmailService {
         }
 
         if (!$member) {
-            $this->logger->warning('Rejected email from non-workspace member', [
+            $this->log('warning','Rejected email from non-workspace member', [
                 'sender' => $sender,
                 'from' => $from,
                 'tenant' => $tenant
@@ -180,7 +196,7 @@ class IncomingEmailService {
                 'approval_mode' => $approvalMode
             ]);
 
-            $this->logger->info('CEO directive created', [
+            $this->log('info','CEO directive created', [
                 'directive_uid' => $directiveId,
                 'member_id' => $memberId,
                 'subject' => $subject,
@@ -195,7 +211,7 @@ class IncomingEmailService {
             ]);
 
         } catch (\Exception $e) {
-            $this->logger->error('Failed to create directive from email', [
+            $this->log('error','Failed to create directive from email', [
                 'error' => $e->getMessage(),
                 'sender' => $sender,
                 'subject' => $subject
@@ -267,7 +283,7 @@ class IncomingEmailService {
         // Check timestamp is within 5 minutes to prevent replay attacks
         $now = time();
         if (abs($now - (int)$timestamp) > 300) {
-            $this->logger->warning('Mailgun signature: timestamp too old', [
+            $this->log('warning','Mailgun signature: timestamp too old', [
                 'timestamp' => $timestamp,
                 'now' => $now
             ]);

@@ -23,7 +23,7 @@ class IncomingEmailService {
      */
     private function getLogger() {
         if ($this->logger === null) {
-            $this->logger = Flight::get('logger');
+            $this->logger = Flight::get('log');
         }
         return $this->logger;
     }

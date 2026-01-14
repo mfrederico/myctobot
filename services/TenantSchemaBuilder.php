@@ -61,6 +61,10 @@ class TenantSchemaBuilder {
         $this->createAIDevJobsTable();
         $this->createAIDevJobLogsTable();
         $this->createDirectivesTable();
+        $this->createCeoDirectivesTable();
+        $this->createCtoProjectsTable();
+        $this->createCtoEpicsTable();
+        $this->createCtoStoriesTable();
         $this->createProjectsTable();
         $this->createPluginTables();
 
@@ -355,6 +359,94 @@ class TenantSchemaBuilder {
         R::trash($bean);
     }
 
+    private function createCeoDirectivesTable(): void {
+        $bean = R::dispense('ceodirectives');
+        $bean->directive_uid = 'schema-ceodirective-uid'; // _uid suffix
+        $bean->member = $this->member; // Creates member_id FK
+        $bean->email_from = 'ceo@example.com';
+        $bean->email_subject = 'Schema directive subject';
+        $bean->email_body = 'Schema directive body';
+        $bean->email_message_id = 'schema-message-id';
+        $bean->parsed_intent = 'project';
+        $bean->parsed_summary = 'Schema summary';
+        $bean->parsed_requirements = '[]';
+        $bean->status = 'received';
+        $bean->current_phase = 'initial';
+        $bean->error_message = 'Schema error';
+        $bean->approval_mode = 'auto';
+        $bean->response_sent_at = date('Y-m-d H:i:s');
+        $bean->response_content = 'Schema response';
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
+    private function createCtoProjectsTable(): void {
+        $bean = R::dispense('ctoprojects');
+        $bean->project_uid = 'schema-ctoproject-uid'; // _uid suffix
+        $bean->member = $this->member; // Creates member_id FK
+        $bean->jiraboards = $this->board; // Creates jiraboards_id FK (board_id equivalent)
+        $bean->repoconnections = $this->repo; // Creates repoconnections_id FK (github_repo_id equivalent)
+        $bean->name = 'Schema CTO Project';
+        $bean->project_type = 'jira';
+        $bean->description = 'Schema project description';
+        $bean->goals = '[]';
+        $bean->estimated_effort = 'medium';
+        $bean->risk_assessment = '{}';
+        $bean->tech_stack = '[]';
+        $bean->jira_project_key = 'SCHEMA';
+        $bean->status = 'planning';
+        $bean->completion_percentage = 0;
+        $bean->milestones = '[]';
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
+    private function createCtoEpicsTable(): void {
+        $bean = R::dispense('ctoepics');
+        $bean->epic_uid = 'schema-ctoepic-uid'; // _uid suffix
+        $bean->ctoprojects = R::findOne('ctoprojects'); // FK placeholder - will be null
+        $bean->title = 'Schema CTO Epic';
+        $bean->description = 'Schema epic description';
+        $bean->acceptance_criteria = '[]';
+        $bean->jira_epic_key = 'SCHEMA-1';
+        $bean->jira_epic_uid = 'schema-jira-epic-uid';
+        $bean->status = 'backlog';
+        $bean->story_count = 0;
+        $bean->stories_completed = 0;
+        $bean->priority = 0;
+        $bean->sequence = 0;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
+    private function createCtoStoriesTable(): void {
+        $bean = R::dispense('ctostories');
+        $bean->story_uid = 'schema-ctostory-uid'; // _uid suffix
+        $bean->ctoepics = R::findOne('ctoepics'); // FK placeholder - will be null
+        $bean->title = 'Schema CTO Story';
+        $bean->description = 'Schema story description';
+        $bean->acceptance_criteria = '[]';
+        $bean->story_points = 0;
+        $bean->jira_issue_key = 'SCHEMA-2';
+        $bean->jira_issue_uid = 'schema-jira-issue-uid';
+        $bean->aidev_job_uid = 'schema-aidev-job-uid';
+        $bean->status = 'pending_review';
+        $bean->blocker_reason = 'Schema blocker';
+        $bean->depends_on = '[]';
+        $bean->verified_at = date('Y-m-d H:i:s');
+        $bean->verification_result = '{}';
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
     private function createProjectsTable(): void {
         $bean = R::dispense('projects');
         $bean->project_uid = 'schema-project-uid'; // _uid suffix
@@ -468,6 +560,19 @@ class TenantSchemaBuilder {
         R::exec('ALTER TABLE `pluginscans` MODIFY COLUMN `error_log` JSON');
 
         R::exec('ALTER TABLE `installedplugins` MODIFY COLUMN `config_json` JSON');
+
+        R::exec('ALTER TABLE `ceodirectives` MODIFY COLUMN `parsed_requirements` JSON');
+
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `goals` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `risk_assessment` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `tech_stack` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `milestones` JSON');
+
+        R::exec('ALTER TABLE `ctoepics` MODIFY COLUMN `acceptance_criteria` JSON');
+
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `acceptance_criteria` JSON');
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `depends_on` JSON');
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `verification_result` JSON');
 
         // Add unique constraints
         R::exec('ALTER TABLE `member` ADD UNIQUE INDEX IF NOT EXISTS `uk_email` (`email`)');

@@ -1,22 +1,26 @@
 <?php
 /**
- * Incoming Email Controller
+ * Incoming Email Service
  * Handles incoming email webhooks from Mailgun for CEO directives
  */
 
-namespace app;
+namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\Bean;
-use \app\services\UserDatabaseService;
-use \app\services\CeoDirectiveService;
 use \app\TenantResolver;
 
-require_once __DIR__ . '/../services/UserDatabaseService.php';
-require_once __DIR__ . '/../services/CeoDirectiveService.php';
+require_once __DIR__ . '/UserDatabaseService.php';
+require_once __DIR__ . '/CeoDirectiveService.php';
 
-class Incomingemail extends BaseControls\Control {
+class IncomingEmailService {
+
+    private $logger;
+
+    public function __construct() {
+        $this->logger = Flight::get('logger');
+    }
 
     /**
      * Handle Mailgun incoming email webhook
@@ -35,7 +39,7 @@ class Incomingemail extends BaseControls\Control {
      * - token: Mailgun token
      * - signature: HMAC signature for verification
      */
-    public function mailgun() {
+    public function handleMailgun() {
         // Debug: Log raw input
         $rawInput = file_get_contents('php://input');
         $this->logger->debug('Mailgun raw input', [
@@ -99,7 +103,7 @@ class Incomingemail extends BaseControls\Control {
 
         // Switch to tenant database if tenant found
         if ($tenant) {
-            if (!$this->switchToTenantForWebhook($tenant)) {
+            if (!TenantResolver::switchDatabase($tenant)) {
                 $this->logger->warning("Invalid tenant for incoming email: {$tenant}");
                 Flight::response()->status(400);
                 echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
@@ -205,7 +209,7 @@ class Incomingemail extends BaseControls\Control {
      * Load Mailgun config from conf/mailgun.ini
      */
     private function loadMailgunConfig(): array {
-        $iniPath = __DIR__ . '/../conf/mailgun.ini';
+        $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
         if (file_exists($iniPath)) {
             $config = parse_ini_file($iniPath);
             if ($config) {
@@ -238,7 +242,7 @@ class Incomingemail extends BaseControls\Control {
         if (preg_match('/@(.+)$/i', $recipient, $matches)) {
             $domain = strtolower($matches[1]);
             // Look for config files matching the domain
-            $configFiles = glob(__DIR__ . '/../conf/config.*.ini');
+            $configFiles = glob(dirname(__DIR__) . '/conf/config.*.ini');
             foreach ($configFiles as $configFile) {
                 $tenantName = preg_replace('/^.*config\.(.+)\.ini$/', '$1', $configFile);
                 $config = parse_ini_file($configFile, true);
@@ -273,13 +277,6 @@ class Incomingemail extends BaseControls\Control {
         // Verify signature
         $expectedSignature = hash_hmac('sha256', $timestamp . $token, $apiKey);
         return hash_equals($expectedSignature, $signature);
-    }
-
-    /**
-     * Switch to tenant database for webhook processing
-     */
-    private function switchToTenantForWebhook(string $tenant): bool {
-        return TenantResolver::switchDatabase($tenant);
     }
 
     /**

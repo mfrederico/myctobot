@@ -13,6 +13,7 @@ use \RedBeanPHP\R as R;
 
 require_once __DIR__ . '/EncryptionService.php';
 require_once __DIR__ . '/JiraClient.php';
+require_once __DIR__ . '/GitHubClient.php';
 require_once __DIR__ . '/AIDevStatusService.php';
 require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
@@ -172,6 +173,27 @@ class AIDevJobService {
             // Non-Jira project types (github, monday, zoho) always use local runner
 
             if ($useLocalRunner) {
+                // Check if there's already a running session for this issue
+                $runningSession = $this->findRunningSessionForIssue($issueKey, $tenant);
+                if ($runningSession) {
+                    // Session already running - don't send generic "check for updates" message
+                    // The Webhook controller handles forwarding actual comments/updates directly
+                    $this->logger->info('Session already running for issue, skipping job start', [
+                        'member_id' => $memberId,
+                        'issue_key' => $issueKey,
+                        'session_id' => $runningSession['session_id'],
+                        'tmux_name' => $runningSession['tmux_name']
+                    ]);
+
+                    return [
+                        'success' => true,
+                        'already_running' => true,
+                        'session_id' => $runningSession['session_id'],
+                        'tmux_name' => $runningSession['tmux_name'],
+                        'message' => "Session already running for {$issueKey}"
+                    ];
+                }
+
                 // Queue-first pattern: All jobs go to queue, cron processor starts them
                 // This provides better rate limiting and job management
                 $wsLimit = self::checkWorkspaceLocalRunnerLimit();
@@ -455,12 +477,28 @@ class AIDevJobService {
             }
         }
 
-        // Count running LOCAL jobs workspace-wide
-        // Local jobs have shard_id NULL or empty
-        $runningLocal = (int)Bean::count('aidevjobs',
-            'status = ? AND (shard_id IS NULL OR shard_id = ?)',
-            ['running', '']
-        );
+        // Count running jobs by checking actual AOE tmux sessions
+        $runningLocal = 0;
+        try {
+            $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
+            if (file_exists($aoePath)) {
+                require_once $aoePath;
+                $tenant = Flight::get('tenant.slug') ?: 'default';
+                \Aoe\Tenant\TenantContext::set($tenant);
+                $aoeStorage = new \Aoe\Session\Storage($tenant);
+                $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
+
+                // Count sessions where tmux is actually running
+                foreach ($aoeStorage->loadAll() as $session) {
+                    if ($aoeTmux->sessionExistsByName($session->getTmuxName())) {
+                        $runningLocal++;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            // Fallback to database count if AOE check fails
+            $runningLocal = (int)Bean::count('aidevjobs', 'status = ?', ['running']);
+        }
 
         return [
             'available' => $runningLocal < $maxLocalRunners,
@@ -995,6 +1033,105 @@ class AIDevJobService {
     // ========================================
 
     /**
+     * Find a running AOE session for the given issue
+     *
+     * @param string $issueKey Issue key to find
+     * @param string|null $tenant Tenant slug
+     * @return array|null Session info if found and running, null otherwise
+     */
+    private function findRunningSessionForIssue(string $issueKey, ?string $tenant): ?array
+    {
+        try {
+            $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
+            if (!file_exists($aoePath)) {
+                return null;
+            }
+            require_once $aoePath;
+
+            $tenantSlug = $tenant ?: (\Aoe\Tmux\TmuxService::getDomainId() ?? 'default');
+            \Aoe\Tenant\TenantContext::set($tenantSlug);
+
+            $storage = new \Aoe\Session\Storage($tenantSlug);
+            $tmux = new \Aoe\Tmux\TmuxService($tenantSlug);
+
+            // Find session by reference (issue key)
+            foreach ($storage->loadAll() as $session) {
+                // Check if this session is for the same issue (by reference or title)
+                if ($session->reference === $issueKey || $session->title === $issueKey) {
+                    $tmuxName = $session->getTmuxName();
+                    // Check if tmux session is actually running
+                    if ($tmux->sessionExistsByName($tmuxName)) {
+                        return [
+                            'session_id' => $session->id,
+                            'tmux_name' => $tmuxName,
+                            'tenant' => $tenantSlug,
+                            'session' => $session
+                        ];
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            $this->logger->warning('Error checking for running session', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Send an update to a running session
+     *
+     * @param array $runningSession Session info from findRunningSessionForIssue
+     * @param string $issueKey Issue key
+     * @param int $memberId Member ID
+     * @return array Result
+     */
+    private function sendUpdateToRunningSession(array $runningSession, string $issueKey, int $memberId): array
+    {
+        try {
+            $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
+            require_once $aoePath;
+
+            $tmux = new \Aoe\Tmux\TmuxService($runningSession['tenant']);
+            $tmuxName = $runningSession['tmux_name'];
+
+            // Send a message to the running session about the update
+            $message = "\n\n[WEBHOOK UPDATE] New activity on {$issueKey}. Please check for any new comments or changes to the ticket.\n";
+
+            // Send the message as text followed by Enter
+            $tmux->sendTextByName($tmuxName, $message);
+            $tmux->sendEnterByName($tmuxName);
+
+            $this->logger->info('Sent update to running session', [
+                'issue_key' => $issueKey,
+                'session_id' => $runningSession['session_id'],
+                'tmux_name' => $tmuxName
+            ]);
+
+            return [
+                'success' => true,
+                'updated_existing' => true,
+                'session_id' => $runningSession['session_id'],
+                'tmux_name' => $tmuxName,
+                'message' => "Update sent to running session for {$issueKey}"
+            ];
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to send update to running session', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+
+            return [
+                'success' => false,
+                'error' => 'Failed to send update to running session: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Queue a job for later execution when capacity is available
      *
      * @param int $memberId Member ID
@@ -1042,11 +1179,12 @@ class AIDevJobService {
 
         // Create queued job record
         $job = Bean::dispense('aidevjobs');
+        $job->job_id = bin2hex(random_bytes(16));  // Generate UUID
         $job->member_id = $memberId;
         $job->board_id = $boardId;
         $job->issue_key = $issueKey;
         $job->cloud_id = $cloudId;
-        $job->repo_id = $repoId;
+        $job->repo_connection_id = $repoId;
         $job->status = 'queued';
         $job->current_step = 'Waiting in queue';
         $job->progress = 0;
@@ -1063,12 +1201,14 @@ class AIDevJobService {
             'ws_max' => $wsLimit['max']
         ]);
 
-        $jobId = Bean::store($job);
+        $jobUuid = $job->job_id;  // Save UUID before store
+        $beanId = Bean::store($job);
 
-        $queuePosition = $this->getQueuePosition($jobId);
+        $queuePosition = $this->getQueuePosition($beanId);
 
         $this->logger->info('Job queued for later execution', [
-            'job_id' => $jobId,
+            'job_id' => $jobUuid,
+            'bean_id' => $beanId,
             'issue_key' => $issueKey,
             'member_id' => $memberId,
             'position' => $queuePosition,
@@ -1076,8 +1216,8 @@ class AIDevJobService {
             'max' => $wsLimit['max']
         ]);
 
-        // Log to job history
-        AIDevStatusService::log($jobId, $memberId, 'info', 'Job queued - waiting for available slot', [
+        // Log to job history (uses string job_id, not bean id)
+        AIDevStatusService::log($jobUuid, $memberId, 'info', 'Job queued - waiting for available slot', [
             'position' => $queuePosition,
             'running_jobs' => $wsLimit['running'],
             'max_jobs' => $wsLimit['max']
@@ -1086,7 +1226,7 @@ class AIDevJobService {
         return [
             'success' => true,
             'queued' => true,
-            'job_id' => $jobId,
+            'job_id' => $jobUuid,
             'message' => "Job queued (position {$queuePosition}). {$wsLimit['running']}/{$wsLimit['max']} jobs running.",
             'position' => $queuePosition,
             'running' => $wsLimit['running'],
@@ -1190,10 +1330,10 @@ class AIDevJobService {
 
                 $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
 
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->id, $job->repo_id, $jobTenant)) {
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_id, $job->repo_connection_id, $jobTenant)) {
                     $results['jobs_started']++;
 
-                    AIDevStatusService::log($job->id, $job->member_id, 'info', 'Job started from queue', [
+                    AIDevStatusService::log($job->job_id, $job->member_id, 'info', 'Job started from queue', [
                         'session' => $tmux->getSessionName(),
                         'wait_time' => $this->calculateWaitTime($job->created_at)
                     ]);
@@ -1209,19 +1349,19 @@ class AIDevJobService {
                     $job->updated_at = date('Y-m-d H:i:s');
                     Bean::store($job);
 
-                    $results['errors'][] = "Job {$job->id} ({$job->issue_key}): Failed to spawn";
+                    $results['errors'][] = "Job {$job->job_id} ({$job->issue_key}): Failed to spawn";
 
                     $this->logger->error('Queue processor: failed to spawn job', [
-                        'job_id' => $job->id,
+                        'job_id' => $job->job_id,
                         'issue_key' => $job->issue_key
                     ]);
                 }
 
             } catch (\Exception $e) {
-                $results['errors'][] = "Job {$job->id}: " . $e->getMessage();
+                $results['errors'][] = "Job {$job->job_id}: " . $e->getMessage();
 
                 $this->logger->error('Queue processor: exception starting job', [
-                    'job_id' => $job->id,
+                    'job_id' => $job->job_id,
                     'error' => $e->getMessage()
                 ]);
 
@@ -1328,6 +1468,176 @@ class AIDevJobService {
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    /**
+     * Public method to cleanup job labels (for API endpoint use)
+     *
+     * Handles both Jira and GitHub issues based on job's project_type.
+     * Call this from cleanup endpoint after tenant database is switched.
+     *
+     * @param int|null $jobId Job ID (optional if issueKey provided)
+     * @param string|null $issueKey Issue key (optional if jobId provided)
+     * @return array Result with labels_removed, errors, and job info
+     */
+    public function cleanupJobLabels(?int $jobId = null, ?string $issueKey = null): array {
+        $result = [
+            'success' => false,
+            'issue_key' => null,
+            'project_type' => null,
+            'labels_removed' => [],
+            'errors' => []
+        ];
+
+        // Find the job
+        $job = null;
+        if ($jobId) {
+            $job = Bean::load('aidevjobs', $jobId);
+            if (!$job || !$job->id) {
+                $job = null;
+            }
+        }
+        if (!$job && $issueKey) {
+            $job = Bean::findOne('aidevjobs', 'issue_key = ? ORDER BY updated_at DESC', [$issueKey]);
+        }
+
+        if (!$job) {
+            $result['errors'][] = 'Job not found';
+            return $result;
+        }
+
+        $result['issue_key'] = $job->issue_key;
+        $result['project_type'] = $job->project_type ?? 'jira';
+
+        $memberId = (int) $job->member_id;
+        $cloudId = $job->cloud_id ?? '';
+        $projectType = $job->project_type ?? 'jira';
+
+        if ($projectType === 'github') {
+            $result = $this->cleanupGitHubLabels($job, $memberId, $result);
+        } else {
+            $result = $this->cleanupJiraLabels($job, $memberId, $cloudId, $result);
+        }
+
+        $result['success'] = empty($result['errors']) || !empty($result['labels_removed']);
+        return $result;
+    }
+
+    /**
+     * Cleanup Jira labels for a job
+     */
+    private function cleanupJiraLabels($job, int $memberId, string $cloudId, array $result): array {
+        if (empty($cloudId)) {
+            $result['errors'][] = 'No cloud_id for Jira job';
+            return $result;
+        }
+
+        try {
+            $jiraClient = new JiraClient($memberId, $cloudId);
+
+            // Remove working label
+            try {
+                $jiraClient->removeLabel($job->issue_key, self::WORKING_LABEL);
+                $result['labels_removed'][] = self::WORKING_LABEL;
+            } catch (\Exception $e) {
+                if (strpos($e->getMessage(), '404') === false) {
+                    $result['errors'][] = 'Failed to remove ' . self::WORKING_LABEL . ': ' . $e->getMessage();
+                }
+            }
+
+            // Remove ai-dev labels
+            try {
+                $issue = $jiraClient->getIssue($job->issue_key);
+                $labels = $issue['fields']['labels'] ?? [];
+                foreach ($labels as $label) {
+                    if ($label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label)) {
+                        try {
+                            $jiraClient->removeLabel($job->issue_key, $label);
+                            $result['labels_removed'][] = $label;
+                        } catch (\Exception $e) {
+                            $result['errors'][] = "Failed to remove {$label}: " . $e->getMessage();
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                $result['errors'][] = 'Failed to get issue labels: ' . $e->getMessage();
+            }
+
+        } catch (\Exception $e) {
+            $result['errors'][] = 'Failed to initialize Jira client: ' . $e->getMessage();
+        }
+
+        return $result;
+    }
+
+    /**
+     * Cleanup GitHub labels for a job
+     */
+    private function cleanupGitHubLabels($job, int $memberId, array $result): array {
+        $repoConnectionId = $job->repo_connection_id ? (int) $job->repo_connection_id : null;
+
+        if (!$repoConnectionId) {
+            $result['errors'][] = 'No repo_connection_id for GitHub job';
+            return $result;
+        }
+
+        $repo = Bean::load('repoconnections', $repoConnectionId);
+        if (!$repo || !$repo->id) {
+            $result['errors'][] = 'Repository connection not found';
+            return $result;
+        }
+
+        $owner = $repo->repo_owner;
+        $repoName = $repo->repo_name;
+
+        // Parse issue number from issue_key
+        $issueNumber = null;
+        if (preg_match('/#(\d+)$/', $job->issue_key, $matches)) {
+            $issueNumber = (int) $matches[1];
+        } elseif (is_numeric($job->issue_key)) {
+            $issueNumber = (int) $job->issue_key;
+        }
+
+        if (!$issueNumber) {
+            $result['errors'][] = "Could not parse issue number from: {$job->issue_key}";
+            return $result;
+        }
+
+        // Get GitHub token
+        $githubToken = $repo->access_token ?? null;
+        if (empty($githubToken)) {
+            $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            if ($githubSetting && !empty($githubSetting->setting_value)) {
+                $encryption = new EncryptionService();
+                $githubToken = $encryption->decrypt($githubSetting->setting_value);
+            }
+        }
+
+        if (empty($githubToken)) {
+            $result['errors'][] = 'No GitHub token available';
+            return $result;
+        }
+
+        try {
+            $githubClient = new GitHubClient($githubToken);
+
+            $labelsToRemove = ['ai-dev', self::WORKING_LABEL, 'in-progress'];
+            foreach ($labelsToRemove as $label) {
+                try {
+                    $githubClient->removeLabel($owner, $repoName, $issueNumber, $label);
+                    $result['labels_removed'][] = $label;
+                } catch (\Exception $e) {
+                    // 404 means label wasn't on the issue - that's OK
+                    if (strpos($e->getMessage(), '404') === false) {
+                        $result['errors'][] = "Failed to remove {$label}: " . $e->getMessage();
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            $result['errors'][] = 'Failed to initialize GitHub client: ' . $e->getMessage();
+        }
+
+        return $result;
     }
 
     /**

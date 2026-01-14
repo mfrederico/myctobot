@@ -49,7 +49,7 @@ PAYLOAD=$(cat <<EOF
   "job_id": "$MYCTOBOT_JOB_ID",
   "member_id": ${MYCTOBOT_MEMBER_ID:-0},
   "tenant": "${MYCTOBOT_WORKSPACE:-default}",
-  "status": "completed",
+  "status": "checkpoint",
   "result": $RESULT_JSON
 }
 EOF
@@ -85,7 +85,7 @@ if [[ -z "$SESSION_NAME" && -n "$TMUX" ]]; then
 fi
 
 if [[ -n "$SESSION_NAME" ]]; then
-    # Capture terminal snapshot before killing
+    # Capture terminal snapshot for debugging
     SNAPSHOT_FILE="terminal_snapshot.txt"
     echo "Capturing terminal snapshot to $SNAPSHOT_FILE..."
 
@@ -98,13 +98,22 @@ if [[ -n "$SESSION_NAME" ]]; then
     cp "$SNAPSHOT_FILE" "$SNAPSHOT_ARCHIVE" 2>/dev/null || true
 
     echo "  Snapshot saved: $SNAPSHOT_FILE ($(wc -l < "$SNAPSHOT_FILE" 2>/dev/null || echo 0) lines)"
-
-    echo "Terminating tmux session: $SESSION_NAME"
-    # Give a moment for any cleanup
-    sleep 1
-    # Kill the session
-    tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
-else
-    echo "No tmux session detected, exiting normally"
-    exit 0
 fi
+
+# Session stays alive to receive further updates from issue tracker
+# The webhook will send /exit when ticket transitions to "Ready for QA"
+echo ""
+echo "═══════════════════════════════════════════════════════════════════"
+echo "                     CHECKPOINT COMPLETE"
+echo "═══════════════════════════════════════════════════════════════════"
+echo ""
+echo "✓ Initial work is done. The PR has been created."
+echo ""
+echo "This session will remain active to receive updates:"
+echo "  • Comments added to the ticket will appear here"
+echo "  • You can continue to iterate on the implementation"
+echo "  • When the ticket moves to 'Ready for QA', this session will close"
+echo ""
+echo "To manually exit: type /exit"
+echo "═══════════════════════════════════════════════════════════════════"
+echo ""

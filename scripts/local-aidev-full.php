@@ -24,6 +24,7 @@ $options = getopt('', [
     'tenant:',
     'repo:',
     'provider:',  // jira or github
+    'aoe-session:',  // AOE session ID (passed from TmuxService)
     'attach',
     'repo-path:',
     'print',
@@ -111,14 +112,32 @@ TenantContext::set($tenantSlug);
 // Initialize AOE storage for session tracking
 $aoeStorage = new AoeStorage($tenantSlug);
 
-// Create AOE session with ticket reference visible in tmux name
-$aoeSession = AoeInstance::create(
-    tenantId: $tenantSlug,
-    title: $issueKey,
-    projectPath: '/tmp',  // Will update with actual workDir below
-    tool: 'claude',
-    reference: $issueKey  // Ticket ID visible in tmux session name
-);
+// Check if AOE session ID was passed (from TmuxService)
+$aoeSessionId = $options['aoe-session'] ?? null;
+
+if ($aoeSessionId) {
+    // Load existing session created by TmuxService
+    $aoeSession = $aoeStorage->find($aoeSessionId);
+    if (!$aoeSession) {
+        echo "Warning: Could not load AOE session {$aoeSessionId}, creating new one\n";
+        $aoeSession = AoeInstance::create(
+            tenantId: $tenantSlug,
+            title: $issueKey,
+            projectPath: '/tmp',
+            tool: 'claude',
+            reference: $issueKey
+        );
+    }
+} else {
+    // Create new AOE session (manual run without TmuxService)
+    $aoeSession = AoeInstance::create(
+        tenantId: $tenantSlug,
+        title: $issueKey,
+        projectPath: '/tmp',
+        tool: 'claude',
+        reference: $issueKey
+    );
+}
 
 // Session name format: aoe-{tenant}-{issue}-{shortId}
 $sessionName = $aoeSession->getTmuxName();
@@ -128,21 +147,22 @@ $workDir = "/tmp/{$sessionName}";
 // Update session with actual work directory
 $aoeSession->projectPath = $workDir;
 
-// Default cloudId - will be looked up from member's Atlassian connection
-$cloudId = 'cb1fabf7-9018-49bb-90c7-afa23343dbe5';
+// Look up cloudId from member's Atlassian connection
+$cloudId = null;
+if ($provider === 'jira') {
+    $atlassianTokenCheck = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+    if ($atlassianTokenCheck) {
+        $cloudId = $atlassianTokenCheck->cloud_id;
+    } else {
+        echo "ERROR: No Atlassian token found for member {$memberId}\n";
+        echo "Please connect your Atlassian account first.\n";
+        exit(1);
+    }
+}
 
-echo "===========================================\n";
-echo "Local AI Developer - Using YOUR Claude Account\n";
-echo "===========================================\n\n";
-echo "Tenant: {$tenantSlug}\n";
-echo "Provider: {$provider}\n";
-echo "Issue: {$issueKey}\n";
-echo "Member ID: {$memberId}\n";
-if ($jobId) echo "Job ID: {$jobId}\n";
-echo "Print Mode: " . ($usePrintMode ? "YES" : "NO") . "\n";
+// Minimal PHP output - full banner is in generated bash script
+echo "Preparing AI Developer session for {$issueKey}...\n";
 if ($dryRun) echo "DRY RUN: YES (testing DB queries only)\n";
-echo "Session: {$sessionName}\n";
-echo "Work Dir: {$workDir}\n\n";
 
 // Create work directory structure (like shard does)
 if (!is_dir($workDir)) {
@@ -989,9 +1009,9 @@ echo "SHOPIFY_CLI_THEME_TOKEN: ****\${SHOPIFY_CLI_THEME_TOKEN: -4}"
 SHOPIFY_ECHO;
 }
 
-// Get API key for webhook auth
-$apiKey = Flight::get('cron.api_key') ?? '';
+// Get API key for cleanup endpoint auth
 $webhookUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
+$apiKey = Flight::get('api.api_key') ?? '';
 
 // Hook environment variables for multi-tenant support
 $hookEnvSection = <<<HOOK_ENV
@@ -1000,13 +1020,14 @@ $hookEnvSection = <<<HOOK_ENV
 export MYCTOBOT_APP_ROOT="{$baseDir}"
 export MYCTOBOT_WORKSPACE="{$tenant}"
 export MYCTOBOT_JOB_ID="{$jobId}"
+export MYCTOBOT_ISSUE_KEY="{$issueKey}"
 export MYCTOBOT_MEMBER_ID="{$memberId}"
 export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
-export MYCTOBOT_API_KEY="{$apiKey}"
 export MYCTOBOT_WEBHOOK_URL="{$webhookUrl}"
+export MYCTOBOT_API_KEY="{$apiKey}"
 HOOK_ENV;
 
-// Copy finish_job.sh to work directory
+// Copy finish_job.sh to work directory (saves checkpoint, keeps session alive)
 $finishJobSrc = "{$baseDir}/scripts/finish_job.sh";
 $finishJobDst = "{$workDir}/finish_job.sh";
 if (file_exists($finishJobSrc)) {
@@ -1099,18 +1120,12 @@ export AOE_TENANT="{$tenantSlug}"
 export AOE_SESSION_ID="{$aoeSessionId}"
 export AOE_SESSION_NAME="{$sessionName}"
 
-# Cleanup function - called on exit
-aoe_cleanup() {
-    local exit_code=\$?
-    echo ""
-    echo "=== Session Ended (exit code: \$exit_code) ==="
+# AOE session cleanup function (updates session status in storage)
+aoe_session_cleanup() {
+    local exit_code=\${1:-0}
     echo "Updating AOE session status..."
     php "{$cleanupScript}" --tenant="\$AOE_TENANT" --session-id="\$AOE_SESSION_ID" --exit-code="\$exit_code" || true
-    echo "=== Cleanup Complete ==="
 }
-
-# Register exit trap for cleanup
-trap aoe_cleanup EXIT
 
 {$providerEnvSection}
 {$ollamaEnvSection}
@@ -1119,18 +1134,34 @@ export TERM="xterm-256color"
 {$hookEnvSection}
 {$shopifyEnvSection}
 
-# Verify tokens are set
-echo "=== Environment Setup ==="
+# ============================================
+# Session Startup Banner
+# ============================================
+echo "==========================================="
+echo "AI Developer Session - Using YOUR Claude"
+echo "==========================================="
+echo ""
+echo "Tenant: {$tenantSlug}"
+echo "Provider: {$provider}"
 echo "Issue: {$issueKey}"
 echo "Summary: {$summary}"
+echo "Session: {$sessionName}"
+echo "Work Dir: {$workDir}"
+echo "Member ID: {$memberId}"
+echo "Job ID: \$MYCTOBOT_JOB_ID"
 echo ""
 {$providerEchoSection}
 {$ollamaEchoSection}
-echo "MYCTOBOT_WORKSPACE: \$MYCTOBOT_WORKSPACE"
-echo "MYCTOBOT_JOB_ID: \$MYCTOBOT_JOB_ID"
 {$shopifyEchoSection}
-echo "========================="
+echo "==========================================="
 echo ""
+
+# Clean repo dir if exists (for re-runs) - git clone creates fresh
+if [[ -d "{$workDir}/repo" ]]; then
+    echo "Cleaning existing repo directory..."
+    rm -rf "{$workDir}/repo"
+fi
+mkdir -p "{$workDir}/attachments" 2>/dev/null
 
 cd {$workDir}
 
@@ -1401,6 +1432,84 @@ JIRA_BASH;
 $updateScriptWithVars = str_replace('${WORK_DIR}', $workDir, $updateScript);
 $envScript .= $updateScriptWithVars;
 
+// Add cleanup function that calls the API to remove labels
+$cleanupFunction = <<<'CLEANUP_BASH'
+
+# Cleanup job labels via API (removes ai-dev, myctobot-working labels)
+cleanup_labels() {
+    echo ""
+    echo "=== Removing Job Labels ==="
+
+    if [[ -z "$MYCTOBOT_API_KEY" ]]; then
+        echo "  ⚠ MYCTOBOT_API_KEY not set, skipping label cleanup"
+        return
+    fi
+
+    # Use main domain to avoid subdomain redirect losing POST data
+    local api_url="https://myctobot.ai/jobs/cleanup?tenant=$MYCTOBOT_WORKSPACE"
+    local response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
+        -H "X-API-Key: $MYCTOBOT_API_KEY" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -d "tenant=$MYCTOBOT_WORKSPACE&issue_key=$MYCTOBOT_ISSUE_KEY&job_id=$MYCTOBOT_JOB_ID" 2>/dev/null)
+
+    local http_code=$(echo "$response" | tail -1)
+    local body=$(echo "$response" | head -n -1)
+
+    if [[ "$http_code" =~ ^2 ]]; then
+        echo "  ✓ Labels removed successfully"
+        # Parse and show removed labels if jq available
+        if command -v jq &>/dev/null; then
+            local removed=$(echo "$body" | jq -r '.data.labels_removed // [] | join(", ")' 2>/dev/null)
+            [[ -n "$removed" ]] && echo "    Removed: $removed"
+        fi
+    else
+        echo "  ✗ Failed to remove labels (HTTP $http_code)"
+        echo "    $body" | head -c 200
+    fi
+}
+CLEANUP_BASH;
+
+$envScript .= $cleanupFunction;
+
+// Add trap-based cleanup to ensure it runs even if script is interrupted
+$trapCleanup = <<<'TRAP_BASH'
+
+# Track if cleanup has already run to avoid double-execution
+CLEANUP_DONE=0
+
+# Main cleanup function called by trap
+do_cleanup() {
+    if [[ "$CLEANUP_DONE" == "1" ]]; then
+        return
+    fi
+    CLEANUP_DONE=1
+
+    echo ""
+    echo "=== Session Cleanup ==="
+
+    # Remove job labels via API
+    cleanup_labels
+
+    # Update AOE session status
+    aoe_session_cleanup $?
+
+    # Cleanup orphaned Playwright processes
+    echo "Cleaning up orphaned Playwright processes..."
+    ps -eo pid,ppid,args 2>/dev/null | grep -E "playwright|mcp-server-playwright" | awk '$2 == 1 {print $1}' | while read pid; do
+        echo "  Killing orphaned playwright (PID $pid)"
+        kill $pid 2>/dev/null || true
+    done
+
+    echo "=== Cleanup Complete ==="
+}
+
+# Set trap to run cleanup on EXIT (catches normal exit, Ctrl+C, kill, etc.)
+trap do_cleanup EXIT
+
+TRAP_BASH;
+
+$envScript .= $trapCleanup;
+
 // Build Claude command with optional --model flag for Ollama
 $modelFlag = '';
 if (!empty($ollamaModel)) {
@@ -1419,6 +1528,9 @@ claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt 2>&1 | t
 
 # Update issue tracker after Claude completes
 {$updateFunction} "{$logFile}" "{$logFile}"
+
+# Remove job labels via API
+cleanup_labels
 
 # Cleanup orphaned Playwright processes (PPID=1 means parent died)
 echo "Cleaning up orphaned Playwright processes..."
@@ -1440,18 +1552,51 @@ echo ""
 # Pass prompt content as argument (without -p) to start with message AND show TUI
 script -q session.log -c 'claude --dangerously-skip-permissions {$modelFlag} "\$(cat prompt.txt)"'
 
-# Update issue tracker after Claude completes
+# === Post-Session Update (runs after Claude exits normally) ===
+echo ""
+echo "=== Claude Session Ended ==="
+
+# Update issue tracker (post comment, transition status)
 BASH;
     $envScript .= "\n{$updateFunction} \"{$workDir}/session.log\" \"{$workDir}/session.log\"\n";
-    $envScript .= <<<'BASH'
 
-# Cleanup orphaned Playwright processes (PPID=1 means parent died)
-echo "Cleaning up orphaned Playwright processes..."
-ps -eo pid,ppid,args | grep -E "playwright|mcp-server-playwright" | awk '$2 == 1 {print $1}' | while read pid; do
-    echo "  Killing orphaned playwright (PID $pid)"
-    kill $pid 2>/dev/null || true
+    // Wait for webhook to signal task complete
+    // Webhook creates done file when ticket transitions to "When Task Complete" status
+    $envScript .= <<<WAIT_BASH
+
+echo ""
+echo "=== Waiting for Task Complete ==="
+echo "Session will stay alive until ticket reaches 'Ready for QA' status."
+echo "Add comments to the Jira ticket to continue the conversation."
+echo "(Timeout: 2 hours)"
+
+DONE_FILE="{$workDir}/done"
+MAX_WAIT=7200  # 2 hours
+WAIT_INTERVAL=5
+WAITED=0
+
+while [[ ! -f "\$DONE_FILE" && \$WAITED -lt \$MAX_WAIT ]]; do
+    sleep \$WAIT_INTERVAL
+    WAITED=\$((WAITED + WAIT_INTERVAL))
+    if (( WAITED % 600 == 0 )); then
+        echo "  Still waiting... (\$((WAITED/60))m / \$((MAX_WAIT/60))m)"
+    fi
 done
-BASH;
+
+if [[ -f "\$DONE_FILE" ]]; then
+    echo ""
+    echo "✓ Task Complete signal received!"
+    rm -f "\$DONE_FILE"
+else
+    echo ""
+    echo "⚠ Timeout - cleaning up"
+fi
+
+echo ""
+echo "=== Final Cleanup ==="
+cleanup_labels
+aoe_session_cleanup \$?
+WAIT_BASH;
 }
 
 $envScriptPath = "{$workDir}/run-claude.sh";
@@ -1472,7 +1617,9 @@ if ($dryRun) {
     echo "  - Repository: {$repoOwner}/{$repoName}\n";
     echo "  - Default Branch: {$defaultBranch}\n";
     echo "  - GitHub Token: " . (!empty($githubToken) ? "****" . substr($githubToken, -4) : "NOT SET") . "\n";
-    echo "  - Jira Cloud ID: {$cloudId}\n";
+    if ($provider === 'jira') {
+        echo "  - Jira Cloud ID: {$cloudId}\n";
+    }
     echo "  - Session Name: {$sessionName}\n";
     echo "  - Work Dir: {$workDir}\n";
     echo "  - Prompt File: {$promptFile}\n";

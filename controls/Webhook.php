@@ -643,7 +643,6 @@ class Webhook extends BaseControls\Control {
      */
     private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null, string $reason = 'closed'): void {
         $tenant = Flight::get('tenant.slug');
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
 
         // Clean up status file regardless of whether tmux session exists
         $this->cleanupJobStatus($memberId, $issueKey, $reason);
@@ -653,42 +652,57 @@ class Webhook extends BaseControls\Control {
             $cloudId = $this->findCloudIdForIssue($issueKey, $memberId);
         }
 
-        // Always remove the working label when session closes
-        // Check if this is a GitHub issue (format: owner/repo#number) or Jira issue
-        if (preg_match('#^([^/]+)/([^#]+)#(\d+)$#', $issueKey, $matches)) {
-            // GitHub issue - remove label via GitHub API
-            $this->removeGitHubWorkingLabel($matches[1], $matches[2], (int) $matches[3], $memberId);
-        } elseif ($cloudId) {
-            // Jira issue - remove label via Jira API
-            $this->removeWorkingLabel($issueKey, $memberId, $cloudId);
-        }
-
-        if (!$tmux->exists()) {
-            $this->logger->debug('No local tmux session to close', ['issue_key' => $issueKey, 'member_id' => $memberId]);
-            return;
-        }
-
-        $killed = $tmux->kill();
-        $this->logger->info('Local tmux session closed', [
-            'issue_key' => $issueKey,
-            'member_id' => $memberId,
-            'success' => $killed,
-            'reason' => $reason
-        ]);
-
-        // Garbage collect: remove the work directory (contains cloned repo)
+        // Get work directory and signal the session to complete
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
         $workDir = $tmux->getWorkDir();
+
         if ($workDir && is_dir($workDir)) {
-            $this->removeWorkDirectory($workDir);
-            $this->logger->info('Cleaned up work directory', [
+            // Create done file to signal the waiting script
+            $doneFile = $workDir . '/done';
+            file_put_contents($doneFile, json_encode([
+                'timestamp' => date('Y-m-d H:i:s'),
+                'reason' => $reason,
+                'issue_key' => $issueKey
+            ]));
+            $this->logger->info('Created task complete signal', [
                 'issue_key' => $issueKey,
-                'work_dir' => $workDir
+                'done_file' => $doneFile
             ]);
+
+            // If Claude is still running, also send /exit
+            if ($tmux->isClaudeRunning()) {
+                $tmux->sendExit();
+                $this->logger->info('Sent /exit to Claude', ['issue_key' => $issueKey]);
+            }
+
+            // Wait for script to cleanup gracefully
+            sleep(10);
         }
 
-        // Remove ai-dev label from the ticket (only when label was explicitly removed, not on completion)
-        if ($cloudId && $reason === 'label_removed') {
-            $this->removeAiDevLabel($issueKey, $memberId, $cloudId);
+        // Fallback: cleanup labels directly if script didn't
+        if ($cloudId) {
+            try {
+                require_once __DIR__ . '/../services/AIDevJobService.php';
+                $jobService = new \app\services\AIDevJobService();
+                $cleanupResult = $jobService->cleanupJobLabels(null, $issueKey);
+                if (!empty($cleanupResult['labels_removed'])) {
+                    $this->logger->info('Cleaned up remaining labels', [
+                        'issue_key' => $issueKey,
+                        'labels_removed' => $cleanupResult['labels_removed']
+                    ]);
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to cleanup labels', [
+                    'issue_key' => $issueKey,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+
+        // Force kill tmux if still exists after timeout
+        if ($tmux->exists()) {
+            $tmux->kill();
+            $this->logger->info('Force killed tmux session', ['issue_key' => $issueKey]);
         }
     }
 
@@ -2496,6 +2510,28 @@ class Webhook extends BaseControls\Control {
                 // Transition to clarification status if configured
                 if ($cloudId && $issueKey && $boardId) {
                     $jobService->onJobNeedsClarification($memberId, $cloudId, $issueKey, $boardId);
+                }
+
+            } elseif ($status === 'checkpoint') {
+                // Checkpoint - Claude completed initial work but session stays alive
+                // Don't remove labels or transition status - just log it
+                $this->logger->info('AIdev job checkpoint', [
+                    'job_id' => $jobId,
+                    'issue_key' => $issueKey,
+                    'pr_url' => $result['pr_url'] ?? null,
+                    'summary' => $result['summary'] ?? null
+                ]);
+
+                // Update job manager with PR info if present
+                if (!empty($result['pr_url'])) {
+                    $jobManager->complete(
+                        $issueKey,
+                        $result['pr_url'],
+                        $result['pr_number'] ?? null,
+                        $result['branch_name'] ?? null,
+                        $result['raw_output'] ?? null,
+                        $result
+                    );
                 }
 
             } else {

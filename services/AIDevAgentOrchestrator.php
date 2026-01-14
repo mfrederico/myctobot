@@ -115,15 +115,21 @@ mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issue
 4. **If blocked/failed**: Explain what went wrong and what's needed
 5. **When complete**: Post final summary with PR link
 
-## Job Completion
+## Job Checkpoint (After PR Created)
 
-When your work is complete, run the `finish_job.sh` script (in the work directory) to signal completion:
+When you've created the PR and completed initial work, run `finish_job.sh` to save progress:
 
 ```bash
 ./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
 ```
 
-This handles everything: saves results, notifies the orchestrator, captures terminal snapshot, and terminates the session.
+**IMPORTANT: This does NOT terminate your session.** After running checkpoint:
+- Your session stays alive to receive updates from the issue tracker
+- If someone adds a comment, you'll see it as a [GITHUB UPDATE] message
+- You can continue iterating on the implementation based on feedback
+- The session will close automatically when the issue transitions to "Ready for QA"
+
+Do NOT call `/exit` after checkpoint - wait for more updates or manual closure.
 
 SECTION;
         } else {
@@ -154,15 +160,21 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 - Upload it: `jira_upload_attachment("{$issueKey}", "screenshot.png")`
 - Reference it in a follow-up comment
 
-## Job Completion
+## Job Checkpoint (After PR Created)
 
-When your work is complete, run the `finish_job.sh` script (in the work directory) to signal completion:
+When you've created the PR and completed initial work, run `finish_job.sh` to save progress:
 
 ```bash
 ./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
 ```
 
-This handles everything: saves results, notifies the orchestrator, captures terminal snapshot, and terminates the session.
+**IMPORTANT: This does NOT terminate your session.** After running checkpoint:
+- Your session stays alive to receive updates from Jira
+- If someone adds a comment, you'll see it as a [JIRA UPDATE] message
+- You can continue iterating on the implementation based on feedback
+- The session will close automatically when the ticket transitions to "Ready for QA"
+
+Do NOT call `/exit` after checkpoint - wait for more updates or manual closure.
 
 SECTION;
         }
@@ -362,17 +374,16 @@ RESULT_EOF
 
 {$this->buildFinalSummaryInstructions()}
 
-3. **Signal completion to orchestrator** - IMPORTANT: Run the finish_job.sh script to signal completion:
+3. **Save checkpoint** - IMPORTANT: Run finish_job.sh to save your results:
 ```bash
 ./finish_job.sh '{"success": true, "issue_key": "{$issueKey}", "pr_url": "https://github.com/owner/repo/pull/123", "pr_number": 123, "branch_name": "feature/issue-description", "files_changed": ["file1.js", "file2.js"], "summary": "Brief description of what was done", "verification_passed": true}'
 ```
 This script:
 - Saves result.json locally
-- Posts completion to the orchestrator webhook
-- Captures a terminal snapshot for debugging
-- Terminates the session automatically
+- Posts checkpoint to the orchestrator webhook
+- Keeps your session ALIVE to receive further updates
 
-You do NOT need to call `/exit` after running this script - it handles termination.
+**DO NOT call /exit** - Your session stays open to receive comments and updates from the issue tracker. The session will be closed automatically when the ticket transitions to "Ready for QA".
 
 {$this->buildMcpToolsSection()}
 
@@ -386,7 +397,7 @@ You do NOT need to call `/exit` after running this script - it handles terminati
 4. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 5. **Output JSON** - Final output must be valid JSON for parsing.
 6. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
-7. **Signal completion via finish_job.sh** - After posting to the issue tracker, run `./finish_job.sh '{...}'` with your results JSON. This notifies the orchestrator and terminates the session automatically.
+7. **Save checkpoint via finish_job.sh** - After posting to the issue tracker, run `./finish_job.sh '{...}'` with your results JSON. This saves your progress but keeps the session ALIVE to receive more updates.
 
 ## Start Now
 

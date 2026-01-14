@@ -17,6 +17,7 @@ namespace app\services;
 use \app\TmuxManager;
 use Aoe\Session\Instance as AoeInstance;
 use Aoe\Session\Storage as AoeStorage;
+use Aoe\Session\Status as AoeStatus;
 use Aoe\Tmux\TmuxService as AoeTmux;
 
 require_once __DIR__ . '/../lib/TmuxManager.php';
@@ -155,6 +156,28 @@ class TmuxService {
     }
 
     /**
+     * Send /exit command to Claude to trigger graceful shutdown
+     *
+     * @return bool Success
+     */
+    public function sendExit(): bool {
+        if (!$this->isClaudeRunning()) {
+            return false;
+        }
+
+        $activeSession = $this->getActiveSessionName();
+        if (!$activeSession) {
+            return false;
+        }
+
+        // Send /exit command to Claude
+        TmuxManager::sendKeys($activeSession, '/exit');
+        TmuxManager::sendKeys($activeSession, 'Enter');
+
+        return true;
+    }
+
+    /**
      * Spawn a new tmux session running Claude Code
      *
      * @param string $prompt Initial prompt for Claude
@@ -211,8 +234,10 @@ class TmuxService {
 
         @mkdir($this->workDir, 0755, true);
 
-        // Save AOE session for tracking
+        // Save AOE session for tracking - reset status to Starting
+        // This ensures the directive processor can detect if the session crashes
         if ($this->aoeSession) {
+            $this->aoeSession->status = AoeStatus::Starting;
             $storage = new AoeStorage($this->tenantSlug);
             $storage->save($this->aoeSession);
         }
@@ -223,8 +248,15 @@ class TmuxService {
         $tenantFlag = $tenant ?: $this->tenantSlug;
         $tenantFlagStr = $tenantFlag ? sprintf('--tenant=%s', escapeshellarg($tenantFlag)) : '';
         $providerFlag = $provider ? sprintf('--provider=%s', escapeshellarg($provider)) : '';
+
+        // Pass AOE session ID so local-aidev-full.php uses the same session
+        $aoeSessionFlag = $this->aoeSession ? sprintf('--aoe-session=%s', escapeshellarg($this->aoeSession->id)) : '';
+
+        // Log file for capturing errors from local-aidev-full.php
+        $logFile = $this->workDir . '/spawn.log';
+
         $command = sprintf(
-            'php %s --issue=%s --member=%d %s %s %s %s %s',
+            'php %s --issue=%s --member=%d %s %s %s %s %s %s 2>&1 | tee %s',
             escapeshellarg($scriptPath),
             escapeshellarg($this->issueKey),
             $this->memberId,
@@ -232,7 +264,9 @@ class TmuxService {
             $jobIdFlag,
             $repoIdFlag,
             $tenantFlagStr,
-            $providerFlag
+            $providerFlag,
+            $aoeSessionFlag,
+            escapeshellarg($logFile)
         );
 
         try {
@@ -558,41 +592,7 @@ BASH;
 
         $recentLines = array_slice($lines, -15);
 
-        // Look for Claude's status line
-        foreach ($recentLines as $line) {
-            if (preg_match('/^.\s+(.+?)\s+\(esc to interrupt\s*·\s*(.+)\)/u', $line, $matches)) {
-                $statusText = trim($matches[1], '…. ');
-                $statusMap = [
-                    'determining' => 'determining',
-                    'thinking' => 'thinking',
-                    'processing' => 'processing',
-                    'analyzing' => 'analyzing',
-                    'exploring' => 'exploring',
-                    'searching' => 'searching',
-                    'reading' => 'reading',
-                    'writing' => 'writing',
-                ];
-                $lower = strtolower($statusText);
-                foreach ($statusMap as $key => $status) {
-                    if (str_starts_with($lower, $key)) {
-                        return $status;
-                    }
-                }
-                return preg_match('/^(\w+)/', $lower, $m) ? $m[1] : 'working';
-            }
-        }
-
         $lastLines = implode("\n", $recentLines);
-
-        // Check for "In progress" tool execution
-        if (preg_match('/In progress.*tool uses/i', $lastLines)) {
-            return 'executing';
-        }
-
-        // "esc to interrupt" means Claude is actively working
-        if (preg_match('/esc to interrupt/i', $lastLines)) {
-            return 'working';
-        }
 
         // Check for session complete
         if (preg_match('/Session complete|Claude exited with code: 0/i', $lastLines)) {
@@ -604,14 +604,15 @@ BASH;
             return 'error';
         }
 
-        // Check for waiting prompts
-        if (preg_match('/↵ send|^\s*>\s|>\s*$|Press Enter|waiting for (your |user )?input/im', $lastLines)) {
-            return 'waiting';
+        // Simple detection: "(ctrl+c to interrupt" = working, anything else = idle
+        // Format: (ctrl+c to interrupt · 2m 37s · ↑ 1.0k tokens)
+        if (preg_match('/\(ctrl\+c to interrupt/i', $lastLines)) {
+            return 'working';
         }
 
-        // If Claude process is running, it's working
+        // If Claude process is running but not showing "ctrl+c to interrupt", it's waiting/idle
         if ($this->isClaudeRunning()) {
-            return 'running';
+            return 'waiting';
         }
 
         // If session exists but Claude not running, it completed

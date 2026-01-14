@@ -260,17 +260,17 @@ message = "We are currently performing maintenance. Please check back soon."
 allowed_ips = "127.0.0.1"
 
 [atlassian]
-; Tenant will configure their own Atlassian OAuth
+; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is tenant-specific
 client_id = ""
 client_secret = ""
-redirect_uri = "https://{$subdomain}.myctobot.ai/atlassian/callback"
-scopes = "read:jira-work read:jira-user read:board-scope:jira-software read:sprint:jira-software read:issue:jira-software read:project:jira write:jira-work manage:jira-webhook offline_access"
+redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$slug}"
+scopes = ""
 
 [github]
-; Tenant will configure their own GitHub OAuth
+; GitHub OAuth - credentials from conf/github.ini, redirect_uri is tenant-specific
 client_id = ""
 client_secret = ""
-redirect_uri = "https://{$subdomain}.myctobot.ai/enterprise/githubcallback"
+redirect_uri = "https://myctobot.ai/enterprise/githubcallback?workspace={$slug}"
 
 [stripe]
 ; Handled at platform level

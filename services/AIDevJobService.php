@@ -50,12 +50,12 @@ class AIDevJobService {
      * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Whether to use orchestrator mode
      * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
-     * @return array Result with 'success', 'job_id', 'error' keys
+     * @return array Result with 'success', 'job_uid', 'error' keys
      */
     public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false, string $projectType = self::PROJECT_TYPE_JIRA): array {
         try {
             // Validate member exists
-            $member = R::load('member', $memberId);
+            $member = Bean::load('member', $memberId);
             if (!$member || !$member->id) {
                 return ['success' => false, 'error' => 'Member not found'];
             }
@@ -80,7 +80,7 @@ class AIDevJobService {
 
             // Auto-detect repo ID if not provided (workspace-level - shared by all members)
             if (!$repoId) {
-                $repo = R::findOne('repoconnections', 'enabled = ?', [1]);
+                $repo = Bean::findOne('repoconnections', 'enabled = ?', [1]);
                 if (!$repo) {
                     return ['success' => false, 'error' => 'No enabled repository connections'];
                 }
@@ -98,15 +98,15 @@ class AIDevJobService {
                 if (in_array($existingJob['status'], ['running', 'pending'])) {
                     if ($tmuxSessionRunning) {
                         // Tmux session exists - actually running
-                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_id' => $existingJob['job_id']];
+                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_uid' => $existingJob['job_uid']];
                     } else {
                         // Stale status file - tmux session is gone, auto-cleanup
                         $this->logger->info('Auto-cleanup stale job status (tmux gone)', [
                             'issue_key' => $issueKey,
-                            'job_id' => $existingJob['job_id'],
+                            'job_uid' => $existingJob['job_uid'],
                             'stale_status' => $existingJob['status']
                         ]);
-                        AIDevStatusService::fail($memberId, $existingJob['job_id'], 'Session ended unexpectedly');
+                        AIDevStatusService::fail($memberId, $existingJob['job_uid'], 'Session ended unexpectedly');
                     }
                 }
 
@@ -115,7 +115,7 @@ class AIDevJobService {
                 $lastUpdated = strtotime($existingJob['updated_at'] ?? $existingJob['created_at'] ?? '');
                 $cooldownSeconds = 120; // 2 minutes
                 if ($lastUpdated && (time() - $lastUpdated) < $cooldownSeconds) {
-                    return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_id' => $existingJob['job_id']];
+                    return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_uid' => $existingJob['job_uid']];
                 }
             } elseif ($tmuxSessionRunning) {
                 // No status file but tmux session exists (orphaned session)
@@ -209,7 +209,7 @@ class AIDevJobService {
             }
 
             // === API execution path - get key and model from anthropickeys table ===
-            $keyBean = R::load('anthropickeys', $boardKeyId);
+            $keyBean = Bean::load('anthropickeys', $boardKeyId);
 
             if (!$keyBean || !$keyBean->id || empty($keyBean->api_key)) {
                 return ['success' => false, 'error' => 'Selected API key not found or invalid'];
@@ -240,7 +240,7 @@ class AIDevJobService {
             }
 
             // Get repository details
-            $repoBean = R::load('repoconnections', $repoId);
+            $repoBean = Bean::load('repoconnections', $repoId);
 
             if (!$repoBean || !$repoBean->id) {
                 return ['success' => false, 'error' => 'Repository not found'];
@@ -301,7 +301,7 @@ class AIDevJobService {
             $payload = [
                 'anthropic_api_key' => $apiKey,
                 'anthropic_model' => $model,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
                     'summary' => $summary,
@@ -323,7 +323,7 @@ class AIDevJobService {
                 'jira_api_token' => $jiraToken,
                 'jira_oauth_token' => $jiraOAuthToken,
                 'jira_site_url' => $jiraSiteUrl,
-                'cloud_id' => $cloudId,
+                'cloud_uid' => $cloudId,
                 'github_token' => $repoToken,
                 'callback_url' => Flight::get('baseurl') . '/webhook/aidev',
                 'callback_api_key' => Flight::get('cron.api_key'),
@@ -366,7 +366,7 @@ class AIDevJobService {
 
             $this->logger->info('AI Developer shard job started', [
                 'member_id' => $memberId,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'shard_id' => $shard['id'],
                 'shard_name' => $shard['name'] ?? $shard['host'],
                 'issue_key' => $issueKey,
@@ -378,7 +378,7 @@ class AIDevJobService {
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'shard' => $shard['name'] ?? $shard['host'],
                 'message' => 'Job started on shard',
                 'board_id' => $boardId
@@ -422,7 +422,7 @@ class AIDevJobService {
             $maxConcurrent = (int)$iniMaxConcurrent;
         } else {
             // 2. Fall back to enterprisesettings (member-level setting)
-            $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
             if ($setting && $setting->setting_value) {
                 $maxConcurrent = (int)$setting->setting_value;
             }
@@ -763,7 +763,7 @@ class AIDevJobService {
         $accountId = $user['accountId'] ?? '';
 
         // Get the bot's Jira account ID for this member
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['jira_bot_account_id', $memberId]);
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['jira_bot_account_id', $memberId]);
         if ($setting && $setting->setting_value && $accountId === $setting->setting_value) {
             return true;
         }
@@ -806,12 +806,12 @@ class AIDevJobService {
      * @param string $issueKey GitHub issue key (e.g., "owner/repo#123")
      * @param int $repoId Repository connection ID
      * @param string|null $tenant Tenant slug for multi-tenancy
-     * @return array Result with 'success', 'job_id', 'error' keys
+     * @return array Result with 'success', 'job_uid', 'error' keys
      */
     public function triggerGitHubJob(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
         try {
             // Validate member exists
-            $member = R::load('member', $memberId);
+            $member = Bean::load('member', $memberId);
             if (!$member || !$member->id) {
                 return ['success' => false, 'error' => 'Member not found'];
             }
@@ -833,21 +833,21 @@ class AIDevJobService {
             if ($existingJob) {
                 if (in_array($existingJob['status'], ['running', 'pending'])) {
                     if ($tmuxSessionRunning) {
-                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_id' => $existingJob['job_id']];
+                        return ['success' => false, 'error' => 'Job already running for this issue', 'job_uid' => $existingJob['job_uid']];
                     } else {
                         // Stale status file - auto cleanup
                         $this->logger->info('Auto-cleanup stale GitHub job status', [
                             'issue_key' => $issueKey,
-                            'job_id' => $existingJob['job_id']
+                            'job_uid' => $existingJob['job_uid']
                         ]);
-                        AIDevStatusService::fail($memberId, $existingJob['job_id'], 'Session ended unexpectedly');
+                        AIDevStatusService::fail($memberId, $existingJob['job_uid'], 'Session ended unexpectedly');
                     }
                 }
 
                 // Cooldown check
                 $lastUpdated = strtotime($existingJob['updated_at'] ?? $existingJob['created_at'] ?? '');
                 if ($lastUpdated && (time() - $lastUpdated) < 120) {
-                    return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_id' => $existingJob['job_id']];
+                    return ['success' => false, 'error' => 'Recent job exists, cooldown active', 'job_uid' => $existingJob['job_uid']];
                 }
             } elseif ($tmuxSessionRunning) {
                 return ['success' => false, 'error' => 'Session exists for this issue (no status file)'];
@@ -927,12 +927,12 @@ class AIDevJobService {
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
                 'member_id' => $memberId,
-                'job_id' => $jobId
+                'job_uid' => $jobId
             ]);
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'session_name' => $tmux->getSessionName(),
                 'message' => 'Job started locally (Claude Code)',
                 'local' => true,
@@ -964,7 +964,7 @@ class AIDevJobService {
      * @param string|null $tenant Tenant slug for multi-tenancy
      * @param bool $useOrchestrator Use orchestrator mode
      * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
-     * @return array Result with 'success', 'job_id', 'session_name' keys
+     * @return array Result with 'success', 'job_uid', 'session_name' keys
      */
     private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true, string $projectType = self::PROJECT_TYPE_JIRA): array {
         $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
@@ -1008,12 +1008,12 @@ class AIDevJobService {
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
                 'member_id' => $memberId,
-                'job_id' => $jobId
+                'job_uid' => $jobId
             ]);
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'session_name' => $tmux->getSessionName(),
                 'message' => 'Job started locally (Claude Code)',
                 'board_id' => $boardId,
@@ -1166,12 +1166,12 @@ class AIDevJobService {
             $this->logger->info('Job already exists for issue', [
                 'issue_key' => $issueKey,
                 'existing_status' => $existingJob->status,
-                'job_id' => $existingJob->id
+                'job_uid' => $existingJob->id
             ]);
             return [
                 'success' => true,
                 'queued' => $existingJob->status === 'queued',
-                'job_id' => $existingJob->id,
+                'job_uid' => $existingJob->id,
                 'message' => "Job already {$existingJob->status} for this issue",
                 'position' => $this->getQueuePosition($existingJob->id)
             ];
@@ -1179,11 +1179,11 @@ class AIDevJobService {
 
         // Create queued job record
         $job = Bean::dispense('aidevjobs');
-        $job->job_id = bin2hex(random_bytes(16));  // Generate UUID
+        $job->job_uid = bin2hex(random_bytes(16));  // Generate UUID
         $job->member_id = $memberId;
         $job->board_id = $boardId;
         $job->issue_key = $issueKey;
-        $job->cloud_id = $cloudId;
+        $job->cloud_uid = $cloudId;
         $job->repo_connection_id = $repoId;
         $job->status = 'queued';
         $job->current_step = 'Waiting in queue';
@@ -1201,13 +1201,13 @@ class AIDevJobService {
             'ws_max' => $wsLimit['max']
         ]);
 
-        $jobUuid = $job->job_id;  // Save UUID before store
+        $jobUuid = $job->job_uid;  // Save UUID before store
         $beanId = Bean::store($job);
 
         $queuePosition = $this->getQueuePosition($beanId);
 
         $this->logger->info('Job queued for later execution', [
-            'job_id' => $jobUuid,
+            'job_uid' => $jobUuid,
             'bean_id' => $beanId,
             'issue_key' => $issueKey,
             'member_id' => $memberId,
@@ -1216,7 +1216,7 @@ class AIDevJobService {
             'max' => $wsLimit['max']
         ]);
 
-        // Log to job history (uses string job_id, not bean id)
+        // Log to job history (uses string job_uid, not bean id)
         AIDevStatusService::log($jobUuid, $memberId, 'info', 'Job queued - waiting for available slot', [
             'position' => $queuePosition,
             'running_jobs' => $wsLimit['running'],
@@ -1226,7 +1226,7 @@ class AIDevJobService {
         return [
             'success' => true,
             'queued' => true,
-            'job_id' => $jobUuid,
+            'job_uid' => $jobUuid,
             'message' => "Job queued (position {$queuePosition}). {$wsLimit['running']}/{$wsLimit['max']} jobs running.",
             'position' => $queuePosition,
             'running' => $wsLimit['running'],
@@ -1295,7 +1295,7 @@ class AIDevJobService {
                 $currentLimit = self::checkWorkspaceLocalRunnerLimit();
                 if (!$currentLimit['available']) {
                     $this->logger->info('Queue processor: slot taken, stopping', [
-                        'job_id' => $job->id
+                        'job_uid' => $job->id
                     ]);
                     break;
                 }
@@ -1306,7 +1306,7 @@ class AIDevJobService {
                 $useOrchestrator = $metadata['use_orchestrator'] ?? true;
 
                 $this->logger->info('Queue processor: starting queued job', [
-                    'job_id' => $job->id,
+                    'job_uid' => $job->id,
                     'issue_key' => $job->issue_key,
                     'tenant' => $jobTenant
                 ]);
@@ -1330,17 +1330,17 @@ class AIDevJobService {
 
                 $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
 
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_id, $job->repo_connection_id, $jobTenant)) {
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repo_connection_id, $jobTenant)) {
                     $results['jobs_started']++;
 
-                    AIDevStatusService::log($job->job_id, $job->member_id, 'info', 'Job started from queue', [
+                    AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [
                         'session' => $tmux->getSessionName(),
                         'wait_time' => $this->calculateWaitTime($job->created_at)
                     ]);
 
                     // Trigger onJobStarted for Jira jobs
                     if (($job->project_type ?? 'jira') === self::PROJECT_TYPE_JIRA) {
-                        $this->onJobStarted($job->member_id, $job->cloud_id, $job->issue_key, $job->board_id);
+                        $this->onJobStarted($job->member_id, $job->cloud_uid, $job->issue_key, $job->board_id);
                     }
                 } else {
                     // Failed to spawn - mark as error
@@ -1349,19 +1349,19 @@ class AIDevJobService {
                     $job->updated_at = date('Y-m-d H:i:s');
                     Bean::store($job);
 
-                    $results['errors'][] = "Job {$job->job_id} ({$job->issue_key}): Failed to spawn";
+                    $results['errors'][] = "Job {$job->job_uid} ({$job->issue_key}): Failed to spawn";
 
                     $this->logger->error('Queue processor: failed to spawn job', [
-                        'job_id' => $job->job_id,
+                        'job_uid' => $job->job_uid,
                         'issue_key' => $job->issue_key
                     ]);
                 }
 
             } catch (\Exception $e) {
-                $results['errors'][] = "Job {$job->job_id}: " . $e->getMessage();
+                $results['errors'][] = "Job {$job->job_uid}: " . $e->getMessage();
 
                 $this->logger->error('Queue processor: exception starting job', [
-                    'job_id' => $job->job_id,
+                    'job_uid' => $job->job_uid,
                     'error' => $e->getMessage()
                 ]);
 
@@ -1415,7 +1415,7 @@ class AIDevJobService {
         foreach ($queuedJobs as $job) {
             $queue[] = [
                 'position' => $position++,
-                'job_id' => $job->id,
+                'job_uid' => $job->id,
                 'issue_key' => $job->issue_key,
                 'queued_at' => $job->created_at,
                 'member_id' => $job->member_id
@@ -1510,7 +1510,7 @@ class AIDevJobService {
         $result['project_type'] = $job->project_type ?? 'jira';
 
         $memberId = (int) $job->member_id;
-        $cloudId = $job->cloud_id ?? '';
+        $cloudId = $job->cloud_uid ?? '';
         $projectType = $job->project_type ?? 'jira';
 
         if ($projectType === 'github') {
@@ -1528,7 +1528,7 @@ class AIDevJobService {
      */
     private function cleanupJiraLabels($job, int $memberId, string $cloudId, array $result): array {
         if (empty($cloudId)) {
-            $result['errors'][] = 'No cloud_id for Jira job';
+            $result['errors'][] = 'No cloud_uid for Jira job';
             return $result;
         }
 
@@ -1673,7 +1673,7 @@ class AIDevJobService {
     public function onJobStarted(int $memberId, string $cloudId, string $issueKey, int $boardId, string $projectType = self::PROJECT_TYPE_JIRA): void {
         $this->logger->info('onJobStarted called', [
             'member_id' => $memberId,
-            'cloud_id' => $cloudId,
+            'cloud_uid' => $cloudId,
             'issue_key' => $issueKey,
             'board_id' => $boardId,
             'project_type' => $projectType
@@ -2146,7 +2146,7 @@ class AIDevJobService {
 
             // Mark jobs as complete and collect branches for cleanup
             foreach ($jobs as $job) {
-                $jobId = $job['job_id'];
+                $jobId = $job['job_uid'];
                 $status = $job['status'];
 
                 // Collect branch names for potential cleanup
@@ -2271,12 +2271,12 @@ class AIDevJobService {
                     $settings['verify_with_playwright'] = (bool)$shopifyConn->verify_with_playwright;
                 } else {
                     // Legacy: Get settings from enterprisesettings
-                    $passwordSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
+                    $passwordSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
                     if ($passwordSetting && $passwordSetting->setting_value) {
                         $settings['storefront_password'] = EncryptionService::decrypt($passwordSetting->setting_value);
                     }
 
-                    $verifySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
+                    $verifySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
                     $verifyEnabled = $verifySetting ? $verifySetting->setting_value : null;
                     $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
                 }
@@ -2315,7 +2315,7 @@ class AIDevJobService {
 
             if (!empty($recentLogs)) {
                 // Use the most recent directive ID for this issue
-                $directiveId = $recentLogs[0]['directive_id'];
+                $directiveId = $recentLogs[0]['directive_uid'];
             } else {
                 // No existing directive found, create a new one
                 $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
@@ -2357,7 +2357,7 @@ class AIDevJobService {
             $directiveId = null;
 
             if (!empty($recentLogs)) {
-                $directiveId = $recentLogs[0]['directive_id'];
+                $directiveId = $recentLogs[0]['directive_uid'];
             } else {
                 // No existing directive found, create a new one
                 $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'system', [
@@ -2423,7 +2423,7 @@ class AIDevJobService {
             }
 
             $this->logger->info('Delivery confirmation sent', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $issueKey,
                 'type' => $type,
                 'success' => $result['success'],
@@ -2433,7 +2433,7 @@ class AIDevJobService {
         } catch (\Exception $e) {
             // Log but don't fail the job completion/failure flow
             $this->logger->error('Failed to send delivery confirmation', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $issueKey,
                 'type' => $type,
                 'error' => $e->getMessage()
@@ -2474,7 +2474,7 @@ class AIDevJobService {
      * Find jobs that have status='running' but no live tmux session
      * These are jobs that crashed without updating their status
      *
-     * @return array Array of stale job info with 'job_id', 'issue_key', 'member_id', 'started_at', 'current_step'
+     * @return array Array of stale job info with 'job_uid', 'issue_key', 'member_id', 'started_at', 'current_step'
      */
     public static function findStaleJobs(): array {
         // Find all jobs with running status
@@ -2488,7 +2488,7 @@ class AIDevJobService {
             if (!$tmux->exists()) {
                 // Session is gone - this is a stale job
                 $staleJobs[] = [
-                    'job_id' => $job->job_id,
+                    'job_uid' => $job->job_uid,
                     'id' => $job->id,
                     'issue_key' => $job->issue_key,
                     'member_id' => $job->member_id,
@@ -2509,10 +2509,10 @@ class AIDevJobService {
      *
      * @param string $jobId Job ID (the UUID)
      * @param string $reason Reason for marking as stale
-     * @return array Result with 'success', 'job_id', 'error' keys
+     * @return array Result with 'success', 'job_uid', 'error' keys
      */
     public static function markJobAsStale(string $jobId, string $reason = 'Tmux session crashed or terminated'): array {
-        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        $job = \app\Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return ['success' => false, 'error' => 'Job not found'];
         }
@@ -2543,7 +2543,7 @@ class AIDevJobService {
 
         return [
             'success' => true,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $job->issue_key,
             'message' => 'Job marked as failed'
         ];
@@ -2565,18 +2565,18 @@ class AIDevJobService {
         ];
 
         foreach ($staleJobs as $staleJob) {
-            $result = self::markJobAsStale($staleJob['job_id'], 'Tmux session no longer exists - job crashed or was terminated');
+            $result = self::markJobAsStale($staleJob['job_uid'], 'Tmux session no longer exists - job crashed or was terminated');
 
             if ($result['success']) {
                 $results['cleaned']++;
                 $results['jobs'][] = [
-                    'job_id' => $staleJob['job_id'],
+                    'job_uid' => $staleJob['job_uid'],
                     'issue_key' => $staleJob['issue_key'],
                     'status' => 'cleaned'
                 ];
             } else {
                 $results['errors'][] = [
-                    'job_id' => $staleJob['job_id'],
+                    'job_uid' => $staleJob['job_uid'],
                     'issue_key' => $staleJob['issue_key'],
                     'error' => $result['error']
                 ];
@@ -2590,10 +2590,10 @@ class AIDevJobService {
      * Check if a specific job's tmux session is still alive
      *
      * @param string $jobId Job ID
-     * @return array Status with 'exists', 'job_id', 'session_name', 'claude_running'
+     * @return array Status with 'exists', 'job_uid', 'session_name', 'claude_running'
      */
     public static function checkJobSession(string $jobId): array {
-        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        $job = \app\Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return ['exists' => false, 'error' => 'Job not found'];
         }
@@ -2602,7 +2602,7 @@ class AIDevJobService {
 
         return [
             'exists' => $tmux->exists(),
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $job->issue_key,
             'session_name' => $tmux->getActiveSessionName() ?? $tmux->getSessionName(),
             'claude_running' => $tmux->isClaudeRunning(),
@@ -2621,10 +2621,10 @@ class AIDevJobService {
      * @param string $jobId Job ID (UUID)
      * @param int $memberId Member ID (for authorization)
      * @param string|null $tenant Tenant slug
-     * @return array Result with 'success', 'job_id', 'error' keys
+     * @return array Result with 'success', 'job_uid', 'error' keys
      */
     public function retryJob(string $jobId, int $memberId, ?string $tenant = null): array {
-        $job = \app\Bean::findOne('aidevjobs', 'job_id = ?', [$jobId]);
+        $job = \app\Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return ['success' => false, 'error' => 'Job not found'];
         }
@@ -2665,7 +2665,7 @@ class AIDevJobService {
         $queuePosition = $this->getQueuePosition($job->id);
 
         $this->logger->info('Job queued for retry', [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $job->issue_key,
             'position' => $queuePosition,
             'retry_count' => $metadata['retry_count']
@@ -2674,7 +2674,7 @@ class AIDevJobService {
         return [
             'success' => true,
             'queued' => true,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $job->issue_key,
             'position' => $queuePosition,
             'message' => "Job queued for retry (position {$queuePosition})"

@@ -165,13 +165,13 @@ class Ceodirective extends BaseControls\Control {
             $directiveId = Bean::store($directive);
 
             $this->logger->info('CEO directive stored successfully', [
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'member_id' => $member->id,
                 'priority' => $directive->priority
             ]);
 
             Flight::jsonSuccess([
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'status' => 'received',
                 'received_at' => $directive->created_at
             ], 'Directive received successfully');

@@ -36,7 +36,7 @@
                 </div>
                 <div class="card-body">
                     <?php foreach ($sites as $site): ?>
-                    <?php $webhooks = $webhooksPerSite[$site->cloud_id] ?? []; ?>
+                    <?php $webhooks = $webhooksPerSite[$site->cloud_uid] ?? []; ?>
                     <div class="p-3 bg-light rounded mb-3">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -61,10 +61,10 @@
                                 </small>
                             </div>
                             <div class="btn-group">
-                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="refreshToken('<?= $site->cloud_id ?>')">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="refreshToken('<?= $site->cloud_uid ?>')">
                                     <i class="bi bi-arrow-repeat"></i> Refresh
                                 </button>
-                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="disconnectSite('<?= $site->cloud_id ?>', '<?= htmlspecialchars($site->site_name) ?>')">
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="disconnectSite('<?= $site->cloud_uid ?>', '<?= htmlspecialchars($site->site_name) ?>')">
                                     <i class="bi bi-x-circle"></i> Disconnect
                                 </button>
                             </div>
@@ -73,10 +73,10 @@
                         <!-- Actions for this site -->
                         <div class="mt-3 pt-3 border-top">
                             <div class="d-flex gap-2 mb-3">
-                                <a href="/boards/discover?cloud_id=<?= urlencode($site->cloud_id) ?>" class="btn btn-sm btn-outline-primary">
+                                <a href="/boards/discover?cloud_uid=<?= urlencode($site->cloud_uid) ?>" class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-search"></i> Discover Boards
                                 </a>
-                                <a href="/boards?cloud_id=<?= urlencode($site->cloud_id) ?>" class="btn btn-sm btn-outline-secondary">
+                                <a href="/boards?cloud_uid=<?= urlencode($site->cloud_uid) ?>" class="btn btn-sm btn-outline-secondary">
                                     <i class="bi bi-kanban"></i> Manage Boards
                                 </a>
                             </div>
@@ -117,7 +117,7 @@
                                 </table>
                             </div>
                             <div class="mt-2">
-                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                <a href="/atlassian/refreshwebhook?cloud_uid=<?= urlencode($site->cloud_uid) ?>"
                                    class="btn btn-sm btn-outline-warning"
                                    onclick="return confirm('This will delete existing webhooks and register a new one. Continue?')">
                                     <i class="bi bi-arrow-clockwise"></i> Refresh Webhook
@@ -126,7 +126,7 @@
                             <?php else: ?>
                             <div class="d-flex align-items-center gap-2">
                                 <small class="text-muted"><i class="bi bi-link-45deg"></i> No webhooks registered</small>
-                                <a href="/atlassian/refreshwebhook?cloud_id=<?= urlencode($site->cloud_id) ?>"
+                                <a href="/atlassian/refreshwebhook?cloud_uid=<?= urlencode($site->cloud_uid) ?>"
                                    class="btn btn-sm btn-outline-primary">
                                     <i class="bi bi-plus-lg"></i> Register Webhook
                                 </a>

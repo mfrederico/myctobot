@@ -163,8 +163,8 @@ class Mcp extends Control {
      * Authenticate the MCP request
      *
      * Supports multiple auth methods:
-     * 1. Basic Auth: username=member_id, password=cloud_id
-     * 2. Bearer token: "member_id:cloud_id"
+     * 1. Basic Auth: username=member_id, password=cloud_uid
+     * 2. Bearer token: "member_id:cloud_uid"
      * 3. Custom headers: X-MCP-Member-ID and X-MCP-Cloud-ID
      */
     private function authenticate(): bool {
@@ -203,7 +203,7 @@ class Mcp extends Control {
         }
 
         // Verify member has a token for this cloud
-        $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?',
+        $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?',
             [$this->memberId, $this->cloudId]);
 
         $this->logger->debug('MCP auth token lookup', ['found' => !empty($token)]);

@@ -12,12 +12,12 @@
                 <h1><?= htmlspecialchars($directive->email_subject ?: '(No Subject)') ?></h1>
                 <div>
                     <?php if (in_array($directive->status, ['failed', 'received'])): ?>
-                    <button class="btn btn-warning retry-directive" data-id="<?= htmlspecialchars($directive->directive_id) ?>">
+                    <button class="btn btn-warning retry-directive" data-id="<?= htmlspecialchars($directive->directive_uid) ?>">
                         <i class="bi bi-arrow-clockwise"></i> Retry
                     </button>
                     <?php endif; ?>
                     <?php if ($directive->status !== 'completed'): ?>
-                    <button class="btn btn-outline-danger cancel-directive" data-id="<?= htmlspecialchars($directive->directive_id) ?>">
+                    <button class="btn btn-outline-danger cancel-directive" data-id="<?= htmlspecialchars($directive->directive_uid) ?>">
                         <i class="bi bi-x-lg"></i> Cancel
                     </button>
                     <?php endif; ?>
@@ -219,7 +219,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <a href="/projects/view/<?= $project->project_id ?>" class="btn btn-sm btn-outline-primary">
+                            <a href="/projects/view/<?= $project->project_uid ?>" class="btn btn-sm btn-outline-primary">
                                 View Project <i class="bi bi-arrow-right"></i>
                             </a>
                         </div>
@@ -234,7 +234,7 @@
                         <div class="card-body">
                             <dl class="row mb-0">
                                 <dt class="col-5">Directive ID</dt>
-                                <dd class="col-7"><code class="small"><?= htmlspecialchars(substr($directive->directive_id, 0, 16)) ?>...</code></dd>
+                                <dd class="col-7"><code class="small"><?= htmlspecialchars(substr($directive->directive_uid, 0, 16)) ?>...</code></dd>
 
                                 <dt class="col-5">Message ID</dt>
                                 <dd class="col-7"><small class="text-muted"><?= htmlspecialchars($directive->email_message_id ?: '-') ?></small></dd>

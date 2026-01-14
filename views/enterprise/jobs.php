@@ -21,7 +21,7 @@
         </div>
         <div class="card-body">
             <?php foreach ($activeJobs as $job): ?>
-            <div class="border rounded p-3 mb-3" id="active-job-<?= htmlspecialchars($job['job_id']) ?>">
+            <div class="border rounded p-3 mb-3" id="active-job-<?= htmlspecialchars($job['job_uid']) ?>">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <h6 class="mb-1">
@@ -41,7 +41,7 @@
                         </small>
                     </div>
                     <div>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="showJobLogs('<?= htmlspecialchars($job['job_id']) ?>')">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="showJobLogs('<?= htmlspecialchars($job['job_uid']) ?>')">
                             <i class="bi bi-terminal"></i> Logs
                         </button>
                     </div>
@@ -68,7 +68,7 @@
                             <br><small>Questions asked: <?= count($job['clarification_questions']) ?></small>
                             <?php endif; ?>
                         </div>
-                        <button class="btn btn-sm btn-success" onclick="resumeJob('<?= htmlspecialchars($job['job_id']) ?>')">
+                        <button class="btn btn-sm btn-success" onclick="resumeJob('<?= htmlspecialchars($job['job_uid']) ?>')">
                             <i class="bi bi-play-fill"></i> Resume Job
                         </button>
                     </div>
@@ -153,11 +153,11 @@
                         </td>
                         <td>
                             <?php if ($job['status'] === 'waiting_clarification'): ?>
-                            <button class="btn btn-sm btn-success" onclick="resumeJob('<?= htmlspecialchars($job['job_id']) ?>')" title="Resume Job">
+                            <button class="btn btn-sm btn-success" onclick="resumeJob('<?= htmlspecialchars($job['job_uid']) ?>')" title="Resume Job">
                                 <i class="bi bi-play-fill"></i>
                             </button>
                             <?php endif; ?>
-                            <button class="btn btn-sm btn-outline-secondary" onclick="showJobLogs('<?= htmlspecialchars($job['job_id']) ?>')" title="View Logs">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="showJobLogs('<?= htmlspecialchars($job['job_uid']) ?>')" title="View Logs">
                                 <i class="bi bi-terminal"></i>
                             </button>
                             <?php if (!empty($job['error'])): ?>
@@ -166,7 +166,7 @@
                             </button>
                             <?php endif; ?>
                             <?php if (!empty($job['branch_name']) && in_array($job['status'], ['complete', 'failed'])): ?>
-                            <button class="btn btn-sm btn-outline-primary" onclick="retryJob('<?= htmlspecialchars($job['job_id']) ?>')" title="Retry on Same Branch">
+                            <button class="btn btn-sm btn-outline-primary" onclick="retryJob('<?= htmlspecialchars($job['job_uid']) ?>')" title="Retry on Same Branch">
                                 <i class="bi bi-arrow-clockwise"></i> Retry
                             </button>
                             <?php endif; ?>
@@ -296,12 +296,12 @@ async function showJobLogs(jobId) {
 setInterval(async function() {
     <?php foreach ($activeJobs as $job): ?>
     try {
-        const response = await fetch('/jobs/status/<?= htmlspecialchars($job['job_id']) ?>');
+        const response = await fetch('/jobs/status/<?= htmlspecialchars($job['job_uid']) ?>');
         const data = await response.json();
 
         if (data.success && data.status) {
             const status = data.status;
-            const el = document.getElementById('active-job-<?= htmlspecialchars($job['job_id']) ?>');
+            const el = document.getElementById('active-job-<?= htmlspecialchars($job['job_uid']) ?>');
 
             if (el) {
                 // Update progress bar

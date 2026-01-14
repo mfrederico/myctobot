@@ -294,7 +294,10 @@ class Signup extends BaseControls\Control {
     public function verify($params) {
         $token = $this->opId() ?? '';
 
+        $this->logger->info('Verify called', ['token_length' => strlen($token), 'token_prefix' => substr($token, 0, 10)]);
+
         if (empty($token)) {
+            $this->logger->warning('Verify: empty token');
             $this->render('signup/verify_error', [
                 'title' => 'Invalid Link',
                 'error' => 'Invalid verification link.'
@@ -306,6 +309,7 @@ class Signup extends BaseControls\Control {
         $pending = R::findOne('pendingsignup', 'verification_token = ?', [$token]);
 
         if (!$pending) {
+            $this->logger->warning('Verify: token not found in pendingsignup', ['token' => $token]);
             $this->render('signup/verify_error', [
                 'title' => 'Invalid Link',
                 'error' => 'This verification link is invalid or has already been used.'
@@ -313,8 +317,15 @@ class Signup extends BaseControls\Control {
             return;
         }
 
+        $this->logger->info('Verify: found pending signup', [
+            'subdomain' => $pending->subdomain,
+            'email' => $pending->email,
+            'expires_at' => $pending->expires_at
+        ]);
+
         // Check if expired
         if (strtotime($pending->expires_at) < time()) {
+            $this->logger->warning('Verify: token expired', ['expires_at' => $pending->expires_at]);
             $this->render('signup/verify_error', [
                 'title' => 'Link Expired',
                 'error' => 'This verification link has expired.',
@@ -330,7 +341,19 @@ class Signup extends BaseControls\Control {
             $adminUser = Flight::get('provisioner.db_user') ?? Flight::get('database.user');
             $adminPass = Flight::get('provisioner.db_pass') ?? Flight::get('database.pass');
 
+            $this->logger->info('Verify: creating provisioner', [
+                'host' => $adminHost,
+                'user' => $adminUser,
+                'pass_set' => !empty($adminPass)
+            ]);
+
             $provisioner = new TenantProvisioner($adminHost, $adminUser, $adminPass);
+
+            $this->logger->info('Verify: starting provision', [
+                'subdomain' => $pending->subdomain,
+                'business_name' => $pending->business_name,
+                'email' => $pending->email
+            ]);
 
             // Provision the tenant (password is already hashed, need to pass plain for provisioner)
             // We stored the hash, so we need a workaround - provision with a temp password
@@ -343,13 +366,22 @@ class Signup extends BaseControls\Control {
                 $tempPassword
             );
 
+            $this->logger->info('Verify: provision result', $result);
+
             if (!$result['success']) {
+                $this->logger->error('Verify: provisioning failed', ['error' => $result['error']]);
                 $this->render('signup/verify_error', [
                     'title' => 'Provisioning Failed',
-                    'error' => $result['error']
+                    'error' => $result['error'],
+                    'debug' => Flight::get('app.debug') ? $result : null
                 ]);
                 return;
             }
+
+            $this->logger->info('Verify: updating password hash', [
+                'database' => $result['database'],
+                'db_user' => $result['db_user']
+            ]);
 
             // Update the password hash directly in the new tenant database
             $this->updatePasswordHash(
@@ -377,12 +409,16 @@ class Signup extends BaseControls\Control {
         } catch (\Exception $e) {
             $this->logger->error('Tenant provisioning failed after verification', [
                 'subdomain' => $pending->subdomain,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             $this->render('signup/verify_error', [
                 'title' => 'Error',
-                'error' => 'An error occurred while setting up your workspace. Please contact support.'
+                'error' => 'An error occurred while setting up your workspace. Please contact support.',
+                'debug' => Flight::get('app.debug') ? $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() : null
             ]);
         }
     }

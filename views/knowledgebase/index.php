@@ -177,7 +177,7 @@
                         <?php foreach ($documents as $doc): ?>
                         <?php
                             $isProcessing = in_array($doc->status, ['pending', 'processing']);
-                            $jobId = $doc->job_id ?? '';
+                            $jobId = $doc->job_uid ?? '';
                         ?>
                         <tr data-doc-id="<?= $doc->id ?>" data-job-id="<?= htmlspecialchars($jobId) ?>" data-status="<?= $doc->status ?>">
                             <td>
@@ -725,7 +725,7 @@ function addDocumentRow(doc) {
 
     const row = document.createElement('tr');
     row.setAttribute('data-doc-id', doc.id);
-    row.setAttribute('data-job-id', doc.job_id || '');
+    row.setAttribute('data-job-id', doc.job_uid || '');
     row.setAttribute('data-status', doc.status || 'processing');
 
     const ext = doc.filename.split('.').pop().toLowerCase();

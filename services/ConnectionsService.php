@@ -72,7 +72,7 @@ class ConnectionsService {
     public function __construct(int $memberId) {
         $this->memberId = $memberId;
 
-        $this->member = R::load('member', $memberId);
+        $this->member = Bean::load('member', $memberId);
         // Use SubscriptionService directly instead of FUSE model
         // to avoid dependency on Model_Member being loaded
         $this->tier = SubscriptionService::getTier($memberId);
@@ -518,7 +518,7 @@ class ConnectionsService {
             // Get agent name if assigned (aiagents is in MySQL)
             $agentName = null;
             if ($bean->agent_id) {
-                $agent = R::load('aiagents', $bean->agent_id);
+                $agent = Bean::load('aiagents', $bean->agent_id);
                 if ($agent->id) {
                     $agentName = $agent->name;
                 }
@@ -534,7 +534,7 @@ class ConnectionsService {
                 'access_token' => $bean->access_token,
                 'enabled' => $bean->enabled,
                 'issues_enabled' => $bean->issues_enabled ?? 0,
-                'webhook_id' => $bean->webhook_id,
+                'webhook_uid' => $bean->webhook_uid,
                 'agent_id' => $bean->agent_id,
                 'agent_name' => $agentName,
                 'created_at' => $bean->created_at,

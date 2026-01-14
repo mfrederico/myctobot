@@ -25,39 +25,39 @@ class Boards extends BaseControls\Control {
     public function index() {
         if (!$this->requireLogin()) return;
 
-        // Optional cloud_id filter from query string
-        $filterCloudId = $this->getParam('cloud_id');
+        // Optional cloud_uid filter from query string
+        $filterCloudId = $this->getParam('cloud_uid');
 
         $boards = UserDatabaseService::getBoards();
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
-        // Build cloud_id -> site_name lookup
+        // Build cloud_uid -> site_name lookup
         $siteNames = [];
         $filterSiteName = null;
         foreach ($sites as $site) {
-            $siteNames[$site->cloud_id] = $site->site_name ?? $site->site_url ?? null;
-            if ($filterCloudId && $site->cloud_id === $filterCloudId) {
+            $siteNames[$site->cloud_uid] = $site->site_name ?? $site->site_url ?? null;
+            if ($filterCloudId && $site->cloud_uid === $filterCloudId) {
                 $filterSiteName = $site->site_name;
             }
         }
 
-        // Filter boards by cloud_id if specified
+        // Filter boards by cloud_uid if specified
         if ($filterCloudId) {
             $boards = array_filter($boards, function($board) use ($filterCloudId) {
-                return $board['cloud_id'] === $filterCloudId;
+                return $board['cloud_uid'] === $filterCloudId;
             });
         }
 
         // Enrich boards with site_name
         foreach ($boards as &$board) {
-            $board['site_name'] = $siteNames[$board['cloud_id']] ?? null;
+            $board['site_name'] = $siteNames[$board['cloud_uid']] ?? null;
         }
         unset($board); // break reference
 
         // Group boards by site
         $boardsBySite = [];
         foreach ($boards as $board) {
-            $cloudId = $board['cloud_id'];
+            $cloudId = $board['cloud_uid'];
             if (!isset($boardsBySite[$cloudId])) {
                 $boardsBySite[$cloudId] = [
                     'site' => null,
@@ -65,7 +65,7 @@ class Boards extends BaseControls\Control {
                 ];
                 // Find site info
                 foreach ($sites as $site) {
-                    if ($site->cloud_id === $cloudId) {
+                    if ($site->cloud_uid === $cloudId) {
                         $boardsBySite[$cloudId]['site'] = $site;
                         break;
                     }
@@ -92,8 +92,8 @@ class Boards extends BaseControls\Control {
     public function discover() {
         if (!$this->requireLogin()) return;
 
-        // Optional cloud_id filter from query string
-        $filterCloudId = $this->getParam('cloud_id');
+        // Optional cloud_uid filter from query string
+        $filterCloudId = $this->getParam('cloud_uid');
 
         $sites = AtlassianAuth::getConnectedSites($this->member->id);
 
@@ -103,11 +103,11 @@ class Boards extends BaseControls\Control {
             return;
         }
 
-        // Filter sites if cloud_id specified
+        // Filter sites if cloud_uid specified
         $filterSiteName = null;
         if ($filterCloudId) {
             $sites = array_filter($sites, function($site) use ($filterCloudId, &$filterSiteName) {
-                if ($site->cloud_id === $filterCloudId) {
+                if ($site->cloud_uid === $filterCloudId) {
                     $filterSiteName = $site->site_name;
                     return true;
                 }
@@ -120,14 +120,14 @@ class Boards extends BaseControls\Control {
         $existingBoards = UserDatabaseService::getBoards();
 
         foreach ($sites as $site) {
-            $token = AtlassianAuth::getValidToken($this->member->id, $site->cloud_id);
+            $token = AtlassianAuth::getValidToken($this->member->id, $site->cloud_uid);
             if (!$token) {
-                $jiraBoards[$site->cloud_id] = [];
+                $jiraBoards[$site->cloud_uid] = [];
                 continue;
             }
 
-            $boards = $this->fetchJiraBoards($site->cloud_id, $token);
-            $jiraBoards[$site->cloud_id] = $boards;
+            $boards = $this->fetchJiraBoards($site->cloud_uid, $token);
+            $jiraBoards[$site->cloud_uid] = $boards;
         }
 
         $this->render('boards/discover', [
@@ -150,7 +150,7 @@ class Boards extends BaseControls\Control {
 
         if ($request->method === 'POST') {
             $boardId = (int) $this->getParam('board_id');
-            $cloudId = $this->getParam('cloud_id');
+            $cloudId = $this->getParam('cloud_uid');
             $boardName = $this->getParam('board_name');
             $projectKey = $this->getParam('project_key');
             $boardType = $this->getParam('board_type') ?? 'scrum';
@@ -182,7 +182,7 @@ class Boards extends BaseControls\Control {
                 'board_id' => $boardId,
                 'board_name' => $boardName,
                 'project_key' => $projectKey,
-                'cloud_id' => $cloudId,
+                'cloud_uid' => $cloudId,
                 'board_type' => $boardType,
                 'enabled' => 1,
                 'digest_enabled' => 0,
@@ -239,8 +239,8 @@ class Boards extends BaseControls\Control {
         }
 
         // Enrich board with site_name from Atlassian token
-        if (!empty($board['cloud_id'])) {
-            $site = AtlassianAuth::getSiteByCloudId($this->member->id, $board['cloud_id']);
+        if (!empty($board['cloud_uid'])) {
+            $site = AtlassianAuth::getSiteByCloudId($this->member->id, $board['cloud_uid']);
             $board['site_name'] = $site->site_name ?? $site->site_url ?? null;
         }
 
@@ -346,10 +346,10 @@ class Boards extends BaseControls\Control {
 
         // Fetch Jira statuses for this board's project (for Status Filter and AI Developer dropdowns)
         $jiraStatuses = [];
-        if (!empty($board['cloud_id']) && !empty($board['project_key'])) {
+        if (!empty($board['cloud_uid']) && !empty($board['project_key'])) {
             try {
                 require_once __DIR__ . '/../services/JiraClient.php';
-                $jiraClient = new \app\services\JiraClient($this->member->id, $board['cloud_id']);
+                $jiraClient = new \app\services\JiraClient($this->member->id, $board['cloud_uid']);
                 $jiraStatuses = $jiraClient->getProjectStatuses($board['project_key']);
             } catch (\Exception $e) {
                 $this->logger->warning('Failed to fetch Jira statuses: ' . $e->getMessage());
@@ -491,7 +491,7 @@ class Boards extends BaseControls\Control {
         if ($httpCode !== 200) {
             $this->logger->error('Failed to fetch Jira boards', [
                 'http_code' => $httpCode,
-                'cloud_id' => $cloudId,
+                'cloud_uid' => $cloudId,
                 'url' => $url,
                 'response' => $response
             ]);
@@ -500,7 +500,7 @@ class Boards extends BaseControls\Control {
 
         $data = json_decode($response, true);
         $this->logger->debug('Jira boards API response', [
-            'cloud_id' => $cloudId,
+            'cloud_uid' => $cloudId,
             'total' => $data['total'] ?? 0,
             'values_count' => count($data['values'] ?? []),
             'raw_response' => substr($response, 0, 500)

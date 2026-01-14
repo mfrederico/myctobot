@@ -144,7 +144,7 @@ try {
         echo "\n=======================\n";
         echo "Scan Complete!\n";
         echo "=======================\n";
-        echo "Scan ID:           {$result['scan_id']}\n";
+        echo "Scan ID:           {$result['scan_uid']}\n";
         echo "Repos scanned:     {$result['repos_scanned']}\n";
         echo "Plugins found:     {$result['plugins_found']}\n";
         echo "Errors:            {$result['errors_encountered']}\n";

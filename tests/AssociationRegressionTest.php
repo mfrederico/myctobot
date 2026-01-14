@@ -131,7 +131,7 @@ class AssociationRegressionTest {
         R::exec('CREATE TABLE IF NOT EXISTS atlassiantoken (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             member_id INTEGER,
-            cloud_id TEXT,
+            cloud_uid TEXT,
             access_token TEXT,
             refresh_token TEXT,
             site_url TEXT,
@@ -162,7 +162,7 @@ class AssociationRegressionTest {
         R::exec('CREATE TABLE IF NOT EXISTS digestjobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             member_id INTEGER,
-            job_id TEXT,
+            job_uid TEXT,
             board_id INTEGER,
             status TEXT,
             created_at TEXT
@@ -182,7 +182,7 @@ class AssociationRegressionTest {
             board_id INTEGER,
             board_name TEXT,
             project_key TEXT,
-            cloud_id TEXT,
+            cloud_uid TEXT,
             created_at TEXT
         )');
 
@@ -192,7 +192,7 @@ class AssociationRegressionTest {
             repoconnections_id INTEGER,
             issue_key TEXT,
             status TEXT,
-            cloud_id TEXT,
+            cloud_uid TEXT,
             created_at TEXT
         )');
 
@@ -408,7 +408,7 @@ class AssociationRegressionTest {
 
         // Test 1: Create token via association
         $token = R::dispense('atlassiantoken');
-        $token->cloud_id = 'test-cloud-123';
+        $token->cloud_uid = 'test-cloud-123';
         $token->access_token = 'test-access-token';
         $token->site_url = 'https://test.atlassian.net';
         $token->created_at = date('Y-m-d H:i:s');
@@ -420,18 +420,18 @@ class AssociationRegressionTest {
             'Atlassian token created via association'
         );
 
-        // Test 2: Find token by cloud_id
+        // Test 2: Find token by cloud_uid
         $member2 = R::load('member', self::$testMemberId);
         $foundToken = null;
         foreach ($member2->ownAtlassiantokenList as $t) {
-            if ($t->cloud_id === 'test-cloud-123') {
+            if ($t->cloud_uid === 'test-cloud-123') {
                 $foundToken = $t;
                 break;
             }
         }
         self::assert(
             $foundToken !== null && $foundToken->access_token === 'test-access-token',
-            'Find token by cloud_id via association'
+            'Find token by cloud_uid via association'
         );
     }
 
@@ -534,7 +534,7 @@ class AssociationRegressionTest {
 
         // Test 1: Create digest job via association
         $digestJob = R::dispense('digestjobs');
-        $digestJob->job_id = 'test-job-' . time();
+        $digestJob->job_uid = 'test-job-' . time();
         $digestJob->board_id = 1;
         $digestJob->status = 'queued';
         $digestJob->created_at = date('Y-m-d H:i:s');
@@ -569,7 +569,7 @@ class AssociationRegressionTest {
         $board->board_id = 123;
         $board->board_name = 'Test Board';
         $board->project_key = 'TEST';
-        $board->cloud_id = 'test-cloud';
+        $board->cloud_uid = 'test-cloud';
         $board->created_at = date('Y-m-d H:i:s');
         Bean::store($board);
 
@@ -590,7 +590,7 @@ class AssociationRegressionTest {
         $job = Bean::dispense('aidevjobs');
         $job->issue_key = 'TEST-123';
         $job->status = 'pending';
-        $job->cloud_id = 'external-cloud-id';
+        $job->cloud_uid = 'external-cloud-id';
         $job->created_at = date('Y-m-d H:i:s');
         $job->repoconnections = $repo;  // Set repo via association
         $board->ownAidevjobsList[] = $job;

@@ -281,7 +281,7 @@ class AttachmentService {
      * @param string $tenantSlug Tenant identifier
      * @param array $attachment Attachment info from detectAttachments()
      * @param string|null $knowledgeBaseSlug Optional knowledge base slug (defaults to 'ceo-directives')
-     * @return array Result with 'success', 'message', 'job_id' (for async processing)
+     * @return array Result with 'success', 'message', 'job_uid' (for async processing)
      */
     public function indexToRag(string $tenantSlug, array $attachment, ?string $knowledgeBaseSlug = null): array {
         // Only index documents and images (not code or archives)

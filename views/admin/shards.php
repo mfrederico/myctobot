@@ -16,12 +16,82 @@
         </div>
     </div>
 
+    <!-- Explanation Section -->
+    <div class="card bg-light border-0 mb-4">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h5 class="card-title mb-3">
+                        <i class="bi bi-question-circle text-primary"></i> What are Workstations?
+                    </h5>
+                    <p class="mb-2">
+                        <strong>Workstations are servers where your AI agents do their work.</strong>
+                        When you ask an AI agent to implement a feature or fix a bug, it needs a place to:
+                    </p>
+                    <ul class="mb-3">
+                        <li><strong>Clone your repositories</strong> - Download and work with your code</li>
+                        <li><strong>Run Claude Code CLI</strong> - Execute AI-powered coding tasks</li>
+                        <li><strong>Create commits and branches</strong> - Make changes and push to GitHub</li>
+                        <li><strong>Run tests and builds</strong> - Verify changes work correctly</li>
+                    </ul>
+                    <p class="mb-0 text-muted small">
+                        <i class="bi bi-info-circle"></i>
+                        Think of workstations as dedicated development machines for your AI agents.
+                        Each workstation can run multiple jobs concurrently, and you can add as many as you need.
+                    </p>
+                </div>
+                <div class="col-md-4">
+                    <div class="bg-white rounded p-3 border">
+                        <h6 class="text-muted mb-3"><i class="bi bi-lightning-charge"></i> Workstation Options</h6>
+                        <div class="d-flex align-items-start mb-2">
+                            <i class="bi bi-cloud-check text-success me-2 mt-1"></i>
+                            <div>
+                                <strong>Remote Server</strong>
+                                <small class="d-block text-muted">A VPS or dedicated server you control (recommended for production)</small>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-start mb-2">
+                            <i class="bi bi-pc-display text-primary me-2 mt-1"></i>
+                            <div>
+                                <strong>Local Machine</strong>
+                                <small class="d-block text-muted">Your own computer or a server in your office</small>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-start">
+                            <i class="bi bi-hdd-network text-info me-2 mt-1"></i>
+                            <div>
+                                <strong>MyCTOBot Server</strong>
+                                <small class="d-block text-muted">Use our shared infrastructure (coming soon)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <?php if (empty($shards)): ?>
     <div class="card">
         <div class="card-body text-center py-5">
             <i class="bi bi-pc-display-horizontal display-4 text-muted"></i>
-            <p class="text-muted mt-3">No workstations configured yet.</p>
-            <a href="/admin/createshard" class="btn btn-primary">Add Your First Workstation</a>
+            <h4 class="mt-3">No workstations configured yet</h4>
+            <p class="text-muted mb-4" style="max-width: 500px; margin: 0 auto;">
+                To use AI agents with Claude Code CLI, you'll need at least one workstation.
+                This is where your agents will clone repos, write code, and create pull requests.
+            </p>
+            <a href="/admin/createshard" class="btn btn-primary btn-lg">
+                <i class="bi bi-plus-lg"></i> Add Your First Workstation
+            </a>
+            <div class="mt-4 text-muted small">
+                <p class="mb-1"><strong>Don't have a server?</strong></p>
+                <p class="mb-0">
+                    You can use any Linux server with SSH access. Popular options include
+                    <a href="https://www.digitalocean.com/" target="_blank">DigitalOcean</a>,
+                    <a href="https://www.linode.com/" target="_blank">Linode</a>, or
+                    <a href="https://aws.amazon.com/ec2/" target="_blank">AWS EC2</a>.
+                    A $12-24/month VPS works great for most teams.
+                </p>
+            </div>
         </div>
     </div>
     <?php else: ?>

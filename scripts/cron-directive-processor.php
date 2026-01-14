@@ -182,7 +182,7 @@ try {
     $boards = Bean::findAll('jiraboards', ' enabled = 1 ORDER BY id ASC LIMIT 1 ');
     if (!empty($boards)) {
         $board = reset($boards);
-        $cloudId = $board->cloud_id;
+        $cloudId = $board->cloud_uid;
         $projectKey = $board->project_key;
         output("Jira context: {$projectKey} (cloud: {$cloudId})");
     } else {

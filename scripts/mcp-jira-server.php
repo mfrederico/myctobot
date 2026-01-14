@@ -10,9 +10,9 @@
  * - jira_get_transitions: Get available transitions for a ticket
  *
  * Context resolution (in order of priority):
- * 1. Explicit cloud_id parameter in tool call
+ * 1. Explicit cloud_uid parameter in tool call
  * 2. JIRA_CLOUD_ID and JIRA_MEMBER_ID environment variables
- * 3. Derived from issue key by looking up board → member → cloud_id
+ * 3. Derived from issue key by looking up board → member → cloud_uid
  *
  * Usage: This script is called by Claude Code via MCP protocol.
  * Configure in .mcp.json:
@@ -62,7 +62,7 @@ $defaultCloudId = getenv('JIRA_CLOUD_ID') ?: '';
 class MCPJiraServer {
     private int $defaultMemberId;
     private string $defaultCloudId;
-    private array $clientCache = []; // Cache JiraClient per cloud_id
+    private array $clientCache = []; // Cache JiraClient per cloud_uid
 
     public function __construct(int $defaultMemberId, string $defaultCloudId) {
         $this->defaultMemberId = $defaultMemberId;
@@ -85,7 +85,7 @@ class MCPJiraServer {
             );
         }
 
-        return ['member_id' => $this->defaultMemberId, 'cloud_id' => $this->defaultCloudId];
+        return ['member_id' => $this->defaultMemberId, 'cloud_uid' => $this->defaultCloudId];
     }
 
     /**
@@ -93,10 +93,10 @@ class MCPJiraServer {
      */
     private function getJiraClient(): JiraClient {
         $context = $this->getContext();
-        $cacheKey = "{$context['member_id']}:{$context['cloud_id']}";
+        $cacheKey = "{$context['member_id']}:{$context['cloud_uid']}";
 
         if (!isset($this->clientCache[$cacheKey])) {
-            $this->clientCache[$cacheKey] = new JiraClient($context['member_id'], $context['cloud_id']);
+            $this->clientCache[$cacheKey] = new JiraClient($context['member_id'], $context['cloud_uid']);
         }
 
         return $this->clientCache[$cacheKey];

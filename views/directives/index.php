@@ -89,7 +89,7 @@
                                 <?php foreach ($directives as $directive): ?>
                                 <tr>
                                     <td>
-                                        <a href="/directives/view/<?= htmlspecialchars($directive->directive_id) ?>">
+                                        <a href="/directives/view/<?= htmlspecialchars($directive->directive_uid) ?>">
                                             <strong><?= htmlspecialchars($directive->email_subject ?: '(No Subject)') ?></strong>
                                         </a>
                                         <?php if ($directive->parsed_summary): ?>
@@ -136,24 +136,24 @@
                                     </td>
                                     <td>
                                         <div class="btn-group btn-group-sm">
-                                            <a href="/directives/view/<?= htmlspecialchars($directive->directive_id) ?>"
+                                            <a href="/directives/view/<?= htmlspecialchars($directive->directive_uid) ?>"
                                                class="btn btn-outline-primary" title="View">
                                                 <i class="bi bi-eye"></i>
                                             </a>
                                             <?php if (in_array($directive->status, ['failed', 'received'])): ?>
                                             <button type="button" class="btn btn-outline-warning retry-directive"
-                                                    data-id="<?= htmlspecialchars($directive->directive_id) ?>" title="Retry">
+                                                    data-id="<?= htmlspecialchars($directive->directive_uid) ?>" title="Retry">
                                                 <i class="bi bi-arrow-clockwise"></i>
                                             </button>
                                             <?php endif; ?>
                                             <?php if (!in_array($directive->status, ['completed', 'failed'])): ?>
                                             <button type="button" class="btn btn-outline-secondary cancel-directive"
-                                                    data-id="<?= htmlspecialchars($directive->directive_id) ?>" title="Cancel">
+                                                    data-id="<?= htmlspecialchars($directive->directive_uid) ?>" title="Cancel">
                                                 <i class="bi bi-x-lg"></i>
                                             </button>
                                             <?php endif; ?>
                                             <button type="button" class="btn btn-outline-danger delete-directive"
-                                                    data-id="<?= htmlspecialchars($directive->directive_id) ?>" title="Delete">
+                                                    data-id="<?= htmlspecialchars($directive->directive_uid) ?>" title="Delete">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </div>

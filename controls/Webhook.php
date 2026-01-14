@@ -165,13 +165,13 @@ class Webhook extends BaseControls\Control {
             'event' => $event,
             'issue_key' => $issueKey,
             'self_url' => $selfUrl,
-            'cloud_id' => $cloudId ?: 'not found'
+            'cloud_uid' => $cloudId ?: 'not found'
         ]);
 
         if (empty($issueKey) || empty($cloudId)) {
             $this->logger->debug('Jira webhook: missing issue key or cloud ID', [
                 'has_issue_key' => !empty($issueKey),
-                'has_cloud_id' => !empty($cloudId),
+                'has_cloud_uid' => !empty($cloudId),
                 'self_url' => $selfUrl
             ]);
             return;
@@ -190,7 +190,7 @@ class Webhook extends BaseControls\Control {
             $directiveLogger = new CeoDirectiveLogger($memberId);
             $directiveId = $directiveLogger->logDirectiveReceived($issueKey, 'jira', [
                 'event' => $event,
-                'cloud_id' => $cloudId,
+                'cloud_uid' => $cloudId,
                 'user' => $data['user']['displayName'] ?? 'unknown'
             ]);
 
@@ -447,7 +447,7 @@ class Webhook extends BaseControls\Control {
         // Find member by cloud ID
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
-            $this->logger->debug('No member found for cloud', ['cloud_id' => $cloudId]);
+            $this->logger->debug('No member found for cloud', ['cloud_uid' => $cloudId]);
             return;
         }
 
@@ -472,7 +472,7 @@ class Webhook extends BaseControls\Control {
 
         $this->logger->info('Clarification response detected', [
             'issue_key' => $issueKey,
-            'shard_job_id' => $job->currentShardJobId,
+            'shard_job_uid' => $job->currentShardJobId,
             'comment_id' => $commentId
         ]);
 
@@ -491,7 +491,7 @@ class Webhook extends BaseControls\Control {
     private function triggerAIDevJob(string $issueKey, string $cloudId, ?int $repoId = null): void {
         $memberId = $this->findMemberByCloudId($cloudId);
         if (!$memberId) {
-            $this->logger->debug('No member found for cloud', ['cloud_id' => $cloudId]);
+            $this->logger->debug('No member found for cloud', ['cloud_uid' => $cloudId]);
             return;
         }
 
@@ -514,7 +514,7 @@ class Webhook extends BaseControls\Control {
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
 
         if ($result['success']) {
-            // Check if session was already running (no new job_id)
+            // Check if session was already running (no new job_uid)
             if ($result['already_running'] ?? false) {
                 $this->logger->info('AI Developer session already running for issue', [
                     'member_id' => $memberId,
@@ -526,11 +526,11 @@ class Webhook extends BaseControls\Control {
             }
 
             $isQueued = $result['queued'] ?? false;
-            $jobId = $result['job_id'] ?? null;
+            $jobId = $result['job_uid'] ?? null;
 
             $this->logger->info($isQueued ? 'AI Developer job queued via webhook' : 'AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $issueKey,
                 'repo_id' => $repoId,
                 'queued' => $isQueued,
@@ -551,7 +551,7 @@ class Webhook extends BaseControls\Control {
                     $stepType,
                     $stepMessage,
                     [
-                        'job_id' => $jobId,
+                        'job_uid' => $jobId,
                         'queued' => $isQueued,
                         'position' => $result['position'] ?? null,
                         'local' => $result['local'] ?? false,
@@ -758,14 +758,14 @@ class Webhook extends BaseControls\Control {
     private function checkCompleteStatusTransition(string $issueKey, string $cloudId, string $newStatus): void {
         $this->logger->debug('checkCompleteStatusTransition: START', [
             'issue_key' => $issueKey,
-            'cloud_id' => $cloudId,
+            'cloud_uid' => $cloudId,
             'new_status' => $newStatus
         ]);
 
         $memberId = $this->findMemberByCloudId($cloudId);
         $this->logger->debug('checkCompleteStatusTransition: member lookup', ['member_id' => $memberId]);
         if (!$memberId) {
-            $this->logger->debug('checkCompleteStatusTransition: No member found for cloud', ['cloud_id' => $cloudId]);
+            $this->logger->debug('checkCompleteStatusTransition: No member found for cloud', ['cloud_uid' => $cloudId]);
             return;
         }
 
@@ -1773,7 +1773,7 @@ class Webhook extends BaseControls\Control {
         $result = $jobService->triggerGitHubJob($memberId, $issueKey, $repoId, $tenant);
 
         if ($result['success']) {
-            // Check if session was already running (no new job_id)
+            // Check if session was already running (no new job_uid)
             if ($result['already_running'] ?? false) {
                 $this->logger->info('GitHub AI Developer session already running for issue', [
                     'member_id' => $memberId,
@@ -1785,7 +1785,7 @@ class Webhook extends BaseControls\Control {
 
             $this->logger->info('GitHub AI Dev job triggered via webhook', [
                 'member_id' => $memberId,
-                'job_id' => $result['job_id'] ?? null,
+                'job_uid' => $result['job_uid'] ?? null,
                 'issue_key' => $issueKey,
                 'repo_id' => $repoId,
                 'local' => $result['local'] ?? false
@@ -2025,13 +2025,13 @@ class Webhook extends BaseControls\Control {
             // Look up the cloud ID from our stored tokens
             $token = R::findOne('atlassiantoken', 'site_url = ?', [$siteUrl]);
             if ($token) {
-                return $token->cloud_id;
+                return $token->cloud_uid;
             }
 
             // Also try without https
             $token = R::findOne('atlassiantoken', 'site_url LIKE ?', ['%' . $siteDomain . '%']);
             if ($token) {
-                return $token->cloud_id;
+                return $token->cloud_uid;
             }
         }
 
@@ -2045,16 +2045,16 @@ class Webhook extends BaseControls\Control {
         // Get the project key from the issue key
         $projectKey = explode('-', $issueKey)[0] ?? '';
 
-        // Find the board for this project to get the cloud_id
+        // Find the board for this project to get the cloud_uid
         $board = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
-        if ($board && !empty($board->cloud_id)) {
-            return $board->cloud_id;
+        if ($board && !empty($board->cloud_uid)) {
+            return $board->cloud_uid;
         }
 
         // Fall back to first token for member
         $token = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
         if ($token) {
-            return $token->cloud_id;
+            return $token->cloud_uid;
         }
 
         return null;
@@ -2064,7 +2064,7 @@ class Webhook extends BaseControls\Control {
      * Find member ID by Atlassian cloud ID
      */
     private function findMemberByCloudId(string $cloudId): ?int {
-        $token = R::findOne('atlassiantoken', 'cloud_id = ?', [$cloudId]);
+        $token = R::findOne('atlassiantoken', 'cloud_uid = ?', [$cloudId]);
         return $token ? (int)$token->member_id : null;
     }
 
@@ -2092,7 +2092,7 @@ class Webhook extends BaseControls\Control {
      * Endpoint: POST /webhook/digest
      *
      * Called by shard when digest analysis is complete
-     * Body: { job_id, status, result: { analysis, markdown_report }, error }
+     * Body: { job_uid, status, result: { analysis, markdown_report }, error }
      */
     public function digest() {
         // Validate API key from Authorization header
@@ -2133,7 +2133,7 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        $jobId = $data['job_id'] ?? '';
+        $jobId = $data['job_uid'] ?? '';
         $type = $data['type'] ?? 'final'; // 'progress' or 'final'
         $status = $data['status'] ?? '';
         $result = $data['result'] ?? null;
@@ -2144,7 +2144,7 @@ class Webhook extends BaseControls\Control {
         $partialOutput = $data['partial_output'] ?? null;
 
         $this->logger->info('Digest webhook received', [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'type' => $type,
             'items_count' => $itemsCount,
             'status' => $status,
@@ -2153,16 +2153,16 @@ class Webhook extends BaseControls\Control {
 
         if (empty($jobId)) {
             Flight::response()->status(400);
-            echo json_encode(['error' => 'Missing job_id']);
+            echo json_encode(['error' => 'Missing job_uid']);
             return;
         }
 
         try {
             // Look up the pending digest job
-            $digestJob = R::findOne('digestjobs', 'job_id = ?', [$jobId]);
+            $digestJob = R::findOne('digestjobs', 'job_uid = ?', [$jobId]);
 
             if (!$digestJob) {
-                $this->logger->warning('Digest job not found', ['job_id' => $jobId]);
+                $this->logger->warning('Digest job not found', ['job_uid' => $jobId]);
                 Flight::response()->status(404);
                 echo json_encode(['error' => 'Job not found']);
                 return;
@@ -2183,7 +2183,7 @@ class Webhook extends BaseControls\Control {
                 R::store($digestJob);
 
                 $this->logger->debug('Digest progress update', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'phase' => $phase,
                     'items_count' => $itemsCount,
                     'elapsed' => $elapsedSeconds
@@ -2209,13 +2209,13 @@ class Webhook extends BaseControls\Control {
                 if ($result && !empty($result['raw_output'])) {
                     $digestJob->partial_output = $result['raw_output'];
                     $this->logger->info('Saving partial digest results', [
-                        'job_id' => $jobId,
+                        'job_uid' => $jobId,
                         'items_count' => $itemsCount
                     ]);
                 }
 
                 $this->logger->error('Digest analysis failed', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'error' => $error,
                     'items_count' => $itemsCount
                 ]);
@@ -2228,7 +2228,7 @@ class Webhook extends BaseControls\Control {
 
         } catch (\Exception $e) {
             $this->logger->error('Digest webhook processing failed', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'error' => $e->getMessage()
             ]);
             Flight::response()->status(500);
@@ -2257,7 +2257,7 @@ class Webhook extends BaseControls\Control {
         $analysisId = UserDatabaseService::storeAnalysis($boardId, 'digest', [
             'success' => true,
             'analysis' => $analysis,
-            'shard_job_id' => $digestJob->job_id
+            'shard_job_uid' => $digestJob->job_uid
         ], $markdown);
 
         // Update last_digest_at for the board
@@ -2281,7 +2281,7 @@ class Webhook extends BaseControls\Control {
      * Endpoint: POST /webhook/aidev
      *
      * Called by shard when AI Developer work is complete
-     * Body: { job_id, status, result: { success, pr_url, pr_number, ... }, error }
+     * Body: { job_uid, status, result: { success, pr_url, pr_number, ... }, error }
      */
     public function aidev() {
         // Validate API key from Authorization header
@@ -2321,20 +2321,20 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        $jobId = $data['job_id'] ?? '';
+        $jobId = $data['job_uid'] ?? '';
         $status = $data['status'] ?? '';
         $result = $data['result'] ?? [];
         $elapsedSeconds = $data['elapsed_seconds'] ?? 0;
 
         $this->logger->info('AIdev webhook received', [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'status' => $status,
             'has_result' => !empty($result)
         ]);
 
         if (empty($jobId)) {
             Flight::response()->status(400);
-            echo json_encode(['error' => 'Missing job_id']);
+            echo json_encode(['error' => 'Missing job_uid']);
             return;
         }
 
@@ -2343,7 +2343,7 @@ class Webhook extends BaseControls\Control {
             $jobData = $this->findAIDevJob($jobId);
 
             if (!$jobData) {
-                $this->logger->warning('AIdev job not found', ['job_id' => $jobId]);
+                $this->logger->warning('AIdev job not found', ['job_uid' => $jobId]);
                 Flight::response()->status(404);
                 echo json_encode(['error' => 'Job not found']);
                 return;
@@ -2351,7 +2351,7 @@ class Webhook extends BaseControls\Control {
 
             $memberId = $jobData['member_id'];
 
-            $cloudId = $jobData['cloud_id'] ?? '';
+            $cloudId = $jobData['cloud_uid'] ?? '';
             $issueKey = $jobData['issue_key'] ?? '';
             $boardId = $jobData['board_id'] ?? 0;
             $jobService = new AIDevJobService();
@@ -2382,7 +2382,7 @@ class Webhook extends BaseControls\Control {
                 );
 
                 $this->logger->info('AIdev job PR created', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'issue_key' => $issueKey,
                     'pr_url' => $result['pr_url']
                 ]);
@@ -2408,7 +2408,7 @@ class Webhook extends BaseControls\Control {
                 );
 
                 $this->logger->info('AIdev Shopify preview ready', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'issue_key' => $issueKey,
                     'preview_url' => $previewUrl
                 ]);
@@ -2431,7 +2431,7 @@ class Webhook extends BaseControls\Control {
                 // Checkpoint - Claude completed initial work but session stays alive
                 // Don't remove labels or transition status - just log it
                 $this->logger->info('AIdev job checkpoint', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'issue_key' => $issueKey,
                     'pr_url' => $result['pr_url'] ?? null,
                     'summary' => $result['summary'] ?? null
@@ -2463,7 +2463,7 @@ class Webhook extends BaseControls\Control {
                 \app\services\AIDevStatusService::fail($memberId, $jobId, $errorMsg);
 
                 $this->logger->error('AIdev job failed', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'issue_key' => $issueKey,
                     'error' => $errorMsg
                 ]);
@@ -2491,7 +2491,7 @@ class Webhook extends BaseControls\Control {
 
         } catch (\Exception $e) {
             $this->logger->error('AIdev webhook processing failed', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'error' => $e->getMessage()
             ]);
             Flight::response()->status(500);
@@ -2515,12 +2515,12 @@ class Webhook extends BaseControls\Control {
                     $content = @file_get_contents($file);
                     if ($content) {
                         $data = json_decode($content, true);
-                        if ($data && ($data['job_id'] ?? '') === $shardJobId) {
+                        if ($data && ($data['job_uid'] ?? '') === $shardJobId) {
                             return [
                                 'member_id' => $memberId,
-                                'job_id' => $shardJobId,
+                                'job_uid' => $shardJobId,
                                 'issue_key' => $data['issue_key'] ?? '',
-                                'cloud_id' => $data['cloud_id'] ?? '',
+                                'cloud_uid' => $data['cloud_uid'] ?? '',
                                 'board_id' => (int) ($data['board_id'] ?? 0),
                                 'status' => $data['status'] ?? '',
                                 'repo_connection_id' => $data['repo_connection_id'] ?? null
@@ -2531,15 +2531,15 @@ class Webhook extends BaseControls\Control {
             }
         }
 
-        // Fallback: search database for jobs with matching current_shard_job_id
-        $job = R::findOne('aidevjobs', 'current_shard_job_id = ?', [$shardJobId]);
+        // Fallback: search database for jobs with matching current_shard_job_uid
+        $job = R::findOne('aidevjobs', 'current_shard_job_uid = ?', [$shardJobId]);
 
         if ($job) {
             return [
                 'member_id' => (int) $job->member_id,
-                'job_id' => $shardJobId,
+                'job_uid' => $shardJobId,
                 'issue_key' => $job->issue_key,
-                'cloud_id' => $job->cloud_id,
+                'cloud_uid' => $job->cloud_uid,
                 'board_id' => (int) $job->board_id,
                 'status' => $job->status,
                 'repo_connection_id' => $job->repo_connection_id
@@ -2631,7 +2631,7 @@ class Webhook extends BaseControls\Control {
 
         $resultFile = $statusDir . '/' . $jobId . '_result.json';
         file_put_contents($resultFile, json_encode([
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'elapsed_seconds' => $elapsed,
             'result' => $result,
             'received_at' => date('Y-m-d H:i:s')

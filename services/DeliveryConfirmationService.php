@@ -15,6 +15,7 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 require_once __DIR__ . '/MailgunService.php';
 require_once __DIR__ . '/JiraClient.php';
@@ -59,7 +60,7 @@ class DeliveryConfirmationService {
     ): array {
         $this->logger->info('Sending success confirmation', [
             'member_id' => $memberId,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $issueKey
         ]);
 
@@ -69,7 +70,7 @@ class DeliveryConfirmationService {
 
         // Build confirmation message details
         $details = [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $issueKey,
             'timestamp' => $timestamp,
             'status' => 'success',
@@ -87,7 +88,7 @@ class DeliveryConfirmationService {
                 $deliveryResults[$method] = $methodResult;
             } catch (\Exception $e) {
                 $this->logger->error("Confirmation delivery failed via {$method}", [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'error' => $e->getMessage()
                 ]);
                 $deliveryResults[$method] = [
@@ -128,7 +129,7 @@ class DeliveryConfirmationService {
     ): array {
         $this->logger->info('Sending failure notification', [
             'member_id' => $memberId,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $issueKey,
             'error' => $errorMessage
         ]);
@@ -139,7 +140,7 @@ class DeliveryConfirmationService {
 
         // Build failure notification details
         $details = [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $issueKey,
             'timestamp' => $timestamp,
             'status' => 'failed',
@@ -155,7 +156,7 @@ class DeliveryConfirmationService {
                 $deliveryResults[$method] = $methodResult;
             } catch (\Exception $e) {
                 $this->logger->error("Failure notification delivery failed via {$method}", [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'error' => $e->getMessage()
                 ]);
                 $deliveryResults[$method] = [
@@ -195,7 +196,7 @@ class DeliveryConfirmationService {
             $params[] = $memberId;
         }
 
-        $jobs = R::find('aidevjobs', $sql, $params);
+        $jobs = Bean::find('aidevjobs', $sql, $params);
 
         $results = [
             'processed' => 0,
@@ -206,7 +207,7 @@ class DeliveryConfirmationService {
         ];
 
         foreach ($jobs as $job) {
-            $jobId = $job->job_id;
+            $jobId = $job->job_uid;
             $attempts = (int) $job->confirmation_attempts;
 
             // Check if enough time has passed for exponential backoff
@@ -232,7 +233,7 @@ class DeliveryConfirmationService {
                         (int) $job->member_id,
                         $jobId,
                         $job->issue_key,
-                        $job->cloud_id,
+                        $job->cloud_uid,
                         [
                             'pr_url' => $job->pr_url,
                             'pr_number' => $job->pr_number,
@@ -246,7 +247,7 @@ class DeliveryConfirmationService {
                         (int) $job->member_id,
                         $jobId,
                         $job->issue_key,
-                        $job->cloud_id,
+                        $job->cloud_uid,
                         $job->error_message ?? 'Unknown error'
                     );
                 }
@@ -267,7 +268,7 @@ class DeliveryConfirmationService {
                 ];
 
                 $this->logger->error('Retry failed for job', [
-                    'job_id' => $jobId,
+                    'job_uid' => $jobId,
                     'error' => $e->getMessage()
                 ]);
             }
@@ -420,7 +421,7 @@ class DeliveryConfirmationService {
         if ($type === 'success') {
             $content = "# Directive Completed Successfully\n\n";
             $content .= "**Issue:** {$details['issue_key']}\n";
-            $content .= "**Job ID:** {$details['job_id']}\n";
+            $content .= "**Job ID:** {$details['job_uid']}\n";
             $content .= "**Timestamp:** {$details['timestamp']}\n\n";
 
             if (!empty($details['pr_url'])) {
@@ -449,7 +450,7 @@ class DeliveryConfirmationService {
         } else {
             $content = "# Directive Failed\n\n";
             $content .= "**Issue:** {$details['issue_key']}\n";
-            $content .= "**Job ID:** {$details['job_id']}\n";
+            $content .= "**Job ID:** {$details['job_uid']}\n";
             $content .= "**Timestamp:** {$details['timestamp']}\n\n";
             $content .= "## Error\n{$details['error_message']}\n";
 
@@ -497,7 +498,7 @@ class DeliveryConfirmationService {
                     'type' => 'paragraph',
                     'content' => [
                         ['type' => 'text', 'text' => 'Job ID: ', 'marks' => [['type' => 'strong']]],
-                        ['type' => 'text', 'text' => $details['job_id'], 'marks' => [['type' => 'code']]]
+                        ['type' => 'text', 'text' => $details['job_uid'], 'marks' => [['type' => 'code']]]
                     ]
                 ]]
             ];
@@ -626,11 +627,11 @@ class DeliveryConfirmationService {
      * Record confirmation attempt in the database
      */
     private function recordConfirmationAttempt(int $memberId, string $jobId, array $deliveryResults, string $type): void {
-        $job = R::findOne('aidevjobs', 'job_id = ? AND member_id = ?', [$jobId, $memberId]);
+        $job = Bean::findOne('aidevjobs', 'job_uid = ? AND member_id = ?', [$jobId, $memberId]);
 
         if (!$job) {
             $this->logger->warning('Job not found for confirmation recording', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'member_id' => $memberId
             ]);
             return;
@@ -660,7 +661,7 @@ class DeliveryConfirmationService {
         }
 
         $job->updated_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
 
         // Log the attempt
         AIDevStatusService::log($jobId, $memberId, $anySuccess ? 'info' : 'warning',
@@ -685,11 +686,11 @@ class DeliveryConfirmationService {
             $params[] = $memberId;
         }
 
-        $exceededJobs = R::find('aidevjobs', $sql, $params);
+        $exceededJobs = Bean::find('aidevjobs', $sql, $params);
 
         foreach ($exceededJobs as $job) {
             $this->logger->error('Delivery confirmation exceeded max retries - requires manual follow-up', [
-                'job_id' => $job->job_id,
+                'job_uid' => $job->job_uid,
                 'member_id' => $job->member_id,
                 'issue_key' => $job->issue_key,
                 'attempts' => $job->confirmation_attempts,
@@ -722,11 +723,11 @@ class DeliveryConfirmationService {
         $webhookEnabled = Flight::get('confirmation.webhook_enabled') ?? false;
 
         // Check member-specific settings (override globals)
-        $emailSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $emailSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_email_enabled', $memberId]);
-        $jiraSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $jiraSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_jira_enabled', $memberId]);
-        $webhookSetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $webhookSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_webhook_enabled', $memberId]);
 
         if ($emailSetting) {
@@ -762,7 +763,7 @@ class DeliveryConfirmationService {
      */
     private function getConfirmationEmail(int $memberId): ?string {
         // Check member-specific setting first
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_recipient_email', $memberId]);
 
         if ($setting && $setting->setting_value) {
@@ -770,7 +771,7 @@ class DeliveryConfirmationService {
         }
 
         // Fall back to member's email
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if ($member && $member->email) {
             return $member->email;
         }
@@ -783,7 +784,7 @@ class DeliveryConfirmationService {
      * Get webhook URL for a member
      */
     private function getWebhookUrl(int $memberId): ?string {
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_webhook_url', $memberId]);
 
         return $setting ? $setting->setting_value : Flight::get('confirmation.webhook_url');
@@ -793,7 +794,7 @@ class DeliveryConfirmationService {
      * Get webhook secret for a member
      */
     private function getWebhookSecret(int $memberId): ?string {
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
             ['confirmation_webhook_secret', $memberId]);
 
         if ($setting && $setting->setting_value) {

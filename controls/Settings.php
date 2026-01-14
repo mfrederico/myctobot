@@ -248,7 +248,7 @@ class Settings extends BaseControls\Control {
             $data['atlassian_sites'][] = [
                 'site_name' => $site->site_name,
                 'site_url' => $site->site_url,
-                'cloud_id' => $site->cloud_id
+                'cloud_uid' => $site->cloud_uid
             ];
         }
 

@@ -50,10 +50,10 @@ class PluginScannerService {
     public function scanAllSources(): array {
         $scanId = $this->startScan();
 
-        $this->log("Starting full plugin scan (scan_id: {$scanId})");
+        $this->log("Starting full plugin scan (scan_uid: {$scanId})");
 
         $stats = [
-            'scan_id' => $scanId,
+            'scan_uid' => $scanId,
             'repos_scanned' => 0,
             'plugins_found' => 0,
             'errors_encountered' => 0,
@@ -133,10 +133,10 @@ class PluginScannerService {
 
         $scanId = $this->startScan($repoConnectionId);
 
-        $this->log("Starting single repo scan for {$repo->repo_owner}/{$repo->repo_name} (scan_id: {$scanId})");
+        $this->log("Starting single repo scan for {$repo->repo_owner}/{$repo->repo_name} (scan_uid: {$scanId})");
 
         $stats = [
-            'scan_id' => $scanId,
+            'scan_uid' => $scanId,
             'repos_scanned' => 0,
             'plugins_found' => 0,
             'errors_encountered' => 0,
@@ -331,7 +331,7 @@ class PluginScannerService {
         $pluginId = md5("{$pluginData['repo_owner']}/{$pluginData['repo_name']}");
 
         // Check if plugin already exists
-        $existing = Bean::findOne('discoveredplugins', 'plugin_id = ?', [$pluginId]);
+        $existing = Bean::findOne('discoveredplugins', 'plugin_uid = ?', [$pluginId]);
 
         if ($existing) {
             // Update existing record
@@ -339,7 +339,7 @@ class PluginScannerService {
         } else {
             // Create new record
             $plugin = Bean::dispense('discoveredplugins');
-            $plugin->plugin_id = $pluginId;
+            $plugin->plugin_uid = $pluginId;
             $plugin->discovered_at = date('Y-m-d H:i:s');
         }
 
@@ -371,7 +371,7 @@ class PluginScannerService {
         $scanId = bin2hex(random_bytes(16));
 
         $scan = Bean::dispense('pluginscans');
-        $scan->scan_id = $scanId;
+        $scan->scan_uid = $scanId;
         $scan->repo_connection_id = $repoConnectionId;
         $scan->status = 'running';
         $scan->started_at = date('Y-m-d H:i:s');
@@ -382,7 +382,7 @@ class PluginScannerService {
         Bean::store($scan);
 
         $this->logger->info("Plugin scan started", [
-            'scan_id' => $scanId,
+            'scan_uid' => $scanId,
             'repo_connection_id' => $repoConnectionId
         ]);
 
@@ -396,7 +396,7 @@ class PluginScannerService {
      * @param array $data Data to update
      */
     public function updateScan(string $scanId, array $data): void {
-        $scan = Bean::findOne('pluginscans', 'scan_id = ?', [$scanId]);
+        $scan = Bean::findOne('pluginscans', 'scan_uid = ?', [$scanId]);
 
         if (!$scan) {
             return;
@@ -416,7 +416,7 @@ class PluginScannerService {
      * @param array $stats Final statistics
      */
     public function completeScan(string $scanId, array $stats): void {
-        $scan = Bean::findOne('pluginscans', 'scan_id = ?', [$scanId]);
+        $scan = Bean::findOne('pluginscans', 'scan_uid = ?', [$scanId]);
 
         if (!$scan) {
             return;
@@ -431,7 +431,7 @@ class PluginScannerService {
         Bean::store($scan);
 
         $this->logger->info("Plugin scan completed", [
-            'scan_id' => $scanId,
+            'scan_uid' => $scanId,
             'repos_scanned' => $stats['repos_scanned'],
             'plugins_found' => $stats['plugins_found'],
             'errors' => $stats['errors_encountered']
@@ -445,7 +445,7 @@ class PluginScannerService {
      * @param string $errorMessage Error message
      */
     public function failScan(string $scanId, string $errorMessage): void {
-        $scan = Bean::findOne('pluginscans', 'scan_id = ?', [$scanId]);
+        $scan = Bean::findOne('pluginscans', 'scan_uid = ?', [$scanId]);
 
         if (!$scan) {
             return;
@@ -458,7 +458,7 @@ class PluginScannerService {
         Bean::store($scan);
 
         $this->logger->error("Plugin scan failed", [
-            'scan_id' => $scanId,
+            'scan_uid' => $scanId,
             'error' => $errorMessage
         ]);
     }

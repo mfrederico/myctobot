@@ -178,22 +178,22 @@ class Github extends BaseControls\Control {
                     $existingHook = $github->findWebhook($owner, $repoName, $webhookUrl);
                     if ($existingHook) {
                         $webhookCreated = true;
-                        $repo->webhook_id = $existingHook['id'];
+                        $repo->webhook_uid = $existingHook['id'];
                         $this->logger->info('Found existing webhook', ['hook_id' => $existingHook['id'], 'url' => $webhookUrl]);
                     } else {
                         // Create webhook
                         $hook = $github->createWebhook($owner, $repoName, $webhookUrl, $webhookSecret);
-                        $repo->webhook_id = $hook['id'] ?? null;
-                        $webhookCreated = !empty($repo->webhook_id);
-                        $this->logger->info('Created webhook', ['hook_id' => $repo->webhook_id, 'url' => $webhookUrl, 'response' => $hook]);
+                        $repo->webhook_uid = $hook['id'] ?? null;
+                        $webhookCreated = !empty($repo->webhook_uid);
+                        $this->logger->info('Created webhook', ['hook_id' => $repo->webhook_uid, 'url' => $webhookUrl, 'response' => $hook]);
                     }
 
                     // Ensure ai-dev label exists
                     $github->ensureAiDevLabel($owner, $repoName);
 
-                    // Save the webhook_id to the repo
+                    // Save the webhook_uid to the repo
                     $storedId = Bean::store($repo);
-                    $this->logger->info('Stored repo with webhook_id', ['repo_id' => $storedId, 'webhook_id' => $repo->webhook_id]);
+                    $this->logger->info('Stored repo with webhook_uid', ['repo_id' => $storedId, 'webhook_uid' => $repo->webhook_uid]);
                 }
             } catch (\Exception $e) {
                 $webhookError = $e->getMessage();
@@ -343,7 +343,7 @@ class Github extends BaseControls\Control {
             'default_branch' => $repo->default_branch,
             'enabled' => (bool)$repo->enabled,
             'issues_enabled' => (bool)$repo->issues_enabled,
-            'webhook_id' => $repo->webhook_id,
+            'webhook_uid' => $repo->webhook_uid,
         ]);
     }
 
@@ -377,7 +377,7 @@ class Github extends BaseControls\Control {
                 'id' => $bean->id,
                 'board_name' => $bean->board_name,
                 'project_key' => $bean->project_key,
-                'cloud_id' => $bean->cloud_id
+                'cloud_uid' => $bean->cloud_uid
             ];
         }
 
@@ -478,18 +478,18 @@ class Github extends BaseControls\Control {
 
             // Delete webhook from GitHub if we have one
             $webhookDeleted = false;
-            if (!empty($repo->webhook_id) && !empty($repo->repo_owner) && !empty($repo->repo_name)) {
+            if (!empty($repo->webhook_uid) && !empty($repo->repo_owner) && !empty($repo->repo_name)) {
                 try {
                     $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
                     if ($tokenSetting && !empty($tokenSetting->setting_value)) {
                         $token = EncryptionService::decrypt($tokenSetting->setting_value);
                         $github = new GitHubClient($token);
-                        $webhookDeleted = $github->deleteWebhook($repo->repo_owner, $repo->repo_name, $repo->webhook_id);
+                        $webhookDeleted = $github->deleteWebhook($repo->repo_owner, $repo->repo_name, $repo->webhook_uid);
 
                         if ($webhookDeleted) {
                             $this->logger->info('Deleted GitHub webhook', [
                                 'repo' => $repo->repo_owner . '/' . $repo->repo_name,
-                                'webhook_id' => $repo->webhook_id
+                                'webhook_uid' => $repo->webhook_uid
                             ]);
                         }
                     }
@@ -497,7 +497,7 @@ class Github extends BaseControls\Control {
                     // Log but don't fail - webhook might already be gone
                     $this->logger->warning('Could not delete GitHub webhook', [
                         'repo' => $repo->repo_owner . '/' . $repo->repo_name,
-                        'webhook_id' => $repo->webhook_id,
+                        'webhook_uid' => $repo->webhook_uid,
                         'error' => $e->getMessage()
                     ]);
                 }

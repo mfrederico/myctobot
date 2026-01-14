@@ -65,7 +65,7 @@
                 <h4 class="mb-3">Response History</h4>
                 <?php foreach ($responses as $response): ?>
                     <?php
-                    $admin = \RedBeanPHP\R::load('member', $response->admin_id);
+                    $admin = \app\Bean::load('member', $response->admin_id);
                     ?>
                     <div class="card mb-3">
                         <div class="card-header bg-success text-white">

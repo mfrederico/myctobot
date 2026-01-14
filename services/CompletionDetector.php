@@ -67,7 +67,7 @@ class CompletionDetector {
 
         // Find stories with linked aidevjobs that are in_progress or ready
         $stories = Bean::find('ctostories',
-            'aidev_job_id IS NOT NULL AND status IN (?, ?)',
+            'aidev_job_uid IS NOT NULL AND status IN (?, ?)',
             ['ready', 'in_progress']
         );
 
@@ -89,12 +89,12 @@ class CompletionDetector {
         $newStatus = null;
 
         // Find the linked aidevjob
-        $job = Bean::findOne('aidevjobs', 'job_id = ?', [$story->aidev_job_id]);
+        $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$story->aidev_job_uid]);
 
         if (!$job) {
             $this->logger->warning('CompletionDetector: aidevjob not found', [
                 'story_id' => $story->story_id,
-                'job_id' => $story->aidev_job_id
+                'job_uid' => $story->aidev_job_uid
             ]);
             return ['changed' => false];
         }
@@ -280,7 +280,7 @@ class CompletionDetector {
      * Check completion of a single project
      */
     public function checkProjectCompletion(object $project): array {
-        $epics = Bean::find('ctoepics', 'project_id = ?', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
         $totalEpics = count($epics);
 
         if ($totalEpics === 0) {
@@ -312,12 +312,12 @@ class CompletionDetector {
             $completed = true;
 
             // Complete the directive
-            if ($project->directive_id) {
-                $this->completeDirective($project->directive_id);
+            if ($project->directive_uid) {
+                $this->completeDirective($project->directive_uid);
             }
 
             $this->logger->info('CompletionDetector: Project completed', [
-                'project_id' => $project->project_id,
+                'project_uid' => $project->project_uid,
                 'name' => $project->name
             ]);
         }
@@ -402,10 +402,10 @@ class CompletionDetector {
         $epic = Bean::load('ctoepics', $story->epic_id);
         if (!$epic) return;
 
-        $project = Bean::load('ctoprojects', $epic->project_id);
+        $project = Bean::load('ctoprojects', $epic->project_uid);
         if (!$project) return;
 
-        $directive = Bean::load('ceodirectives', $project->directive_id);
+        $directive = Bean::load('ceodirectives', $project->directive_uid);
         if (!$directive) return;
 
         $this->logDirective($directive->id, 'escalation', 'warning',
@@ -417,7 +417,7 @@ class CompletionDetector {
 
         // TODO: Send escalation email to CEO
         $this->logger->warning('CompletionDetector: Escalation created', [
-            'directive_id' => $directive->directive_id,
+            'directive_uid' => $directive->directive_uid,
             'story_id' => $story->story_id,
             'reason' => $reason
         ]);
@@ -432,7 +432,7 @@ class CompletionDetector {
             return ['error' => 'Project not found'];
         }
 
-        $epics = Bean::find('ctoepics', 'project_id = ? ORDER BY sequence ASC', [$projectId]);
+        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$projectId]);
         $epicProgress = [];
 
         foreach ($epics as $epic) {
@@ -454,7 +454,7 @@ class CompletionDetector {
         }
 
         return [
-            'project_id' => $project->project_id,
+            'project_uid' => $project->project_uid,
             'name' => $project->name,
             'status' => $project->status,
             'completion_percentage' => $project->completion_percentage,
@@ -468,7 +468,7 @@ class CompletionDetector {
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
+            $log->directive_uid = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;

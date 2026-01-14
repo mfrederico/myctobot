@@ -97,6 +97,16 @@ class Agents extends BaseControls\Control {
         $this->viewData['title'] = 'AI Agent Profiles';
         $this->viewData['agents'] = $agents;
         $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
+
+        // Check shard availability for Claude CLI
+        $useLocalRunner = Flight::get('aidev.use_local_runner') ?? false;
+        $shardCount = 0;
+        if (!$useLocalRunner) {
+            // Check for active shards in default database
+            $shardCount = (int) R::getCell("SELECT COUNT(*) FROM claudeshards WHERE is_active = 1");
+        }
+        $this->viewData['has_shards'] = $useLocalRunner || $shardCount > 0;
+        $this->viewData['use_local_runner'] = $useLocalRunner;
         // csrf already set by parent constructor
 
         $this->render('agents/index', $this->viewData);
@@ -194,10 +204,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Validate CSRF from header
-        $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        $csrfSession = $_SESSION['csrf_token'] ?? '';
-        if (empty($csrfHeader) || $csrfHeader !== $csrfSession) {
-            Flight::jsonError('Invalid security token', 403);
+        if (!$this->validateCSRFHeader()) {
             return;
         }
 

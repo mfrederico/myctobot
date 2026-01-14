@@ -6,6 +6,8 @@
  * Designed for users who are new to AI development systems.
  */
 $csrf = $csrf['csrf_token'] ?? '';
+$hasShards = $wizardHasShards ?? false;
+$useLocalRunner = $wizardUseLocalRunner ?? false;
 ?>
 
 <!-- Agent Setup Wizard Modal -->
@@ -200,19 +202,29 @@ $csrf = $csrf['csrf_token'] ?? '';
                     <div class="row g-3">
                         <!-- Claude CLI (Recommended) -->
                         <div class="col-md-6">
-                            <div class="card provider-card h-100" data-provider="claude_cli">
+                            <div class="card provider-card h-100 <?= !$hasShards ? 'opacity-50' : '' ?>" data-provider="claude_cli" <?= !$hasShards ? 'data-disabled="true"' : '' ?>>
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div class="d-flex align-items-center">
                                             <i class="bi bi-terminal text-primary fs-3 me-2"></i>
                                             <h5 class="mb-0">Claude Code CLI</h5>
                                         </div>
+                                        <?php if ($hasShards): ?>
                                         <span class="badge bg-success">Recommended</span>
+                                        <?php else: ?>
+                                        <span class="badge bg-warning text-dark">No Shards</span>
+                                        <?php endif; ?>
                                     </div>
                                     <p class="text-muted small mb-3">
                                         Anthropic's official CLI tool for coding. Best for complex multi-file changes,
                                         supports MCP tools, and runs on remote workstation shards.
                                     </p>
+                                    <?php if (!$hasShards): ?>
+                                    <div class="alert alert-warning small py-2 mb-2">
+                                        <i class="bi bi-exclamation-triangle"></i>
+                                        Requires <a href="/admin/shards">workstation shards</a> to be configured.
+                                    </div>
+                                    <?php endif; ?>
                                     <ul class="list-unstyled small text-muted">
                                         <li><i class="bi bi-check-circle text-success me-1"></i> Most capable for code tasks</li>
                                         <li><i class="bi bi-check-circle text-success me-1"></i> Full MCP tool support</li>
@@ -549,46 +561,50 @@ $csrf = $csrf['csrf_token'] ?? '';
 
 <script>
 (function() {
+    // Shard availability from server
+    const hasShards = <?= $hasShards ? 'true' : 'false' ?>;
+    const defaultProvider = hasShards ? 'claude_cli' : 'ollama';
+
     // Wizard state
     const wizardState = {
         currentStep: 1,
         totalSteps: 4,
         profile: null,
-        provider: 'claude_cli',
+        provider: defaultProvider,
         providerConfig: {},
         mcpTools: ['github', 'fetch'],
         capabilities: ['code_implementation']
     };
 
-    // Profile configurations
+    // Profile configurations - use defaultProvider based on shard availability
     const profileConfigs = {
         developer: {
             name: 'Code Developer',
-            provider: 'claude_cli',
+            provider: defaultProvider,
             mcpTools: ['github', 'fetch', 'mantic'],
             capabilities: ['code_implementation', 'refactoring', 'debugging']
         },
         reviewer: {
             name: 'Code Reviewer',
-            provider: 'claude_cli',
+            provider: defaultProvider,
             mcpTools: ['github', 'fetch'],
             capabilities: ['code_review', 'security_audit']
         },
         tester: {
             name: 'QA Tester',
-            provider: 'claude_cli',
+            provider: defaultProvider,
             mcpTools: ['playwright', 'fetch'],
             capabilities: ['browser_testing', 'debugging']
         },
         docs: {
             name: 'Documentation Writer',
-            provider: 'claude_cli',
+            provider: defaultProvider,
             mcpTools: ['github', 'fetch'],
             capabilities: ['documentation']
         },
         custom: {
             name: 'Custom Agent',
-            provider: 'claude_cli',
+            provider: defaultProvider,
             mcpTools: [],
             capabilities: []
         }
@@ -624,6 +640,11 @@ $csrf = $csrf['csrf_token'] ?? '';
         // Provider card selection
         document.querySelectorAll('.provider-card').forEach(card => {
             card.addEventListener('click', function() {
+                // Don't allow selecting disabled providers
+                if (this.dataset.disabled === 'true') {
+                    alert('This provider requires workstation shards to be configured. Please set up shards first or choose a different provider.');
+                    return;
+                }
                 document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));
                 this.classList.add('selected');
                 wizardState.provider = this.dataset.provider;

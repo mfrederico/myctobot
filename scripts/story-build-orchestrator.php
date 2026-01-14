@@ -669,7 +669,7 @@ class StoryBuildOrchestrator {
         $job->updated_at = date('Y-m-d H:i:s');
         Bean::store($job);
 
-        output("  Updated aidevjobs record: {$job->job_id} -> {$job->status}", true);
+        output("  Updated aidevjobs record: {$job->job_uid} -> {$job->status}", true);
     }
 
     /**

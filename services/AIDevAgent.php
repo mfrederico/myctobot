@@ -125,7 +125,7 @@ class AIDevAgent {
      * Get user's SQLite database
      */
     private function getUserDb(): \SQLite3 {
-        $member = \RedBeanPHP\R::load('member', $this->memberId);
+        $member = \app\Bean::load('member', $this->memberId);
         if (!$member || empty($member->ceobot_db)) {
             throw new \Exception("Member database not configured");
         }

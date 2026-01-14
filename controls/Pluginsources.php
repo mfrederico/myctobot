@@ -208,7 +208,7 @@ class Pluginsources extends BaseControls\Control {
             Bean::store($source);
 
             $this->logger->info('Plugin repository source validated', [
-                'source_id' => $sourceId,
+                'source_uid' => $sourceId,
                 'validation_status' => $source->validation_status
             ]);
 
@@ -255,7 +255,7 @@ class Pluginsources extends BaseControls\Control {
 
             $this->logger->info('Plugin repository source deleted', [
                 'member_id' => $memberId,
-                'source_id' => $sourceId,
+                'source_uid' => $sourceId,
                 'repository_url' => $repositoryUrl
             ]);
 
@@ -297,7 +297,7 @@ class Pluginsources extends BaseControls\Control {
             Bean::store($source);
 
             $this->logger->info('Plugin repository source toggled', [
-                'source_id' => $sourceId,
+                'source_uid' => $sourceId,
                 'is_active' => $source->is_active
             ]);
 

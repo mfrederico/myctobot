@@ -83,13 +83,13 @@ class Pluginregistry extends BaseControls\Control {
 
             $this->logger->info('Plugin scan triggered', [
                 'member_id' => $this->member->id,
-                'scan_id' => $result['scan_id'],
+                'scan_uid' => $result['scan_uid'],
                 'repos_scanned' => $result['repos_scanned'],
                 'plugins_found' => $result['plugins_found']
             ]);
 
             $this->jsonSuccess([
-                'scan_id' => $result['scan_id'],
+                'scan_uid' => $result['scan_uid'],
                 'repos_scanned' => $result['repos_scanned'],
                 'plugins_found' => $result['plugins_found'],
                 'errors_encountered' => $result['errors_encountered'],
@@ -128,7 +128,7 @@ class Pluginregistry extends BaseControls\Control {
             $this->logger->info('Single repo scan triggered', [
                 'member_id' => $this->member->id,
                 'repo_id' => $repoId,
-                'scan_id' => $result['scan_id'],
+                'scan_uid' => $result['scan_uid'],
                 'plugins_found' => $result['plugins_found']
             ]);
 
@@ -139,7 +139,7 @@ class Pluginregistry extends BaseControls\Control {
             }
 
             $this->jsonSuccess([
-                'scan_id' => $result['scan_id'],
+                'scan_uid' => $result['scan_uid'],
                 'repos_scanned' => $result['repos_scanned'],
                 'plugins_found' => $result['plugins_found'],
                 'plugins' => $result['plugins']

@@ -188,7 +188,7 @@ class Mcpjobs extends Control {
             }
         }
 
-        // Method 2: Basic auth with member_id:job_id
+        // Method 2: Basic auth with member_id:job_uid
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
             if ($decoded && strpos($decoded, ':') !== false) {
@@ -237,7 +237,7 @@ class Mcpjobs extends Control {
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_id' => [
+                        'job_uid' => [
                             'type' => 'string',
                             'description' => 'The job ID (from MYCTOBOT_JOB_ID environment variable)'
                         ],
@@ -271,7 +271,7 @@ class Mcpjobs extends Control {
                             'description' => 'Whether verification tests passed'
                         ]
                     ],
-                    'required' => ['job_id', 'success']
+                    'required' => ['job_uid', 'success']
                 ]
             ],
             [
@@ -280,7 +280,7 @@ class Mcpjobs extends Control {
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_id' => [
+                        'job_uid' => [
                             'type' => 'string',
                             'description' => 'The job ID'
                         ],
@@ -300,7 +300,7 @@ class Mcpjobs extends Control {
                             'description' => 'Progress percentage (0-100)'
                         ]
                     ],
-                    'required' => ['job_id', 'status']
+                    'required' => ['job_uid', 'status']
                 ]
             ],
             [
@@ -309,7 +309,7 @@ class Mcpjobs extends Control {
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_id' => [
+                        'job_uid' => [
                             'type' => 'string',
                             'description' => 'The job ID'
                         ],
@@ -323,7 +323,7 @@ class Mcpjobs extends Control {
                             'description' => 'Type of failure'
                         ]
                     ],
-                    'required' => ['job_id', 'error_message']
+                    'required' => ['job_uid', 'error_message']
                 ]
             ]
         ];
@@ -345,7 +345,7 @@ class Mcpjobs extends Control {
         $this->logger->info('MCP Jobs tool call', [
             'tool' => $toolName,
             'member_id' => $this->memberId,
-            'job_id' => $args['job_id'] ?? 'unknown'
+            'job_uid' => $args['job_uid'] ?? 'unknown'
         ]);
 
         try {
@@ -388,7 +388,7 @@ class Mcpjobs extends Control {
      * Tool: job_complete - Mark job as complete
      */
     private function toolJobComplete(array $args): array {
-        $jobId = $args['job_id'] ?? '';
+        $jobId = $args['job_uid'] ?? '';
         $success = $args['success'] ?? false;
         $prUrl = $args['pr_url'] ?? '';
         $prNumber = $args['pr_number'] ?? null;
@@ -398,7 +398,7 @@ class Mcpjobs extends Control {
         $verificationPassed = $args['verification_passed'] ?? false;
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_id is required');
+            throw new \InvalidArgumentException('job_uid is required');
         }
 
         // Update job status via AIDevStatusService
@@ -412,7 +412,7 @@ class Mcpjobs extends Control {
             );
 
             $this->logger->info('Job completed successfully', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'member_id' => $this->memberId,
                 'pr_url' => $prUrl,
                 'verification_passed' => $verificationPassed
@@ -432,7 +432,7 @@ class Mcpjobs extends Control {
             return [
                 'status' => 'completed',
                 'message' => 'Job marked as complete. PR created successfully.',
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'pr_url' => $prUrl
             ];
         } else {
@@ -448,7 +448,7 @@ class Mcpjobs extends Control {
             return [
                 'status' => 'completed',
                 'message' => 'Job marked as complete.',
-                'job_id' => $jobId
+                'job_uid' => $jobId
             ];
         }
     }
@@ -457,13 +457,13 @@ class Mcpjobs extends Control {
      * Tool: job_update_status - Update job progress
      */
     private function toolJobUpdateStatus(array $args): array {
-        $jobId = $args['job_id'] ?? '';
+        $jobId = $args['job_uid'] ?? '';
         $status = $args['status'] ?? 'running';
         $message = $args['message'] ?? '';
         $progress = $args['progress'] ?? null;
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_id is required');
+            throw new \InvalidArgumentException('job_uid is required');
         }
 
         // Map friendly status to internal status
@@ -486,7 +486,7 @@ class Mcpjobs extends Control {
         );
 
         $this->logger->debug('Job status updated', [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'status' => $status,
             'message' => $message
         ]);
@@ -494,7 +494,7 @@ class Mcpjobs extends Control {
         return [
             'status' => 'updated',
             'message' => "Job status updated to: {$status}",
-            'job_id' => $jobId
+            'job_uid' => $jobId
         ];
     }
 
@@ -502,18 +502,18 @@ class Mcpjobs extends Control {
      * Tool: job_failed - Mark job as failed
      */
     private function toolJobFailed(array $args): array {
-        $jobId = $args['job_id'] ?? '';
+        $jobId = $args['job_uid'] ?? '';
         $errorMessage = $args['error_message'] ?? 'Unknown error';
         $errorType = $args['error_type'] ?? 'technical_error';
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_id is required');
+            throw new \InvalidArgumentException('job_uid is required');
         }
 
         AIDevStatusService::fail($this->memberId, $jobId, $errorMessage);
 
         $this->logger->warning('Job failed', [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'member_id' => $this->memberId,
             'error_type' => $errorType,
             'error_message' => $errorMessage
@@ -525,7 +525,7 @@ class Mcpjobs extends Control {
         return [
             'status' => 'failed',
             'message' => 'Job marked as failed. Error has been logged.',
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'error_type' => $errorType
         ];
     }
@@ -538,13 +538,13 @@ class Mcpjobs extends Control {
             // Find job details to get issue key, board ID, etc.
             $jobData = AIDevStatusService::getStatus($jobId, $this->memberId);
             if (!$jobData) {
-                $this->logger->warning('Could not find job for post-completion', ['job_id' => $jobId]);
+                $this->logger->warning('Could not find job for post-completion', ['job_uid' => $jobId]);
                 return;
             }
 
             $issueKey = $jobData['issue_key'] ?? '';
             $boardId = $jobData['board_id'] ?? 0;
-            $cloudId = $jobData['cloud_id'] ?? '';
+            $cloudId = $jobData['cloud_uid'] ?? '';
 
             if (empty($issueKey)) {
                 return;
@@ -576,7 +576,7 @@ class Mcpjobs extends Control {
             }
         } catch (\Exception $e) {
             $this->logger->error('Error in post-completion actions', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'error' => $e->getMessage()
             ]);
         }
@@ -594,7 +594,7 @@ class Mcpjobs extends Control {
 
             $issueKey = $jobData['issue_key'] ?? '';
             $boardId = $jobData['board_id'] ?? 0;
-            $cloudId = $jobData['cloud_id'] ?? '';
+            $cloudId = $jobData['cloud_uid'] ?? '';
 
             if (empty($issueKey) || empty($cloudId) || $cloudId === 'github') {
                 return;
@@ -611,7 +611,7 @@ class Mcpjobs extends Control {
             );
         } catch (\Exception $e) {
             $this->logger->error('Error in failure actions', [
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'error' => $e->getMessage()
             ]);
         }

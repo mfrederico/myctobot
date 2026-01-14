@@ -276,4 +276,9 @@ window.addEventListener('hashchange', highlightAgentFromHash);
 }
 </style>
 
-<?php include __DIR__ . '/../partials/agentsetupwizard.php'; ?>
+<?php
+// Pass shard availability to wizard
+$wizardHasShards = $has_shards ?? false;
+$wizardUseLocalRunner = $use_local_runner ?? false;
+include __DIR__ . '/../partials/agentsetupwizard.php';
+?>

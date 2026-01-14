@@ -169,7 +169,7 @@
                             <select class="form-select" id="board_id" required>
                                 <option value="">Select a board...</option>
                                 <?php foreach ($boards ?? [] as $board): ?>
-                                <option value="<?= $board['id'] ?>" data-cloud-id="<?= htmlspecialchars($board['cloud_id'] ?? '') ?>">
+                                <option value="<?= $board['id'] ?>" data-cloud-id="<?= htmlspecialchars($board['cloud_uid'] ?? '') ?>">
                                     <?= htmlspecialchars($board['board_name']) ?> (<?= htmlspecialchars($board['project_key']) ?>)
                                 </option>
                                 <?php endforeach; ?>
@@ -184,7 +184,7 @@
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <input type="hidden" id="cloud_id" value="">
+                        <input type="hidden" id="cloud_uid" value="">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-robot"></i> Start AI Developer
                         </button>
@@ -320,9 +320,9 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const boardSelect = document.getElementById('board_id');
-    const cloudIdInput = document.getElementById('cloud_id');
+    const cloudIdInput = document.getElementById('cloud_uid');
 
-    // Update cloud_id when board is selected
+    // Update cloud_uid when board is selected
     if (boardSelect) {
         boardSelect.addEventListener('change', function() {
             const selectedOption = this.options[this.selectedIndex];
@@ -351,7 +351,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         issue_key: issueKey,
                         board_id: boardId,
                         repo_id: repoId,
-                        cloud_id: cloudId,
+                        cloud_uid: cloudId,
                         <?php if (!empty($csrf)): ?>
                         csrf_token: '<?= $csrf['csrf_token'] ?? '' ?>'
                         <?php endif; ?>

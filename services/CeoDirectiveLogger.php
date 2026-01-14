@@ -88,7 +88,7 @@ class CeoDirectiveLogger {
 
         // Also log to application logger for real-time monitoring
         $this->logger->info($message, [
-            'directive_id' => $directiveId,
+            'directive_uid' => $directiveId,
             'member_id' => $this->memberId,
             'issue_key' => $issueKey,
             'source' => $source
@@ -118,7 +118,7 @@ class CeoDirectiveLogger {
         );
 
         $this->logger->debug('CEO directive processing step', [
-            'directive_id' => $directiveId,
+            'directive_uid' => $directiveId,
             'member_id' => $this->memberId,
             'action' => $action,
             'message' => $message
@@ -144,7 +144,7 @@ class CeoDirectiveLogger {
         );
 
         $this->logger->info('CEO directive completed', [
-            'directive_id' => $directiveId,
+            'directive_uid' => $directiveId,
             'member_id' => $this->memberId,
             'message' => $message
         ]);
@@ -188,7 +188,7 @@ class CeoDirectiveLogger {
         );
 
         $this->logger->error('CEO directive error', [
-            'directive_id' => $directiveId,
+            'directive_uid' => $directiveId,
             'member_id' => $this->memberId,
             'error' => $errorMessage,
             'recovery_action' => $recoveryAction,
@@ -232,7 +232,7 @@ class CeoDirectiveLogger {
 
         $logLevel = ($deliveryStatus === self::DELIVERY_SUCCESS) ? 'info' : 'warning';
         $this->logger->$logLevel('CEO directive response sent', [
-            'directive_id' => $directiveId,
+            'directive_uid' => $directiveId,
             'member_id' => $this->memberId,
             'delivery_status' => $deliveryStatus,
             'response_length' => strlen($responseContent)
@@ -248,7 +248,7 @@ class CeoDirectiveLogger {
     public function getDirectiveLogs(string $directiveId): array {
         $logs = Bean::find(
             'ceodirectivelogs',
-            'directive_id = ? ORDER BY created_at ASC',
+            'directive_uid = ? ORDER BY created_at ASC',
             [$directiveId]
         );
 
@@ -391,7 +391,7 @@ class CeoDirectiveLogger {
     ): void {
         try {
             $log = Bean::dispense('ceodirectivelogs');
-            $log->directive_id = $directiveId;
+            $log->directive_uid = $directiveId;
             $log->member_id = $this->memberId;
             $log->issue_key = $issueKey;
             $log->action = $action;
@@ -407,7 +407,7 @@ class CeoDirectiveLogger {
         } catch (\Exception $e) {
             // Log to application logger if database write fails
             $this->logger->error('Failed to write CEO directive log to database', [
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'action' => $action,
                 'error' => $e->getMessage()
             ]);
@@ -420,7 +420,7 @@ class CeoDirectiveLogger {
     private function getIssueKeyForDirective(string $directiveId): ?string {
         $log = Bean::findOne(
             'ceodirectivelogs',
-            'directive_id = ? AND issue_key IS NOT NULL LIMIT 1',
+            'directive_uid = ? AND issue_key IS NOT NULL LIMIT 1',
             [$directiveId]
         );
 
@@ -433,7 +433,7 @@ class CeoDirectiveLogger {
     private function formatLogEntry($log): array {
         return [
             'id' => (int)$log->id,
-            'directive_id' => $log->directive_id,
+            'directive_uid' => $log->directive_uid,
             'member_id' => (int)$log->member_id,
             'issue_key' => $log->issue_key,
             'action' => $log->action,

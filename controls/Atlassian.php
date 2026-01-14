@@ -29,9 +29,9 @@ class Atlassian extends BaseControls\Control {
         // Fetch registered webhooks for each site
         $webhooksPerSite = [];
         foreach ($sites as $site) {
-            $accessToken = AtlassianAuth::getValidToken($this->member->id, $site->cloud_id);
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $site->cloud_uid);
             if ($accessToken) {
-                $webhooksPerSite[$site->cloud_id] = AtlassianAuth::getRegisteredWebhooks($site->cloud_id, $accessToken);
+                $webhooksPerSite[$site->cloud_uid] = AtlassianAuth::getRegisteredWebhooks($site->cloud_uid, $accessToken);
             }
         }
 
@@ -143,8 +143,8 @@ class Atlassian extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         try {
-            // Cloud ID comes from URL: /atlassian/disconnect/{cloud_id}
-            $cloudId = $this->opId() ?? $this->getParam('cloud_id');
+            // Cloud ID comes from URL: /atlassian/disconnect/{cloud_uid}
+            $cloudId = $this->opId() ?? $this->getParam('cloud_uid');
 
             if (empty($cloudId)) {
                 if (Flight::request()->ajax) {
@@ -209,8 +209,8 @@ class Atlassian extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         try {
-            // Cloud ID comes from URL: /atlassian/refresh/{cloud_id}
-            $cloudId = $this->opId() ?? $this->getParam('cloud_id');
+            // Cloud ID comes from URL: /atlassian/refresh/{cloud_uid}
+            $cloudId = $this->opId() ?? $this->getParam('cloud_uid');
 
             if (empty($cloudId)) {
                 $this->jsonError('No cloud ID specified', 400);
@@ -243,7 +243,7 @@ class Atlassian extends BaseControls\Control {
             $resources = [];
             foreach ($sites as $site) {
                 $resources[] = [
-                    'cloud_id' => $site->cloud_id,
+                    'cloud_uid' => $site->cloud_uid,
                     'site_url' => $site->site_url,
                     'site_name' => $site->site_name,
                     'connected_at' => $site->created_at,
@@ -279,7 +279,7 @@ class Atlassian extends BaseControls\Control {
                 $status['sites'] = array_map(function($site) {
                     $expired = strtotime($site->expires_at) < time();
                     return [
-                        'cloud_id' => $site->cloud_id,
+                        'cloud_uid' => $site->cloud_uid,
                         'site_name' => $site->site_name,
                         'site_url' => $site->site_url,
                         'expired' => $expired
@@ -302,7 +302,7 @@ class Atlassian extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         try {
-            $cloudId = $params['cloud_id'] ?? $this->getParam('cloud_id');
+            $cloudId = $params['cloud_uid'] ?? $this->getParam('cloud_uid');
             if (!$cloudId) {
                 $this->flash('error', 'No site specified');
                 Flight::redirect('/atlassian');
@@ -356,12 +356,12 @@ class Atlassian extends BaseControls\Control {
             return;
         }
 
-        $cloudId = $this->getParam('cloud_id');
+        $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
             // Try to get from member's first Atlassian token
             $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
             if ($token) {
-                $cloudId = $token->cloud_id;
+                $cloudId = $token->cloud_uid;
             }
         }
 

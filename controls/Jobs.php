@@ -97,7 +97,7 @@ class Jobs extends BaseControls\Control {
         $issueKey = Flight::request()->data->issue_key ?? '';
         $boardId = (int)(Flight::request()->data->board_id ?? 0);
         $repoId = (int)(Flight::request()->data->repo_id ?? 0);
-        $cloudId = Flight::request()->data->cloud_id ?? '';
+        $cloudId = Flight::request()->data->cloud_uid ?? '';
         $useOrchestrator = !empty(Flight::request()->data->use_orchestrator);
 
         if (empty($issueKey) || empty($boardId) || empty($repoId) || empty($cloudId)) {
@@ -189,7 +189,7 @@ class Jobs extends BaseControls\Control {
             // Build payload for shard
             $payload = [
                 'anthropic_api_key' => $apiKey,
-                'job_id' => $shardJobId,
+                'job_uid' => $shardJobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
                     'summary' => $summary,
@@ -243,7 +243,7 @@ class Jobs extends BaseControls\Control {
             $this->logger->info('AI Developer shard job started', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'shard_job_id' => $shardJobId,
+                'shard_job_uid' => $shardJobId,
                 'shard_id' => $shard['id'],
                 'use_orchestrator' => $useOrchestrator
             ]);
@@ -251,7 +251,7 @@ class Jobs extends BaseControls\Control {
             $this->json([
                 'success' => true,
                 'issue_key' => $issueKey,
-                'shard_job_id' => $shardJobId,
+                'shard_job_uid' => $shardJobId,
                 'shard' => $shard['name'] ?? $shard['host'],
                 'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on shard',
                 'use_orchestrator' => $useOrchestrator
@@ -437,11 +437,11 @@ class Jobs extends BaseControls\Control {
                 return;
             }
 
-            // Get cloud_id from the job or look up from board
+            // Get cloud_uid from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
                 $board = Bean::load('jiraboards', (int)$job->board_id);
-                $cloudId = $board->cloud_id ?? null;
+                $cloudId = $board->cloud_uid ?? null;
             }
 
             if (empty($cloudId)) {
@@ -541,13 +541,13 @@ class Jobs extends BaseControls\Control {
      * Authentication: X-Cron-Secret header or ?secret= query param
      * Parameters:
      *   - tenant (required): tenant slug
-     *   - job_id OR issue_key (one required): identifies the job
+     *   - job_uid OR issue_key (one required): identifies the job
      *
      * This endpoint handles both Jira and GitHub issues based on the job's project_type.
      */
     public function cleanup() {
         $tenant = $this->getParam('tenant', '');
-        $jobId = $this->getParam('job_id', '');
+        $jobId = $this->getParam('job_uid', '');
         $issueKey = $this->getParam('issue_key', '');
         $providedSecret = $_SERVER['HTTP_X_API_KEY'] ?? $this->getParam('api_key', '');
 
@@ -574,13 +574,13 @@ class Jobs extends BaseControls\Control {
         }
 
         if (empty($jobId) && empty($issueKey)) {
-            Flight::jsonError('job_id or issue_key parameter required', 400);
+            Flight::jsonError('job_uid or issue_key parameter required', 400);
             return;
         }
 
         $this->logger->info('Jobs cleanup called', [
             'tenant' => $tenant,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'issue_key' => $issueKey
         ]);
 

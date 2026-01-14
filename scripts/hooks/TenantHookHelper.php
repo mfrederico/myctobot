@@ -233,7 +233,7 @@ class TenantHookHelper
 
         try {
             $log = R::dispense('aidevjoblogs');
-            $log->job_id = $this->jobId;
+            $log->job_uid = $this->jobId;
             $log->level = $level;
             $log->log_type = $type;
             $log->message = $this->truncate($message, 4000);

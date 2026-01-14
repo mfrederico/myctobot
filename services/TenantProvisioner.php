@@ -12,11 +12,11 @@ namespace app\services;
 
 use \Flight;
 use \PDO;
+use app\services\TenantSchemaBuilder;
 
 class TenantProvisioner {
 
     private PDO $adminDb;
-    private string $schemaPath;
     private string $configDir;
     private array $reservedSubdomains = [
         'www', 'api', 'admin', 'app', 'mail', 'smtp', 'pop', 'imap',
@@ -42,7 +42,6 @@ class TenantProvisioner {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
         ]);
 
-        $this->schemaPath = dirname(__DIR__) . '/sql/tenant_schema.sql';
         $this->configDir = dirname(__DIR__) . '/conf';
     }
 
@@ -157,51 +156,11 @@ class TenantProvisioner {
     }
 
     /**
-     * Run the schema on the new database
+     * Run the schema on the new database using RedBeanPHP
      */
     private function runSchema(string $dbName, string $dbUser, string $dbPass): void {
-        if (!file_exists($this->schemaPath)) {
-            throw new \Exception("Schema file not found: {$this->schemaPath}");
-        }
-
-        // Connect as the new user to their database
-        $dsn = "mysql:host=localhost;dbname={$dbName};charset=utf8mb4";
-        $db = new PDO($dsn, $dbUser, $dbPass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
-        ]);
-
-        // Read schema
-        $schema = file_get_contents($this->schemaPath);
-
-        // Remove CREATE DATABASE and USE statements (we already created the DB)
-        $schema = preg_replace('/CREATE\s+DATABASE[^;]+;/i', '', $schema);
-        $schema = preg_replace('/USE\s+[^;]+;/i', '', $schema);
-
-        // Remove single-line comments
-        $schema = preg_replace('/--.*$/m', '', $schema);
-
-        // Split by semicolons
-        $statements = explode(';', $schema);
-
-        foreach ($statements as $statement) {
-            $statement = trim($statement);
-            // Skip empty statements
-            if (empty($statement)) {
-                continue;
-            }
-            // Must start with a SQL keyword
-            if (!preg_match('/^(CREATE|INSERT|ALTER|DROP|UPDATE|DELETE|SET)/i', $statement)) {
-                continue;
-            }
-            try {
-                $db->exec($statement);
-            } catch (\PDOException $e) {
-                // Ignore "already exists" errors
-                if (strpos($e->getMessage(), 'already exists') === false) {
-                    throw $e;
-                }
-            }
-        }
+        $schemaBuilder = new TenantSchemaBuilder($dbName, $dbUser, $dbPass, 'localhost');
+        $schemaBuilder->build();
     }
 
     /**

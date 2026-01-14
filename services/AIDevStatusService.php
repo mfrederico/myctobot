@@ -58,13 +58,13 @@ class AIDevStatusService {
         }
 
         return [
-            'job_id' => $bean->job_id,
+            'job_uid' => $bean->job_uid,
             'member_id' => (int) $bean->member_id,
             'board_id' => (int) $bean->board_id,
             'issue_key' => $bean->issue_key,
             'project_type' => $bean->project_type ?? 'jira',
             'repo_connection_id' => $bean->repo_connection_id ? (int) $bean->repo_connection_id : null,
-            'cloud_id' => $bean->cloud_id,
+            'cloud_uid' => $bean->cloud_uid,
             'status' => $bean->status,
             'progress' => (int) $bean->progress,
             'current_step' => $bean->current_step,
@@ -73,7 +73,7 @@ class AIDevStatusService {
             'pr_url' => $bean->pr_url,
             'pr_number' => $bean->pr_number ? (int) $bean->pr_number : null,
             'pr_created_at' => $bean->pr_created_at,
-            'clarification_comment_id' => $bean->clarification_comment_id,
+            'clarification_comment_uid' => $bean->clarification_comment_uid,
             'clarification_questions' => json_decode($bean->clarification_questions ?: '[]', true),
             'files_changed' => json_decode($bean->files_changed ?: '[]', true),
             'commit_sha' => $bean->commit_sha,
@@ -110,13 +110,13 @@ class AIDevStatusService {
         $jobId = self::generateJobId();
 
         $job = Bean::dispense('aidevjobs');
-        $job->job_id = $jobId;
+        $job->job_uid = $jobId;
         $job->member_id = $memberId;
         $job->board_id = $boardId;
         $job->issue_key = $issueKey;
         $job->project_type = $projectType;
         $job->repo_connection_id = $repoConnectionId;
-        $job->cloud_id = $cloudId;
+        $job->cloud_uid = $cloudId;
         $job->status = self::STATUS_PENDING;
         $job->progress = 0;
         $job->current_step = self::STEP_INITIALIZING;
@@ -138,10 +138,10 @@ class AIDevStatusService {
     }
 
     /**
-     * Find job by job_id
+     * Find job by job_uid
      */
     private static function findByJobId(int $memberId, string $jobId): ?object {
-        return Bean::findOne('aidevjobs', 'job_id = ? AND member_id = ?', [$jobId, $memberId]);
+        return Bean::findOne('aidevjobs', 'job_uid = ? AND member_id = ?', [$jobId, $memberId]);
     }
 
     /**
@@ -187,7 +187,7 @@ class AIDevStatusService {
         $allowedFields = [
             'branch_name', 'pr_url', 'pr_number', 'commit_sha',
             'shopify_theme_id', 'shopify_preview_url', 'playwright_results',
-            'files_changed', 'preserve_branch', 'current_shard_job_id'
+            'files_changed', 'preserve_branch', 'current_shard_job_uid'
         ];
 
         foreach ($details as $key => $value) {
@@ -220,7 +220,7 @@ class AIDevStatusService {
 
         $job->status = self::STATUS_WAITING_CLARIFICATION;
         $job->current_step = 'Waiting for clarification';
-        $job->clarification_comment_id = $commentId;
+        $job->clarification_comment_uid = $commentId;
         $job->clarification_questions = json_encode($questions);
         $job->updated_at = date('Y-m-d H:i:s');
 
@@ -619,7 +619,7 @@ class AIDevStatusService {
         $count = 0;
         foreach ($jobs as $job) {
             // Delete associated logs
-            R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
+            Bean::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
             Bean::trash($job);
             $count++;
         }
@@ -647,7 +647,7 @@ class AIDevStatusService {
         $count = 0;
         foreach ($jobs as $job) {
             // Delete associated logs
-            R::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
+            Bean::exec('DELETE FROM aidevjoblogs WHERE issue_key = ?', [$job->issue_key]);
             Bean::trash($job);
             $count++;
         }

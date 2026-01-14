@@ -40,7 +40,7 @@
 
                     <!-- Job Details -->
                     <div class="text-muted small">
-                        <p class="mb-1">Job ID: <code><?= htmlspecialchars($job['job_id']) ?></code></p>
+                        <p class="mb-1">Job ID: <code><?= htmlspecialchars($job['job_uid']) ?></code></p>
                         <p class="mb-1">Started: <?= $job['started_at'] ?? $job['created_at'] ?></p>
                         <p class="mb-1" id="lastUpdated" style="display: none;">Last update: <span></span></p>
                     </div>

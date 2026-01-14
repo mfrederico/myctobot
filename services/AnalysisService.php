@@ -10,6 +10,7 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\plugins\AtlassianAuth;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
@@ -43,7 +44,7 @@ class AnalysisService {
         $this->memberId = $memberId;
 
         // Load member
-        $this->member = R::load('member', $memberId);
+        $this->member = Bean::load('member', $memberId);
         if (!$this->member->id) {
             throw new \Exception("Member not found: {$memberId}");
         }
@@ -70,14 +71,14 @@ class AnalysisService {
      *
      * @param int $boardId Board ID to analyze
      * @param array $options Options:
-     *   - job_id: Job ID for progress tracking (optional)
+     *   - job_uid: Job ID for progress tracking (optional)
      *   - status_filter: Override status filter (optional)
      *   - send_email: Send email after analysis (default: false)
      *   - analysis_type: Type for storage - 'priorities' or 'digest' (default: 'priorities')
      * @return array Result with analysis_id, success status, etc.
      */
     public function runAnalysis(int $boardId, array $options = []): array {
-        $jobId = $options['job_id'] ?? null;
+        $jobId = $options['job_uid'] ?? null;
         $statusFilter = $options['status_filter'] ?? null;
         $sendEmail = $options['send_email'] ?? false;
         $analysisType = $options['analysis_type'] ?? 'priorities';
@@ -107,7 +108,7 @@ class AnalysisService {
             $this->updateProgress($jobId, 'Connecting to Jira...', 10);
 
             // Initialize Jira client
-            $jiraClient = new JiraClient($this->memberId, $board['cloud_id']);
+            $jiraClient = new JiraClient($this->memberId, $board['cloud_uid']);
 
             // Update status: Fetching issues
             $this->updateProgress($jobId, 'Fetching sprint issues...', 20);
@@ -219,7 +220,7 @@ class AnalysisService {
             $this->updateProgress($jobId, 'Generating report...', 85);
 
             // Get Jira site URL for creating ticket links
-            $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->memberId, $board['cloud_id']);
+            $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->memberId, $board['cloud_uid']);
 
             // Generate markdown report with Jira links
             $markdown = $priorityAnalyzer->generateDailyLog($priorityResult, $jiraSiteUrl);
@@ -241,7 +242,7 @@ class AnalysisService {
                 'board_id' => $boardId,
                 'analysis_id' => $analysisId,
                 'issue_count' => count($issues),
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'send_email' => $sendEmail
             ]);
 
@@ -432,7 +433,7 @@ class AnalysisService {
      *   - anthropic_api_key: Override Anthropic API key (optional)
      *   - use_jira_mcp: Let shard fetch from Jira via MCP (default: true)
      *   - issues: Pre-fetched issues if not using Jira MCP
-     * @return array Result with job_id, shard info, etc.
+     * @return array Result with job_uid, shard info, etc.
      */
     public function runShardAnalysis(int $boardId, array $options = []): array {
         $sendEmail = $options['send_email'] ?? false;
@@ -454,7 +455,7 @@ class AnalysisService {
         }
 
         // Get MCP credentials (Jira/GitHub)
-        $credentials = ShardRouter::getMemberMcpCredentials($this->memberId, $board['cloud_id']);
+        $credentials = ShardRouter::getMemberMcpCredentials($this->memberId, $board['cloud_uid']);
 
         // Find an available shard with 'jira' capability if using Jira MCP
         $requiredCapabilities = $useJiraMcp ? ['jira'] : [];
@@ -469,8 +470,8 @@ class AnalysisService {
 
         // Create digest job record via member association
         // Uses RedBeanPHP associations: member->ownDigestjobsList
-        $digestJob = R::dispense('digestjobs');
-        $digestJob->job_id = $jobId;
+        $digestJob = Bean::dispense('digestjobs');
+        $digestJob->job_uid = $jobId;
         $digestJob->board_id = $boardId;
         $digestJob->shard_id = $shard['id'];  // External shard ID
         $digestJob->status = 'queued';
@@ -482,7 +483,7 @@ class AnalysisService {
 
         // Add to member's ownDigestjobsList (sets member_id automatically)
         $this->member->ownDigestjobsList[] = $digestJob;
-        R::store($this->member);
+        Bean::store($this->member);
 
         $this->log("Created digest job {$jobId} for board {$board['board_name']}");
 
@@ -497,18 +498,18 @@ class AnalysisService {
             'board_name' => $board['board_name'],
             'project_key' => $board['project_key'],
             'status_filter' => $board['status_filter'] ?? 'To Do',
-            'cloud_id' => $board['cloud_id']
+            'cloud_uid' => $board['cloud_uid']
         ];
 
         // Get Jira site URL for ticket links
-        $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->memberId, $board['cloud_id']);
+        $jiraSiteUrl = AtlassianAuth::getSiteUrl($this->memberId, $board['cloud_uid']);
         if ($jiraSiteUrl) {
             $boardInfo['jira_site_url'] = $jiraSiteUrl;
         }
 
         // Build request payload
         $payload = [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'anthropic_api_key' => $anthropicApiKey,
             'board' => $boardInfo,
             'options' => [
@@ -537,7 +538,7 @@ class AnalysisService {
                 // Fetch issues locally
                 $statusFilter = $board['status_filter'] ?? 'To Do';
                 $statusArray = array_map('trim', explode(',', $statusFilter));
-                $jiraClient = new JiraClient($this->memberId, $board['cloud_id']);
+                $jiraClient = new JiraClient($this->memberId, $board['cloud_uid']);
                 $issues = $jiraClient->getCurrentSprintIssues($board['project_key'], $statusArray);
                 $payload['issues'] = $issues;
             }
@@ -568,21 +569,21 @@ class AnalysisService {
             // Update job status
             $digestJob->status = 'running';
             $digestJob->started_at = date('Y-m-d H:i:s');
-            R::store($digestJob);
+            Bean::store($digestJob);
 
             $this->log("Shard analysis started on {$shard['name']}");
 
             $this->logger->info('Shard digest analysis started', [
                 'member_id' => $this->memberId,
                 'board_id' => $boardId,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'shard_id' => $shard['id'],
                 'shard_name' => $shard['name']
             ]);
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'shard_id' => $shard['id'],
                 'shard_name' => $shard['name'],
                 'board' => $board,
@@ -595,7 +596,7 @@ class AnalysisService {
             $digestJob->status = 'failed';
             $digestJob->error = $e->getMessage();
             $digestJob->completed_at = date('Y-m-d H:i:s');
-            R::store($digestJob);
+            Bean::store($digestJob);
 
             $this->logger->error('Failed to start shard analysis', [
                 'member_id' => $this->memberId,
@@ -615,14 +616,14 @@ class AnalysisService {
      * @return array|null Job status or null if not found
      */
     public function getDigestJobStatus(string $jobId): ?array {
-        $job = R::findOne('digestjobs', 'job_id = ? AND member_id = ?', [$jobId, $this->memberId]);
+        $job = Bean::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->memberId]);
 
         if (!$job) {
             return null;
         }
 
         return [
-            'job_id' => $job->job_id,
+            'job_uid' => $job->job_uid,
             'status' => $job->status,
             'board_id' => $job->board_id,
             'board_name' => $job->board_name,
@@ -646,7 +647,7 @@ class AnalysisService {
         }
 
         // Check member's enterprise settings (key-value pattern)
-        $setting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
         if ($setting && !empty($setting->setting_value)) {
             return $setting->setting_value;
         }
@@ -663,7 +664,7 @@ class AnalysisService {
      */
     private function getBoardAnthropicKey(int $keyId): ?array {
         try {
-            $key = R::load('anthropickeys', $keyId);
+            $key = Bean::load('anthropickeys', $keyId);
 
             if (!$key->id || empty($key->api_key)) {
                 $this->logger->warning('API key not found', [

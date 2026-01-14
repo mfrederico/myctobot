@@ -269,7 +269,7 @@ class CeoDirectiveService {
      *
      * @param array $directive The validated directive data
      * @param int|null $memberId Optional member ID for association
-     * @return array Result with 'success', 'directive_id', and 'error' keys
+     * @return array Result with 'success', 'directive_uid', and 'error' keys
      */
     public function parseAndQueue(array $directive, ?int $memberId = null): array {
         // Validate first
@@ -325,7 +325,7 @@ class CeoDirectiveService {
             $directiveId = Bean::store($directiveBean);
 
             $this->logger->info('CEO directive queued for processing', [
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'directive_type' => $directive['directive_type'],
                 'priority' => $directive['priority'],
                 'member_id' => $memberId
@@ -333,7 +333,7 @@ class CeoDirectiveService {
 
             return [
                 'success' => true,
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'status' => 'queued',
                 'warnings' => $validation['warnings']
             ];
@@ -390,7 +390,7 @@ class CeoDirectiveService {
     public static function logDirectiveEvent(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
+            $log->directive_uid = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;
@@ -401,7 +401,7 @@ class CeoDirectiveService {
             $logger = Flight::get('log');
             $logger->error('Failed to log directive event', [
                 'error' => $e->getMessage(),
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'phase' => $phase
             ]);
         }

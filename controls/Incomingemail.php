@@ -157,7 +157,7 @@ class Incomingemail extends BaseControls\Control {
             $directiveId = $this->generateDirectiveId();
 
             $directive = Bean::dispense('ceodirectives');
-            $directive->directive_id = $directiveId;
+            $directive->directive_uid = $directiveId;
             $directive->member_id = $memberId;
             $directive->email_from = $from;
             $directive->email_subject = $subject;
@@ -177,7 +177,7 @@ class Incomingemail extends BaseControls\Control {
             ]);
 
             $this->logger->info('CEO directive created', [
-                'directive_id' => $directiveId,
+                'directive_uid' => $directiveId,
                 'member_id' => $memberId,
                 'subject' => $subject,
                 'approval_mode' => $approvalMode
@@ -187,7 +187,7 @@ class Incomingemail extends BaseControls\Control {
             Flight::response()->status(200);
             echo json_encode([
                 'success' => true,
-                'directive_id' => $directiveId
+                'directive_uid' => $directiveId
             ]);
 
         } catch (\Exception $e) {

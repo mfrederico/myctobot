@@ -49,12 +49,12 @@ class Reviewboard extends BaseControls\Control {
         $projectData = [];
         foreach ($projects as $project) {
             // Get directive for this project
-            $directive = $project->directive_id
-                ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
+            $directive = $project->directive_uid
+                ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_uid])
                 : null;
 
             // Get epics for this project
-            $epics = Bean::find('ctoepics', 'project_id = ? ORDER BY sequence ASC', [$project->id]);
+            $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
 
             $epicData = [];
             $pendingCount = 0;
@@ -155,7 +155,7 @@ class Reviewboard extends BaseControls\Control {
             if ($story) {
                 $epic = Bean::load('ctoepics', $story->epic_id);
                 if ($epic && $epic->id) {
-                    $project = Bean::load('ctoprojects', $epic->project_id);
+                    $project = Bean::load('ctoprojects', $epic->project_uid);
                 }
             }
 
@@ -181,7 +181,7 @@ class Reviewboard extends BaseControls\Control {
         // Auto-cleanup stale jobs (running in DB but no tmux session)
         AIDevJobService::cleanupStaleJobs();
 
-        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        $project = Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
         if (!$project) {
             $this->flash('error', 'Project not found');
             Flight::redirect('/reviewboard');
@@ -189,12 +189,12 @@ class Reviewboard extends BaseControls\Control {
         }
 
         // Get directive
-        $directive = $project->directive_id
-            ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
+        $directive = $project->directive_uid
+            ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_uid])
             : null;
 
         // Get epics with stories
-        $epics = Bean::find('ctoepics', 'project_id = ? ORDER BY sequence ASC', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
 
         $epicData = [];
         foreach ($epics as $epic) {
@@ -369,16 +369,16 @@ class Reviewboard extends BaseControls\Control {
     public function approveproject() {
         if (!$this->requireLogin()) return;
 
-        $projectId = $this->getParam('project_id');
+        $projectId = $this->getParam('project_uid');
 
-        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        $project = Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
         if (!$project) {
             Flight::jsonError('Project not found', 404);
             return;
         }
 
         // Get all pending stories for this project
-        $epics = Bean::find('ctoepics', 'project_id = ?', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
         $storyIds = [];
 
         foreach ($epics as $epic) {
@@ -404,9 +404,9 @@ class Reviewboard extends BaseControls\Control {
     public function deleteproject() {
         if (!$this->requireLogin()) return;
 
-        $projectId = $this->getParam('project_id');
+        $projectId = $this->getParam('project_uid');
 
-        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        $project = Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
         if (!$project) {
             Flight::jsonError('Project not found', 404);
             return;
@@ -415,7 +415,7 @@ class Reviewboard extends BaseControls\Control {
         $deleted = 0;
 
         // Delete all pending stories for this project
-        $epics = Bean::find('ctoepics', 'project_id = ?', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
 
         foreach ($epics as $epic) {
             $stories = Bean::find('ctostories', 'epic_id = ? AND status = ?', [$epic->id, 'pending_review']);
@@ -436,7 +436,7 @@ class Reviewboard extends BaseControls\Control {
         }
 
         // Check if project should be deleted
-        $remainingEpics = Bean::count('ctoepics', 'project_id = ?', [$project->id]);
+        $remainingEpics = Bean::count('ctoepics', 'project_uid = ?', [$project->id]);
         if ($remainingEpics === 0) {
             $project->status = 'cancelled';
             Bean::store($project);
@@ -467,7 +467,7 @@ class Reviewboard extends BaseControls\Control {
         $job = $jobs[0];
 
         // Get logs for this job
-        $logs = AIDevStatusService::getLogs($job['job_id'], $this->member->id);
+        $logs = AIDevStatusService::getLogs($job['job_uid'], $this->member->id);
 
         Flight::jsonSuccess([
             'job' => $job,
@@ -516,7 +516,7 @@ class Reviewboard extends BaseControls\Control {
         }
 
         return [
-            'cloud_id' => $board->cloud_id,
+            'cloud_uid' => $board->cloud_uid,
             'project_key' => $board->project_key,
             'board_id' => $board->id,
         ];
@@ -637,11 +637,11 @@ class Reviewboard extends BaseControls\Control {
     public function updateproject() {
         if (!$this->requireLogin()) return;
 
-        $projectId = $this->getParam('project_id');
+        $projectId = $this->getParam('project_uid');
         $name = $this->getParam('name');
         $description = $this->getParam('description');
 
-        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        $project = Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
         if (!$project) {
             Flight::jsonError('Project not found', 404);
             return;
@@ -663,11 +663,11 @@ class Reviewboard extends BaseControls\Control {
     public function createepic() {
         if (!$this->requireLogin()) return;
 
-        $projectId = $this->getParam('project_id');
+        $projectId = $this->getParam('project_uid');
         $title = $this->getParam('title');
         $description = $this->getParam('description');
 
-        $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+        $project = Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
         if (!$project) {
             Flight::jsonError('Project not found', 404);
             return;
@@ -679,11 +679,11 @@ class Reviewboard extends BaseControls\Control {
         }
 
         // Get max sequence for ordering
-        $maxSeq = Bean::getCell('SELECT MAX(sequence) FROM ctoepics WHERE project_id = ?', [$project->id]);
+        $maxSeq = Bean::getCell('SELECT MAX(sequence) FROM ctoepics WHERE project_uid = ?', [$project->id]);
 
         $epic = Bean::dispense('ctoepics');
         $epic->epic_id = bin2hex(random_bytes(16));
-        $epic->project_id = $project->id;
+        $epic->project_uid = $project->id;
         $epic->title = $title;
         $epic->description = $description;
         $epic->status = 'backlog';
@@ -1058,7 +1058,7 @@ class Reviewboard extends BaseControls\Control {
     public function checkjobsession() {
         if (!$this->requireLogin()) return;
 
-        $jobId = $this->getParam('job_id');
+        $jobId = $this->getParam('job_uid');
         if (!$jobId) {
             Flight::jsonError('Job ID required', 400);
             return;
@@ -1074,7 +1074,7 @@ class Reviewboard extends BaseControls\Control {
     public function markjobstale() {
         if (!$this->requireLogin()) return;
 
-        $jobId = $this->getParam('job_id');
+        $jobId = $this->getParam('job_uid');
         if (!$jobId) {
             Flight::jsonError('Job ID required', 400);
             return;
@@ -1086,7 +1086,7 @@ class Reviewboard extends BaseControls\Control {
         if ($result['success']) {
             $this->logger->info('Job marked as stale', [
                 'member_id' => $this->member->id,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $result['issue_key'] ?? null
             ]);
             Flight::jsonSuccess($result, 'Job marked as failed');
@@ -1101,7 +1101,7 @@ class Reviewboard extends BaseControls\Control {
     public function retryjob() {
         if (!$this->requireLogin()) return;
 
-        $jobId = $this->getParam('job_id');
+        $jobId = $this->getParam('job_uid');
         if (!$jobId) {
             Flight::jsonError('Job ID required', 400);
             return;
@@ -1114,7 +1114,7 @@ class Reviewboard extends BaseControls\Control {
         if ($result['success']) {
             $this->logger->info('Job retry initiated', [
                 'member_id' => $this->member->id,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $result['issue_key'] ?? null
             ]);
             Flight::jsonSuccess($result, 'Job retry started');
@@ -1159,7 +1159,7 @@ class Reviewboard extends BaseControls\Control {
         // Determine project from first story
         $firstStory = Bean::findOne('ctostories', 'id = ?', [$validStoryIds[0]]);
         $epic = Bean::load('ctoepics', $firstStory->epic_id);
-        $projectId = $epic->project_id ?? null;
+        $projectId = $epic->project_uid ?? null;
 
         if (!$projectId) {
             Flight::jsonError('Could not determine project', 400);
@@ -1196,7 +1196,7 @@ class Reviewboard extends BaseControls\Control {
 
         $this->logger->info('Starting QA release build', [
             'member_id' => $this->member->id,
-            'project_id' => $projectId,
+            'project_uid' => $projectId,
             'story_ids' => $validStoryIds,
             'target_branch' => $targetBranch,
             'qa_branch' => $qaBranch,
@@ -1212,7 +1212,7 @@ class Reviewboard extends BaseControls\Control {
 
         Flight::jsonSuccess([
             'story_count' => count($validStoryIds),
-            'project_id' => $projectId,
+            'project_uid' => $projectId,
             'target_branch' => $targetBranch,
             'qa_branch' => $qaBranch,
             'log_file' => $logFile,
@@ -1405,7 +1405,7 @@ class Reviewboard extends BaseControls\Control {
 
         // Create job record
         $job = Bean::dispense('aidevjobs');
-        $job->job_id = bin2hex(random_bytes(16));
+        $job->job_uid = bin2hex(random_bytes(16));
         $job->member_id = $this->member->id;
         $job->issue_key = $story->jira_issue_key;
         $job->project_type = 'github';
@@ -1416,7 +1416,7 @@ class Reviewboard extends BaseControls\Control {
         Bean::store($job);
 
         // Link job to story
-        $story->aidev_job_id = $job->job_id;
+        $story->aidev_job_uid = $job->job_uid;
         Bean::store($story);
 
         return $job;
@@ -1481,10 +1481,10 @@ class Reviewboard extends BaseControls\Control {
             $this->logger->info('New job started from Review Board', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'job_id' => $result['job_id'] ?? null
+                'job_uid' => $result['job_uid'] ?? null
             ]);
             Flight::jsonSuccess([
-                'job_id' => $result['job_id'] ?? null,
+                'job_uid' => $result['job_uid'] ?? null,
                 'issue_key' => $issueKey
             ], 'Job started successfully');
         } else {

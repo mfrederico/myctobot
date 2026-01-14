@@ -152,7 +152,7 @@ $cloudId = null;
 if ($provider === 'jira') {
     $atlassianTokenCheck = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
     if ($atlassianTokenCheck) {
-        $cloudId = $atlassianTokenCheck->cloud_id;
+        $cloudId = $atlassianTokenCheck->cloud_uid;
     } else {
         echo "ERROR: No Atlassian token found for member {$memberId}\n";
         echo "Please connect your Atlassian account first.\n";
@@ -456,7 +456,7 @@ $jiraOAuthToken = '';
 $jiraSiteUrl = '';
 
 try {
-    $atlassianToken = R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?', [$memberId, $cloudId]);
+    $atlassianToken = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
     if ($atlassianToken) {
         $jiraEmail = $atlassianToken->email ?? '';
         // Get the site URL for ticket links
@@ -1450,7 +1450,7 @@ cleanup_labels() {
     local response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
         -H "X-API-Key: $MYCTOBOT_API_KEY" \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "tenant=$MYCTOBOT_WORKSPACE&issue_key=$MYCTOBOT_ISSUE_KEY&job_id=$MYCTOBOT_JOB_ID" 2>/dev/null)
+        -d "tenant=$MYCTOBOT_WORKSPACE&issue_key=$MYCTOBOT_ISSUE_KEY&job_uid=$MYCTOBOT_JOB_ID" 2>/dev/null)
 
     local http_code=$(echo "$response" | tail -1)
     local body=$(echo "$response" | head -n -1)

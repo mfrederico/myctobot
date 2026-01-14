@@ -321,7 +321,7 @@ class GoogleAuth {
                 board_id INTEGER NOT NULL,
                 board_name TEXT NOT NULL,
                 project_key TEXT NOT NULL,
-                cloud_id TEXT NOT NULL,
+                cloud_uid TEXT NOT NULL,
                 board_type TEXT DEFAULT 'scrum',
                 enabled INTEGER DEFAULT 1,
                 digest_enabled INTEGER DEFAULT 0,
@@ -333,7 +333,7 @@ class GoogleAuth {
                 last_digest_at TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT,
-                UNIQUE(board_id, cloud_id)
+                UNIQUE(board_id, cloud_uid)
             )
         ");
 
@@ -377,7 +377,7 @@ class GoogleAuth {
         ");
 
         // Create indexes
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_id)");
+        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_uid)");
         $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
         $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
         $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");

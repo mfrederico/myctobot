@@ -300,7 +300,7 @@
 </div>
 
 <script>
-const projectId = '<?= htmlspecialchars($project->project_id) ?>';
+const projectId = '<?= htmlspecialchars($project->project_uid) ?>';
 
 // AJAX helper
 async function apiCall(endpoint, data) {
@@ -322,7 +322,7 @@ async function saveProject() {
     const description = document.getElementById('edit-project-description').value;
 
     const result = await apiCall('/reviewboard/updateproject', {
-        project_id: projectId,
+        project_uid: projectId,
         name: name,
         description: description
     });
@@ -357,7 +357,7 @@ async function saveEpic() {
 
     const endpoint = epicId ? '/reviewboard/updateepic' : '/reviewboard/createepic';
     const result = await apiCall(endpoint, {
-        project_id: projectId,
+        project_uid: projectId,
         epic_id: epicId || undefined,
         title: title,
         description: description

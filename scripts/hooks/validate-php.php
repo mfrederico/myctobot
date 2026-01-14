@@ -106,7 +106,7 @@ function findManualFkAssignments(string $content): array
     // Known FK columns that should use associations
     $knownFks = [
         'board_id', 'boardId', 'jiraboards_id',
-        'job_id', 'jobId', 'aidevjobs_id',
+        'job_uid', 'jobId', 'aidevjobs_id',
         'repo_id', 'repoId', 'repoconnections_id',
         'member_id', 'memberId',
         'parent_id', 'parentId',

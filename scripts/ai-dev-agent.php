@@ -205,17 +205,17 @@ try {
         }
 
         $issueKey = $job['issue_key'];
-        $cloudId = $job['cloud_id'] ?? '';
+        $cloudId = $job['cloud_uid'] ?? '';
         $repoId = $job['repo_connection_id'];
-        $answerCommentId = $options['comment'] ?? $job['clarification_comment_id'];
+        $answerCommentId = $options['comment'] ?? $job['clarification_comment_uid'];
 
         logMessage("Resuming job for ticket: {$issueKey}");
 
-        // Get cloud_id if not in job data
+        // Get cloud_uid if not in job data
         if (empty($cloudId)) {
             // Try to find it from board using RedBeanPHP
             $boardBean = R::load('jiraboards', (int)$job['board_id']);
-            $cloudId = $boardBean->cloud_id ?? '';
+            $cloudId = $boardBean->cloud_uid ?? '';
         }
 
         if (empty($cloudId)) {
@@ -245,17 +245,17 @@ try {
         $branchName = $options['branch'] ?? $job['branch_name'] ?? '';
         $prNumber = isset($options['pr']) ? (int)$options['pr'] : ($job['pr_number'] ?? null);
         $issueKey = $job['issue_key'];
-        $cloudId = $job['cloud_id'] ?? '';
+        $cloudId = $job['cloud_uid'] ?? '';
         $repoId = $job['repo_connection_id'];
 
         if (empty($branchName)) {
             throw new \Exception("Branch name is required for retry action");
         }
 
-        // Get cloud_id if not in job data using RedBeanPHP
+        // Get cloud_uid if not in job data using RedBeanPHP
         if (empty($cloudId)) {
             $boardBean = R::load('jiraboards', (int)$job['board_id']);
-            $cloudId = $boardBean->cloud_id ?? '';
+            $cloudId = $boardBean->cloud_uid ?? '';
         }
 
         if (empty($cloudId)) {

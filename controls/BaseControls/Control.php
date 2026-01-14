@@ -184,6 +184,32 @@ abstract class Control {
         }
         return true;
     }
+
+    /**
+     * Validate CSRF token from header (for AJAX/JSON requests)
+     *
+     * Use this for endpoints that receive JSON body where token can't be in POST data.
+     * Frontend should send token in X-CSRF-TOKEN header.
+     *
+     * @return bool True if valid or CSRF disabled, false otherwise
+     */
+    protected function validateCSRFHeader(): bool {
+        // Skip CSRF validation if disabled in config
+        if (!Flight::get('security.csrf_enabled')) {
+            return true;
+        }
+
+        $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        $csrfSession = $_SESSION['csrf_token'] ?? '';
+
+        if (empty($csrfHeader) || $csrfHeader !== $csrfSession) {
+            $this->logger->warning('CSRF header validation failed');
+            Flight::jsonError('Invalid security token', 403);
+            return false;
+        }
+
+        return true;
+    }
     
     /**
      * Get request parameter with optional default

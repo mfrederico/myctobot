@@ -59,7 +59,7 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <h5 class="card-title mb-0">
-                                    <a href="/projects/view/<?= htmlspecialchars($project->project_id) ?>" class="text-decoration-none">
+                                    <a href="/projects/view/<?= htmlspecialchars($project->project_uid) ?>" class="text-decoration-none">
                                         <?= htmlspecialchars($project->name) ?>
                                     </a>
                                 </h5>
@@ -108,7 +108,7 @@
                                     Created <?= date('M j', strtotime($project->created_at)) ?>
                                 </small>
                                 <div>
-                                    <a href="/projects/view/<?= htmlspecialchars($project->project_id) ?>"
+                                    <a href="/projects/view/<?= htmlspecialchars($project->project_uid) ?>"
                                        class="btn btn-sm btn-outline-primary">
                                         View <i class="bi bi-arrow-right"></i>
                                     </a>

@@ -22,7 +22,7 @@
                             (Started: <?= $activeJob['created_at'] ?>)
                         </small>
                     </div>
-                    <a href="/analysis/shardprogress/<?= urlencode($activeJob['job_id']) ?>" class="btn btn-primary btn-sm">
+                    <a href="/analysis/shardprogress/<?= urlencode($activeJob['job_uid']) ?>" class="btn btn-primary btn-sm">
                         <i class="bi bi-eye"></i> View Progress
                     </a>
                 </div>
@@ -101,7 +101,7 @@
                         </tr>
                         <tr>
                             <th>Cloud ID:</th>
-                            <td><code><?= htmlspecialchars($board['cloud_id']) ?></code></td>
+                            <td><code><?= htmlspecialchars($board['cloud_uid']) ?></code></td>
                         </tr>
                         <?php if (!empty($board['digest_cc'])): ?>
                         <tr>

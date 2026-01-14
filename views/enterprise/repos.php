@@ -52,7 +52,7 @@
                                     <?php else: ?>
                                     <span class="badge bg-secondary">Disabled</span>
                                     <?php endif; ?>
-                                    <?php if (!empty($repo['webhook_id'])): ?>
+                                    <?php if (!empty($repo['webhook_uid'])): ?>
                                     <span class="badge bg-info" title="Webhook auto-configured">
                                         <i class="bi bi-link-45deg"></i> Webhook
                                     </span>

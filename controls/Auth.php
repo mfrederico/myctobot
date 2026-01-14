@@ -775,7 +775,7 @@ HTML;
                     board_id INTEGER NOT NULL,
                     board_name TEXT NOT NULL,
                     project_key TEXT NOT NULL,
-                    cloud_id TEXT NOT NULL,
+                    cloud_uid TEXT NOT NULL,
                     board_type TEXT DEFAULT 'scrum',
                     enabled INTEGER DEFAULT 1,
                     digest_enabled INTEGER DEFAULT 0,
@@ -786,7 +786,7 @@ HTML;
                     last_digest_at TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT,
-                    UNIQUE(board_id, cloud_id)
+                    UNIQUE(board_id, cloud_uid)
                 )
             ");
 
@@ -830,7 +830,7 @@ HTML;
             ");
 
             // Create indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_uid)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");
@@ -891,13 +891,13 @@ HTML;
                     issue_key TEXT NOT NULL UNIQUE,
                     board_id INTEGER NOT NULL,
                     repo_connection_id INTEGER,
-                    cloud_id TEXT,
+                    cloud_uid TEXT,
                     status TEXT DEFAULT 'pending',
-                    current_shard_job_id TEXT,
+                    current_shard_job_uid TEXT,
                     branch_name TEXT,
                     pr_url TEXT,
                     pr_number INTEGER,
-                    clarification_comment_id TEXT,
+                    clarification_comment_uid TEXT,
                     clarification_questions TEXT,
                     error_message TEXT,
                     run_count INTEGER DEFAULT 0,
@@ -917,7 +917,7 @@ HTML;
             $userDb->exec("
                 CREATE TABLE IF NOT EXISTS aidevjoblogs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_id TEXT NOT NULL,
+                    job_uid TEXT NOT NULL,
                     log_level TEXT DEFAULT 'info',
                     message TEXT NOT NULL,
                     context_json TEXT,
@@ -952,7 +952,7 @@ HTML;
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON aidevjoblogs(job_id)");
+            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON aidevjoblogs(job_uid)");
 
             // Plugin Registry indexes
             $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_provider ON pluginrepositorysource(provider)");

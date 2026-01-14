@@ -8,6 +8,7 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class InviteService {
 
@@ -44,7 +45,7 @@ class InviteService {
         ?string $displayName = null
     ): array {
         // Check if email already exists
-        $existing = R::findOne('member', 'email = ?', [$email]);
+        $existing = Bean::findOne('member', 'email = ?', [$email]);
         if ($existing) {
             if ($existing->status === 'pending') {
                 // Resend invite for pending member
@@ -61,7 +62,7 @@ class InviteService {
         $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
 
         // Create pending member
-        $member = R::dispense('member');
+        $member = Bean::dispense('member');
         $member->email = $email;
         $member->username = $displayName ?: explode('@', $email)[0];
         $member->display_name = $displayName;
@@ -74,7 +75,7 @@ class InviteService {
         $member->created_at = date('Y-m-d H:i:s');
 
         try {
-            R::store($member);
+            Bean::store($member);
         } catch (\Exception $e) {
             return [
                 'success' => false,
@@ -106,7 +107,7 @@ class InviteService {
      * Resend invitation to a pending member
      */
     public function resendInvite(int $memberId, int $invitedBy): array {
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if (!$member->id) {
             return ['success' => false, 'error' => 'Member not found'];
         }
@@ -124,7 +125,7 @@ class InviteService {
         $member->invite_expires_at = $expiresAt;
         $member->invited_by = $invitedBy;
 
-        R::store($member);
+        Bean::store($member);
 
         // Send invite email
         $emailResult = $this->sendInviteEmail($member, $token);
@@ -152,7 +153,7 @@ class InviteService {
         $inviteUrl = $this->buildInviteUrl($token);
 
         // Get inviter info
-        $inviter = R::load('member', $member->invited_by);
+        $inviter = Bean::load('member', $member->invited_by);
         $inviterName = $inviter->display_name ?: $inviter->username ?: 'An administrator';
 
         // Get tenant display name
@@ -219,7 +220,7 @@ MD;
      */
     private function getTenantDisplayName(): string {
         // Try to get from enterprisesettings
-        $setting = R::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
         if ($setting && $setting->setting_value) {
             return $setting->setting_value;
         }
@@ -239,7 +240,7 @@ MD;
         // If tenant specified, we need to switch database context first
         // This is handled by the bootstrap before this is called
 
-        $member = R::findOne('member', 'invite_token = ?', [$token]);
+        $member = Bean::findOne('member', 'invite_token = ?', [$token]);
 
         if (!$member) {
             return ['valid' => false, 'error' => 'Invalid invitation link'];
@@ -289,7 +290,7 @@ MD;
         }
 
         try {
-            R::store($member);
+            Bean::store($member);
             return ['success' => true, 'member' => $member];
         } catch (\Exception $e) {
             return ['success' => false, 'error' => 'Failed to activate account: ' . $e->getMessage()];

@@ -14,6 +14,7 @@ namespace app\plugins;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class AtlassianAuth {
 
@@ -190,7 +191,7 @@ class AtlassianAuth {
      * Store tokens for a member and cloud resource
      *
      * Uses RedBeanPHP associations: member->ownAtlassiantokenList
-     * Note: cloud_id is an external Atlassian ID, not a local FK
+     * Note: cloud_uid is an external Atlassian ID, not a local FK
      *
      * @param int $memberId Member ID
      * @param array $tokens Token data from OAuth
@@ -201,20 +202,20 @@ class AtlassianAuth {
         $expiresAt = date('Y-m-d H:i:s', time() + ($tokens['expires_in'] ?? 3600));
 
         // Load member for association
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
 
         // Check for existing token for this member/cloud via association
         $existing = null;
         foreach ($member->ownAtlassiantokenList as $token) {
-            if ($token->cloud_id === $resource['id']) {
+            if ($token->cloud_uid === $resource['id']) {
                 $existing = $token;
                 break;
             }
         }
 
         if (!$existing) {
-            $existing = R::dispense('atlassiantoken');
-            $existing->cloud_id = $resource['id'];  // External Atlassian ID
+            $existing = Bean::dispense('atlassiantoken');
+            $existing->cloud_uid = $resource['id'];  // External Atlassian ID
             $existing->created_at = date('Y-m-d H:i:s');
             $member->ownAtlassiantokenList[] = $existing;  // Sets member_id automatically
         }
@@ -228,11 +229,11 @@ class AtlassianAuth {
         $existing->scopes = $tokens['scope'] ?? self::$defaultScopes;
         $existing->updated_at = date('Y-m-d H:i:s');
 
-        R::store($member);
+        Bean::store($member);
 
         Flight::get('log')->info('Stored Atlassian tokens', [
             'member_id' => $memberId,
-            'cloud_id' => $resource['id'],
+            'cloud_uid' => $resource['id'],
             'site_name' => $resource['name']
         ]);
     }
@@ -248,15 +249,15 @@ class AtlassianAuth {
         $logger = Flight::get('log');
 
         // Get existing token record
-        $token = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
+        $token = Bean::findOne('atlassiantoken',
+            'member_id = ? AND cloud_uid = ?',
             [$memberId, $cloudId]
         );
 
         if (!$token || empty($token->refresh_token)) {
             $logger->error('No refresh token found', [
                 'member_id' => $memberId,
-                'cloud_id' => $cloudId
+                'cloud_uid' => $cloudId
             ]);
             return false;
         }
@@ -288,7 +289,7 @@ class AtlassianAuth {
                 'http_code' => $httpCode,
                 'response' => $response,
                 'member_id' => $memberId,
-                'cloud_id' => $cloudId
+                'cloud_uid' => $cloudId
             ]);
             return false;
         }
@@ -304,11 +305,11 @@ class AtlassianAuth {
         }
         $token->expires_at = $expiresAt;
         $token->updated_at = date('Y-m-d H:i:s');
-        R::store($token);
+        Bean::store($token);
 
         $logger->info('Refreshed Atlassian token', [
             'member_id' => $memberId,
-            'cloud_id' => $cloudId
+            'cloud_uid' => $cloudId
         ]);
 
         return true;
@@ -323,8 +324,8 @@ class AtlassianAuth {
      */
     public static function getValidToken($memberId, $cloudId) {
 
-        $token = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
+        $token = Bean::findOne('atlassiantoken',
+            'member_id = ? AND cloud_uid = ?',
             [$memberId, $cloudId]
         );
 
@@ -340,7 +341,7 @@ class AtlassianAuth {
                 return null;
             }
             // Reload token after refresh
-            $token = R::load('atlassiantoken', $token->id);
+            $token = Bean::load('atlassiantoken', $token->id);
         }
 
         return $token->access_token;
@@ -353,7 +354,7 @@ class AtlassianAuth {
      * @return array Array of token records
      */
     public static function getConnectedSites($memberId) {
-        return R::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
+        return Bean::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
     }
 
     /**
@@ -364,7 +365,7 @@ class AtlassianAuth {
      * @return object|null Token bean with site_name, site_url, etc.
      */
     public static function getSiteByCloudId($memberId, $cloudId) {
-        return R::findOne('atlassiantoken', 'member_id = ? AND cloud_id = ?', [$memberId, $cloudId]);
+        return Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
     }
 
     /**
@@ -376,8 +377,8 @@ class AtlassianAuth {
      */
     public static function disconnect($memberId, $cloudId) {
 
-        $token = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
+        $token = Bean::findOne('atlassiantoken',
+            'member_id = ? AND cloud_uid = ?',
             [$memberId, $cloudId]
         );
 
@@ -385,10 +386,10 @@ class AtlassianAuth {
             // Remove AI Developer webhook before disconnecting
             self::removeAIDevWebhook($memberId, $cloudId);
 
-            R::trash($token);
+            Bean::trash($token);
             Flight::get('log')->info('Disconnected Atlassian site', [
                 'member_id' => $memberId,
-                'cloud_id' => $cloudId
+                'cloud_uid' => $cloudId
             ]);
             return true;
         }
@@ -404,13 +405,13 @@ class AtlassianAuth {
      */
     public static function disconnectAll($memberId) {
 
-        $tokens = R::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
+        $tokens = Bean::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
         $count = count($tokens);
 
         foreach ($tokens as $token) {
             // Remove AI Developer webhook before disconnecting
-            self::removeAIDevWebhook($memberId, $token->cloud_id);
-            R::trash($token);
+            self::removeAIDevWebhook($memberId, $token->cloud_uid);
+            Bean::trash($token);
         }
 
         if ($count > 0) {
@@ -445,8 +446,8 @@ class AtlassianAuth {
      */
     public static function getSiteUrl($memberId, $cloudId) {
 
-        $token = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
+        $token = Bean::findOne('atlassiantoken',
+            'member_id = ? AND cloud_uid = ?',
             [$memberId, $cloudId]
         );
 
@@ -519,8 +520,8 @@ class AtlassianAuth {
      */
     public static function hasWriteScopes($memberId, $cloudId) {
 
-        $token = R::findOne('atlassiantoken',
-            'member_id = ? AND cloud_id = ?',
+        $token = Bean::findOne('atlassiantoken',
+            'member_id = ? AND cloud_uid = ?',
             [$memberId, $cloudId]
         );
 
@@ -553,7 +554,7 @@ class AtlassianAuth {
         $logger = Flight::get('log');
 
         // All features now available to all tiers
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if (!$member) {
             $logger->debug('Skipping webhook registration - member not found', [
                 'member_id' => $memberId
@@ -576,8 +577,8 @@ class AtlassianAuth {
         foreach ($existingWebhooks as $webhook) {
             if (isset($webhook['url']) && strpos($webhook['url'], $webhookUrl) !== false) {
                 $logger->debug('AI Developer webhook already registered', [
-                    'cloud_id' => $cloudId,
-                    'webhook_id' => $webhook['id'] ?? 'unknown',
+                    'cloud_uid' => $cloudId,
+                    'webhook_uid' => $webhook['id'] ?? 'unknown',
                     'tenant' => $tenantSlug ?? 'default'
                 ]);
                 return true;
@@ -623,8 +624,8 @@ class AtlassianAuth {
 
             $logger->info('AI Developer webhook registered', [
                 'member_id' => $memberId,
-                'cloud_id' => $cloudId,
-                'webhook_id' => $webhookId
+                'cloud_uid' => $cloudId,
+                'webhook_uid' => $webhookId
             ]);
 
             // Store webhook ID for later management
@@ -634,7 +635,7 @@ class AtlassianAuth {
         } else {
             $logger->warning('Failed to register AI Developer webhook', [
                 'member_id' => $memberId,
-                'cloud_id' => $cloudId,
+                'cloud_uid' => $cloudId,
                 'http_code' => $httpCode,
                 'response' => $response,
                 'request_url' => $apiUrl,
@@ -711,7 +712,7 @@ class AtlassianAuth {
     private static function storeWebhookId(int $memberId, string $cloudId, ?string $webhookId): void {
         if (!$webhookId) return;
 
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if (!$member || empty($member->ceobot_db)) return;
 
         $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
@@ -725,15 +726,15 @@ class AtlassianAuth {
             // Ensure table exists
             $db->exec("CREATE TABLE IF NOT EXISTS jira_webhooks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cloud_id TEXT NOT NULL,
-                webhook_id TEXT NOT NULL,
+                cloud_uid TEXT NOT NULL,
+                webhook_uid TEXT NOT NULL,
                 webhook_type TEXT DEFAULT 'aidev',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(cloud_id, webhook_type)
+                UNIQUE(cloud_uid, webhook_type)
             )");
 
             // Insert or replace webhook ID
-            $stmt = $db->prepare("INSERT OR REPLACE INTO jira_webhooks (cloud_id, webhook_id, webhook_type) VALUES (?, ?, 'aidev')");
+            $stmt = $db->prepare("INSERT OR REPLACE INTO jira_webhooks (cloud_uid, webhook_uid, webhook_type) VALUES (?, ?, 'aidev')");
             $stmt->bindValue(1, $cloudId, SQLITE3_TEXT);
             $stmt->bindValue(2, $webhookId, SQLITE3_TEXT);
             $stmt->execute();
@@ -762,7 +763,7 @@ class AtlassianAuth {
         }
 
         // Get stored webhook ID
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if (!$member || empty($member->ceobot_db)) return false;
 
         $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
@@ -772,7 +773,7 @@ class AtlassianAuth {
 
         try {
             $db = new \SQLite3($dbFile);
-            $webhookId = $db->querySingle("SELECT webhook_id FROM jira_webhooks WHERE cloud_id = '{$db->escapeString($cloudId)}' AND webhook_type = 'aidev'");
+            $webhookId = $db->querySingle("SELECT webhook_uid FROM jira_webhooks WHERE cloud_uid = '{$db->escapeString($cloudId)}' AND webhook_type = 'aidev'");
             $db->close();
 
             if (!$webhookId) {
@@ -798,7 +799,7 @@ class AtlassianAuth {
             if ($httpCode >= 200 && $httpCode < 300) {
                 $logger->info('AI Developer webhook removed', [
                     'member_id' => $memberId,
-                    'cloud_id' => $cloudId
+                    'cloud_uid' => $cloudId
                 ]);
                 return true;
             }
@@ -825,7 +826,7 @@ class AtlassianAuth {
 
         $logger->info('Re-registering AI Developer webhook', [
             'member_id' => $memberId,
-            'cloud_id' => $cloudId
+            'cloud_uid' => $cloudId
         ]);
 
         // Step 1: Remove existing webhook

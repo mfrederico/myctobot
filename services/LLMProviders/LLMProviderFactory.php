@@ -68,14 +68,27 @@ class LLMProviderFactory
                 'file_operations' => false,
                 'web_search' => false
             ]
+        ],
+        'ollama' => [
+            'name' => 'Ollama',
+            'description' => 'Self-hosted local models via Ollama',
+            'class' => 'OllamaProvider',
+            'can_orchestrate' => false,
+            'requires_api_key' => false,
+            'capabilities' => [
+                'tool_calling' => false, // Depends on model
+                'vision' => false, // Depends on model
+                'streaming' => true,
+                'file_operations' => false,
+                'web_search' => false
+            ]
         ]
     ];
 
 
     /**
-     * Get OllamaProvider for model discovery (used by Claude CLI + Ollama)
-     * Note: 'ollama' is not a standalone provider, but OllamaProvider is used
-     * for fetching model lists when Claude CLI uses Ollama as backend.
+     * Get OllamaProvider instance
+     * Can be used standalone or for model discovery when Claude CLI uses Ollama backend.
      */
     public static function getOllamaProvider(array $config): OllamaProvider
     {

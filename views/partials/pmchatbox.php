@@ -302,7 +302,7 @@ $knowledgeBases = $knowledgeBases ?? [];
         ws.send(JSON.stringify({
             type: 'pm_chat',
             message: message,
-            project_id: PM_CONFIG.projectId,
+            project_uid: PM_CONFIG.projectId,
             kb_slug: kbSlug || null
         }));
     }

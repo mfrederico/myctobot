@@ -132,7 +132,7 @@ class Analysis extends BaseControls\Control {
             $this->logger->info('Background analysis started', [
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'tenant' => $tenantSlug ?? 'default'
             ]);
 
@@ -152,8 +152,8 @@ class Analysis extends BaseControls\Control {
     public function progress($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/progress/{job_id}
-        $jobId = $this->opId() ?? $this->getParam('job_id');
+        // Job ID comes from URL: /analysis/progress/{job_uid}
+        $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->flash('error', 'No job specified');
             Flight::redirect('/analysis');
@@ -195,8 +195,8 @@ class Analysis extends BaseControls\Control {
     public function status($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/status/{job_id}
-        $jobId = $this->opId() ?? $this->getParam('job_id');
+        // Job ID comes from URL: /analysis/status/{job_uid}
+        $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->jsonError('No job specified');
             return;
@@ -380,7 +380,7 @@ class Analysis extends BaseControls\Control {
                 'title' => 'Run Shard Analysis - ' . $board['board_name'],
                 'board' => $board,
                 'activeJob' => $activeJob ? [
-                    'job_id' => $activeJob->job_id,
+                    'job_uid' => $activeJob->job_uid,
                     'status' => $activeJob->status,
                     'created_at' => $activeJob->created_at
                 ] : null
@@ -402,12 +402,12 @@ class Analysis extends BaseControls\Control {
             $this->logger->info('Shard analysis started', [
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
-                'job_id' => $result['job_id'],
+                'job_uid' => $result['job_uid'],
                 'shard' => $result['shard_name']
             ]);
 
             // Redirect to shard progress page
-            Flight::redirect('/analysis/shardprogress/' . urlencode($result['job_id']));
+            Flight::redirect('/analysis/shardprogress/' . urlencode($result['job_uid']));
 
         } catch (Exception $e) {
             $this->logger->error('Failed to start shard analysis: ' . $e->getMessage());
@@ -422,8 +422,8 @@ class Analysis extends BaseControls\Control {
     public function shardprogress($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/shardprogress/{job_id}
-        $jobId = $this->opId() ?? $this->getParam('job_id');
+        // Job ID comes from URL: /analysis/shardprogress/{job_uid}
+        $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->flash('error', 'No job specified');
             Flight::redirect('/analysis');
@@ -431,7 +431,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Get job with ownership verification
-        $job = R::findOne('digestjobs', 'job_id = ? AND member_id = ?', [$jobId, $this->member->id]);
+        $job = R::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
         if (!$job) {
             $this->flash('error', 'Job not found or access denied');
             Flight::redirect('/analysis');
@@ -460,7 +460,7 @@ class Analysis extends BaseControls\Control {
             'title' => 'Shard Analysis in Progress',
             'jobId' => $jobId,
             'job' => [
-                'job_id' => $job->job_id,
+                'job_uid' => $job->job_uid,
                 'status' => $job->status,
                 'board_name' => $job->board_name,
                 'project_key' => $job->project_key,
@@ -477,22 +477,22 @@ class Analysis extends BaseControls\Control {
     public function shardstatus($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/shardstatus/{job_id}
-        $jobId = $this->opId() ?? $this->getParam('job_id');
+        // Job ID comes from URL: /analysis/shardstatus/{job_uid}
+        $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->jsonError('No job specified');
             return;
         }
 
         // Get job with ownership verification
-        $job = R::findOne('digestjobs', 'job_id = ? AND member_id = ?', [$jobId, $this->member->id]);
+        $job = R::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
         if (!$job) {
             $this->jsonError('Job not found or access denied');
             return;
         }
 
         $response = [
-            'job_id' => $job->job_id,
+            'job_uid' => $job->job_uid,
             'status' => $job->status,
             'board_id' => $job->board_id,
             'board_name' => $job->board_name,
@@ -611,7 +611,7 @@ class Analysis extends BaseControls\Control {
         $jiraSiteUrl = $input['jira_site_url'] ?? '';
         $callbackUrl = $input['callback_url'] ?? '';
         $callbackApiKey = $input['callback_api_key'] ?? '';
-        $jobId = $input['job_id'] ?? uniqid('shard_', true);
+        $jobId = $input['job_uid'] ?? uniqid('shard_', true);
         $options = $input['options'] ?? [];
 
         // Ensure options is an array
@@ -632,7 +632,7 @@ class Analysis extends BaseControls\Control {
         // Return accepted immediately and continue processing in background
         $response = json_encode([
             'success' => true,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'status' => 'running',
             'message' => 'Digest analysis started (PHP shard)'
         ]);
@@ -789,7 +789,7 @@ PROMPT;
         // Send callback
         if ($callbackUrl) {
             $payload = json_encode([
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'type' => 'final',
                 'status' => 'completed',
                 'elapsed_seconds' => $elapsed,
@@ -839,7 +839,7 @@ PROMPT;
 
         // Extract data from request
         $apiKey = $input['anthropic_api_key'];
-        $jobId = $input['job_id'] ?? uniqid('aidev_', true);
+        $jobId = $input['job_uid'] ?? uniqid('aidev_', true);
         $issueKey = $input['issue_key'] ?? '';
         $issueData = $input['issue_data'] ?? [];
         $repoConfig = $input['repo_config'] ?? [];
@@ -848,7 +848,7 @@ PROMPT;
         $jiraToken = $input['jira_api_token'] ?? '';
         $jiraOAuthToken = $input['jira_oauth_token'] ?? '';
         $jiraSiteUrl = $input['jira_site_url'] ?? '';
-        $cloudId = $input['cloud_id'] ?? '';
+        $cloudId = $input['cloud_uid'] ?? '';
         $githubToken = $input['github_token'] ?? '';
         $callbackUrl = $input['callback_url'] ?? '';
         $callbackApiKey = $input['callback_api_key'] ?? '';
@@ -863,7 +863,7 @@ PROMPT;
         // Use Flight's response to avoid conflicts with its internal handling
         $response = json_encode([
             'success' => true,
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'status' => 'running',
             'message' => 'AI Developer started (Claude Code CLI)'
         ]);
@@ -1201,7 +1201,7 @@ PROMPT;
         // Log the session info for monitoring
         $infoFile = "{$homeDir}/session-info.json";
         file_put_contents($infoFile, json_encode([
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'log_file' => $logFile,
             'prompt_file' => $promptFile,
             'work_dir' => $workDir,
@@ -1367,7 +1367,7 @@ PROMPT;
                     // Build Jira credentials for screenshot upload
                     $jiraCredentials = [
                         'issue_key' => $issueKey,
-                        'cloud_id' => $cloudId,
+                        'cloud_uid' => $cloudId,
                         'oauth_token' => $jiraOAuthToken
                     ];
 
@@ -1405,7 +1405,7 @@ PROMPT;
 
         // Update session info with completion status
         file_put_contents($infoFile, json_encode([
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'log_file' => $logFile,
             'prompt_file' => $promptFile,
             'work_dir' => $workDir,
@@ -1418,7 +1418,7 @@ PROMPT;
         // Send callback
         if ($callbackUrl) {
             $payload = json_encode([
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'type' => 'final',
                 'status' => $status,
                 'elapsed_seconds' => $elapsed,
@@ -1983,7 +1983,7 @@ PROMPT;
 
         // Extract Jira credentials for screenshot upload
         $issueKey = $jiraCredentials['issue_key'] ?? '';
-        $cloudId = $jiraCredentials['cloud_id'] ?? '';
+        $cloudId = $jiraCredentials['cloud_uid'] ?? '';
         $jiraOAuthToken = $jiraCredentials['oauth_token'] ?? '';
 
         fwrite($logHandle, "\n=== Playwright Verification Loop ===\n");

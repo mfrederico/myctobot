@@ -125,7 +125,7 @@ class ShardRouter {
      *
      * @param int $shardId Shard ID
      * @param array $jobPayload Job configuration
-     * @return array Result with job_id and status
+     * @return array Result with job_uid and status
      */
     public static function executeJob(int $shardId, array $jobPayload): array {
         $shard = ShardService::getShard($shardId);
@@ -134,8 +134,8 @@ class ShardRouter {
         }
 
         // Generate job ID if not provided
-        $jobId = $jobPayload['job_id'] ?? bin2hex(random_bytes(16));
-        $jobPayload['job_id'] = $jobId;
+        $jobId = $jobPayload['job_uid'] ?? bin2hex(random_bytes(16));
+        $jobPayload['job_uid'] = $jobId;
 
         // Record job in local database
         $memberId = $jobPayload['member_id'] ?? 0;
@@ -162,7 +162,7 @@ class ShardRouter {
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'shard_id' => $shardId,
                 'shard_name' => $shard['name'],
                 'result' => $result
@@ -182,7 +182,7 @@ class ShardRouter {
     public static function getJobStatus(string $jobId): ?array {
 
         // Get job record using bean operations
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
@@ -226,7 +226,7 @@ class ShardRouter {
      */
     public static function getJobOutput(string $jobId): ?array {
 
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
@@ -258,7 +258,7 @@ class ShardRouter {
      */
     public static function cancelJob(string $jobId): bool {
 
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return false;
         }
@@ -293,7 +293,7 @@ class ShardRouter {
     private static function recordJob(string $jobId, int $memberId, int $shardId, array $payload): void {
 
         $job = R::dispense('shardjobs');
-        $job->job_id = $jobId;
+        $job->job_uid = $jobId;
         $job->member_id = $memberId;
         $job->shard_id = $shardId;
         $job->issue_key = $payload['task']['issue_key'] ?? null;
@@ -308,7 +308,7 @@ class ShardRouter {
      */
     public static function updateJobStatus(string $jobId, string $status, ?string $error = null): void {
 
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->status = $status;
@@ -334,7 +334,7 @@ class ShardRouter {
      */
     public static function updateJobResult(string $jobId, array $result): void {
 
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->result_payload = json_encode($result);
@@ -438,7 +438,7 @@ class ShardRouter {
         $params = [$memberId];
 
         if ($cloudId) {
-            $whereClause .= ' AND cloud_id = ?';
+            $whereClause .= ' AND cloud_uid = ?';
             $params[] = $cloudId;
         }
 
@@ -448,7 +448,7 @@ class ShardRouter {
         if ($token) {
             // For OAuth tokens, must use Atlassian API gateway URL (not site_url)
             // site_url is for browser links, API calls must go through api.atlassian.com
-            $jiraHost = AtlassianAuth::getApiBaseUrl($token->cloud_id);
+            $jiraHost = AtlassianAuth::getApiBaseUrl($token->cloud_uid);
             // Remove /rest/api/3 suffix - Claude will add the appropriate path
             $jiraHost = str_replace('/rest/api/3', '', $jiraHost);
 
@@ -458,7 +458,7 @@ class ShardRouter {
             $credentials['jira_site_url'] = $token->site_url ?? '';
 
             // Get a valid access token (refreshes if expired)
-            $validToken = AtlassianAuth::getValidToken($memberId, $token->cloud_id);
+            $validToken = AtlassianAuth::getValidToken($memberId, $token->cloud_uid);
             $credentials['jira_api_token'] = $validToken;
         }
 
@@ -470,7 +470,7 @@ class ShardRouter {
      */
     public static function getStreamUrl(string $jobId): ?string {
 
-        $job = R::findOne('shardjobs', 'job_id = ?', [$jobId]);
+        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }

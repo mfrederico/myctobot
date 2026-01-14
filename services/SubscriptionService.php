@@ -11,6 +11,7 @@ namespace app\services;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class SubscriptionService {
 
@@ -108,7 +109,7 @@ class SubscriptionService {
      * @return object|null RedBeanPHP bean or null
      */
     public static function getWorkspaceSubscription(): ?object {
-        return R::findOne('subscription', 'status = ? ORDER BY id DESC', ['active']);
+        return Bean::findOne('subscription', 'status = ? ORDER BY id DESC', ['active']);
     }
 
     /**
@@ -147,19 +148,19 @@ class SubscriptionService {
             }
             if ($billingEmail || $billingName) {
                 $existing->updated_at = date('Y-m-d H:i:s');
-                R::store($existing);
+                Bean::store($existing);
             }
             return $existing;
         }
 
         // Create new workspace subscription
-        $subscription = R::dispense('subscription');
+        $subscription = Bean::dispense('subscription');
         $subscription->tier = 'free';
         $subscription->status = 'active';
         $subscription->billing_email = $billingEmail;
         $subscription->billing_name = $billingName;
         $subscription->created_at = date('Y-m-d H:i:s');
-        R::store($subscription);
+        Bean::store($subscription);
 
         return $subscription;
     }
@@ -192,7 +193,7 @@ class SubscriptionService {
         $subscription->current_period_end = date('Y-m-d H:i:s', strtotime('+1 month'));
         $subscription->updated_at = date('Y-m-d H:i:s');
 
-        R::store($subscription);
+        Bean::store($subscription);
 
         Flight::get('log')->info('Stub upgrade workspace to Pro');
 
@@ -212,7 +213,7 @@ class SubscriptionService {
         $subscription->cancelled_at = date('Y-m-d H:i:s');
         $subscription->updated_at = date('Y-m-d H:i:s');
 
-        R::store($subscription);
+        Bean::store($subscription);
 
         Flight::get('log')->info('Stub downgrade workspace to Free');
 
@@ -241,7 +242,7 @@ class SubscriptionService {
         $subscription->current_period_end = $expiresAt ?? date('Y-m-d H:i:s', strtotime('+100 years'));
         $subscription->updated_at = date('Y-m-d H:i:s');
 
-        R::store($subscription);
+        Bean::store($subscription);
 
         $tenant = $_SESSION['tenant_slug'] ?? 'default';
         Flight::get('log')->info('Manual workspace tier assignment', [

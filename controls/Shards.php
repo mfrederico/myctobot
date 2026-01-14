@@ -49,20 +49,20 @@ class Shards extends BaseControls\Control {
     public function callback($params = []) {
         $data = json_decode(file_get_contents('php://input'), true);
 
-        if (!$data || empty($data['job_id'])) {
+        if (!$data || empty($data['job_uid'])) {
             $this->json(['success' => false, 'error' => 'Invalid callback data']);
             return;
         }
 
-        $jobId = $data['job_id'];
+        $jobId = $data['job_uid'];
         $status = $data['status'] ?? 'unknown';
 
         if ($status === 'completed') {
             ShardRouter::updateJobResult($jobId, $data['result'] ?? []);
-            $this->logger->info('Shard job completed', ['job_id' => $jobId]);
+            $this->logger->info('Shard job completed', ['job_uid' => $jobId]);
         } elseif ($status === 'failed') {
             ShardRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
-            $this->logger->error('Shard job failed', ['job_id' => $jobId, 'error' => $data['error'] ?? '']);
+            $this->logger->error('Shard job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
         }
 
         $this->json(['success' => true]);

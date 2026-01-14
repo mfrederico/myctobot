@@ -70,7 +70,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoards(): array {
-        return array_values(R::findAll('jiraboards', ' ORDER BY board_name ASC '));
+        return array_values(Bean::findAll('jiraboards', ' ORDER BY board_name ASC '));
     }
 
     /**
@@ -79,7 +79,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoardsByCloudId(string $cloudId): array {
-        return array_values(R::find('jiraboards', ' cloud_id = ? ORDER BY board_name ASC ', [$cloudId]));
+        return array_values(Bean::find('jiraboards', ' cloud_uid = ? ORDER BY board_name ASC ', [$cloudId]));
     }
 
     /**
@@ -87,7 +87,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getEnabledBoards(): array {
-        return array_values(R::find('jiraboards', ' enabled = 1 ORDER BY board_name ASC '));
+        return array_values(Bean::find('jiraboards', ' enabled = 1 ORDER BY board_name ASC '));
     }
 
     /**
@@ -95,7 +95,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoardsForDigest(): array {
-        return array_values(R::find('jiraboards', ' enabled = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
+        return array_values(Bean::find('jiraboards', ' enabled = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
     }
 
     /**
@@ -104,7 +104,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoard(int $id) {
-        $board = R::load('jiraboards', $id);
+        $board = Bean::load('jiraboards', $id);
         return $board->id ? $board : null;
     }
 
@@ -115,7 +115,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoardByJiraId(int $boardId, string $cloudId) {
-        return R::findOne('jiraboards', ' board_id = ? AND cloud_id = ? ', [$boardId, $cloudId]);
+        return Bean::findOne('jiraboards', ' board_id = ? AND cloud_uid = ? ', [$boardId, $cloudId]);
     }
 
     /**
@@ -124,7 +124,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoardByProjectKey(string $projectKey) {
-        return R::findOne('jiraboards', ' project_key = ? ', [$projectKey]);
+        return Bean::findOne('jiraboards', ' project_key = ? ', [$projectKey]);
     }
 
     /**
@@ -133,11 +133,11 @@ class UserDatabaseService {
      * @return int Board ID
      */
     public static function addBoard(array $data): int {
-        $board = R::dispense('jiraboards');
+        $board = Bean::dispense('jiraboards');
         $board->board_id = $data['board_id'];
         $board->board_name = $data['board_name'];
         $board->project_key = $data['project_key'];
-        $board->cloud_id = $data['cloud_id'];
+        $board->cloud_uid = $data['cloud_uid'];
         $board->board_type = $data['board_type'] ?? 'scrum';
         $board->enabled = $data['enabled'] ?? 1;
         $board->digest_enabled = $data['digest_enabled'] ?? 0;
@@ -145,7 +145,7 @@ class UserDatabaseService {
         $board->timezone = $data['timezone'] ?? 'UTC';
         $board->status_filter = $data['status_filter'] ?? 'To Do';
         $board->created_at = date('Y-m-d H:i:s');
-        return R::store($board);
+        return Bean::store($board);
     }
 
     /**
@@ -155,7 +155,7 @@ class UserDatabaseService {
      * @return bool
      */
     public static function updateBoard(int $id, array $data): bool {
-        $board = R::load('jiraboards', $id);
+        $board = Bean::load('jiraboards', $id);
         if (!$board->id) {
             return false;
         }
@@ -176,7 +176,7 @@ class UserDatabaseService {
         }
 
         $board->updated_at = date('Y-m-d H:i:s');
-        R::store($board);
+        Bean::store($board);
         return true;
     }
 
@@ -186,17 +186,17 @@ class UserDatabaseService {
      * @return bool
      */
     public static function removeBoard(int $id): bool {
-        $board = R::load('jiraboards', $id);
+        $board = Bean::load('jiraboards', $id);
         if (!$board->id) {
             return false;
         }
 
         // Delete related records
-        R::exec('DELETE FROM analysisresults WHERE board_id = ?', [$id]);
-        R::exec('DELETE FROM digesthistory WHERE board_id = ?', [$id]);
-        R::exec('DELETE FROM ticketanalysiscache WHERE board_id = ?', [$id]);
+        Bean::exec('DELETE FROM analysisresults WHERE board_id = ?', [$id]);
+        Bean::exec('DELETE FROM digesthistory WHERE board_id = ?', [$id]);
+        Bean::exec('DELETE FROM ticketanalysiscache WHERE board_id = ?', [$id]);
 
-        R::trash($board);
+        Bean::trash($board);
         return true;
     }
 
@@ -206,14 +206,14 @@ class UserDatabaseService {
      * @return bool|null New status or null if not found
      */
     public static function toggleBoard(int $id): ?bool {
-        $board = R::load('jiraboards', $id);
+        $board = Bean::load('jiraboards', $id);
         if (!$board->id) {
             return null;
         }
 
         $board->enabled = $board->enabled ? 0 : 1;
         $board->updated_at = date('Y-m-d H:i:s');
-        R::store($board);
+        Bean::store($board);
 
         return (bool) $board->enabled;
     }
@@ -229,7 +229,7 @@ class UserDatabaseService {
      * @return int Analysis ID
      */
     public static function storeAnalysis(int $boardId, string $type, array $results, ?string $markdown = null): int {
-        $analysis = R::dispense('analysisresults');
+        $analysis = Bean::dispense('analysisresults');
         $analysis->board_id = $boardId;
         $analysis->analysis_type = $type;
         $analysis->content_json = json_encode($results, JSON_INVALID_UTF8_SUBSTITUTE);
@@ -238,7 +238,7 @@ class UserDatabaseService {
         $analysis->status_filter = $results['status_filter'] ?? null;
         $analysis->created_at = date('Y-m-d H:i:s');
 
-        $id = R::store($analysis);
+        $id = Bean::store($analysis);
 
         // Update board's last_analysis_at
         self::updateBoard($boardId, ['last_analysis_at' => date('Y-m-d H:i:s')]);
@@ -252,7 +252,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getAnalysis(int $id) {
-        $analysis = R::load('analysisresults', $id);
+        $analysis = Bean::load('analysisresults', $id);
         return $analysis->id ? $analysis : null;
     }
 
@@ -263,7 +263,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getRecentAnalyses(int $boardId, int $limit = 10): array {
-        return array_values(R::find('analysisresults',
+        return array_values(Bean::find('analysisresults',
             ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
             [$boardId, $limit]
         ));
@@ -275,13 +275,17 @@ class UserDatabaseService {
      * @return array
      */
     public static function getAllRecentAnalyses(int $limit = 20): array {
-        return R::getAll("
-            SELECT a.*, b.board_name, b.project_key
-            FROM analysisresults a
-            JOIN jiraboards b ON a.board_id = b.id
-            ORDER BY a.created_at DESC
-            LIMIT ?
-        ", [$limit]);
+        try {
+            return Bean::getAll("
+                SELECT a.*, b.board_name, b.project_key
+                FROM analysisresults a
+                JOIN jiraboards b ON a.board_id = b.id
+                ORDER BY a.created_at DESC
+                LIMIT ?
+            ", [$limit]) ?? [];
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /**
@@ -295,7 +299,7 @@ class UserDatabaseService {
 
         foreach ($boards as $board) {
             $boardId = $board->id ?? $board['id'];
-            $result = R::exec("
+            $result = Bean::exec("
                 DELETE FROM analysisresults
                 WHERE board_id = ?
                 AND id NOT IN (
@@ -324,7 +328,7 @@ class UserDatabaseService {
      * @return int
      */
     public static function logDigest(int $boardId, string $sentTo, string $subject, string $contentPreview, string $status = 'sent', ?string $errorMessage = null): int {
-        $digest = R::dispense('digesthistory');
+        $digest = Bean::dispense('digesthistory');
         $digest->board_id = $boardId;
         $digest->sent_to = $sentTo;
         $digest->subject = $subject;
@@ -333,7 +337,7 @@ class UserDatabaseService {
         $digest->error_message = $errorMessage;
         $digest->created_at = date('Y-m-d H:i:s');
 
-        $id = R::store($digest);
+        $id = Bean::store($digest);
 
         // Update board's last_digest_at
         self::updateBoard($boardId, ['last_digest_at' => date('Y-m-d H:i:s')]);
@@ -348,7 +352,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getDigestHistory(int $boardId, int $limit = 20): array {
-        return array_values(R::find('digesthistory',
+        return array_values(Bean::find('digesthistory',
             ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
             [$boardId, $limit]
         ));
@@ -363,7 +367,7 @@ class UserDatabaseService {
      * @return mixed
      */
     public static function getSetting(string $key, $default = null) {
-        $setting = R::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
+        $setting = Bean::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
         return $setting ? $setting->setting_value : $default;
     }
 
@@ -374,15 +378,15 @@ class UserDatabaseService {
      * @return bool
      */
     public static function setSetting(string $key, $value): bool {
-        $setting = R::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
+        $setting = Bean::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
         if (!$setting) {
-            $setting = R::dispense('enterprisesettings');
+            $setting = Bean::dispense('enterprisesettings');
             $setting->setting_key = $key;
             $setting->created_at = date('Y-m-d H:i:s');
         }
         $setting->setting_value = $value;
         $setting->updated_at = date('Y-m-d H:i:s');
-        R::store($setting);
+        Bean::store($setting);
         return true;
     }
 
@@ -392,7 +396,7 @@ class UserDatabaseService {
      */
     public static function getAllSettings(): array {
         $settings = [];
-        $beans = R::findAll('enterprisesettings');
+        $beans = Bean::findAll('enterprisesettings');
         foreach ($beans as $bean) {
             $settings[$bean->setting_key] = $bean->setting_value;
         }
@@ -406,14 +410,26 @@ class UserDatabaseService {
      * @return array
      */
     public static function getStats(): array {
-        return [
-            'total_boards' => R::count('jiraboards'),
-            'enabled_boards' => R::count('jiraboards', ' enabled = 1 '),
-            'digest_enabled_boards' => R::count('jiraboards', ' digest_enabled = 1 '),
-            'total_analyses' => R::count('analysisresults'),
-            'total_digests' => R::count('digesthistory', ' status = ? ', ['sent']),
-            'recent_analyses' => self::getAllRecentAnalyses(5)
-        ];
+        try {
+            return [
+                'total_boards' => Bean::count('jiraboards') ?? 0,
+                'enabled_boards' => Bean::count('jiraboards', ' enabled = 1 ') ?? 0,
+                'digest_enabled_boards' => Bean::count('jiraboards', ' digest_enabled = 1 ') ?? 0,
+                'total_analyses' => Bean::count('analysisresults') ?? 0,
+                'total_digests' => Bean::count('digesthistory', ' status = ? ', ['sent']) ?? 0,
+                'recent_analyses' => self::getAllRecentAnalyses(5) ?? []
+            ];
+        } catch (\Throwable $e) {
+            // Return empty stats if tables don't exist yet
+            return [
+                'total_boards' => 0,
+                'enabled_boards' => 0,
+                'digest_enabled_boards' => 0,
+                'total_analyses' => 0,
+                'total_digests' => 0,
+                'recent_analyses' => []
+            ];
+        }
     }
 
     // ==================== Ticket Analysis Cache ====================
@@ -425,7 +441,7 @@ class UserDatabaseService {
      * @return array|null Array with clarity_score, clarity_analysis, etc.
      */
     public static function getTicketAnalysisCache(int $boardId, string $issueKey): ?array {
-        $bean = R::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        $bean = Bean::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
         if (!$bean) {
             return null;
         }
@@ -447,9 +463,9 @@ class UserDatabaseService {
      * @return bool
      */
     public static function setTicketAnalysisCache(int $boardId, string $issueKey, string $contentHash, array $data): bool {
-        $cache = R::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        $cache = Bean::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
         if (!$cache) {
-            $cache = R::dispense('ticketanalysiscache');
+            $cache = Bean::dispense('ticketanalysiscache');
             $cache->board_id = $boardId;
             $cache->issue_key = $issueKey;
             $cache->created_at = date('Y-m-d H:i:s');
@@ -462,7 +478,7 @@ class UserDatabaseService {
         $cache->reporter_email = $data['reporter_email'] ?? null;
         $cache->updated_at = date('Y-m-d H:i:s');
 
-        R::store($cache);
+        Bean::store($cache);
         return true;
     }
 
@@ -509,20 +525,20 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean
      */
     public static function getOrCreateAiDevJob(string $issueKey, int $boardId, ?int $repoConnectionId = null, ?string $cloudId = null) {
-        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        $job = Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if ($job) {
             return $job;
         }
 
-        $job = R::dispense('aidevjobs');
+        $job = Bean::dispense('aidevjobs');
         $job->issue_key = $issueKey;
         $job->board_id = $boardId;
         $job->repo_connection_id = $repoConnectionId;
-        $job->cloud_id = $cloudId;
+        $job->cloud_uid = $cloudId;
         $job->status = 'pending';
         $job->run_count = 0;
         $job->created_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
 
         return $job;
     }
@@ -533,7 +549,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getAiDevJob(string $issueKey) {
-        return R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        return Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
     }
 
     /**
@@ -543,16 +559,16 @@ class UserDatabaseService {
      * @return bool
      */
     public static function updateAiDevJob(string $issueKey, array $data): bool {
-        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        $job = Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if (!$job) {
             return false;
         }
 
         $allowedFields = [
-            'status', 'current_shard_job_id', 'branch_name', 'pr_url', 'pr_number',
-            'clarification_comment_id', 'clarification_questions', 'error_message',
+            'status', 'current_shard_job_uid', 'branch_name', 'pr_url', 'pr_number',
+            'clarification_comment_uid', 'clarification_questions', 'error_message',
             'run_count', 'last_output', 'last_result_json', 'files_changed',
-            'commit_sha', 'started_at', 'completed_at', 'board_id', 'repo_connection_id', 'cloud_id'
+            'commit_sha', 'started_at', 'completed_at', 'board_id', 'repo_connection_id', 'cloud_uid'
         ];
 
         foreach ($data as $key => $value) {
@@ -566,7 +582,7 @@ class UserDatabaseService {
         }
 
         $job->updated_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
         return true;
     }
 
@@ -577,19 +593,19 @@ class UserDatabaseService {
      * @return bool
      */
     public static function startAiDevJobRun(string $issueKey, string $shardJobId): bool {
-        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        $job = Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if (!$job) {
             return false;
         }
 
         $job->status = 'running';
-        $job->current_shard_job_id = $shardJobId;
+        $job->current_shard_job_uid = $shardJobId;
         $job->started_at = date('Y-m-d H:i:s');
         $job->error_message = null;
         $job->completed_at = null;
         $job->run_count = ($job->run_count ?? 0) + 1;
         $job->updated_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
 
         return true;
     }
@@ -643,7 +659,7 @@ class UserDatabaseService {
     public static function setAiDevJobWaitingClarification(string $issueKey, string $commentId, array $questions): bool {
         return self::updateAiDevJob($issueKey, [
             'status' => 'waiting_clarification',
-            'clarification_comment_id' => $commentId,
+            'clarification_comment_uid' => $commentId,
             'clarification_questions' => $questions
         ]);
     }
@@ -654,7 +670,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getAllAiDevJobs(int $limit = 50): array {
-        return array_values(R::find('aidevjobs',
+        return array_values(Bean::find('aidevjobs',
             ' ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ? ',
             [$limit]
         ));
@@ -665,7 +681,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getActiveAiDevJobs(): array {
-        return array_values(R::find('aidevjobs',
+        return array_values(Bean::find('aidevjobs',
             " status IN ('pending', 'running', 'waiting_clarification') ORDER BY started_at DESC "
         ));
     }
@@ -686,11 +702,11 @@ class UserDatabaseService {
      * @return bool
      */
     public static function deleteAiDevJob(string $issueKey): bool {
-        $job = R::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
+        $job = Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if (!$job) {
             return false;
         }
-        R::trash($job);
+        Bean::trash($job);
         return true;
     }
 
@@ -704,15 +720,15 @@ class UserDatabaseService {
      */
     public static function addAiDevJobLog(string $issueKey, string $level, string $message, ?array $context = null): bool {
         $job = self::getAiDevJob($issueKey);
-        $jobId = $job ? ($job->current_shard_job_id ?? $issueKey) : $issueKey;
+        $jobId = $job ? ($job->current_shard_job_uid ?? $issueKey) : $issueKey;
 
-        $log = R::dispense('aidevjoblogs');
-        $log->job_id = $jobId;
+        $log = Bean::dispense('aidevjoblogs');
+        $log->job_uid = $jobId;
         $log->log_level = $level;
         $log->message = $message;
         $log->context_json = $context ? json_encode($context) : null;
         $log->created_at = date('Y-m-d H:i:s');
-        R::store($log);
+        Bean::store($log);
 
         return true;
     }
@@ -729,9 +745,9 @@ class UserDatabaseService {
             return [];
         }
 
-        $jobId = $job->current_shard_job_id ?? $issueKey;
-        return array_values(R::find('aidevjoblogs',
-            ' job_id = ? ORDER BY created_at ASC LIMIT ? ',
+        $jobId = $job->current_shard_job_uid ?? $issueKey;
+        return array_values(Bean::find('aidevjoblogs',
+            ' job_uid = ? ORDER BY created_at ASC LIMIT ? ',
             [$jobId, $limit]
         ));
     }
@@ -743,7 +759,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getAnthropicKeys(): array {
-        return array_values(R::findAll('anthropickeys', ' ORDER BY created_at DESC '));
+        return array_values(Bean::findAll('anthropickeys', ' ORDER BY created_at DESC '));
     }
 
     /**
@@ -752,7 +768,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getAnthropicKey(int $id) {
-        $key = R::load('anthropickeys', $id);
+        $key = Bean::load('anthropickeys', $id);
         return $key->id ? $key : null;
     }
 
@@ -764,12 +780,12 @@ class UserDatabaseService {
      * @return int Key ID
      */
     public static function addAnthropicKey(string $name, string $encryptedKey, string $model): int {
-        $key = R::dispense('anthropickeys');
+        $key = Bean::dispense('anthropickeys');
         $key->name = $name;
         $key->api_key = $encryptedKey;
         $key->model = $model;
         $key->created_at = date('Y-m-d H:i:s');
-        return R::store($key);
+        return Bean::store($key);
     }
 
     /**
@@ -778,15 +794,15 @@ class UserDatabaseService {
      * @return bool
      */
     public static function deleteAnthropicKey(int $id): bool {
-        $key = R::load('anthropickeys', $id);
+        $key = Bean::load('anthropickeys', $id);
         if (!$key->id) {
             return false;
         }
 
         // Reset boards using this key to NULL (local runner)
-        R::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$id]);
+        Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$id]);
 
-        R::trash($key);
+        Bean::trash($key);
         return true;
     }
 }

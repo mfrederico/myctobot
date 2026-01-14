@@ -48,9 +48,9 @@ class Projects extends BaseControls\Control {
 
         // Enrich projects with epic counts
         foreach ($projects as $project) {
-            $project->epic_count = Bean::count('ctoepics', 'project_id = ?', [$project->id]);
+            $project->epic_count = Bean::count('ctoepics', 'project_uid = ?', [$project->id]);
             $project->story_count = Bean::count('ctostories',
-                'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?)',
+                'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?)',
                 [$project->id]
             );
         }
@@ -81,7 +81,7 @@ class Projects extends BaseControls\Control {
         // Find project
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
-            : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
 
         if (!$project || !$project->id) {
             $this->flash('error', 'Project not found');
@@ -90,7 +90,7 @@ class Projects extends BaseControls\Control {
         }
 
         // Get epics with their stories
-        $epics = Bean::find('ctoepics', 'project_id = ? ORDER BY sequence ASC', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
         $epicsWithStories = [];
 
         foreach ($epics as $epic) {
@@ -103,8 +103,8 @@ class Projects extends BaseControls\Control {
 
         // Get directive info
         $directive = null;
-        if ($project->directive_id) {
-            $directive = Bean::load('ceodirectives', $project->directive_id);
+        if ($project->directive_uid) {
+            $directive = Bean::load('ceodirectives', $project->directive_uid);
         }
 
         // Get progress using CompletionDetector
@@ -138,7 +138,7 @@ class Projects extends BaseControls\Control {
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
-            : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
 
         if (!$project || !$project->id) {
             Flight::jsonError('Project not found');
@@ -155,11 +155,11 @@ class Projects extends BaseControls\Control {
         Bean::store($project);
 
         $this->logger->info('Project paused', [
-            'project_id' => $project->project_id,
+            'project_uid' => $project->project_uid,
             'member_id' => $this->member->id
         ]);
 
-        Flight::jsonSuccess(['project_id' => $project->project_id], 'Project paused');
+        Flight::jsonSuccess(['project_uid' => $project->project_uid], 'Project paused');
     }
 
     /**
@@ -172,7 +172,7 @@ class Projects extends BaseControls\Control {
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
-            : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
 
         if (!$project || !$project->id) {
             Flight::jsonError('Project not found');
@@ -189,11 +189,11 @@ class Projects extends BaseControls\Control {
         Bean::store($project);
 
         $this->logger->info('Project resumed', [
-            'project_id' => $project->project_id,
+            'project_uid' => $project->project_uid,
             'member_id' => $this->member->id
         ]);
 
-        Flight::jsonSuccess(['project_id' => $project->project_id], 'Project resumed');
+        Flight::jsonSuccess(['project_uid' => $project->project_uid], 'Project resumed');
     }
 
     /**
@@ -206,7 +206,7 @@ class Projects extends BaseControls\Control {
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
             ? Bean::load('ctoprojects', $projectId)
-            : Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
 
         if (!$project || !$project->id) {
             Flight::jsonError('Project not found');
@@ -219,7 +219,7 @@ class Projects extends BaseControls\Control {
         $report = [
             'generated_at' => date('Y-m-d H:i:s'),
             'project' => [
-                'id' => $project->project_id,
+                'id' => $project->project_uid,
                 'name' => $project->name,
                 'description' => $project->description,
                 'status' => $project->status,

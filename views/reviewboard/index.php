@@ -584,8 +584,8 @@
                             </small>
                             <?php endif; ?>
                             <div class="btn-group btn-group-sm w-100">
-                                <?php if ($job && !empty($job['job_id'])): ?>
-                                <button class="btn btn-warning" onclick="retryJob('<?= htmlspecialchars($job['job_id']) ?>')" title="Retry">
+                                <?php if ($job && !empty($job['job_uid'])): ?>
+                                <button class="btn btn-warning" onclick="retryJob('<?= htmlspecialchars($job['job_uid']) ?>')" title="Retry">
                                     <i class="bi bi-arrow-repeat"></i> Retry
                                 </button>
                                 <?php endif; ?>
@@ -884,7 +884,7 @@ async function retryJob(jobId) {
     if (!confirm('Retry this failed job? It will start a new tmux session and append to the existing logs.')) return;
 
     try {
-        const result = await apiCall('/reviewboard/retryjob', { job_id: jobId });
+        const result = await apiCall('/reviewboard/retryjob', { job_uid: jobId });
         if (result.success) {
             showToast(`Job retry started for ${result.data.issue_key}`, 'success');
             setTimeout(() => location.reload(), 1500);
@@ -1366,7 +1366,7 @@ function updateQASelection() {
             id: cb.value,
             story_id: cb.dataset.storyId,
             issue_key: cb.dataset.issueKey,
-            project_id: cb.dataset.projectId,
+            project_uid: cb.dataset.projectId,
             title: cb.dataset.title
         });
     });
@@ -1465,7 +1465,7 @@ function showQABuildStatus(data) {
         storyCount: data.story_count || 0,
         targetBranch: data.target_branch || 'main',
         qaBranch: data.qa_branch || 'qa-release',
-        projectId: data.project_id || null,
+        projectId: data.project_uid || null,
         workDir: data.work_dir || null,
         status: 'running',
         timestamp: new Date().toISOString()

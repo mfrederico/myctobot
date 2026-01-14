@@ -48,7 +48,7 @@ class AnalysisStatusService {
         $jobId = self::generateJobId();
 
         $status = [
-            'job_id' => $jobId,
+            'job_uid' => $jobId,
             'member_id' => $memberId,
             'board_id' => $boardId,
             'board_name' => $boardName,

@@ -22,7 +22,7 @@
                             (<?= $activeJob['progress'] ?>% complete)
                         </small>
                     </div>
-                    <a href="/analysis/progress/<?= urlencode($activeJob['job_id']) ?>" class="btn btn-primary btn-sm">
+                    <a href="/analysis/progress/<?= urlencode($activeJob['job_uid']) ?>" class="btn btn-primary btn-sm">
                         <i class="bi bi-eye"></i> View Progress
                     </a>
                 </div>

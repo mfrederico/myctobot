@@ -294,7 +294,7 @@ class QAReleaseBuilder {
         // First try to infer from stories' issue keys (most reliable for GitHub projects)
         // Format: owner/repo#123
         $story = Bean::findOne('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?) AND jira_issue_key LIKE ?',
+            'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?) AND jira_issue_key LIKE ?',
             [$this->projectId, '%/%#%']
         );
         if ($story && preg_match('/^([^\/]+)\/([^#]+)#/', $story->jira_issue_key, $matches)) {
@@ -336,7 +336,7 @@ class QAReleaseBuilder {
                 FROM ctostories s
                 JOIN ctoepics e ON s.epic_id = e.id
                 JOIN aidevjobs j ON j.issue_key = s.jira_issue_key
-                WHERE e.project_id = ?
+                WHERE e.project_uid = ?
                 AND s.status IN ('done', 'approved')
                 AND j.branch_name IS NOT NULL
                 AND j.branch_name != ''

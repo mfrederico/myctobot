@@ -116,10 +116,10 @@ class DirectiveOrchestrator {
                 $processed++;
             } catch (\Exception $e) {
                 $this->logger->error('DirectiveOrchestrator: Error processing directive', [
-                    'directive_id' => $directive->directive_id,
+                    'directive_uid' => $directive->directive_uid,
                     'error' => $e->getMessage()
                 ]);
-                $errors[] = "Directive {$directive->directive_id}: " . $e->getMessage();
+                $errors[] = "Directive {$directive->directive_uid}: " . $e->getMessage();
 
                 // Mark directive as failed
                 $directive->status = 'failed';
@@ -137,7 +137,7 @@ class DirectiveOrchestrator {
      */
     public function processDirective(object $directive): array {
         $this->logger->info('DirectiveOrchestrator: Processing directive', [
-            'directive_id' => $directive->directive_id,
+            'directive_uid' => $directive->directive_uid,
             'subject' => $directive->email_subject
         ]);
 
@@ -268,7 +268,7 @@ class DirectiveOrchestrator {
 
             // Check if we can queue more stories
             $runningStories = Bean::count('ctostories',
-                'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?) AND status = ?',
+                'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?) AND status = ?',
                 [$project->id, 'in_progress']
             );
 
@@ -293,7 +293,7 @@ class DirectiveOrchestrator {
 
         // Find ready stories that aren't blocked
         $stories = Bean::find('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?)
+            'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?)
              AND status = ?
              AND (depends_on IS NULL OR depends_on = "[]")
              ORDER BY sequence ASC
@@ -312,7 +312,7 @@ class DirectiveOrchestrator {
 
             if ($jobId) {
                 $story->status = 'ready';
-                $story->aidev_job_id = $jobId;
+                $story->aidev_job_uid = $jobId;
                 $story->updated_at = date('Y-m-d H:i:s');
                 Bean::store($story);
                 $queued++;
@@ -365,7 +365,7 @@ class DirectiveOrchestrator {
             $jobId = 'directive-' . bin2hex(random_bytes(8));
 
             $job = Bean::dispense('aidevjobs');
-            $job->job_id = $jobId;
+            $job->job_uid = $jobId;
             $job->issue_key = $story->jira_issue_key;
             $job->member_id = $this->memberId;
             $job->status = 'pending';
@@ -375,7 +375,7 @@ class DirectiveOrchestrator {
 
             // Set context based on issue type
             if ($isGitHubIssue) {
-                $job->cloud_id = null;
+                $job->cloud_uid = null;
                 $job->board_id = null;  // GitHub workflows don't have a Jira board
                 $job->issue_source = 'github';
 
@@ -391,7 +391,7 @@ class DirectiveOrchestrator {
                     }
                 }
             } else {
-                $job->cloud_id = $this->cloudId;
+                $job->cloud_uid = $this->cloudId;
                 $job->issue_source = 'jira';
                 // board_id will be set by the processor when it picks up the job
             }
@@ -400,7 +400,7 @@ class DirectiveOrchestrator {
 
             $this->logger->info('DirectiveOrchestrator: Story queued to dev agent', [
                 'story_id' => $story->story_id,
-                'job_id' => $jobId,
+                'job_uid' => $jobId,
                 'issue_key' => $story->jira_issue_key,
                 'issue_source' => $isGitHubIssue ? 'github' : 'jira'
             ]);
@@ -445,12 +445,12 @@ class DirectiveOrchestrator {
     private function updateProjectCompletion(object $project): void {
         // Count total and completed stories
         $totalStories = Bean::count('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?)',
+            'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?)',
             [$project->id]
         );
 
         $completedStories = Bean::count('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE project_id = ?) AND status = ?',
+            'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?) AND status = ?',
             [$project->id, 'done']
         );
 
@@ -466,7 +466,7 @@ class DirectiveOrchestrator {
             $project->status = 'completed';
 
             // Also complete the directive
-            $directive = Bean::load('ceodirectives', $project->directive_id);
+            $directive = Bean::load('ceodirectives', $project->directive_uid);
             if ($directive && $directive->id) {
                 $directive->status = 'completed';
                 $directive->current_phase = 'complete';
@@ -492,7 +492,7 @@ class DirectiveOrchestrator {
             ];
         }
 
-        $project = Bean::load('ctoprojects', $directive->project_id);
+        $project = Bean::load('ctoprojects', $directive->project_uid);
         if (!$project || !$project->id) {
             return [
                 'success' => false,
@@ -546,7 +546,7 @@ class DirectiveOrchestrator {
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
+            $log->directive_uid = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;

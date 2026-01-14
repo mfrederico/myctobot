@@ -309,16 +309,16 @@ class Knowledgebase extends BaseControls\Control {
                 true // async mode
             );
 
-            if ($result['success'] && !empty($result['job_id'])) {
-                // Async mode - store job_id for polling
-                $doc->job_id = $result['job_id'];
+            if ($result['success'] && !empty($result['job_uid'])) {
+                // Async mode - store job_uid for polling
+                $doc->job_uid = $result['job_uid'];
                 Bean::store($doc);
 
                 Flight::jsonSuccess([
                     'id' => $doc->id,
                     'filename' => $doc->filename,
                     'status' => 'processing',
-                    'job_id' => $result['job_id'],
+                    'job_uid' => $result['job_uid'],
                     'vision_model' => $visionConfig['vision_model'],
                     'vision_source' => $visionConfig['source'],
                     'async' => true
@@ -358,14 +358,14 @@ class Knowledgebase extends BaseControls\Control {
     public function polljob($jobId = null) {
         if (!$this->requireLogin()) return;
 
-        $jobId = $jobId ?? $this->getParam('job_id');
+        $jobId = $jobId ?? $this->getParam('job_uid');
         if (empty($jobId)) {
             Flight::jsonError('Job ID required');
             return;
         }
 
-        // Find document by job_id
-        $doc = Bean::findOne('ragdocuments', ' job_id = ? ', [$jobId]);
+        // Find document by job_uid
+        $doc = Bean::findOne('ragdocuments', ' job_uid = ? ', [$jobId]);
         if (!$doc) {
             Flight::jsonError('Document not found for job', 404);
             return;
@@ -647,7 +647,7 @@ class Knowledgebase extends BaseControls\Control {
      * @param string $tenantId Tenant identifier
      * @param string|null $originalFilename Original filename
      * @param array $visionConfig Optional vision OCR config (model, host)
-     * @param bool $async Use async mode (returns immediately with job_id)
+     * @param bool $async Use async mode (returns immediately with job_uid)
      */
     private function sendToRagService(int $docId, string $filePath, string $tenantId, string $originalFilename = null, array $visionConfig = [], bool $async = true): array {
         try {

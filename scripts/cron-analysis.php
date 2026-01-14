@@ -130,7 +130,7 @@ try {
 
     // Build options for AnalysisService
     $analysisOptions = [
-        'job_id' => $options['job'] ?? null,
+        'job_uid' => $options['job'] ?? null,
         'status_filter' => $options['status-filter'] ?? null,
         'send_email' => $sendEmail,
         'analysis_type' => $sendEmail ? 'digest' : 'priorities'

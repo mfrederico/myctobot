@@ -666,7 +666,7 @@ class Api extends BaseControls\Control {
     /**
      * Get PM Assistant context data
      * GET /api/pm/context/{tenant}
-     * GET /api/pm/context/{tenant}?project_id=xxx
+     * GET /api/pm/context/{tenant}?project_uid=xxx
      */
     public function pmcontext($tenant = null) {
         if (empty($tenant)) {
@@ -690,7 +690,7 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        $projectId = $this->getParam('project_id');
+        $projectId = $this->getParam('project_uid');
 
         try {
             $context = $this->buildPmContext($projectId);
@@ -724,14 +724,14 @@ class Api extends BaseControls\Control {
         $params = ['planning', 'in_progress'];
 
         if ($projectId) {
-            $condition = 'status IN (?, ?) AND project_id = ? ORDER BY created_at DESC LIMIT 10';
+            $condition = 'status IN (?, ?) AND project_uid = ? ORDER BY created_at DESC LIMIT 10';
             $params[] = $projectId;
         }
 
         $beans = Bean::find('ctoprojects', $condition, $params);
 
         return array_values(array_map(fn($p) => [
-            'project_id' => $p->project_id,
+            'project_uid' => $p->project_uid,
             'name' => $p->name,
             'description' => $p->description,
             'status' => $p->status,
@@ -745,7 +745,7 @@ class Api extends BaseControls\Control {
     private function getPmEpicsWithStats(?string $projectId): array {
         // GROUP BY with aggregations requires raw SQL
         $sql = "SELECT e.id, e.epic_id, e.title, e.description, e.priority, e.sequence,
-                       e.project_id, p.name as project_name,
+                       e.project_uid, p.name as project_name,
                        COUNT(s.id) as total_stories,
                        SUM(CASE WHEN s.status = 'done' THEN 1 ELSE 0 END) as completed_stories,
                        SUM(CASE WHEN s.status = 'pending_review' THEN 1 ELSE 0 END) as pending_stories,
@@ -754,13 +754,13 @@ class Api extends BaseControls\Control {
                        SUM(COALESCE(s.story_points, 0)) as total_points,
                        SUM(CASE WHEN s.status = 'done' THEN COALESCE(s.story_points, 0) ELSE 0 END) as completed_points
                 FROM ctoepics e
-                JOIN ctoprojects p ON e.project_id = p.id
+                JOIN ctoprojects p ON e.project_uid = p.id
                 LEFT JOIN ctostories s ON s.epic_id = e.id
                 WHERE p.status IN ('planning', 'in_progress')";
 
         $params = [];
         if ($projectId) {
-            $sql .= " AND p.project_id = ?";
+            $sql .= " AND p.project_uid = ?";
             $params[] = $projectId;
         }
 
@@ -783,9 +783,9 @@ class Api extends BaseControls\Control {
             $epic = Bean::load('ctoepics', $s->epic_id);
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_id);
+            $project = Bean::load('ctoprojects', $epic->project_uid);
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
-            if ($projectId && $project->project_id !== $projectId) continue;
+            if ($projectId && $project->project_uid !== $projectId) continue;
 
             $result[] = [
                 'id' => $s->id,
@@ -828,9 +828,9 @@ class Api extends BaseControls\Control {
             $epic = Bean::load('ctoepics', $story->epic_id);
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_id);
+            $project = Bean::load('ctoprojects', $epic->project_uid);
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
-            if ($projectId && $project->project_id !== $projectId) continue;
+            if ($projectId && $project->project_uid !== $projectId) continue;
 
             $result[] = [
                 'id' => $story->id,
@@ -865,9 +865,9 @@ class Api extends BaseControls\Control {
             $epic = Bean::load('ctoepics', $s->epic_id);
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_id);
+            $project = Bean::load('ctoprojects', $epic->project_uid);
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
-            if ($projectId && $project->project_id !== $projectId) continue;
+            if ($projectId && $project->project_uid !== $projectId) continue;
 
             $result[] = [
                 'id' => $s->id,
@@ -904,9 +904,9 @@ class Api extends BaseControls\Control {
             $epic = Bean::load('ctoepics', $story->epic_id);
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_id);
+            $project = Bean::load('ctoprojects', $epic->project_uid);
             if (!$project->id) continue;
-            if ($projectId && $project->project_id !== $projectId) continue;
+            if ($projectId && $project->project_uid !== $projectId) continue;
 
             $result[] = [
                 'id' => $story->id,

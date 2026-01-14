@@ -92,7 +92,7 @@ class Enterprise extends BaseControls\Control {
                 'id' => $board->id,
                 'board_name' => $board->board_name,
                 'project_key' => $board->project_key,
-                'cloud_id' => $board->cloud_id
+                'cloud_uid' => $board->cloud_uid
             ];
         }
 
@@ -100,7 +100,7 @@ class Enterprise extends BaseControls\Control {
         $sites = AtlassianAuth::getConnectedSites($memberId);
         $hasWriteScopes = false;
         foreach ($sites as $site) {
-            if (AtlassianAuth::hasWriteScopes($memberId, $site->cloud_id)) {
+            if (AtlassianAuth::hasWriteScopes($memberId, $site->cloud_uid)) {
                 $hasWriteScopes = true;
                 break;
             }
@@ -153,12 +153,12 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $cloudId = $this->getParam('cloud_id');
+        $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
             // Try to get from member's first Atlassian token
             $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
             if ($token) {
-                $cloudId = $token->cloud_id;
+                $cloudId = $token->cloud_uid;
             }
         }
 
@@ -450,7 +450,7 @@ class Enterprise extends BaseControls\Control {
                 'id' => $bean->id,
                 'board_name' => $bean->board_name,
                 'project_key' => $bean->project_key,
-                'cloud_id' => $bean->cloud_id
+                'cloud_uid' => $bean->cloud_uid
             ];
         }
         try {
@@ -611,12 +611,12 @@ class Enterprise extends BaseControls\Control {
                 // Check if webhook already exists
                 $existingHook = $github->findWebhook($owner, $repoName, $webhookUrl);
                 if ($existingHook) {
-                    $repo->webhook_id = $existingHook['id'];
+                    $repo->webhook_uid = $existingHook['id'];
                     $webhookCreated = true;
                 } else {
                     // Create webhook
                     $hook = $github->createWebhook($owner, $repoName, $webhookUrl, $webhookSecret);
-                    $repo->webhook_id = $hook['id'];
+                    $repo->webhook_uid = $hook['id'];
                     $webhookCreated = true;
                 }
 
@@ -894,7 +894,7 @@ class Enterprise extends BaseControls\Control {
         $issueKey = Flight::request()->data->issue_key ?? '';
         $boardId = (int)(Flight::request()->data->board_id ?? 0);
         $repoId = (int)(Flight::request()->data->repo_id ?? 0);
-        $cloudId = Flight::request()->data->cloud_id ?? '';
+        $cloudId = Flight::request()->data->cloud_uid ?? '';
         $useOrchestrator = !empty(Flight::request()->data->use_orchestrator);
 
         if (empty($issueKey) || empty($boardId) || empty($repoId) || empty($cloudId)) {
@@ -993,7 +993,7 @@ class Enterprise extends BaseControls\Control {
             // Build payload for shard
             $payload = [
                 'anthropic_api_key' => $apiKey,
-                'job_id' => $shardJobId,
+                'job_uid' => $shardJobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
                     'summary' => $summary,
@@ -1047,7 +1047,7 @@ class Enterprise extends BaseControls\Control {
             $this->logger->info('AI Developer shard job started (Claude Code CLI)', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'shard_job_id' => $shardJobId,
+                'shard_job_uid' => $shardJobId,
                 'shard_id' => $shard['id'],
                 'shard_name' => $shard['name'] ?? $shard['host'],
                 'use_orchestrator' => $useOrchestrator
@@ -1056,7 +1056,7 @@ class Enterprise extends BaseControls\Control {
             $this->json([
                 'success' => true,
                 'issue_key' => $issueKey,
-                'shard_job_id' => $shardJobId,
+                'shard_job_uid' => $shardJobId,
                 'shard' => $shard['name'] ?? $shard['host'],
                 'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on shard with Claude Code CLI',
                 'use_orchestrator' => $useOrchestrator
@@ -1091,20 +1091,20 @@ class Enterprise extends BaseControls\Control {
         // This endpoint receives callbacks from shards when jobs complete
         $data = json_decode(file_get_contents('php://input'), true);
 
-        if (!$data || empty($data['job_id'])) {
+        if (!$data || empty($data['job_uid'])) {
             $this->json(['success' => false, 'error' => 'Invalid callback data']);
             return;
         }
 
-        $jobId = $data['job_id'];
+        $jobId = $data['job_uid'];
         $status = $data['status'] ?? 'unknown';
 
         if ($status === 'completed') {
             ShardRouter::updateJobResult($jobId, $data['result'] ?? []);
-            $this->logger->info('Shard job completed', ['job_id' => $jobId]);
+            $this->logger->info('Shard job completed', ['job_uid' => $jobId]);
         } elseif ($status === 'failed') {
             ShardRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
-            $this->logger->error('Shard job failed', ['job_id' => $jobId, 'error' => $data['error'] ?? '']);
+            $this->logger->error('Shard job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
         }
 
         $this->json(['success' => true]);
@@ -1382,11 +1382,11 @@ class Enterprise extends BaseControls\Control {
                 return;
             }
 
-            // Get cloud_id from the job or look up from board
+            // Get cloud_uid from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
                 $board = Bean::load('jiraboards', (int)$job->board_id);
-                $cloudId = $board->cloud_id ?? null;
+                $cloudId = $board->cloud_uid ?? null;
             }
 
             $this->disconnectUserDb();

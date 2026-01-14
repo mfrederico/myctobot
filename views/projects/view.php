@@ -12,15 +12,15 @@
                 <h1><?= htmlspecialchars($project->name) ?></h1>
                 <div>
                     <?php if ($project->status === 'in_progress'): ?>
-                    <button class="btn btn-warning pause-project" data-id="<?= htmlspecialchars($project->project_id) ?>">
+                    <button class="btn btn-warning pause-project" data-id="<?= htmlspecialchars($project->project_uid) ?>">
                         <i class="bi bi-pause-circle"></i> Pause
                     </button>
                     <?php elseif ($project->status === 'blocked'): ?>
-                    <button class="btn btn-success resume-project" data-id="<?= htmlspecialchars($project->project_id) ?>">
+                    <button class="btn btn-success resume-project" data-id="<?= htmlspecialchars($project->project_uid) ?>">
                         <i class="bi bi-play-circle"></i> Resume
                     </button>
                     <?php endif; ?>
-                    <a href="/projects/report/<?= htmlspecialchars($project->project_id) ?>" class="btn btn-outline-primary">
+                    <a href="/projects/report/<?= htmlspecialchars($project->project_uid) ?>" class="btn btn-outline-primary">
                         <i class="bi bi-file-earmark-text"></i> Report
                     </a>
                     <a href="/projects" class="btn btn-outline-secondary">
@@ -302,7 +302,7 @@
                             <h6><?= htmlspecialchars($directive->email_subject ?: '(No Subject)') ?></h6>
                             <small class="text-muted">From: <?= htmlspecialchars($directive->email_from) ?></small>
                             <hr>
-                            <a href="/directives/view/<?= htmlspecialchars($directive->directive_id) ?>"
+                            <a href="/directives/view/<?= htmlspecialchars($directive->directive_uid) ?>"
                                class="btn btn-sm btn-outline-primary w-100">
                                 View Directive <i class="bi bi-arrow-right"></i>
                             </a>

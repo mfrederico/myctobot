@@ -482,7 +482,7 @@ PROMPT;
      */
     public function createStoriesForProject(object $project, array $options = []): array {
         $results = [];
-        $epics = Bean::find('ctoepics', 'project_id = ? ORDER BY sequence ASC', [$project->id]);
+        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
 
         foreach ($epics as $epic) {
             $result = $this->createStories($epic, $options);

@@ -132,7 +132,7 @@ class Webhook extends BaseControls\Control {
      * Uses the IncomingEmail controller for actual processing.
      */
     public function mailgun() {
-        require_once __DIR__ . '/IncomingEmail.php';
+        require_once __DIR__ . '/Incomingemail.php';
         $handler = new \app\Incomingemail();
         $handler->mailgun();
     }

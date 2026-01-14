@@ -514,11 +514,23 @@ class Webhook extends BaseControls\Control {
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
 
         if ($result['success']) {
+            // Check if session was already running (no new job_id)
+            if ($result['already_running'] ?? false) {
+                $this->logger->info('AI Developer session already running for issue', [
+                    'member_id' => $memberId,
+                    'issue_key' => $issueKey,
+                    'session_id' => $result['session_id'] ?? null,
+                    'tmux_name' => $result['tmux_name'] ?? null
+                ]);
+                return; // No further action needed
+            }
+
             $isQueued = $result['queued'] ?? false;
+            $jobId = $result['job_id'] ?? null;
 
             $this->logger->info($isQueued ? 'AI Developer job queued via webhook' : 'AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
-                'job_id' => $result['job_id'],
+                'job_id' => $jobId,
                 'issue_key' => $issueKey,
                 'repo_id' => $repoId,
                 'queued' => $isQueued,
@@ -528,7 +540,7 @@ class Webhook extends BaseControls\Control {
             ]);
 
             // Log successful job trigger or queue
-            if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+            if ($this->currentDirectiveLogger && $this->currentDirectiveId && $jobId) {
                 $stepType = $isQueued ? 'job_queued' : 'job_started';
                 $stepMessage = $isQueued
                     ? "AI Developer job queued (position {$result['position']})"
@@ -539,7 +551,7 @@ class Webhook extends BaseControls\Control {
                     $stepType,
                     $stepMessage,
                     [
-                        'job_id' => $result['job_id'],
+                        'job_id' => $jobId,
                         'queued' => $isQueued,
                         'position' => $result['position'] ?? null,
                         'local' => $result['local'] ?? false,
@@ -1761,9 +1773,19 @@ class Webhook extends BaseControls\Control {
         $result = $jobService->triggerGitHubJob($memberId, $issueKey, $repoId, $tenant);
 
         if ($result['success']) {
+            // Check if session was already running (no new job_id)
+            if ($result['already_running'] ?? false) {
+                $this->logger->info('GitHub AI Developer session already running for issue', [
+                    'member_id' => $memberId,
+                    'issue_key' => $issueKey,
+                    'session_id' => $result['session_id'] ?? null
+                ]);
+                return; // No further action needed
+            }
+
             $this->logger->info('GitHub AI Dev job triggered via webhook', [
                 'member_id' => $memberId,
-                'job_id' => $result['job_id'],
+                'job_id' => $result['job_id'] ?? null,
                 'issue_key' => $issueKey,
                 'repo_id' => $repoId,
                 'local' => $result['local'] ?? false

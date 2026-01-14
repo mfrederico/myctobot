@@ -115,12 +115,12 @@ class Incomingemail extends BaseControls\Control {
         }
 
         // Find member by sender email
-        $member = R::findOne('member', 'email = ?', [$sender]);
+        $member = Bean::findOne('member', 'email = ?', [$sender]);
         if (!$member) {
             // Try to find by the email in "from" header
             preg_match('/<([^>]+)>/', $from, $matches);
             $fromEmail = $matches[1] ?? $sender;
-            $member = R::findOne('member', 'email = ?', [$fromEmail]);
+            $member = Bean::findOne('member', 'email = ?', [$fromEmail]);
         }
 
         if (!$member) {

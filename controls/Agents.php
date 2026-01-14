@@ -53,7 +53,7 @@ class Agents extends BaseControls\Control {
         if (!$this->requireEnterprise()) return;
 
         // Get all agents for this workspace (workspace-level - shared by all members)
-        $agentBeans = R::findAll('aiagents', ' ORDER BY name ASC');
+        $agentBeans = Bean::findAll('aiagents', ' ORDER BY name ASC');
 
         $agents = [];
         foreach ($agentBeans as $bean) {
@@ -164,7 +164,7 @@ class Agents extends BaseControls\Control {
         $providerConfig = $this->buildRunnerConfig($provider);
 
         // Create agent (workspace-level - track who created it)
-        $agent = R::dispense('aiagents');
+        $agent = Bean::dispense('aiagents');
         $agent->created_by_member_id = $memberId;
         $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
@@ -179,10 +179,10 @@ class Agents extends BaseControls\Control {
 
         // If setting as default, unset other defaults (workspace-level)
         if ($isDefault) {
-            R::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
+            Bean::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
         }
 
-        $id = R::store($agent);
+        $id = Bean::store($agent);
 
         $this->flash('success', 'Agent profile created');
         Flight::redirect('/agents/edit/' . $id);
@@ -230,7 +230,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Create agent (workspace-level - track who created it)
-        $agent = R::dispense('aiagents');
+        $agent = Bean::dispense('aiagents');
         $agent->created_by_member_id = $memberId;
         $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
@@ -244,7 +244,7 @@ class Agents extends BaseControls\Control {
         $agent->is_default = 0;
         $agent->created_at = date('Y-m-d H:i:s');
 
-        $id = R::store($agent);
+        $id = Bean::store($agent);
 
         Flight::jsonSuccess(['agent_id' => $id], 'Agent created successfully');
     }
@@ -259,7 +259,7 @@ class Agents extends BaseControls\Control {
         $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can edit agents
-        $agent = R::findOne('aiagents', 'id = ?', [$id]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             $this->flash('error', 'Agent not found');
             Flight::redirect('/agents');
@@ -317,7 +317,7 @@ class Agents extends BaseControls\Control {
         $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can update agents
-        $agent = R::findOne('aiagents', 'id = ?', [$id]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             $this->flash('error', 'Agent not found');
             Flight::redirect('/agents');
@@ -345,7 +345,7 @@ class Agents extends BaseControls\Control {
         }
 
         $agent->updated_at = date('Y-m-d H:i:s');
-        R::store($agent);
+        Bean::store($agent);
 
         $this->flash('success', 'Agent profile updated');
         Flight::redirect('/agents/edit/' . $id . '?tab=' . $tab);
@@ -375,7 +375,7 @@ class Agents extends BaseControls\Control {
 
         if ($isDefault) {
             // Workspace-level - unset all other defaults
-            R::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
+            Bean::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
             $agent->is_default = 1;
         } else {
             $agent->is_default = 0;
@@ -428,7 +428,7 @@ class Agents extends BaseControls\Control {
         $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
 
         // Workspace-level - all members can delete agents
-        $agent = R::findOne('aiagents', 'id = ?', [$id]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$id]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -441,7 +441,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        R::trash($agent);
+        Bean::trash($agent);
 
         Flight::jsonSuccess(['message' => 'Agent deleted']);
     }
@@ -741,13 +741,13 @@ class Agents extends BaseControls\Control {
         $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
 
         // Workspace-level - all members can view agent tools
-        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
         }
 
-        $tools = R::find('agenttools', 'agent_id = ? ORDER BY tool_name ASC', [$agentId]);
+        $tools = Bean::find('agenttools', 'agent_id = ? ORDER BY tool_name ASC', [$agentId]);
 
         $result = [];
         foreach ($tools as $tool) {
@@ -784,7 +784,7 @@ class Agents extends BaseControls\Control {
         $toolId = (int) $this->getParam('tool_id', 0);
 
         // Workspace-level - all members can manage agent tools
-        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
@@ -829,7 +829,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Check for duplicate tool name (excluding current tool if updating)
-        $existingTool = R::findOne('agenttools', 'agent_id = ? AND tool_name = ? AND id != ?', [$agentId, $toolName, $toolId]);
+        $existingTool = Bean::findOne('agenttools', 'agent_id = ? AND tool_name = ? AND id != ?', [$agentId, $toolName, $toolId]);
         if ($existingTool) {
             Flight::jsonError('A tool with this name already exists for this agent', 400);
             return;
@@ -837,13 +837,13 @@ class Agents extends BaseControls\Control {
 
         // Create or update tool
         if ($toolId > 0) {
-            $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+            $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
             if (!$tool) {
                 Flight::jsonError('Tool not found', 404);
                 return;
             }
         } else {
-            $tool = R::dispense('agenttools');
+            $tool = Bean::dispense('agenttools');
             $tool->agent_id = $agentId;
             $tool->created_at = date('Y-m-d H:i:s');
         }
@@ -855,7 +855,7 @@ class Agents extends BaseControls\Control {
         $tool->is_active = $isActive ? 1 : 0;
         $tool->updated_at = date('Y-m-d H:i:s');
 
-        $id = R::store($tool);
+        $id = Bean::store($tool);
 
         Flight::jsonSuccess([
             'id' => $id,
@@ -881,20 +881,20 @@ class Agents extends BaseControls\Control {
         $toolId = (int) $this->getParam('tool_id', 0);
 
         // Workspace-level - all members can delete agent tools
-        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
         }
 
         // Find and delete tool
-        $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
         if (!$tool) {
             Flight::jsonError('Tool not found', 404);
             return;
         }
 
-        R::trash($tool);
+        Bean::trash($tool);
 
         Flight::jsonSuccess(['message' => 'Tool deleted']);
     }
@@ -913,14 +913,14 @@ class Agents extends BaseControls\Control {
         $testParams = $this->getParam('test_params', '{}');
 
         // Workspace-level - all members can test agent tools
-        $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
+        $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
         if (!$agent) {
             Flight::jsonError('Agent not found', 404);
             return;
         }
 
         // Find tool
-        $tool = R::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
         if (!$tool) {
             Flight::jsonError('Tool not found', 404);
             return;

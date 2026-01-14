@@ -122,7 +122,7 @@ class Directives extends BaseControls\Control {
         // Get member info if available
         $member = null;
         if ($directive->member_id) {
-            $member = R::load('member', $directive->member_id);
+            $member = Bean::load('member', $directive->member_id);
         }
 
         $this->render('directives/view', [

@@ -128,7 +128,7 @@ class Auth extends BaseControls\Control {
             }
 
             // Find member by username or email (in current database - tenant or default)
-            $member = R::findOne('member', '(username = ? OR email = ?) AND status = ?', [$login, $login, 'active']);
+            $member = Bean::findOne('member', '(username = ? OR email = ?) AND status = ?', [$login, $login, 'active']);
 
             if (!$member || !password_verify($password, $member->password)) {
                 $this->logger->warning('Failed login attempt', ['login' => $login, 'workspace' => $workspace ?: 'default']);
@@ -146,7 +146,7 @@ class Auth extends BaseControls\Control {
             // Update last login
             $member->last_login = date('Y-m-d H:i:s');
             $member->login_count = ($member->login_count ?? 0) + 1;
-            R::store($member);
+            Bean::store($member);
 
             // Regenerate session ID to prevent session fixation attacks
             session_regenerate_id(true);
@@ -335,12 +335,12 @@ class Auth extends BaseControls\Control {
         }
 
         // Check if email exists
-        if (R::count('member', 'email = ?', [$email]) > 0) {
+        if (Bean::count('member', 'email = ?', [$email]) > 0) {
             $errors[] = 'Email already registered';
         }
 
         // Check if username exists
-        if (R::count('member', 'username = ?', [$username]) > 0) {
+        if (Bean::count('member', 'username = ?', [$username]) > 0) {
             $errors[] = 'Username already taken';
         }
 
@@ -356,7 +356,7 @@ class Auth extends BaseControls\Control {
 
         try {
             // Create member
-            $member = R::dispense('member');
+            $member = Bean::dispense('member');
             $member->email = $email;
             $member->username = $username;
             $member->password = password_hash($password, PASSWORD_DEFAULT);
@@ -364,7 +364,7 @@ class Auth extends BaseControls\Control {
             $member->status = 'active'; // Active immediately - no email verification
             $member->created_at = date('Y-m-d H:i:s');
 
-            $id = R::store($member);
+            $id = Bean::store($member);
             $member->id = $id;
 
             // Create user's database
@@ -431,11 +431,11 @@ class Auth extends BaseControls\Control {
             if (!empty($workspace)) {
                 if ($this->switchToTenantDatabase($workspace)) {
                     $connectedToTenant = true;
-                    $member = R::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
+                    $member = Bean::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
                     $this->logger->debug('Member lookup in tenant DB', ['found' => $member ? true : false, 'workspace' => $workspace]);
                 }
             } else {
-                $member = R::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
+                $member = Bean::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
             }
 
             if ($member) {
@@ -443,7 +443,7 @@ class Auth extends BaseControls\Control {
                 $token = bin2hex(random_bytes(32));
                 $member->reset_token = $token;
                 $member->reset_expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
-                R::store($member);
+                Bean::store($member);
 
                 $this->logger->debug('Reset token stored', ['member_id' => $member->id, 'workspace' => $workspace]);
 
@@ -511,7 +511,7 @@ HTML;
             }
         }
 
-        $member = R::findOne('member', 'reset_token = ? AND reset_expires > ?',
+        $member = Bean::findOne('member', 'reset_token = ? AND reset_expires > ?',
             [$token, date('Y-m-d H:i:s')]);
 
         if (!empty($workspace)) {
@@ -582,7 +582,7 @@ HTML;
             }
 
             // Find member
-            $member = R::findOne('member', 'reset_token = ? AND reset_expires > ?',
+            $member = Bean::findOne('member', 'reset_token = ? AND reset_expires > ?',
                 [$token, date('Y-m-d H:i:s')]);
 
             if (!$member) {
@@ -599,7 +599,7 @@ HTML;
             $member->password = password_hash($password, PASSWORD_DEFAULT);
             $member->reset_token = null;
             $member->reset_expires = null;
-            R::store($member);
+            Bean::store($member);
 
             if (!empty($workspace)) {
                 Bean::selectDatabase('default');
@@ -708,7 +708,7 @@ HTML;
                 }
 
                 // Re-find member in tenant database
-                $tenantMember = R::findOne('member', '(email = ? OR google_id = ?) AND status = ?',
+                $tenantMember = Bean::findOne('member', '(email = ? OR google_id = ?) AND status = ?',
                     [$member->email, $member->google_id, 'active']);
 
                 if (!$tenantMember) {
@@ -758,7 +758,7 @@ HTML;
 
             // Store the database reference on the member
             $member->ceobot_db = $dbHash;
-            R::store($member);
+            Bean::store($member);
 
             // Create the SQLite database directory if needed
             if (!is_dir($dbPath)) {
@@ -1089,7 +1089,7 @@ HTML;
         // Get tenant display name for the form
         $tenantDisplayName = '';
         if (!empty($tenant)) {
-            $setting = R::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
             $tenantDisplayName = $setting ? $setting->setting_value : ucwords(str_replace(['-', '_'], ' ', $tenant));
         }
 

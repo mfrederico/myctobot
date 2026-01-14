@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class Contact extends BaseControls\Control {
     
@@ -67,9 +68,9 @@ class Contact extends BaseControls\Control {
 
             // If user is logged in, link via association
             if (isset($_SESSION['member']['id'])) {
-                $member = R::load('member', $_SESSION['member']['id']);
+                $member = Bean::load('member', $_SESSION['member']['id']);
                 $member->ownContactList[] = $contact;
-                R::store($member);
+                Bean::store($member);
             } else {
                 R::store($contact);
             }
@@ -208,7 +209,7 @@ class Contact extends BaseControls\Control {
             $response->created_at = date('Y-m-d H:i:s');
 
             // Link to admin via association
-            $admin = R::load('member', $_SESSION['member']['id']);
+            $admin = Bean::load('member', $_SESSION['member']['id']);
             $response->member = $admin;  // Sets admin_id automatically
 
             // Add response to contact's list (sets contact_id automatically)

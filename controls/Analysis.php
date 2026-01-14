@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\UserDatabaseService;
@@ -371,7 +372,7 @@ class Analysis extends BaseControls\Control {
         $request = Flight::request();
         if ($request->method === 'GET') {
             // Check for any active shard jobs for this board
-            $activeJob = R::findOne('digestjobs',
+            $activeJob = Bean::findOne('digestjobs',
                 'member_id = ? AND board_id = ? AND status IN (?, ?)',
                 [$this->member->id, $boardId, 'queued', 'running']
             );
@@ -431,7 +432,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Get job with ownership verification
-        $job = R::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
+        $job = Bean::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
         if (!$job) {
             $this->flash('error', 'Job not found or access denied');
             Flight::redirect('/analysis');
@@ -485,7 +486,7 @@ class Analysis extends BaseControls\Control {
         }
 
         // Get job with ownership verification
-        $job = R::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
+        $job = Bean::findOne('digestjobs', 'job_uid = ? AND member_id = ?', [$jobId, $this->member->id]);
         if (!$job) {
             $this->jsonError('Job not found or access denied');
             return;

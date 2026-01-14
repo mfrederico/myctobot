@@ -70,15 +70,15 @@ class Enterprise extends BaseControls\Control {
 
         // Check setup status
         // Check API key
-        $apiKeySetting = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
         $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
         // Check GitHub connections (workspace-level - all members share repos)
-        $githubCount = R::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
+        $githubCount = Bean::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
         $githubConnected = $githubCount > 0;
 
         // Check credit balance errors (within last 24 hours)
-        $creditSetting = R::findOne('enterprisesettings',
+        $creditSetting = Bean::findOne('enterprisesettings',
             'setting_key = ? AND member_id = ? AND updated_at > ?',
             ['credit_balance_error', $memberId, date('Y-m-d H:i:s', strtotime('-24 hours'))]
         );
@@ -86,7 +86,7 @@ class Enterprise extends BaseControls\Control {
 
         // Get boards
         $boards = [];
-        $boardBeans = R::findAll('jiraboards', 'member_id = ? ORDER BY board_name ASC', [$memberId]);
+        $boardBeans = Bean::findAll('jiraboards', 'member_id = ? ORDER BY board_name ASC', [$memberId]);
         foreach ($boardBeans as $board) {
             $boards[] = [
                 'id' => $board->id,
@@ -156,7 +156,7 @@ class Enterprise extends BaseControls\Control {
         $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
             // Try to get from member's first Atlassian token
-            $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
             if ($token) {
                 $cloudId = $token->cloud_uid;
             }
@@ -507,7 +507,7 @@ class Enterprise extends BaseControls\Control {
 
             // Get agents for dropdown (workspace-level - all members share agents)
             $agents = [];
-            $agentBeans = R::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
+            $agentBeans = Bean::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
             foreach ($agentBeans as $agentBean) {
                 $agents[] = [
                     'id' => $agentBean->id,
@@ -1536,7 +1536,7 @@ class Enterprise extends BaseControls\Control {
 
         // If agent_id provided, verify it exists (workspace-level - all members share agents)
         if ($agentId) {
-            $agent = R::findOne('aiagents', 'id = ?', [$agentId]);
+            $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
             if (!$agent) {
                 $this->disconnectUserDb();
                 Flight::jsonError('Agent not found', 404);

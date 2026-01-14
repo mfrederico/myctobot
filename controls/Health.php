@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class Health extends BaseControls\Control {
 
@@ -21,8 +22,8 @@ class Health extends BaseControls\Control {
         $queuedJobs = 0;
 
         try {
-            $runningJobs = R::count('digestjobs', 'status = ?', ['running']);
-            $queuedJobs = R::count('digestjobs', 'status = ?', ['queued']);
+            $runningJobs = Bean::count('digestjobs', 'status = ?', ['running']);
+            $queuedJobs = Bean::count('digestjobs', 'status = ?', ['queued']);
         } catch (\Exception $e) {
             // Table might not exist on shard with SQLite
         }

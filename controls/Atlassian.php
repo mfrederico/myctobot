@@ -116,7 +116,7 @@ class Atlassian extends BaseControls\Control {
             }
 
             // Update session with new member data
-            $member = R::load('member', $this->member->id);
+            $member = Bean::load('member', $this->member->id);
             $_SESSION['member'] = $member->export();
 
             $siteCount = count($resources);
@@ -359,7 +359,7 @@ class Atlassian extends BaseControls\Control {
         $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
             // Try to get from member's first Atlassian token
-            $token = R::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
             if ($token) {
                 $cloudId = $token->cloud_uid;
             }

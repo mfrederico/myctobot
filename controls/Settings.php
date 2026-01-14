@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\UserDatabaseService;
@@ -47,14 +48,14 @@ class Settings extends BaseControls\Control {
 
         // Update profile on POST
         try {
-            $member = R::load('member', $this->member->id);
+            $member = Bean::load('member', $this->member->id);
 
             $displayName = $this->sanitize($this->getParam('display_name'));
             if (!empty($displayName)) {
                 $member->display_name = $displayName;
             }
 
-            R::store($member);
+            Bean::store($member);
 
             $this->flash('success', 'Profile updated successfully');
             Flight::redirect('/settings');

@@ -203,7 +203,7 @@ class Mcp extends Control {
         }
 
         // Verify member has a token for this cloud
-        $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?',
+        $token = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?',
             [$this->memberId, $this->cloudId]);
 
         $this->logger->debug('MCP auth token lookup', ['found' => !empty($token)]);

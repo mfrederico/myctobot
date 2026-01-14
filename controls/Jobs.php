@@ -19,6 +19,7 @@ require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/ShardService.php';
 require_once __DIR__ . '/../services/ShardRouter.php';
+require_once __DIR__ . '/../services/AIDevJobService.php';
 
 class Jobs extends BaseControls\Control {
 
@@ -529,6 +530,138 @@ class Jobs extends BaseControls\Control {
         } catch (Exception $e) {
             $this->logger->error('Failed to complete job', ['error' => $e->getMessage()]);
             $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * API endpoint to cleanup job labels after AOE session completes
+     *
+     * POST /jobs/cleanup
+     * Authentication: X-Cron-Secret header or ?secret= query param
+     * Parameters:
+     *   - tenant (required): tenant slug
+     *   - job_id OR issue_key (one required): identifies the job
+     *
+     * This endpoint handles both Jira and GitHub issues based on the job's project_type.
+     */
+    public function cleanup() {
+        $tenant = $this->getParam('tenant', '');
+        $jobId = $this->getParam('job_id', '');
+        $issueKey = $this->getParam('issue_key', '');
+        $providedSecret = $_SERVER['HTTP_X_API_KEY'] ?? $this->getParam('api_key', '');
+
+        if (empty($tenant)) {
+            Flight::jsonError('tenant parameter required', 400);
+            return;
+        }
+
+        // Load tenant config to get aidev.api_key
+        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            Flight::jsonError("Tenant not found: {$tenant}", 404);
+            return;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        $apiKey = $tenantConfig['api']['api_key'] ?? '';
+
+        // Authenticate via api.api_key from tenant config
+        if (empty($apiKey) || $providedSecret !== $apiKey) {
+            $this->logger->warning('Jobs cleanup: invalid or missing api_key', ['tenant' => $tenant]);
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        if (empty($jobId) && empty($issueKey)) {
+            Flight::jsonError('job_id or issue_key parameter required', 400);
+            return;
+        }
+
+        $this->logger->info('Jobs cleanup called', [
+            'tenant' => $tenant,
+            'job_id' => $jobId,
+            'issue_key' => $issueKey
+        ]);
+
+        // Switch to tenant database
+        if (!$this->switchToTenantDatabase($tenant)) {
+            Flight::jsonError("Failed to switch to tenant: {$tenant}", 500);
+            return;
+        }
+
+        try {
+            $service = new \app\services\AIDevJobService();
+            $result = $service->cleanupJobLabels(
+                $jobId ? (int) $jobId : null,
+                $issueKey ?: null
+            );
+
+            $this->logger->info('Jobs cleanup completed', [
+                'tenant' => $tenant,
+                'result' => $result
+            ]);
+
+            Flight::jsonSuccess($result);
+
+        } catch (Exception $e) {
+            $this->logger->error('Jobs cleanup failed', [
+                'error' => $e->getMessage(),
+                'tenant' => $tenant
+            ]);
+            Flight::jsonError('Cleanup failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Switch to tenant database for internal API calls
+     * Pattern from Webhook::switchToTenantForWebhook()
+     */
+    private function switchToTenantDatabase(string $tenant): bool {
+        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            $this->logger->warning("Tenant config not found: {$configFile}");
+            return false;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $this->logger->warning("Invalid tenant config: {$configFile}");
+            return false;
+        }
+
+        // Override config values
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        // Add and switch to tenant database
+        try {
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                Bean::useDatabase($tenant, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $tenant;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                Bean::useDatabase($tenant, $dsn, $user, $pass);
+            }
+            Flight::set('tenant.slug', $tenant);
+            Flight::set('tenant.active', true);
+            return true;
+        } catch (Exception $e) {
+            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
+            return false;
         }
     }
 

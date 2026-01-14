@@ -305,6 +305,21 @@ try {
                     $aoeStorage->save($session);
                     $aoeStale++;
                     output("  Marked stale: {$session->title}");
+
+                    // Cleanup job labels for this session's issue
+                    $issueKey = $session->reference ?? $session->title ?? null;
+                    if ($issueKey && preg_match('/^[A-Z]+-\d+$/', $issueKey)) {
+                        try {
+                            require_once __DIR__ . '/../services/AIDevJobService.php';
+                            $jobService = new \app\services\AIDevJobService();
+                            $cleanupResult = $jobService->cleanupJobLabels(null, $issueKey);
+                            if (!empty($cleanupResult['labels_removed'])) {
+                                output("    Cleaned up labels: " . implode(', ', $cleanupResult['labels_removed']));
+                            }
+                        } catch (\Exception $e) {
+                            output("    Warning: Label cleanup failed: " . $e->getMessage());
+                        }
+                    }
                 }
             }
 

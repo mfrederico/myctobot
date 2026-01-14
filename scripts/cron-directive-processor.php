@@ -57,6 +57,7 @@ use \app\services\DirectiveOrchestrator;
 use \app\services\CompletionDetector;
 use \app\services\UserDatabaseService;
 use \app\services\EncryptionService;
+use \app\services\AIDevJobService;
 
 // Load tenant config
 $configFile = "conf/config.{$tenant}.ini";
@@ -260,6 +261,86 @@ try {
     output("Epics updated: {$detectorResults['epics_updated']}");
     output("Projects completed: {$detectorResults['projects_completed']}");
     output("Stories unblocked: {$detectorResults['stories_unblocked']}");
+
+    // Check AOE sessions for stale status
+    output("=== Syncing AOE Session Status ===");
+
+    $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
+    if (file_exists($aoePath)) {
+        require_once $aoePath;
+
+        try {
+            \Aoe\Tenant\TenantContext::set($tenant);
+            $aoeStorage = new \Aoe\Session\Storage($tenant);
+            $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
+            $statusDetector = new \Aoe\Tmux\StatusDetector();
+
+            $sessions = $aoeStorage->loadAll();
+            $aoeUpdated = 0;
+            $aoeStale = 0;
+
+            foreach ($sessions as $session) {
+                // Only check sessions that claim to be active
+                if (!$session->status->isActive()) {
+                    continue;
+                }
+
+                $tmuxName = $session->getTmuxName();
+                $tmuxExists = $aoeTmux->sessionExistsByName($tmuxName);
+
+                if ($tmuxExists) {
+                    // Tmux running - try to detect real status
+                    $content = $aoeTmux->capturePaneByName($tmuxName, 20);
+                    $newStatus = $statusDetector->detect($content);
+
+                    if ($newStatus !== $session->status) {
+                        $session->status = $newStatus;
+                        $aoeStorage->save($session);
+                        $aoeUpdated++;
+                        output("  Updated {$session->title}: {$newStatus->value}");
+                    }
+                } else {
+                    // Tmux gone but status says active - mark as stopped
+                    $session->status = \Aoe\Session\Status::Stopped;
+                    $aoeStorage->save($session);
+                    $aoeStale++;
+                    output("  Marked stale: {$session->title}");
+                }
+            }
+
+            output("AOE sessions synced: {$aoeUpdated} updated, {$aoeStale} marked stopped");
+
+            // Clear any queue check trigger files
+            $queueCheckFile = "/tmp/aoe-queue-check-{$tenant}";
+            if (file_exists($queueCheckFile)) {
+                unlink($queueCheckFile);
+                output("Queue check trigger cleared");
+            }
+        } catch (\Exception $e) {
+            output("Warning: AOE sync failed: " . $e->getMessage());
+        }
+    } else {
+        output("AOE-PHP not found, skipping session sync");
+    }
+
+    // Process job queue - start queued jobs if capacity available
+    output("=== Processing Job Queue ===");
+
+    try {
+        $jobService = new AIDevJobService();
+        $queueResults = $jobService->processJobQueue($tenant);
+
+        output("Jobs started from queue: {$queueResults['jobs_started']}");
+        output("Jobs remaining in queue: {$queueResults['jobs_remaining']}");
+
+        if (!empty($queueResults['errors'])) {
+            foreach ($queueResults['errors'] as $error) {
+                output("  Queue error: {$error}");
+            }
+        }
+    } catch (\Exception $e) {
+        output("Warning: Queue processing failed: " . $e->getMessage());
+    }
 
     output("=== Processing Complete ===", true);
 

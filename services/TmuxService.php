@@ -8,12 +8,16 @@
  * - Health checking and error detection
  * - Session lifecycle management
  *
- * Uses TmuxManager for low-level tmux operations.
+ * Uses AOE-PHP for session management with TmuxManager as fallback.
+ * Session naming: aoe-{tenant}-{issue}-{shortId}
  */
 
 namespace app\services;
 
 use \app\TmuxManager;
+use Aoe\Session\Instance as AoeInstance;
+use Aoe\Session\Storage as AoeStorage;
+use Aoe\Tmux\TmuxService as AoeTmux;
 
 require_once __DIR__ . '/../lib/TmuxManager.php';
 
@@ -26,6 +30,8 @@ class TmuxService {
     private string $workDir;
     private ?string $repoPath = null;
     private ?string $activeSessionName = null;
+    private ?AoeInstance $aoeSession = null;
+    private ?string $tenantSlug = null;
 
     /**
      * Create a TmuxService for a specific member and issue
@@ -33,17 +39,53 @@ class TmuxService {
      * @param int $memberId Member ID
      * @param string $issueKey Issue key (Jira like PROJ-123, or GitHub like owner/repo#123)
      * @param string|null $repoPath Optional repository path (for local runner)
+     * @param string|null $tenant Tenant slug for AOE session naming
      */
-    public function __construct(int $memberId, string $issueKey, ?string $repoPath = null) {
+    public function __construct(int $memberId, string $issueKey, ?string $repoPath = null, ?string $tenant = null) {
         $this->memberId = $memberId;
         $this->issueKey = $issueKey;
         $this->repoPath = $repoPath;
-        $this->sessionName = TmuxManager::buildSessionName($memberId, $issueKey);
-        $this->localSessionName = TmuxManager::buildLocalRunnerSessionName($memberId, $issueKey);
-        $domainId = TmuxManager::getDomainId();
-        // Sanitize issue key for directory path (GitHub issues contain / and #)
-        $safeIssueKey = TmuxManager::sanitizeForSessionName($issueKey);
-        $this->workDir = "/tmp/aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
+        $this->tenantSlug = $tenant ?: AoeTmux::getDomainId();
+
+        // Try to find existing AOE session for this issue first
+        $storage = new AoeStorage($this->tenantSlug);
+        $existingSession = $this->findSessionByReference($storage, $issueKey);
+
+        if ($existingSession) {
+            // Use existing session
+            $this->aoeSession = $existingSession;
+        } else {
+            // Create new AOE session for tracking and naming
+            $this->aoeSession = AoeInstance::create(
+                tenantId: $this->tenantSlug,
+                title: $issueKey,
+                projectPath: '/tmp',  // Will be updated below
+                tool: 'claude',
+                groupPath: $this->tenantSlug,  // Group = tenant for easy filtering
+                reference: $issueKey  // Ticket ID visible in tmux session name
+            );
+        }
+
+        // AOE-style session name: aoe-{tenant}-{issue}-{shortId}
+        $this->sessionName = $this->aoeSession->getTmuxName();
+        $this->localSessionName = $this->aoeSession->getTmuxName();  // Same for local runner
+        $this->workDir = "/tmp/{$this->sessionName}";
+
+        // Update AOE session with actual work dir
+        $this->aoeSession->projectPath = $this->workDir;
+    }
+
+    /**
+     * Find existing AOE session by issue reference
+     */
+    private function findSessionByReference(AoeStorage $storage, string $reference): ?AoeInstance {
+        $sessions = $storage->loadAll();
+        foreach ($sessions as $session) {
+            if ($session->reference === $reference) {
+                return $session;
+            }
+        }
+        return null;
     }
 
     /**
@@ -78,6 +120,13 @@ class TmuxService {
             return $this->activeSessionName;
         }
         return null;
+    }
+
+    /**
+     * Get the AOE session instance (for tracking)
+     */
+    public function getAoeSession(): ?AoeInstance {
+        return $this->aoeSession;
     }
 
     /**
@@ -162,10 +211,17 @@ class TmuxService {
 
         @mkdir($this->workDir, 0755, true);
 
+        // Save AOE session for tracking
+        if ($this->aoeSession) {
+            $storage = new AoeStorage($this->tenantSlug);
+            $storage->save($this->aoeSession);
+        }
+
         $orchestratorFlag = $orchestrator ? '--orchestrator' : '';
         $jobIdFlag = $jobId ? sprintf('--job-id=%s', escapeshellarg($jobId)) : '';
         $repoIdFlag = $repoId ? sprintf('--repo=%d', $repoId) : '';
-        $tenantFlag = $tenant ? sprintf('--tenant=%s', escapeshellarg($tenant)) : '';
+        $tenantFlag = $tenant ?: $this->tenantSlug;
+        $tenantFlagStr = $tenantFlag ? sprintf('--tenant=%s', escapeshellarg($tenantFlag)) : '';
         $providerFlag = $provider ? sprintf('--provider=%s', escapeshellarg($provider)) : '';
         $command = sprintf(
             'php %s --issue=%s --member=%d %s %s %s %s %s',
@@ -175,7 +231,7 @@ class TmuxService {
             $orchestratorFlag,
             $jobIdFlag,
             $repoIdFlag,
-            $tenantFlag,
+            $tenantFlagStr,
             $providerFlag
         );
 

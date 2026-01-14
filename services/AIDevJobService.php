@@ -172,51 +172,18 @@ class AIDevJobService {
             // Non-Jira project types (github, monday, zoho) always use local runner
 
             if ($useLocalRunner) {
-                // Check workspace-level runner limit first
+                // Queue-first pattern: All jobs go to queue, cron processor starts them
+                // This provides better rate limiting and job management
                 $wsLimit = self::checkWorkspaceLocalRunnerLimit();
-                if (!$wsLimit['available']) {
-                    $this->logger->info('Workspace runner limit reached', [
-                        'member_id' => $memberId,
-                        'issue_key' => $issueKey,
-                        'running' => $wsLimit['running'],
-                        'max' => $wsLimit['max']
-                    ]);
-                    return [
-                        'success' => false,
-                        'error' => "Workspace runner limit reached ({$wsLimit['running']}/{$wsLimit['max']} running). Please wait for a job to complete or increase the limit.",
-                        'limit_reached' => true,
-                        'running' => $wsLimit['running'],
-                        'max' => $wsLimit['max']
-                    ];
-                }
 
-                // Check per-member concurrency limits for local runner
-                $concurrencyCheck = $this->checkConcurrency($memberId);
-                if (!$concurrencyCheck['available']) {
-                    return ['success' => false, 'error' => $concurrencyCheck['error']];
-                }
-
-                $this->logger->info('Using local runner for AI Developer job', [
+                $this->logger->info('Queuing local runner job', [
                     'member_id' => $memberId,
                     'issue_key' => $issueKey,
-                    'board_key_id' => $boardKeyId,
-                    'source' => 'local_runner',
-                    'running_jobs' => $concurrencyCheck['running_count'],
-                    'max_concurrent' => $concurrencyCheck['max_concurrent'],
-                    'workspace_running' => $wsLimit['running'],
-                    'workspace_max' => $wsLimit['max']
+                    'running' => $wsLimit['running'],
+                    'max' => $wsLimit['max']
                 ]);
 
-                $result = $this->spawnLocalRunner($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator, $projectType);
-
-                if ($result['success']) {
-                    // Add working label and transition status (Jira only)
-                    if ($projectType === self::PROJECT_TYPE_JIRA) {
-                        $this->onJobStarted($memberId, $cloudId, $issueKey, $boardId);
-                    }
-                }
-
-                return $result;
+                return $this->queueJob($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator, $projectType, $wsLimit);
             }
 
             // === API execution path - get key and model from anthropickeys table ===
@@ -880,7 +847,7 @@ class AIDevJobService {
      * Spawn a local AI Developer runner for GitHub issue
      */
     private function spawnGitHubLocalRunner(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
 
         if ($tmux->exists()) {
             return [
@@ -962,7 +929,7 @@ class AIDevJobService {
      * @return array Result with 'success', 'job_id', 'session_name' keys
      */
     private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true, string $projectType = self::PROJECT_TYPE_JIRA): array {
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
 
         // Check if session already exists
         if ($tmux->exists()) {
@@ -1021,6 +988,307 @@ class AIDevJobService {
             ]);
             return ['success' => false, 'error' => 'Failed to spawn tmux session'];
         }
+    }
+
+    // ========================================
+    // Job Queue Management
+    // ========================================
+
+    /**
+     * Queue a job for later execution when capacity is available
+     *
+     * @param int $memberId Member ID
+     * @param string $issueKey Issue key
+     * @param int $boardId Board ID
+     * @param string $cloudId Cloud ID
+     * @param int|null $repoId Repository ID
+     * @param string|null $tenant Tenant slug
+     * @param bool $useOrchestrator Use orchestrator mode
+     * @param string $projectType Project type (jira, github, etc.)
+     * @param array $wsLimit Current workspace limit info
+     * @return array Result with queued status
+     */
+    private function queueJob(
+        int $memberId,
+        string $issueKey,
+        int $boardId,
+        string $cloudId,
+        ?int $repoId,
+        ?string $tenant,
+        bool $useOrchestrator,
+        string $projectType,
+        array $wsLimit
+    ): array {
+        // Check if job already exists for this issue
+        $existingJob = Bean::findOne('aidevjobs',
+            'issue_key = ? AND status IN (?, ?, ?)',
+            [$issueKey, 'queued', 'running', 'pending']
+        );
+
+        if ($existingJob) {
+            $this->logger->info('Job already exists for issue', [
+                'issue_key' => $issueKey,
+                'existing_status' => $existingJob->status,
+                'job_id' => $existingJob->id
+            ]);
+            return [
+                'success' => true,
+                'queued' => $existingJob->status === 'queued',
+                'job_id' => $existingJob->id,
+                'message' => "Job already {$existingJob->status} for this issue",
+                'position' => $this->getQueuePosition($existingJob->id)
+            ];
+        }
+
+        // Create queued job record
+        $job = Bean::dispense('aidevjobs');
+        $job->member_id = $memberId;
+        $job->board_id = $boardId;
+        $job->issue_key = $issueKey;
+        $job->cloud_id = $cloudId;
+        $job->repo_id = $repoId;
+        $job->status = 'queued';
+        $job->current_step = 'Waiting in queue';
+        $job->progress = 0;
+        $job->created_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        $job->project_type = $projectType;
+
+        // Store queue metadata for later execution
+        $job->queue_metadata = json_encode([
+            'tenant' => $tenant,
+            'use_orchestrator' => $useOrchestrator,
+            'queued_at' => date('Y-m-d H:i:s'),
+            'ws_running_at_queue' => $wsLimit['running'],
+            'ws_max' => $wsLimit['max']
+        ]);
+
+        $jobId = Bean::store($job);
+
+        $queuePosition = $this->getQueuePosition($jobId);
+
+        $this->logger->info('Job queued for later execution', [
+            'job_id' => $jobId,
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'position' => $queuePosition,
+            'running' => $wsLimit['running'],
+            'max' => $wsLimit['max']
+        ]);
+
+        // Log to job history
+        AIDevStatusService::log($jobId, $memberId, 'info', 'Job queued - waiting for available slot', [
+            'position' => $queuePosition,
+            'running_jobs' => $wsLimit['running'],
+            'max_jobs' => $wsLimit['max']
+        ]);
+
+        return [
+            'success' => true,
+            'queued' => true,
+            'job_id' => $jobId,
+            'message' => "Job queued (position {$queuePosition}). {$wsLimit['running']}/{$wsLimit['max']} jobs running.",
+            'position' => $queuePosition,
+            'running' => $wsLimit['running'],
+            'max' => $wsLimit['max']
+        ];
+    }
+
+    /**
+     * Get queue position for a job
+     */
+    private function getQueuePosition(int $jobId): int {
+        $queuedJobs = Bean::find('aidevjobs',
+            'status = ? ORDER BY created_at ASC',
+            ['queued']
+        );
+
+        $position = 1;
+        foreach ($queuedJobs as $job) {
+            if ((int)$job->id === $jobId) {
+                return $position;
+            }
+            $position++;
+        }
+        return $position;
+    }
+
+    /**
+     * Process the job queue - start queued jobs if capacity available
+     *
+     * Called by cron-directive-processor.php
+     *
+     * @param string|null $tenant Optional tenant filter
+     * @return array Results with jobs started
+     */
+    public function processJobQueue(?string $tenant = null): array {
+        $results = [
+            'jobs_started' => 0,
+            'jobs_remaining' => 0,
+            'errors' => []
+        ];
+
+        // Check current capacity
+        $wsLimit = self::checkWorkspaceLocalRunnerLimit();
+
+        if (!$wsLimit['available']) {
+            $results['jobs_remaining'] = (int)Bean::count('aidevjobs', 'status = ?', ['queued']);
+            $this->logger->debug('Queue processor: no slots available', [
+                'running' => $wsLimit['running'],
+                'max' => $wsLimit['max'],
+                'queued' => $results['jobs_remaining']
+            ]);
+            return $results;
+        }
+
+        $availableSlots = $wsLimit['max'] - $wsLimit['running'];
+
+        // Get queued jobs (FIFO order)
+        $queuedJobs = Bean::find('aidevjobs',
+            'status = ? ORDER BY created_at ASC LIMIT ?',
+            ['queued', $availableSlots]
+        );
+
+        foreach ($queuedJobs as $job) {
+            try {
+                // Re-check capacity (in case another process started a job)
+                $currentLimit = self::checkWorkspaceLocalRunnerLimit();
+                if (!$currentLimit['available']) {
+                    $this->logger->info('Queue processor: slot taken, stopping', [
+                        'job_id' => $job->id
+                    ]);
+                    break;
+                }
+
+                // Parse queue metadata
+                $metadata = json_decode($job->queue_metadata ?? '{}', true);
+                $jobTenant = $metadata['tenant'] ?? $tenant;
+                $useOrchestrator = $metadata['use_orchestrator'] ?? true;
+
+                $this->logger->info('Queue processor: starting queued job', [
+                    'job_id' => $job->id,
+                    'issue_key' => $job->issue_key,
+                    'tenant' => $jobTenant
+                ]);
+
+                // Update job status to running
+                $job->status = 'running';
+                $job->started_at = date('Y-m-d H:i:s');
+                $job->updated_at = date('Y-m-d H:i:s');
+                $job->current_step = 'Starting from queue';
+                $job->progress = 5;
+                Bean::store($job);
+
+                // Spawn the tmux session
+                $tmux = new TmuxService($job->member_id, $job->issue_key, null, $jobTenant);
+
+                // Kill any existing session first
+                if ($tmux->exists()) {
+                    $tmux->kill();
+                    sleep(1);
+                }
+
+                $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->id, $job->repo_id, $jobTenant)) {
+                    $results['jobs_started']++;
+
+                    AIDevStatusService::log($job->id, $job->member_id, 'info', 'Job started from queue', [
+                        'session' => $tmux->getSessionName(),
+                        'wait_time' => $this->calculateWaitTime($job->created_at)
+                    ]);
+
+                    // Trigger onJobStarted for Jira jobs
+                    if (($job->project_type ?? 'jira') === self::PROJECT_TYPE_JIRA) {
+                        $this->onJobStarted($job->member_id, $job->cloud_id, $job->issue_key, $job->board_id);
+                    }
+                } else {
+                    // Failed to spawn - mark as error
+                    $job->status = 'error';
+                    $job->error_message = 'Failed to spawn tmux session from queue';
+                    $job->updated_at = date('Y-m-d H:i:s');
+                    Bean::store($job);
+
+                    $results['errors'][] = "Job {$job->id} ({$job->issue_key}): Failed to spawn";
+
+                    $this->logger->error('Queue processor: failed to spawn job', [
+                        'job_id' => $job->id,
+                        'issue_key' => $job->issue_key
+                    ]);
+                }
+
+            } catch (\Exception $e) {
+                $results['errors'][] = "Job {$job->id}: " . $e->getMessage();
+
+                $this->logger->error('Queue processor: exception starting job', [
+                    'job_id' => $job->id,
+                    'error' => $e->getMessage()
+                ]);
+
+                // Mark job as error
+                $job->status = 'error';
+                $job->error_message = $e->getMessage();
+                $job->updated_at = date('Y-m-d H:i:s');
+                Bean::store($job);
+            }
+        }
+
+        $results['jobs_remaining'] = (int)Bean::count('aidevjobs', 'status = ?', ['queued']);
+
+        $this->logger->info('Queue processor complete', $results);
+
+        return $results;
+    }
+
+    /**
+     * Calculate wait time from created_at to now
+     */
+    private function calculateWaitTime(string $createdAt): string {
+        $created = new \DateTime($createdAt);
+        $now = new \DateTime();
+        $diff = $now->diff($created);
+
+        if ($diff->h > 0) {
+            return $diff->format('%hh %im');
+        } elseif ($diff->i > 0) {
+            return $diff->format('%im %ss');
+        } else {
+            return $diff->format('%ss');
+        }
+    }
+
+    /**
+     * Get queue status for display
+     *
+     * @return array Queue status info
+     */
+    public static function getQueueStatus(): array {
+        $wsLimit = self::checkWorkspaceLocalRunnerLimit();
+
+        $queuedJobs = Bean::find('aidevjobs',
+            'status = ? ORDER BY created_at ASC',
+            ['queued']
+        );
+
+        $queue = [];
+        $position = 1;
+        foreach ($queuedJobs as $job) {
+            $queue[] = [
+                'position' => $position++,
+                'job_id' => $job->id,
+                'issue_key' => $job->issue_key,
+                'queued_at' => $job->created_at,
+                'member_id' => $job->member_id
+            ];
+        }
+
+        return [
+            'running' => $wsLimit['running'],
+            'max' => $wsLimit['max'],
+            'available_slots' => max(0, $wsLimit['max'] - $wsLimit['running']),
+            'queued_count' => count($queue),
+            'queue' => $queue
+        ];
     }
 
     // ========================================
@@ -2057,95 +2325,49 @@ class AIDevJobService {
         }
 
         // Only allow retry of failed/cancelled jobs
-        if (!in_array($job->status, ['failed', 'cancelled'])) {
+        if (!in_array($job->status, ['failed', 'cancelled', 'error'])) {
             return ['success' => false, 'error' => "Cannot retry job with status '{$job->status}'"];
         }
 
-        // Check workspace runner limits before retrying
-        $wsLimit = self::checkWorkspaceLocalRunnerLimit();
-        if (!$wsLimit['available']) {
-            return [
-                'success' => false,
-                'error' => "Workspace runner limit reached ({$wsLimit['running']}/{$wsLimit['max']}). Please wait for a job to complete.",
-                'limit_reached' => true
-            ];
-        }
-
         // Log the retry attempt
-        AIDevStatusService::log($jobId, $memberId, 'info', 'Job retry initiated', [
+        AIDevStatusService::log($jobId, $memberId, 'info', 'Job retry initiated - adding to queue', [
             'previous_status' => $job->status,
             'previous_error' => $job->error_message
         ]);
 
-        // Reset job status
-        $job->status = 'running';
+        // Queue-first pattern: Reset job to queued status, cron will pick it up
+        $job->status = 'queued';
         $job->error_message = null;
         $job->completed_at = null;
-        $job->current_step = 'Retrying...';
-        $job->progress = 5;
-        $job->started_at = date('Y-m-d H:i:s');
+        $job->current_step = 'Waiting in queue (retry)';
+        $job->progress = 0;
         $job->updated_at = date('Y-m-d H:i:s');
+
+        // Update queue metadata for retry
+        $metadata = json_decode($job->queue_metadata ?? '{}', true);
+        $metadata['tenant'] = $tenant ?? ($metadata['tenant'] ?? null);
+        $metadata['retry_at'] = date('Y-m-d H:i:s');
+        $metadata['retry_count'] = ($metadata['retry_count'] ?? 0) + 1;
+        $job->queue_metadata = json_encode($metadata);
+
         \app\Bean::store($job);
 
-        // Spawn new tmux session for the job
-        $tmux = new TmuxService($memberId, $job->issue_key);
+        $queuePosition = $this->getQueuePosition($job->id);
 
-        // Kill any existing session first (shouldn't exist, but just in case)
-        if ($tmux->exists()) {
-            $tmux->kill();
-            sleep(1);
-        }
-
-        // Build the command to spawn the local runner
-        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
-        $tenantParam = $tenant ? " --tenant=" . escapeshellarg($tenant) : "";
-
-        $cmd = sprintf(
-            'php %s --issue=%s --member=%d --job-id=%s%s --print 2>&1',
-            escapeshellarg($scriptPath),
-            escapeshellarg($job->issue_key),
-            $memberId,
-            escapeshellarg($jobId),
-            $tenantParam
-        );
-
-        // Spawn in tmux
-        $sessionName = $tmux->getLocalSessionName();
-        $tmuxCmd = sprintf(
-            'tmux new-session -d -s %s %s',
-            escapeshellarg($sessionName),
-            escapeshellarg($cmd)
-        );
-
-        $this->logger->info('Retrying job in tmux', [
+        $this->logger->info('Job queued for retry', [
             'job_id' => $jobId,
             'issue_key' => $job->issue_key,
-            'session_name' => $sessionName
+            'position' => $queuePosition,
+            'retry_count' => $metadata['retry_count']
         ]);
-
-        exec($tmuxCmd, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            // Failed to spawn - mark as failed again
-            $job->status = 'failed';
-            $job->error_message = 'Failed to spawn tmux session for retry';
-            $job->completed_at = date('Y-m-d H:i:s');
-            \app\Bean::store($job);
-
-            AIDevStatusService::log($jobId, $memberId, 'error', 'Failed to spawn tmux for retry', [
-                'return_code' => $returnCode,
-                'output' => implode("\n", $output)
-            ]);
-
-            return ['success' => false, 'error' => 'Failed to spawn tmux session'];
-        }
 
         return [
             'success' => true,
+            'queued' => true,
             'job_id' => $jobId,
             'issue_key' => $job->issue_key,
-            'session_name' => $sessionName,
-            'message' => 'Job retry started'
+            'position' => $queuePosition,
+            'message' => "Job queued for retry (position {$queuePosition})"
         ];
     }
 }

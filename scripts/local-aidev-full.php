@@ -52,10 +52,9 @@ if (isset($options['help']) || empty($options['issue'])) {
     exit(1);
 }
 
-require_once $baseDir . '/vendor/autoload.php';
+require_once $baseDir . '/vendor/autoload.php';  // Includes AOE-PHP via composer
 require_once $baseDir . '/bootstrap.php';
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
-require_once $baseDir . '/lib/TmuxManager.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/GitHubClient.php';
 require_once $baseDir . '/services/EncryptionService.php';
@@ -66,8 +65,12 @@ require_once $baseDir . '/services/UserDatabaseService.php';
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
-use \app\TmuxManager;
 use \app\Bean;
+use Aoe\Session\Instance as AoeInstance;
+use Aoe\Session\Storage as AoeStorage;
+use Aoe\Session\Status as AoeStatus;
+use Aoe\Tmux\TmuxService as AoeTmux;
+use Aoe\Tenant\TenantContext;
 use \app\services\JiraClient;
 use \app\services\GitHubClient;
 use \app\services\EncryptionService;
@@ -101,23 +104,37 @@ $dryRun = isset($options['dry-run']);
 $skipJira = isset($options['skip-jira']) || $provider === 'github';  // Skip Jira if using GitHub
 $repoPath = $options['repo-path'] ?? null;
 
-// Get domain identifier and session names from TmuxManager (single source of truth)
-$domainId = TmuxManager::getDomainId();
+// Get domain/tenant identifier using AOE (single source of truth)
+$tenantSlug = $tenant ?: AoeTmux::getDomainId();
+TenantContext::set($tenantSlug);
+
+// Initialize AOE storage for session tracking
+$aoeStorage = new AoeStorage($tenantSlug);
+
+// Create AOE session with ticket reference visible in tmux name
+$aoeSession = AoeInstance::create(
+    tenantId: $tenantSlug,
+    title: $issueKey,
+    projectPath: '/tmp',  // Will update with actual workDir below
+    tool: 'claude',
+    reference: $issueKey  // Ticket ID visible in tmux session name
+);
+
+// Session name format: aoe-{tenant}-{issue}-{shortId}
+$sessionName = $aoeSession->getTmuxName();
+$safeIssueKey = AoeTmux::sanitize($issueKey);
+$workDir = "/tmp/{$sessionName}";
+
+// Update session with actual work directory
+$aoeSession->projectPath = $workDir;
 
 // Default cloudId - will be looked up from member's Atlassian connection
 $cloudId = 'cb1fabf7-9018-49bb-90c7-afa23343dbe5';
 
-// Use TmuxManager for consistent session naming across all components
-$sessionName = TmuxManager::buildLocalRunnerSessionName($memberId, $issueKey);
-// Sanitize issue key for directory path (GitHub issues contain / and #)
-$safeIssueKey = TmuxManager::sanitizeForSessionName($issueKey);
-$workDir = "/tmp/local-aidev-{$domainId}-{$memberId}-{$safeIssueKey}";
-
 echo "===========================================\n";
 echo "Local AI Developer - Using YOUR Claude Account\n";
 echo "===========================================\n\n";
-echo "Domain: {$domainId}\n";
-if ($tenant) echo "Tenant: {$tenant}\n";
+echo "Tenant: {$tenantSlug}\n";
 echo "Provider: {$provider}\n";
 echo "Issue: {$issueKey}\n";
 echo "Member ID: {$memberId}\n";
@@ -1067,11 +1084,33 @@ OLLAMA_ECHO;
     echo "  Ollama Backend: {$ollamaHost} (model: {$ollamaModel})\n";
 }
 
+// Path to cleanup script (relative to myctobot root)
+$cleanupScript = dirname(__DIR__) . '/scripts/aoe-session-cleanup.php';
+$aoeSessionId = $aoeSession->id;
+
 $envScript = <<<BASH
 #!/bin/bash
 # Environment setup for AI Developer session
 # Generated for issue: {$issueKey}
 # Provider: {$provider}
+
+# AOE Session Tracking
+export AOE_TENANT="{$tenantSlug}"
+export AOE_SESSION_ID="{$aoeSessionId}"
+export AOE_SESSION_NAME="{$sessionName}"
+
+# Cleanup function - called on exit
+aoe_cleanup() {
+    local exit_code=\$?
+    echo ""
+    echo "=== Session Ended (exit code: \$exit_code) ==="
+    echo "Updating AOE session status..."
+    php "{$cleanupScript}" --tenant="\$AOE_TENANT" --session-id="\$AOE_SESSION_ID" --exit-code="\$exit_code" || true
+    echo "=== Cleanup Complete ==="
+}
+
+# Register exit trap for cleanup
+trap aoe_cleanup EXIT
 
 {$providerEnvSection}
 {$ollamaEnvSection}
@@ -1429,7 +1468,7 @@ if ($dryRun) {
     echo "===========================================\n\n";
     echo "Summary:\n";
     echo "  - Member: {$memberId} ({$member->email})\n";
-    echo "  - Domain: {$domainId}\n";
+    echo "  - Tenant: {$tenantSlug}\n";
     echo "  - Repository: {$repoOwner}/{$repoName}\n";
     echo "  - Default Branch: {$defaultBranch}\n";
     echo "  - GitHub Token: " . (!empty($githubToken) ? "****" . substr($githubToken, -4) : "NOT SET") . "\n";
@@ -1466,31 +1505,46 @@ if ($alreadyInTmux) {
     exit(0);
 }
 
-// Manual mode - create our own tmux session
+// Manual mode - create our own tmux session using AOE
 echo "Setting up tmux session...\n";
-exec("tmux kill-session -t '{$sessionName}' 2>/dev/null");
+$aoeTmux = new AoeTmux($tenantSlug);
 
-// Create new tmux session
+// Kill existing session if any (use session name with ticket reference)
+if ($aoeTmux->sessionExistsByName($sessionName)) {
+    $aoeTmux->killSessionByName($sessionName);
+}
+
+// Save session to AOE storage for tracking
+$aoeStorage->save($aoeSession);
+
+// Create tmux session with 200x50 size (use session name with ticket reference)
 $outputFile = "{$workDir}/output.log";
-exec("tmux new-session -d -s '{$sessionName}' -x 200 -y 50");
+$aoeTmux->createSessionWithName($sessionName, $workDir, '');
+$aoeTmux->resizePaneByName($sessionName, 200, 50);
 
 // Run the wrapper script which sets env and starts Claude
-exec("tmux send-keys -t '{$sessionName}' '{$envScriptPath}' Enter");
+$aoeTmux->sendTextByName($sessionName, $envScriptPath);
+$aoeTmux->sendEnterByName($sessionName);
 sleep(3);  // Wait for env setup and Claude to start
 
 if (!$usePrintMode) {
     // For interactive mode, accept the bypass permissions dialog
     sleep(2);
-    exec("tmux send-keys -t '{$sessionName}' Down");  // Move to "Yes, I accept"
+    $aoeTmux->sendKeysByName($sessionName, 'Down');  // Move to "Yes, I accept"
     sleep(1);
-    exec("tmux send-keys -t '{$sessionName}' Enter");  // Confirm
+    $aoeTmux->sendEnterByName($sessionName);  // Confirm
     sleep(3);  // Wait for Claude to fully start
 
     // Send the prompt
-    exec("tmux send-keys -t '{$sessionName}' 'Please read and execute the task in prompt.txt' Enter");
+    $aoeTmux->sendTextByName($sessionName, 'Please read and execute the task in prompt.txt');
+    $aoeTmux->sendEnterByName($sessionName);
     sleep(1);
-    exec("tmux send-keys -t '{$sessionName}' Enter");  // Submit
+    $aoeTmux->sendEnterByName($sessionName);  // Submit
 }
+
+// Update status in AOE
+$aoeSession->status = AoeStatus::Starting;
+$aoeStorage->save($aoeSession);
 
 echo "\n";
 echo "============================================\n";
@@ -1516,7 +1570,10 @@ echo "\n";
 echo "Commands:\n";
 echo "  Attach now:    tmux attach -t {$sessionName}\n";
 echo "  Watch log:     tail -f {$workDir}/session.log\n";
-echo "  Kill session:  tmux kill-session -t {$sessionName}\n";
+echo "  Kill session:  bin/aoe --tenant={$tenantSlug} session:stop {$aoeSession->getShortId()}\n";
+echo "  Session info:  bin/aoe --tenant={$tenantSlug} session:status {$aoeSession->getShortId()}\n";
+echo "\n";
+echo "AOE Session ID: {$aoeSession->id} (short: {$aoeSession->getShortId()})\n";
 echo "\n";
 echo "This uses YOUR Claude subscription, not API credits!\n";
 echo "============================================\n";
@@ -1524,13 +1581,13 @@ echo "\n";
 
 if ($autoAttach) {
     echo "Attaching to session... (Ctrl+B, D to detach)\n\n";
-    passthru("tmux attach -t '{$sessionName}'");
+    $aoeTmux->attachSessionByName($sessionName);
 } else {
     echo "Attach now? (y/N): ";
     $handle = fopen("php://stdin", "r");
     $line = fgets($handle);
     if (trim(strtolower($line)) === 'y') {
-        passthru("tmux attach -t '{$sessionName}'");
+        $aoeTmux->attachSessionByName($sessionName);
     }
 }
 

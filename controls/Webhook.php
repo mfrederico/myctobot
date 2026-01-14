@@ -556,23 +556,34 @@ class Webhook extends BaseControls\Control {
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
 
         if ($result['success']) {
-            $this->logger->info('AI Developer job triggered via webhook', [
+            $isQueued = $result['queued'] ?? false;
+
+            $this->logger->info($isQueued ? 'AI Developer job queued via webhook' : 'AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
                 'job_id' => $result['job_id'],
                 'issue_key' => $issueKey,
                 'repo_id' => $repoId,
+                'queued' => $isQueued,
+                'position' => $result['position'] ?? null,
                 'local' => $result['local'] ?? false,
                 'shard' => $result['shard'] ?? null
             ]);
 
-            // Log successful job trigger
+            // Log successful job trigger or queue
             if ($this->currentDirectiveLogger && $this->currentDirectiveId) {
+                $stepType = $isQueued ? 'job_queued' : 'job_started';
+                $stepMessage = $isQueued
+                    ? "AI Developer job queued (position {$result['position']})"
+                    : 'AI Developer job started successfully';
+
                 $this->currentDirectiveLogger->logProcessingStep(
                     $this->currentDirectiveId,
-                    'job_started',
-                    'AI Developer job started successfully',
+                    $stepType,
+                    $stepMessage,
                     [
                         'job_id' => $result['job_id'],
+                        'queued' => $isQueued,
+                        'position' => $result['position'] ?? null,
                         'local' => $result['local'] ?? false,
                         'shard' => $result['shard'] ?? null
                     ]
@@ -631,7 +642,8 @@ class Webhook extends BaseControls\Control {
      * Close local tmux session when ai-dev label is removed or complete status reached
      */
     private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null, string $reason = 'closed'): void {
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tenant = Flight::get('tenant.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
 
         // Clean up status file regardless of whether tmux session exists
         $this->cleanupJobStatus($memberId, $issueKey, $reason);
@@ -978,7 +990,8 @@ class Webhook extends BaseControls\Control {
      * Download a Jira attachment to the local work directory
      */
     private function downloadJiraAttachment(string $issueKey, int $memberId, string $attachmentUrl, string $filename, string $oauthToken): ?string {
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tenant = Flight::get('tenant.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
         $attachmentsDir = $tmux->getWorkDir() . '/attachments';
 
         if (!is_dir($attachmentsDir)) {
@@ -1025,11 +1038,13 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tenant = Flight::get('tenant.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
 
         $this->logger->debug('Local session check', [
             'issue_key' => $issueKey,
             'member_id' => $memberId,
+            'tenant' => $tenant,
             'has_tmux_session' => $tmux->exists(),
             'claude_running' => $tmux->isClaudeRunning()
         ]);
@@ -1249,11 +1264,13 @@ class Webhook extends BaseControls\Control {
         }
 
         // Check if there's a running tmux session for this issue
-        $tmux = new TmuxService($memberId, $issueKey);
+        $tenant = Flight::get('tenant.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
         if (!$tmux->exists()) {
             $this->logger->debug('GitHub: No running tmux session to augment', [
                 'issue_key' => $issueKey,
-                'member_id' => $memberId
+                'member_id' => $memberId,
+                'tenant' => $tenant
             ]);
             return;
         }

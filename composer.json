@@ -10,8 +10,15 @@
             "email": "you@example.com"
         }
     ],
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../aoe-php"
+        }
+    ],
     "require": {
         "php": ">=8.1",
+        "myctobot/aoe-php": "@dev",
         "flightphp/core": "^3.0",
         "gabordemooij/redbean": "dev-master",
         "guzzlehttp/guzzle": "^7.10",

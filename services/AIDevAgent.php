@@ -21,6 +21,7 @@ use GuzzleHttp\Client;
 
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/AttachmentService.php';
+require_once __DIR__ . '/GitOperations.php';
 
 class AIDevAgent {
     private int $memberId;

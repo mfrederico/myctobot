@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\plugins\AtlassianAuth;
 use \app\services\UserDatabaseService;
@@ -74,15 +75,15 @@ class Dashboard extends BaseControls\Control {
         $stats = [];
 
         try {
-            $member = R::load('member', $_SESSION['member']['id']);
+            $member = Bean::load('member', $_SESSION['member']['id']);
             $stats['last_login'] = $member->last_login ?? 'Never';
             $stats['login_count'] = $member->login_count ?? 0;
             $stats['member_since'] = date('F j, Y', strtotime($member->created_at));
 
             // Admin stats
             if (Flight::hasLevel(LEVELS['ADMIN'])) {
-                $stats['total_members'] = R::count('member');
-                $stats['active_members'] = R::count('member', 'status = ?', ['active']);
+                $stats['total_members'] = Bean::count('member');
+                $stats['active_members'] = Bean::count('member', 'status = ?', ['active']);
             }
 
         } catch (\Exception $e) {

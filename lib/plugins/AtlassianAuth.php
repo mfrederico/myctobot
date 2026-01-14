@@ -36,6 +36,9 @@ class AtlassianAuth {
      * @param string $state Optional state parameter for CSRF protection
      * @return string The authorization URL
      */
+
+	// TODO: Need to update this with the projects conf/atlassian.ini
+	// but override if it is inside the tenant ini: e.g. conf/config.{tenant}.ini
     public static function getLoginUrl($state = null) {
         $clientId = Flight::get('atlassian.client_id');
         $redirectUri = Flight::get('atlassian.redirect_uri');

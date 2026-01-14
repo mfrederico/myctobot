@@ -1034,7 +1034,7 @@ class Webhook extends BaseControls\Control {
                 // Also check board's configured complete status
                 if (!$shouldClose) {
                     $projectKey = explode('-', $issueKey)[0] ?? '';
-                    $board = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+                    $board = Bean::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
                     if ($board) {
                         $boardCompleteStatus = $board->aidev_status_complete ?? null;
                         if ($boardCompleteStatus && strcasecmp($newStatus, $boardCompleteStatus) === 0) {
@@ -1367,7 +1367,7 @@ class Webhook extends BaseControls\Control {
         // If workspace is provided, we already switched to that tenant's database
         // Search it first before falling back to all tenants
         if ($workspace && $workspace !== 'default') {
-            $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
+            $repo = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
             if ($repo) {
                 $repoData = $repo->export();
                 $repoData['tenant'] = $workspace;
@@ -1425,7 +1425,7 @@ class Webhook extends BaseControls\Control {
                 }
 
                 // Look for repo connection (repoOwner/repoName already parsed at top of method)
-                $repo = R::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
+                $repo = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
                 if ($repo) {
                     $repoData = $repo->export();
                     $repoData['tenant'] = $tenant;
@@ -1466,13 +1466,13 @@ class Webhook extends BaseControls\Control {
 
         // Look up member by their database name pattern
         $dbName = "myctobot_{$tenant}";
-        $member = R::findOne('member', 'ceobot_db LIKE ?', ["%{$dbName}%"]);
+        $member = Bean::findOne('member', 'ceobot_db LIKE ?', ["%{$dbName}%"]);
         if ($member) {
             return (int)$member->id;
         }
 
         // Try matching by tenant slug in workspace
-        $member = R::findOne('member', 'workspace = ?', [$tenant]);
+        $member = Bean::findOne('member', 'workspace = ?', [$tenant]);
         if ($member) {
             return (int)$member->id;
         }
@@ -1809,7 +1809,7 @@ class Webhook extends BaseControls\Control {
     private function addGitHubWorkingLabel(array $repoConnection, string $repoFullName, int $issueNumber): void {
         try {
             // Get GitHub token from tenant settings
-            $tokenSetting = R::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
                 return;
             }
@@ -2023,13 +2023,13 @@ class Webhook extends BaseControls\Control {
             $siteUrl = 'https://' . $siteDomain;
 
             // Look up the cloud ID from our stored tokens
-            $token = R::findOne('atlassiantoken', 'site_url = ?', [$siteUrl]);
+            $token = Bean::findOne('atlassiantoken', 'site_url = ?', [$siteUrl]);
             if ($token) {
                 return $token->cloud_uid;
             }
 
             // Also try without https
-            $token = R::findOne('atlassiantoken', 'site_url LIKE ?', ['%' . $siteDomain . '%']);
+            $token = Bean::findOne('atlassiantoken', 'site_url LIKE ?', ['%' . $siteDomain . '%']);
             if ($token) {
                 return $token->cloud_uid;
             }
@@ -2046,13 +2046,13 @@ class Webhook extends BaseControls\Control {
         $projectKey = explode('-', $issueKey)[0] ?? '';
 
         // Find the board for this project to get the cloud_uid
-        $board = R::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+        $board = Bean::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
         if ($board && !empty($board->cloud_uid)) {
             return $board->cloud_uid;
         }
 
         // Fall back to first token for member
-        $token = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+        $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
         if ($token) {
             return $token->cloud_uid;
         }
@@ -2064,7 +2064,7 @@ class Webhook extends BaseControls\Control {
      * Find member ID by Atlassian cloud ID
      */
     private function findMemberByCloudId(string $cloudId): ?int {
-        $token = R::findOne('atlassiantoken', 'cloud_uid = ?', [$cloudId]);
+        $token = Bean::findOne('atlassiantoken', 'cloud_uid = ?', [$cloudId]);
         return $token ? (int)$token->member_id : null;
     }
 
@@ -2072,7 +2072,7 @@ class Webhook extends BaseControls\Control {
      * Get member's SQLite database
      */
     private function getMemberDb(int $memberId): ?\SQLite3 {
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
         if (!$member || empty($member->ceobot_db)) {
             return null;
         }
@@ -2159,7 +2159,7 @@ class Webhook extends BaseControls\Control {
 
         try {
             // Look up the pending digest job
-            $digestJob = R::findOne('digestjobs', 'job_uid = ?', [$jobId]);
+            $digestJob = Bean::findOne('digestjobs', 'job_uid = ?', [$jobId]);
 
             if (!$digestJob) {
                 $this->logger->warning('Digest job not found', ['job_uid' => $jobId]);
@@ -2532,7 +2532,7 @@ class Webhook extends BaseControls\Control {
         }
 
         // Fallback: search database for jobs with matching current_shard_job_uid
-        $job = R::findOne('aidevjobs', 'current_shard_job_uid = ?', [$shardJobId]);
+        $job = Bean::findOne('aidevjobs', 'current_shard_job_uid = ?', [$shardJobId]);
 
         if ($job) {
             return [
@@ -2592,7 +2592,7 @@ class Webhook extends BaseControls\Control {
      */
     private function storeCreditBalanceError(int $memberId, string $errorMsg): void {
         try {
-            $member = R::load('member', $memberId);
+            $member = Bean::load('member', $memberId);
             if (!$member || empty($member->ceobot_db)) {
                 return;
             }
@@ -2642,7 +2642,7 @@ class Webhook extends BaseControls\Control {
      * Send digest email
      */
     private function sendDigestEmail($digestJob, string $markdown): void {
-        $member = R::load('member', $digestJob->member_id);
+        $member = Bean::load('member', $digestJob->member_id);
         if (!$member || empty($member->email)) {
             return;
         }

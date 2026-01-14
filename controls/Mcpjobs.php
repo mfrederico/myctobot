@@ -181,7 +181,7 @@ class Mcpjobs extends Control {
             $apiKey = $matches[1];
 
             // Look up member by api_token
-            $member = R::findOne('member', 'api_token = ?', [$apiKey]);
+            $member = Bean::findOne('member', 'api_token = ?', [$apiKey]);
             if ($member) {
                 $this->memberId = (int)$member->id;
                 return true;

@@ -12,6 +12,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 
 class Ceodirective extends BaseControls\Control {
@@ -43,7 +44,7 @@ class Ceodirective extends BaseControls\Control {
         }
 
         // Look up member by API token in main database
-        $member = R::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
+        $member = Bean::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
         return $member ?: null;
     }
 

@@ -430,7 +430,7 @@ class Github extends BaseControls\Control {
 
             // Get agents for dropdown (workspace-level - shared by all members)
             $agents = [];
-            $agentBeans = \RedBeanPHP\R::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
+            $agentBeans = Bean::findAll('aiagents', 'is_active = 1 ORDER BY name ASC');
             foreach ($agentBeans as $agentBean) {
                 $agents[] = [
                     'id' => $agentBean->id,
@@ -553,7 +553,7 @@ class Github extends BaseControls\Control {
 
         // If agent_id provided, verify it exists (workspace-level)
         if ($agentId) {
-            $agent = \RedBeanPHP\R::findOne('aiagents', 'id = ?', [$agentId]);
+            $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
             if (!$agent) {
                 Flight::jsonError('Agent not found', 404);
                 return;

@@ -40,4 +40,39 @@ trait McpResponseTrait
     {
         echo json_encode($this->errorResponse($id, $code, $message));
     }
+
+    /**
+     * Handle a JSON-RPC request by dispatching to the appropriate handler
+     *
+     * Implementing classes must provide:
+     * - handleInitialize($id, array $params): array
+     * - handleToolsList($id): array
+     * - handleToolCall($id, array $params): array
+     *
+     * @param array $request JSON-RPC request
+     * @return array JSON-RPC response
+     */
+    protected function handleRequest(array $request): array
+    {
+        $method = $request['method'] ?? '';
+        $params = $request['params'] ?? [];
+        $id = $request['id'] ?? null;
+
+        switch ($method) {
+            case 'initialize':
+                return $this->handleInitialize($id, $params);
+
+            case 'tools/list':
+                return $this->handleToolsList($id);
+
+            case 'tools/call':
+                return $this->handleToolCall($id, $params);
+
+            case 'notifications/initialized':
+                return []; // No response needed for notifications
+
+            default:
+                return $this->errorResponse($id, -32601, "Method not found: {$method}");
+        }
+    }
 }

@@ -221,32 +221,6 @@ class Mcp extends Control {
     }
 
     /**
-     * Handle a JSON-RPC request
-     */
-    private function handleRequest(array $request): array {
-        $method = $request['method'] ?? '';
-        $params = $request['params'] ?? [];
-        $id = $request['id'] ?? null;
-
-        switch ($method) {
-            case 'initialize':
-                return $this->handleInitialize($id, $params);
-
-            case 'tools/list':
-                return $this->handleToolsList($id);
-
-            case 'tools/call':
-                return $this->handleToolCall($id, $params);
-
-            case 'notifications/initialized':
-                return []; // No response needed
-
-            default:
-                return $this->errorResponse($id, -32601, "Method not found: {$method}");
-        }
-    }
-
-    /**
      * Handle initialize request
      */
     private function handleInitialize($id, array $params): array {

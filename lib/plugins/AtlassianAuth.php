@@ -30,19 +30,88 @@ class AtlassianAuth {
     // read:source-code:jira - allows reading development panel info (branches, commits, PRs linked to issues)
     private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook read:source-code:jira offline_access';
 
+    /** @var array|null Cached Atlassian config */
+    private static ?array $configCache = null;
+
+    /**
+     * Get Atlassian configuration with hierarchy:
+     * 1. Load base config from conf/atlassian.ini
+     * 2. Override with tenant config from conf/config.{tenant}.ini [atlassian] section
+     * 3. Fall back to Flight::get() for backwards compatibility
+     *
+     * @return array Atlassian configuration
+     */
+    public static function getConfig(): array {
+        if (self::$configCache !== null) {
+            return self::$configCache;
+        }
+
+        $config = [
+            'client_id' => null,
+            'client_secret' => null,
+            'redirect_uri' => null,
+            'scopes' => self::$defaultScopes,
+        ];
+
+        // 1. Load base config from conf/atlassian.ini
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
+        $atlassianIni = $basePath . '/conf/atlassian.ini';
+        if (file_exists($atlassianIni)) {
+            $baseConfig = parse_ini_file($atlassianIni, true);
+            if ($baseConfig && isset($baseConfig['atlassian'])) {
+                $config = array_merge($config, $baseConfig['atlassian']);
+            }
+        }
+
+        // 2. Check for tenant overrides
+        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+        if ($tenantSlug && $tenantSlug !== 'default') {
+            $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
+            if (file_exists($tenantIni)) {
+                $tenantConfig = parse_ini_file($tenantIni, true);
+                if ($tenantConfig && isset($tenantConfig['atlassian'])) {
+                    // Tenant overrides base config
+                    $config = array_merge($config, $tenantConfig['atlassian']);
+                }
+            }
+        }
+
+        // 3. Fall back to Flight::get() for any missing values (backwards compatibility)
+        if (empty($config['client_id'])) {
+            $config['client_id'] = Flight::get('atlassian.client_id');
+        }
+        if (empty($config['client_secret'])) {
+            $config['client_secret'] = Flight::get('atlassian.client_secret');
+        }
+        if (empty($config['redirect_uri'])) {
+            $config['redirect_uri'] = Flight::get('atlassian.redirect_uri');
+        }
+        if (empty($config['scopes'])) {
+            $config['scopes'] = Flight::get('atlassian.scopes') ?? self::$defaultScopes;
+        }
+
+        self::$configCache = $config;
+        return $config;
+    }
+
+    /**
+     * Clear the config cache (useful when switching tenants)
+     */
+    public static function clearConfigCache(): void {
+        self::$configCache = null;
+    }
+
     /**
      * Get Atlassian OAuth authorization URL
      *
      * @param string $state Optional state parameter for CSRF protection
      * @return string The authorization URL
      */
-
-	// TODO: Need to update this with the projects conf/atlassian.ini
-	// but override if it is inside the tenant ini: e.g. conf/config.{tenant}.ini
     public static function getLoginUrl($state = null) {
-        $clientId = Flight::get('atlassian.client_id');
-        $redirectUri = Flight::get('atlassian.redirect_uri');
-        $scopes = Flight::get('atlassian.scopes') ?? self::$defaultScopes;
+        $config = self::getConfig();
+        $clientId = $config['client_id'];
+        $redirectUri = $config['redirect_uri'];
+        $scopes = $config['scopes'] ?? self::$defaultScopes;
 
         if (empty($clientId) || empty($redirectUri)) {
             throw new \Exception('Atlassian OAuth not configured. Set atlassian.client_id and atlassian.redirect_uri in config.ini');
@@ -126,9 +195,10 @@ class AtlassianAuth {
      * @return array|false Token data or false on failure
      */
     private static function exchangeCode($code) {
-        $clientId = Flight::get('atlassian.client_id');
-        $clientSecret = Flight::get('atlassian.client_secret');
-        $redirectUri = Flight::get('atlassian.redirect_uri');
+        $config = self::getConfig();
+        $clientId = $config['client_id'];
+        $clientSecret = $config['client_secret'];
+        $redirectUri = $config['redirect_uri'];
 
         $postData = [
             'grant_type' => 'authorization_code',
@@ -265,8 +335,9 @@ class AtlassianAuth {
             return false;
         }
 
-        $clientId = Flight::get('atlassian.client_id');
-        $clientSecret = Flight::get('atlassian.client_secret');
+        $config = self::getConfig();
+        $clientId = $config['client_id'];
+        $clientSecret = $config['client_secret'];
 
         $postData = [
             'grant_type' => 'refresh_token',
@@ -433,11 +504,9 @@ class AtlassianAuth {
      * @return bool
      */
     public static function isConfigured() {
-        $clientId = Flight::get('atlassian.client_id');
-        $clientSecret = Flight::get('atlassian.client_secret');
-        $redirectUri = Flight::get('atlassian.redirect_uri');
+        $config = self::getConfig();
 
-        return !empty($clientId) && !empty($clientSecret) && !empty($redirectUri);
+        return !empty($config['client_id']) && !empty($config['client_secret']) && !empty($config['redirect_uri']);
     }
 
     /**
@@ -485,11 +554,12 @@ class AtlassianAuth {
      * @return string The authorization URL with write scopes
      */
     public static function getLoginUrlWithWriteScopes($state = null) {
-        $clientId = Flight::get('atlassian.client_id');
-        $redirectUri = Flight::get('atlassian.redirect_uri');
+        $config = self::getConfig();
+        $clientId = $config['client_id'];
+        $redirectUri = $config['redirect_uri'];
 
         if (empty($clientId) || empty($redirectUri)) {
-            throw new \Exception('Atlassian OAuth not configured. Set atlassian.client_id and atlassian.redirect_uri in config.ini');
+            throw new \Exception('Atlassian OAuth not configured. Set atlassian.client_id and atlassian.redirect_uri in config.ini or conf/atlassian.ini');
         }
 
         // Generate state for CSRF protection if not provided

@@ -263,14 +263,14 @@ allowed_ips = "127.0.0.1"
 ; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is tenant-specific
 client_id = ""
 client_secret = ""
-redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$slug}"
+redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$subdomain}"
 scopes = ""
 
 [github]
 ; GitHub OAuth - credentials from conf/github.ini, redirect_uri is tenant-specific
 client_id = ""
 client_secret = ""
-redirect_uri = "https://myctobot.ai/enterprise/githubcallback?workspace={$slug}"
+redirect_uri = "https://myctobot.ai/enterprise/githubcallback?workspace={$subdomain}"
 
 [stripe]
 ; Handled at platform level

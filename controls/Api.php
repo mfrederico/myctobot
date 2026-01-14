@@ -12,6 +12,7 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\services\UserDatabaseService;
 use \app\services\LLMProviders\LLMProviderFactory;
+use \app\services\LLMProviders\OllamaProvider;
 
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
@@ -273,70 +274,16 @@ class Api extends BaseControls\Control {
             // Ollama backend via Claude CLI
             $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
             $ollamaModel = $providerConfig['ollama_model'] ?? 'llama3';
-            return $this->callOllama($ollamaHost, $ollamaModel, $prompt, $imagePath);
+            return OllamaProvider::quickChat($ollamaHost, $ollamaModel, $prompt, $imagePath);
         } elseif ($provider === 'ollama') {
             // Direct Ollama
             $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
             $ollamaModel = $providerConfig['model'] ?? 'llama3';
-            return $this->callOllama($ollamaHost, $ollamaModel, $prompt, $imagePath);
+            return OllamaProvider::quickChat($ollamaHost, $ollamaModel, $prompt, $imagePath);
         } else {
             // Other providers - return prompt preview for now
             return "Prompt would be sent to {$provider}:\n\n{$prompt}";
         }
-    }
-
-    /**
-     * Call Ollama API
-     */
-    private function callOllama(string $host, string $model, string $prompt, ?string $imagePath = null): string {
-        $url = rtrim($host, '/') . '/api/chat';
-
-        $messages = [
-            ['role' => 'user', 'content' => $prompt]
-        ];
-
-        // Add image if provided
-        if ($imagePath && file_exists($imagePath)) {
-            $imageData = file_get_contents($imagePath);
-            if ($imageData !== false) {
-                $messages[0]['images'] = [base64_encode($imageData)];
-            }
-        }
-
-        $payload = [
-            'model' => $model,
-            'messages' => $messages,
-            'stream' => false
-        ];
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode($payload),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_TIMEOUT => 120
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($error) {
-            throw new Exception('Ollama request failed: ' . $error);
-        }
-
-        if ($httpCode !== 200) {
-            throw new Exception('Ollama returned HTTP ' . $httpCode . ': ' . $response);
-        }
-
-        $data = json_decode($response, true);
-        if (isset($data['message']['content'])) {
-            return $data['message']['content'];
-        }
-
-        return $response;
     }
 
     /**

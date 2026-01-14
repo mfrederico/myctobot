@@ -32,11 +32,14 @@ use \app\Bean;
 use app\BaseControls\Control;
 use app\services\AIDevStatusService;
 use app\services\AIDevJobService;
+use app\services\McpResponseTrait;
 
 require_once __DIR__ . '/../services/AIDevStatusService.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
+require_once __DIR__ . '/../services/McpResponseTrait.php';
 
 class Mcpjobs extends Control {
+    use McpResponseTrait;
 
     private ?int $memberId = null;
     private ?string $jobId = null;
@@ -638,33 +641,5 @@ class Mcpjobs extends Control {
                 'error' => $e->getMessage()
             ]);
         }
-    }
-
-    /**
-     * Send JSON-RPC error response
-     */
-    private function sendError($id, int $code, string $message): void {
-        echo json_encode([
-            'jsonrpc' => '2.0',
-            'id' => $id,
-            'error' => [
-                'code' => $code,
-                'message' => $message
-            ]
-        ]);
-    }
-
-    /**
-     * Create error response array
-     */
-    private function errorResponse($id, int $code, string $message): array {
-        return [
-            'jsonrpc' => '2.0',
-            'id' => $id,
-            'error' => [
-                'code' => $code,
-                'message' => $message
-            ]
-        ];
     }
 }

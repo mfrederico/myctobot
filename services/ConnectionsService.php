@@ -495,4 +495,53 @@ class ConnectionsService {
         // Fallback for unexpected format
         return substr($key, 0, 10) . '...' . substr($key, -4);
     }
+
+    // ========================================
+    // Static Repository Connection Methods
+    // ========================================
+
+    /**
+     * Get all repository connections with agent names
+     *
+     * This is a static helper that can be called from any controller
+     * once the user database is connected (via connectUserDb or similar).
+     *
+     * @return array List of repository connections with agent info
+     */
+    public static function getRepositoryConnections(): array
+    {
+        $repos = [];
+
+        $repoBeans = Bean::findAll('repoconnections', ' ORDER BY created_at DESC ');
+
+        foreach ($repoBeans as $bean) {
+            // Get agent name if assigned (aiagents is in MySQL)
+            $agentName = null;
+            if ($bean->agent_id) {
+                $agent = R::load('aiagents', $bean->agent_id);
+                if ($agent->id) {
+                    $agentName = $agent->name;
+                }
+            }
+
+            $repos[] = [
+                'id' => $bean->id,
+                'provider' => $bean->provider,
+                'repo_owner' => $bean->repo_owner,
+                'repo_name' => $bean->repo_name,
+                'default_branch' => $bean->default_branch,
+                'clone_url' => $bean->clone_url,
+                'access_token' => $bean->access_token,
+                'enabled' => $bean->enabled,
+                'issues_enabled' => $bean->issues_enabled ?? 0,
+                'webhook_id' => $bean->webhook_id,
+                'agent_id' => $bean->agent_id,
+                'agent_name' => $agentName,
+                'created_at' => $bean->created_at,
+                'updated_at' => $bean->updated_at
+            ];
+        }
+
+        return $repos;
+    }
 }

@@ -18,8 +18,10 @@ use \app\services\AIDevJobManager;
 use \app\services\ShardService;
 use \app\services\ShardRouter;
 use \app\services\LLMProviders\LLMProviderFactory;
+use \app\services\ConnectionsService;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
+require_once __DIR__ . '/../services/ConnectionsService.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 require_once __DIR__ . '/../services/TierFeatures.php';
 require_once __DIR__ . '/../services/EncryptionService.php';
@@ -105,7 +107,9 @@ class Enterprise extends BaseControls\Control {
         }
 
         // Get repo connections
-        $repos = $this->getRepoConnections();
+        $this->connectUserDb();
+        $repos = ConnectionsService::getRepositoryConnections();
+        $this->disconnectUserDb();
 
         // Get recent jobs using AIDevJobManager
         $jobManager = new AIDevJobManager($memberId);
@@ -435,10 +439,10 @@ class Enterprise extends BaseControls\Control {
     public function repos() {
         if (!$this->requireEnterprise()) return;
 
-        $repos = $this->getRepoConnections();
+        $this->connectUserDb();
+        $repos = ConnectionsService::getRepositoryConnections();
 
         // Get boards for mapping using static method
-        $this->connectUserDb();
         $boards = [];
         $boardBeans = Bean::findAll('jiraboards', ' ORDER BY board_name ASC ');
         foreach ($boardBeans as $bean) {
@@ -809,48 +813,6 @@ class Enterprise extends BaseControls\Control {
         }
 
         Flight::redirect('/enterprise/repos');
-    }
-
-    /**
-     * Helper: Get repository connections
-     */
-    private function getRepoConnections(): array {
-        $repos = [];
-
-        // repoconnections is in user SQLite database, use Bean::
-        $this->connectUserDb();
-        $repoBeans = Bean::findAll('repoconnections', ' ORDER BY created_at DESC ');
-
-        foreach ($repoBeans as $bean) {
-            // Get agent name if assigned (aiagents is in MySQL)
-            $agentName = null;
-            if ($bean->agent_id) {
-                $agent = R::load('aiagents', $bean->agent_id);
-                if ($agent->id) {
-                    $agentName = $agent->name;
-                }
-            }
-
-            $repos[] = [
-                'id' => $bean->id,
-                'provider' => $bean->provider,
-                'repo_owner' => $bean->repo_owner,
-                'repo_name' => $bean->repo_name,
-                'default_branch' => $bean->default_branch,
-                'clone_url' => $bean->clone_url,
-                'access_token' => $bean->access_token,
-                'enabled' => $bean->enabled,
-                'issues_enabled' => $bean->issues_enabled ?? 0,
-                'webhook_id' => $bean->webhook_id,
-                'agent_id' => $bean->agent_id,
-                'agent_name' => $agentName,
-                'created_at' => $bean->created_at,
-                'updated_at' => $bean->updated_at
-            ];
-        }
-
-        $this->disconnectUserDb();
-        return $repos;
     }
 
     // ========================================

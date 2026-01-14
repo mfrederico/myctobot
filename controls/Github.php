@@ -13,8 +13,10 @@ use \app\Bean;
 use \app\services\GitHubClient;
 use \app\services\EncryptionService;
 use \app\services\LLMProviders\LLMProviderFactory;
+use \app\services\ConnectionsService;
 
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
+require_once __DIR__ . '/../services/ConnectionsService.php';
 
 class Github extends BaseControls\Control {
 
@@ -365,7 +367,7 @@ class Github extends BaseControls\Control {
     public function repolist() {
         if (!$this->requireLogin()) return;
 
-        $repos = $this->getRepoConnections();
+        $repos = ConnectionsService::getRepositoryConnections();
 
         // Get boards for mapping
         $boards = [];
@@ -664,44 +666,6 @@ class Github extends BaseControls\Control {
         }
 
         Flight::redirect('/github/repolist');
-    }
-
-    /**
-     * Helper: Get repository connections
-     */
-    private function getRepoConnections(): array {
-        $repos = [];
-
-        $repoBeans = Bean::findAll('repoconnections', ' ORDER BY created_at DESC ');
-
-        foreach ($repoBeans as $bean) {
-            $agentName = null;
-            if ($bean->agent_id) {
-                $agent = \RedBeanPHP\R::load('aiagents', $bean->agent_id);
-                if ($agent->id) {
-                    $agentName = $agent->name;
-                }
-            }
-
-            $repos[] = [
-                'id' => $bean->id,
-                'provider' => $bean->provider,
-                'repo_owner' => $bean->repo_owner,
-                'repo_name' => $bean->repo_name,
-                'default_branch' => $bean->default_branch,
-                'clone_url' => $bean->clone_url,
-                'access_token' => $bean->access_token,
-                'enabled' => $bean->enabled,
-                'issues_enabled' => $bean->issues_enabled ?? 0,
-                'webhook_id' => $bean->webhook_id,
-                'agent_id' => $bean->agent_id,
-                'agent_name' => $agentName,
-                'created_at' => $bean->created_at,
-                'updated_at' => $bean->updated_at
-            ];
-        }
-
-        return $repos;
     }
 
     // ========================================

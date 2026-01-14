@@ -32,11 +32,14 @@ use \app\Bean;
 use \app\services\ImageService;
 use app\BaseControls\Control;
 use app\services\JiraClient;
+use app\services\McpResponseTrait;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/JiraClient.php';
+require_once __DIR__ . '/../services/McpResponseTrait.php';
 
 class Mcp extends Control {
+    use McpResponseTrait;
 
     private ?int $memberId = null;
     private ?string $cloudId = null;
@@ -918,26 +921,5 @@ class Mcp extends Control {
                 'isError' => true
             ]
         ];
-    }
-
-    /**
-     * Build an error response
-     */
-    private function errorResponse($id, int $code, string $message): array {
-        return [
-            'jsonrpc' => '2.0',
-            'id' => $id,
-            'error' => [
-                'code' => $code,
-                'message' => $message
-            ]
-        ];
-    }
-
-    /**
-     * Send an error response
-     */
-    private function sendError($id, int $code, string $message): void {
-        echo json_encode($this->errorResponse($id, $code, $message));
     }
 }

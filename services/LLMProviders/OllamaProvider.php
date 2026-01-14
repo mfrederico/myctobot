@@ -400,6 +400,72 @@ class OllamaProvider implements LLMProviderInterface
     }
 
     // ========================================
+    // Static Convenience Methods
+    // ========================================
+
+    /**
+     * Simple static method to call Ollama chat API
+     * Throws exceptions on error for simple use cases
+     *
+     * @param string $host Ollama host URL
+     * @param string $model Model name
+     * @param string $prompt User prompt
+     * @param string|null $imagePath Optional path to image file for vision models
+     * @return string The response content
+     * @throws \Exception On connection or API errors
+     */
+    public static function quickChat(string $host, string $model, string $prompt, ?string $imagePath = null): string {
+        $url = rtrim($host, '/') . '/api/chat';
+
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        // Add image if provided
+        if ($imagePath && file_exists($imagePath)) {
+            $imageData = file_get_contents($imagePath);
+            if ($imageData !== false) {
+                $messages[0]['images'] = [base64_encode($imageData)];
+            }
+        }
+
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'stream' => false
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 120
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            throw new \Exception('Ollama request failed: ' . $error);
+        }
+
+        if ($httpCode !== 200) {
+            throw new \Exception('Ollama returned HTTP ' . $httpCode . ': ' . $response);
+        }
+
+        $data = json_decode($response, true);
+        if (isset($data['message']['content'])) {
+            return $data['message']['content'];
+        }
+
+        return $response;
+    }
+
+    // ========================================
     // HTTP Helpers
     // ========================================
 

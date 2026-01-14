@@ -8,7 +8,7 @@
  * Run with: php tests/AssociationRegressionTest.php
  */
 
-namespace app\tests;
+namespace Tests;
 
 // Bootstrap - vendor/autoload.php loads Bean.php via files autoload
 require_once __DIR__ . '/../vendor/autoload.php';

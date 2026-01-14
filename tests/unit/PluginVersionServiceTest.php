@@ -8,7 +8,7 @@
  * @see GitHub Issue #104
  */
 
-namespace app\tests\unit;
+namespace Tests\unit;
 
 // Load required files
 require_once __DIR__ . '/../../lib/SemVer.php';

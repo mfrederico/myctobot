@@ -6,7 +6,7 @@
  * Run with: php tests/CeoDirectiveValidationTest.php
  */
 
-namespace app\tests;
+namespace Tests;
 
 // Minimal Flight mock for testing without full bootstrap
 if (!class_exists('\Flight')) {

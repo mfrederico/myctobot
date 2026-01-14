@@ -6,7 +6,7 @@
  * Run with: php tests/ImageServiceTest.php
  */
 
-namespace app\tests;
+namespace Tests;
 
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../services/ImageService.php';

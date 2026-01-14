@@ -8,7 +8,7 @@
  * @see GitHub Issue #23
  */
 
-namespace app\tests;
+namespace Tests;
 
 require_once __DIR__ . '/../services/ResponseFormatterService.php';
 

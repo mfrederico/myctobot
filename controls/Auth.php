@@ -11,6 +11,7 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\Bean;
 use \app\plugins\GoogleAuth;
+use \app\TenantResolver;
 
 // Load Google Auth plugin
 require_once __DIR__ . '/../lib/plugins/GoogleAuth.php';
@@ -181,45 +182,7 @@ class Auth extends BaseControls\Control {
      * @return bool True on success
      */
     private function switchToTenantDatabase(string $workspace): bool {
-        $configFile = TenantResolver::getConfigFile($workspace);
-
-        if (!file_exists($configFile)) {
-            $this->logger->error('Tenant config not found', ['workspace' => $workspace, 'config' => $configFile]);
-            return false;
-        }
-
-        try {
-            $config = parse_ini_file($configFile, true);
-            $dbConfig = $config['database'] ?? [];
-
-            if (empty($dbConfig)) {
-                $this->logger->error('Tenant database config missing', ['workspace' => $workspace]);
-                return false;
-            }
-
-            // Build DSN and connect
-            $type = $dbConfig['type'] ?? 'mysql';
-            $host = $dbConfig['host'] ?? 'localhost';
-            $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? '';
-            $user = $dbConfig['user'] ?? '';
-            $pass = $dbConfig['pass'] ?? '';
-
-            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-
-            // Add this connection as a secondary database and switch to it
-            Bean::useDatabase($workspace, $dsn, $user, $pass);
-
-            $this->logger->debug('Switched to tenant database', ['workspace' => $workspace, 'database' => $name]);
-            return true;
-
-        } catch (Exception $e) {
-            $this->logger->error('Failed to switch tenant database', [
-                'workspace' => $workspace,
-                'error' => $e->getMessage()
-            ]);
-            return false;
-        }
+        return TenantResolver::switchDatabase($workspace);
     }
 
     /**

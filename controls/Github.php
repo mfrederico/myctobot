@@ -715,4 +715,105 @@ class Github extends BaseControls\Control {
         ];
         return $labels[$provider] ?? $provider;
     }
+
+    // ========================================
+    // Static Label Management Methods
+    // ========================================
+
+    /**
+     * Get GitHub token for a repo (from repo connection or enterprise settings)
+     * Public static for use by other controllers (e.g., Webhook re-clone)
+     */
+    public static function getTokenStatic(string $owner, string $repo, int $memberId): ?string {
+        \app\services\UserDatabaseService::connect($memberId);
+
+        $repoConnection = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ?', [$owner, $repo]);
+        $githubToken = $repoConnection->access_token ?? null;
+
+        // Fallback to enterprise settings if repo doesn't have token
+        if (empty($githubToken)) {
+            $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            if ($githubSetting && !empty($githubSetting->setting_value)) {
+                $encryption = new EncryptionService();
+                $githubToken = $encryption->decrypt($githubSetting->setting_value);
+            }
+        }
+
+        return $githubToken ?: null;
+    }
+
+    /**
+     * Remove a label from a GitHub issue
+     */
+    public static function removeLabel(string $owner, string $repo, int $issueNumber, int $memberId, string $label): void {
+        $logger = Flight::get('log');
+
+        $githubToken = self::getTokenStatic($owner, $repo, $memberId);
+        if (empty($githubToken)) {
+            $logger->warning('No GitHub token available to remove label', [
+                'owner' => $owner,
+                'repo' => $repo,
+                'issue' => $issueNumber
+            ]);
+            return;
+        }
+
+        try {
+            $githubClient = new GitHubClient($githubToken);
+            $githubClient->removeLabel($owner, $repo, $issueNumber, $label);
+            $logger->info("Removed {$label} label from GitHub issue", [
+                'owner' => $owner,
+                'repo' => $repo,
+                'issue' => $issueNumber
+            ]);
+        } catch (\Exception $e) {
+            // 404 means label wasn't on the issue - that's OK
+            if (strpos($e->getMessage(), '404') === false) {
+                $logger->warning("Failed to remove {$label} label from GitHub issue", [
+                    'owner' => $owner,
+                    'repo' => $repo,
+                    'issue' => $issueNumber,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Remove ai-dev and myctobot-working labels from GitHub issue (called on /exit)
+     */
+    public static function removeLabelsOnExit(string $owner, string $repo, int $issueNumber, int $memberId): void {
+        self::removeLabel($owner, $repo, $issueNumber, $memberId, 'ai-dev');
+        self::removeLabel($owner, $repo, $issueNumber, $memberId, 'myctobot-working');
+    }
+
+    /**
+     * Format a clone URL with GitHub authentication
+     * GitHub format: https://{token}@github.com/owner/repo.git
+     *
+     * Converts SSH URLs to HTTPS automatically (with warning)
+     */
+    public static function formatAuthenticatedUrl(string $cloneUrl, string $token): string {
+        $logger = Flight::get('log');
+
+        // Detect SSH URL and convert to HTTPS
+        // SSH format: git@github.com:owner/repo.git
+        if (preg_match('#^git@github\.com:(.+)$#', $cloneUrl, $matches)) {
+            $logger->warning('Github: Converting SSH URL to HTTPS for authentication', [
+                'original_url' => $cloneUrl,
+                'note' => 'Consider updating repo connection to use HTTPS URL'
+            ]);
+            $cloneUrl = 'https://github.com/' . $matches[1];
+        }
+
+        if (empty($token)) {
+            return $cloneUrl;
+        }
+
+        return preg_replace(
+            '#^(https?://)(.*)$#',
+            '$1' . $token . '@$2',
+            $cloneUrl
+        );
+    }
 }

@@ -19,35 +19,11 @@ require_once __DIR__ . '/../services/UserDatabaseService.php';
 
 class Pluginregistry extends BaseControls\Control {
 
-    private $userDbConnected = false;
-
-    /**
-     * Initialize user database connection
-     */
-    private function initUserDb(): bool {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (\Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * GET /plugins - List all discovered plugins
      */
     public function index(): void {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         try {
             $status = $this->getParam('status');
@@ -100,10 +76,6 @@ class Pluginregistry extends BaseControls\Control {
         if (!$this->requireLogin()) return;
         if (!$this->validateCSRF()) return;
 
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         try {
             $scanner = new PluginScannerService();
@@ -141,10 +113,6 @@ class Pluginregistry extends BaseControls\Control {
         if (!$this->requireLogin()) return;
         if (!$this->validateCSRF()) return;
 
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         $repoId = $this->opId() ?? $this->getParam('id');
 
@@ -193,15 +161,6 @@ class Pluginregistry extends BaseControls\Control {
     public function scans(): void {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            if (Flight::request()->ajax) {
-                $this->jsonError('User database not initialized');
-            } else {
-                $this->flash('error', 'User database not initialized');
-                Flight::redirect('/settings/connections');
-            }
-            return;
-        }
 
         try {
             $limit = (int)($this->getParam('limit') ?? 20);
@@ -230,11 +189,6 @@ class Pluginregistry extends BaseControls\Control {
     public function view($params = []): void {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/plugins');
-            return;
-        }
 
         $pluginId = $this->opId() ?? $this->getParam('id');
 

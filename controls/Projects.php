@@ -17,35 +17,11 @@ require_once __DIR__ . '/../services/CompletionDetector.php';
 
 class Projects extends BaseControls\Control {
 
-    private $userDbConnected = false;
-
-    /**
-     * Initialize user database connection
-     */
-    private function initUserDb() {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (\Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * List all projects
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         // Get filter
         $status = $this->getParam('status');
@@ -93,11 +69,6 @@ class Projects extends BaseControls\Control {
     public function view($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/projects');
-            return;
-        }
 
         // Get project ID
         $projectId = $this->opId() ?? $this->getParam('id');
@@ -163,10 +134,6 @@ class Projects extends BaseControls\Control {
     public function pause($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
@@ -201,10 +168,6 @@ class Projects extends BaseControls\Control {
     public function resume($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)
@@ -239,10 +202,6 @@ class Projects extends BaseControls\Control {
     public function report($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         $projectId = $this->opId() ?? $this->getParam('id');
         $project = is_numeric($projectId)

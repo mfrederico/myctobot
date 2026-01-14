@@ -490,4 +490,148 @@ class GitOperations {
         // Optionally auto-cleanup (disabled by default to allow explicit control)
         // $this->cleanup();
     }
+
+    // ========================================
+    // Static Helpers
+    // ========================================
+
+    /**
+     * Format authenticated clone URL by dispatching to vendor controller
+     *
+     * @param string $cloneUrl Base clone URL
+     * @param string $token Access token
+     * @param string $provider Provider name (github, gitlab, bitbucket, etc.)
+     * @return string Authenticated URL
+     */
+    private static function formatAuthenticatedUrl(string $cloneUrl, string $token, string $provider): string {
+        switch ($provider) {
+            case 'github':
+                return \app\Github::formatAuthenticatedUrl($cloneUrl, $token);
+
+            // Future vendors:
+            // case 'gitlab':
+            //     return \app\Gitlab::formatAuthenticatedUrl($cloneUrl, $token);
+            // case 'bitbucket':
+            //     return \app\Bitbucket::formatAuthenticatedUrl($cloneUrl, $token);
+
+            default:
+                // Unknown provider - fail explicitly (security: no guessing)
+                $logger = Flight::get('log');
+                $logger->error('GitOperations: Unsupported git provider', [
+                    'provider' => $provider,
+                    'clone_url' => $cloneUrl
+                ]);
+                throw new \Exception("Unsupported git provider: {$provider}");
+        }
+    }
+
+    /**
+     * Ensure repo is cloned for a running session (re-clone if missing)
+     *
+     * Looks up job by issueKey to get repo connection info, then clones if needed.
+     * Provider-agnostic: works with GitHub, GitLab, Bitbucket, etc.
+     *
+     * @param string $workDir Work directory (e.g., /tmp/aoe-tenant-issue-xxx)
+     * @param string $issueKey Issue key to look up job
+     * @param int $memberId Member ID for database access
+     * @return bool True if repo exists or was successfully cloned
+     */
+    public static function ensureRepoCloned(string $workDir, string $issueKey, int $memberId): bool {
+        $logger = Flight::get('log');
+        $repoDir = $workDir . '/repo';
+
+        // Already exists
+        if (is_dir($repoDir)) {
+            return true;
+        }
+
+        $logger->info('GitOperations: Repo missing, attempting re-clone', [
+            'issue_key' => $issueKey,
+            'work_dir' => $workDir
+        ]);
+
+        // Connect to user database to find job/repo info
+        UserDatabaseService::connect($memberId);
+
+        // Find the job to get repo_connection_id
+        $job = \app\Bean::findOne('aidevjobs', 'issue_key = ? ORDER BY created_at DESC', [$issueKey]);
+        if (!$job || !$job->repo_connection_id) {
+            $logger->warning('GitOperations: No job or repo_connection_id found', [
+                'issue_key' => $issueKey
+            ]);
+            return false;
+        }
+
+        // Get repo connection details
+        $repo = \app\Bean::load('repoconnections', $job->repo_connection_id);
+        if (!$repo || !$repo->id) {
+            $logger->warning('GitOperations: Repo connection not found', [
+                'repo_connection_id' => $job->repo_connection_id
+            ]);
+            return false;
+        }
+
+        $cloneUrl = $repo->clone_url;
+        $token = $repo->access_token ?? '';
+
+        // If no token in repo connection, try enterprise settings based on provider
+        if (empty($token)) {
+            $provider = $repo->provider ?? 'github';
+            $settingKey = $provider . '_token';  // github_token, gitlab_token, etc.
+
+            $tokenSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', [$settingKey]);
+            if ($tokenSetting && !empty($tokenSetting->setting_value)) {
+                $encryption = new EncryptionService();
+                $token = $encryption->decrypt($tokenSetting->setting_value);
+            }
+        }
+
+        if (empty($cloneUrl)) {
+            $logger->warning('GitOperations: No clone URL available', [
+                'issue_key' => $issueKey,
+                'repo_connection_id' => $job->repo_connection_id
+            ]);
+            return false;
+        }
+
+        // Ensure work directory exists
+        @mkdir($workDir, 0755, true);
+
+        // Build authenticated clone URL via vendor-specific formatter
+        $provider = $repo->provider ?? 'github';
+        $authenticatedUrl = self::formatAuthenticatedUrl($cloneUrl, $token, $provider);
+
+        // Clone the repo
+        $cloneCmd = sprintf(
+            'git clone %s %s 2>&1',
+            escapeshellarg($authenticatedUrl),
+            escapeshellarg($repoDir)
+        );
+
+        exec($cloneCmd, $output, $exitCode);
+
+        if ($exitCode === 0) {
+            // Checkout default branch if specified
+            $defaultBranch = $repo->default_branch ?? 'main';
+            exec(sprintf(
+                'git -C %s checkout %s 2>&1',
+                escapeshellarg($repoDir),
+                escapeshellarg($defaultBranch)
+            ));
+
+            $logger->info('GitOperations: Successfully re-cloned repo', [
+                'issue_key' => $issueKey,
+                'repo_dir' => $repoDir,
+                'provider' => $repo->provider ?? 'unknown'
+            ]);
+            return true;
+        } else {
+            $logger->error('GitOperations: Failed to re-clone repo', [
+                'issue_key' => $issueKey,
+                'exit_code' => $exitCode,
+                'output' => implode("\n", $output)
+            ]);
+            return false;
+        }
+    }
 }

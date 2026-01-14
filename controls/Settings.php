@@ -22,21 +22,6 @@ use \app\services\ConnectionsService;
 
 class Settings extends BaseControls\Control {
 
-    private $userDbConnected = false;
-
-    private function initUserDb() {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * Settings index page - redirects to unified connections page
      */
@@ -87,11 +72,6 @@ class Settings extends BaseControls\Control {
     public function notifications() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
-
         $digestEnabled = $this->getParam('digest_enabled') === 'true' || $this->getParam('digest_enabled') === '1';
 
         UserDatabaseService::setSetting('digest_enabled', $digestEnabled ? '1' : '0');
@@ -129,11 +109,8 @@ class Settings extends BaseControls\Control {
         $tierInfo = SubscriptionService::getTierInfo($currentTier);
 
         // Get board count for context
-        $boardCount = 0;
-        if ($this->initUserDb()) {
-            $boards = UserDatabaseService::getBoards();
-            $boardCount = count($boards);
-        }
+        $boards = UserDatabaseService::getBoards();
+        $boardCount = count($boards);
 
         // Get feature access
         $features = TierFeatures::getFeatures($currentTier);
@@ -157,9 +134,6 @@ class Settings extends BaseControls\Control {
      */
     public function connections() {
         if (!$this->requireLogin()) return;
-
-        // Switch to user database FIRST before any queries
-        $this->initUserDb();
 
         $connectionsService = new ConnectionsService($this->member->id);
         $connections = $connectionsService->getAllConnections();
@@ -279,10 +253,8 @@ class Settings extends BaseControls\Control {
         }
 
         // Get boards and analyses
-        if ($this->initUserDb()) {
-            $data['boards'] = UserDatabaseService::getBoards();
-            $data['analyses'] = UserDatabaseService::getAllRecentAnalyses(100);
-        }
+        $data['boards'] = UserDatabaseService::getBoards();
+        $data['analyses'] = UserDatabaseService::getAllRecentAnalyses(100);
 
         // Output as JSON download
         header('Content-Type: application/json');

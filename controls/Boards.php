@@ -19,35 +19,11 @@ use \app\Bean;
 
 class Boards extends BaseControls\Control {
 
-    private $userDbConnected = false;
-
-    /**
-     * Initialize user database connection
-     */
-    private function initUserDb() {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * List all tracked boards
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         // Optional cloud_id filter from query string
         $filterCloudId = $this->getParam('cloud_id');
@@ -116,12 +92,6 @@ class Boards extends BaseControls\Control {
     public function discover() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
-
         // Optional cloud_id filter from query string
         $filterCloudId = $this->getParam('cloud_id');
 
@@ -175,11 +145,6 @@ class Boards extends BaseControls\Control {
      */
     public function add() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         $request = Flight::request();
 
@@ -257,12 +222,6 @@ class Boards extends BaseControls\Control {
      */
     public function edit($params = []) {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/boards');
-            return;
-        }
 
         // Board ID comes from URL: /boards/edit/{id}
         $id = $this->opId() ?? $this->getParam('id');
@@ -441,11 +400,6 @@ class Boards extends BaseControls\Control {
     public function remove($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
-
         // Board ID comes from URL: /boards/remove/{id}
         $id = $this->opId() ?? $this->getParam('id');
         if (!$id) {
@@ -497,11 +451,6 @@ class Boards extends BaseControls\Control {
      */
     public function toggle($params = []) {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         // Board ID comes from URL: /boards/toggle/{id}
         $id = $this->opId() ?? $this->getParam('id');

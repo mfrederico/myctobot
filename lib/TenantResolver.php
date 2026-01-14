@@ -198,4 +198,83 @@ class TenantResolver {
             'from_session' => isset($_SESSION['tenant_slug'])
         ];
     }
+
+    /**
+     * Switch to tenant database and load config
+     *
+     * Loads tenant config file, sets Flight config values, and switches
+     * Bean database connection. Use this for webhooks, API calls, and
+     * background scripts that need to operate in a tenant context.
+     *
+     * @param string $slug Tenant slug (e.g., 'gwt')
+     * @return bool True if switch successful
+     */
+    public static function switchDatabase(string $slug): bool {
+        $logger = Flight::get('log');
+        $slug = strtolower(trim($slug));
+
+        // Load tenant config
+        $configFile = __DIR__ . "/../conf/config.{$slug}.ini";
+        if (!file_exists($configFile)) {
+            if ($logger) {
+                $logger->warning("TenantResolver: Config not found", ['tenant' => $slug, 'file' => $configFile]);
+            }
+            return false;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        if (!$tenantConfig || empty($tenantConfig['database'])) {
+            if ($logger) {
+                $logger->warning("TenantResolver: Invalid config", ['tenant' => $slug]);
+            }
+            return false;
+        }
+
+        // Override Flight config values
+        foreach ($tenantConfig as $section => $values) {
+            if (is_array($values)) {
+                foreach ($values as $key => $value) {
+                    Flight::set("{$section}.{$key}", $value);
+                }
+            }
+        }
+
+        // Switch Bean database connection
+        try {
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+
+            if ($type === 'sqlite') {
+                $dbPath = $dbConfig['path'] ?? "database/{$slug}.sqlite";
+                $dsn = "sqlite:{$dbPath}";
+                \app\Bean::useDatabase($slug, $dsn);
+            } else {
+                $host = $dbConfig['host'] ?? 'localhost';
+                $port = $dbConfig['port'] ?? 3306;
+                $name = $dbConfig['name'] ?? $slug;
+                $user = $dbConfig['user'] ?? 'root';
+                $pass = $dbConfig['pass'] ?? '';
+                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+                \app\Bean::useDatabase($slug, $dsn, $user, $pass);
+            }
+
+            Flight::set('tenant.slug', $slug);
+            Flight::set('tenant.active', true);
+            $_SESSION['tenant_slug'] = $slug;
+
+            if ($logger) {
+                $logger->debug("TenantResolver: Switched to tenant", ['tenant' => $slug]);
+            }
+
+            return true;
+        } catch (\Exception $e) {
+            if ($logger) {
+                $logger->error("TenantResolver: Database switch failed", [
+                    'tenant' => $slug,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            return false;
+        }
+    }
 }

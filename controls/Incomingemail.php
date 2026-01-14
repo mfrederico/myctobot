@@ -10,6 +10,7 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\UserDatabaseService;
+use \app\TenantResolver;
 
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 
@@ -276,52 +277,7 @@ class Incomingemail extends BaseControls\Control {
      * Switch to tenant database for webhook processing
      */
     private function switchToTenantForWebhook(string $tenant): bool {
-        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
-        if (!file_exists($configFile)) {
-            $this->logger->warning("Tenant config not found: {$configFile}");
-            return false;
-        }
-
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
-            $this->logger->warning("Invalid tenant config: {$configFile}");
-            return false;
-        }
-
-        // Override config values
-        foreach ($tenantConfig as $section => $values) {
-            if (is_array($values)) {
-                foreach ($values as $key => $value) {
-                    Flight::set("{$section}.{$key}", $value);
-                }
-            }
-        }
-
-        // Add and switch to tenant database
-        try {
-            $dbConfig = $tenantConfig['database'];
-            $type = $dbConfig['type'] ?? 'mysql';
-
-            if ($type === 'sqlite') {
-                $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
-                $dsn = "sqlite:{$dbPath}";
-                Bean::useDatabase($tenant, $dsn);
-            } else {
-                $host = $dbConfig['host'] ?? 'localhost';
-                $port = $dbConfig['port'] ?? 3306;
-                $name = $dbConfig['name'] ?? $tenant;
-                $user = $dbConfig['user'] ?? 'root';
-                $pass = $dbConfig['pass'] ?? '';
-                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                Bean::useDatabase($tenant, $dsn, $user, $pass);
-            }
-            Flight::set('tenant.slug', $tenant);
-            Flight::set('tenant.active', true);
-            return true;
-        } catch (\Exception $e) {
-            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
-            return false;
-        }
+        return TenantResolver::switchDatabase($tenant);
     }
 
     /**

@@ -35,32 +35,11 @@ use \app\services\ShopifyClient;
 
 class Analysis extends BaseControls\Control {
 
-    private $userDbConnected = false;
-
-    private function initUserDb() {
-        if (!$this->userDbConnected && $this->member && !empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * Analysis dashboard - list boards and recent analyses
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         $boards = UserDatabaseService::getEnabledBoards();
         $recentAnalyses = UserDatabaseService::getAllRecentAnalyses(20);
@@ -77,11 +56,6 @@ class Analysis extends BaseControls\Control {
      */
     public function run($params = []) {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         // Board ID comes from URL: /analysis/run/{board_id}
         $boardId = $this->opId() ?? $this->getParam('board_id');
@@ -244,12 +218,6 @@ class Analysis extends BaseControls\Control {
     public function view($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
-
         // Analysis ID comes from URL: /analysis/view/{id}
         $analysisId = $this->opId() ?? $this->getParam('id');
         if (!$analysisId) {
@@ -288,16 +256,6 @@ class Analysis extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         $isAjax = Flight::request()->ajax;
-
-        if (!$this->initUserDb()) {
-            if ($isAjax) {
-                $this->jsonError('User database not initialized');
-            } else {
-                $this->flash('error', 'User database not initialized');
-                Flight::redirect('/analysis');
-            }
-            return;
-        }
 
         // Analysis ID comes from URL: /analysis/email/{id}
         $analysisId = $this->opId() ?? $this->getParam('id');
@@ -374,11 +332,6 @@ class Analysis extends BaseControls\Control {
     public function history() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
-
         $boardId = $this->getParam('board_id');
         if (!$boardId) {
             $this->jsonError('No board specified');
@@ -398,11 +351,6 @@ class Analysis extends BaseControls\Control {
      */
     public function runshard($params = []) {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->jsonError('User database not initialized');
-            return;
-        }
 
         // Board ID comes from URL: /analysis/runshard/{board_id}
         $boardId = $this->opId() ?? $this->getParam('board_id');
@@ -492,12 +440,6 @@ class Analysis extends BaseControls\Control {
 
         // If complete, find the analysis and redirect
         if ($job->status === 'completed') {
-            if (!$this->initUserDb()) {
-                $this->flash('error', 'User database not initialized');
-                Flight::redirect('/analysis');
-                return;
-            }
-
             // Find the most recent analysis for this board
             $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
             if (!empty($analysis)) {
@@ -567,7 +509,7 @@ class Analysis extends BaseControls\Control {
         ];
 
         // If completed, include analysis_id if we can find it
-        if ($job->status === 'completed' && $this->initUserDb()) {
+        if ($job->status === 'completed') {
             $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
             if (!empty($analysis)) {
                 $response['analysis_id'] = $analysis[0]['id'];

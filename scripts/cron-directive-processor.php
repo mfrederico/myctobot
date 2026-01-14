@@ -72,6 +72,38 @@ if (!$config) {
     exit(1);
 }
 
+// Lockfile to prevent concurrent runs (race condition protection)
+$lockFile = "/tmp/cron-directive-processor-{$tenant}.lock";
+$lockHandle = fopen($lockFile, 'c');
+
+if (!$lockHandle) {
+    echo "Error: Could not create lock file: {$lockFile}\n";
+    exit(1);
+}
+
+if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    // Another instance is already running - this is not an error, just skip
+    if ($verbose) {
+        echo "Another directive processor is already running for tenant: {$tenant}\n";
+    }
+    fclose($lockHandle);
+    exit(0);
+}
+
+// Write PID to lock file for debugging
+ftruncate($lockHandle, 0);
+fwrite($lockHandle, (string) getmypid());
+fflush($lockHandle);
+
+// Register shutdown handler to release lock on exit (normal or error)
+register_shutdown_function(function() use ($lockHandle, $lockFile) {
+    if (is_resource($lockHandle)) {
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+    }
+    @unlink($lockFile);
+});
+
 // Initialize Flight config
 foreach ($config as $section => $values) {
     if (is_array($values)) {

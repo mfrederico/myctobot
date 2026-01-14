@@ -11,6 +11,7 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\Bean;
 use \app\plugins\AtlassianAuth;
+use \app\TenantResolver;
 
 // Load Atlassian Auth plugin
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
@@ -404,49 +405,43 @@ class Atlassian extends BaseControls\Control {
      * @param string $workspace Workspace/tenant slug
      */
     private function switchToWorkspace(string $workspace): void {
-        $configFile = "conf/config.{$workspace}.ini";
-        if (!file_exists($configFile)) {
-            $this->logger->warning("Workspace config not found: {$workspace}");
-            return;
+        if (!TenantResolver::switchDatabase($workspace)) {
+            $this->logger->warning("Failed to switch to workspace: {$workspace}");
         }
+    }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
-            $this->logger->warning("Invalid workspace config: {$workspace}");
-            return;
-        }
+    // ========================================
+    // Static Label Management Methods
+    // ========================================
 
-        // Add (if not already registered) and select workspace database
-        $dbConfig = $tenantConfig['database'];
-        $type = $dbConfig['type'] ?? 'mysql';
-
-        if ($type === 'sqlite') {
-            $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
-            $dsn = "sqlite:{$dbPath}";
-            Bean::useDatabase($workspace, $dsn);
-        } else {
-            $host = $dbConfig['host'] ?? 'localhost';
-            $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $workspace;
-            $user = $dbConfig['user'] ?? 'root';
-            $pass = $dbConfig['pass'] ?? '';
-            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-            Bean::useDatabase($workspace, $dsn, $user, $pass);
-        }
-        $this->logger->debug("Selected workspace database: {$workspace}");
-
-        // Store workspace in session for subsequent requests
-        $_SESSION['tenant_slug'] = $workspace;
-
-        // Update Flight config with tenant settings
-        foreach ($tenantConfig as $section => $values) {
-            if (is_array($values)) {
-                foreach ($values as $key => $value) {
-                    Flight::set("{$section}.{$key}", $value);
-                }
+    /**
+     * Remove a label from a Jira issue
+     */
+    public static function removeLabel(string $issueKey, int $memberId, string $cloudId, string $label): void {
+        $logger = Flight::get('log');
+        try {
+            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
+            $jiraClient->removeLabel($issueKey, $label);
+            $logger->info("Removed {$label} label from Jira ticket", [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+        } catch (\Exception $e) {
+            // 404 means label wasn't on the issue - that's OK
+            if (strpos($e->getMessage(), '404') === false) {
+                $logger->warning("Failed to remove {$label} label from Jira", [
+                    'issue_key' => $issueKey,
+                    'error' => $e->getMessage()
+                ]);
             }
         }
+    }
 
-        $this->logger->info("Switched to workspace: {$workspace}");
+    /**
+     * Remove ai-dev and myctobot-working labels from Jira issue (called on /exit)
+     */
+    public static function removeLabelsOnExit(string $issueKey, int $memberId, string $cloudId): void {
+        self::removeLabel($issueKey, $memberId, $cloudId, 'ai-dev');
+        self::removeLabel($issueKey, $memberId, $cloudId, 'myctobot-working');
     }
 }

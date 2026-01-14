@@ -28,36 +28,11 @@ require_once __DIR__ . '/../services/EncryptionService.php';
 
 class Reviewboard extends BaseControls\Control {
 
-    private bool $userDbConnected = false;
-
-    /**
-     * Initialize user database connection
-     * Note: UserDatabaseService is now a legacy no-op layer - all data is in single MySQL DB per tenant
-     */
-    private function initUserDb(): bool {
-        if (!$this->userDbConnected && $this->member) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (\Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
-    }
-
     /**
      * Main review board - shows all pending stories grouped by directive/project
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         // Auto-cleanup stale jobs (running in DB but no tmux session)
         $staleCleanup = AIDevJobService::cleanupStaleJobs();
@@ -166,12 +141,6 @@ class Reviewboard extends BaseControls\Control {
     public function history() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
-
         // Get all merged jobs
         $mergedJobs = Bean::find('aidevjobs', 'status = ? ORDER BY merged_at DESC', ['merged']);
 
@@ -208,11 +177,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function project($projectId) {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         // Auto-cleanup stale jobs (running in DB but no tmux session)
         AIDevJobService::cleanupStaleJobs();
@@ -254,11 +218,6 @@ class Reviewboard extends BaseControls\Control {
     public function updatestory() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $storyId = $this->getParam('story_id');
         $title = $this->getParam('title');
         $description = $this->getParam('description');
@@ -299,11 +258,6 @@ class Reviewboard extends BaseControls\Control {
     public function deletestory() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $storyId = $this->getParam('story_id');
 
         $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
@@ -335,11 +289,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function approvestories() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $storyIds = $this->getParam('story_ids');
         if (!is_array($storyIds) || empty($storyIds)) {
@@ -420,11 +369,6 @@ class Reviewboard extends BaseControls\Control {
     public function approveproject() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $projectId = $this->getParam('project_id');
 
         $project = Bean::findOne('ctoprojects', 'project_id = ?', [$projectId]);
@@ -459,11 +403,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function deleteproject() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $projectId = $this->getParam('project_id');
 
@@ -511,11 +450,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function getjobdetails() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $issueKey = $this->getParam('issue_key');
         if (!$issueKey) {
@@ -686,11 +620,6 @@ class Reviewboard extends BaseControls\Control {
     public function getstory() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $storyId = $this->getParam('story_id');
         $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
 
@@ -707,11 +636,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function updateproject() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $projectId = $this->getParam('project_id');
         $name = $this->getParam('name');
@@ -738,11 +662,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function createepic() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $projectId = $this->getParam('project_id');
         $title = $this->getParam('title');
@@ -781,11 +700,6 @@ class Reviewboard extends BaseControls\Control {
     public function updateepic() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $epicId = $this->getParam('epic_id');
         $title = $this->getParam('title');
         $description = $this->getParam('description');
@@ -811,11 +725,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function createstory() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $epicId = $this->getParam('epic_id');
         $title = $this->getParam('title');
@@ -857,11 +766,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function movestory() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $storyId = $this->getParam('story_id');
         $targetEpicId = $this->getParam('epic_id');
@@ -905,11 +809,6 @@ class Reviewboard extends BaseControls\Control {
     public function getrunnerstatus() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $status = AIDevJobService::getRunnerStatus();
         Flight::jsonSuccess($status);
     }
@@ -919,11 +818,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function updaterunnerlimit() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $newLimit = (int)$this->getParam('limit');
         if ($newLimit < 1) {
@@ -950,11 +844,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function getbranches() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         // Get the first enabled repo connection
         $repo = Bean::findOne('repoconnections', 'enabled = 1 ORDER BY id ASC');
@@ -1024,11 +913,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function abandonpr() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $issueKey = $this->getParam('issue_key');
         $prUrl = $this->getParam('pr_url');
@@ -1124,11 +1008,6 @@ class Reviewboard extends BaseControls\Control {
     public function findstalejobs() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         try {
             $staleJobs = AIDevJobService::findStaleJobs();
 
@@ -1156,11 +1035,6 @@ class Reviewboard extends BaseControls\Control {
     public function cleanupstalejobs() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $result = AIDevJobService::cleanupStaleJobs();
 
         $this->logger->info('Stale jobs cleaned up', [
@@ -1184,11 +1058,6 @@ class Reviewboard extends BaseControls\Control {
     public function checkjobsession() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $jobId = $this->getParam('job_id');
         if (!$jobId) {
             Flight::jsonError('Job ID required', 400);
@@ -1204,11 +1073,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function markjobstale() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $jobId = $this->getParam('job_id');
         if (!$jobId) {
@@ -1237,11 +1101,6 @@ class Reviewboard extends BaseControls\Control {
     public function retryjob() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $jobId = $this->getParam('job_id');
         if (!$jobId) {
             Flight::jsonError('Job ID required', 400);
@@ -1269,11 +1128,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function buildqarelease() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $storyIds = $this->getParam('story_ids');
         $targetBranch = $this->getParam('target_branch') ?? 'main';
@@ -1437,11 +1291,6 @@ class Reviewboard extends BaseControls\Control {
     public function batchapprove() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
-
         $storyIds = $this->getParam('story_ids');
         if (!is_array($storyIds) || empty($storyIds)) {
             Flight::jsonError('No stories selected', 400);
@@ -1479,11 +1328,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function batchapproveandrun() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $storyIds = $this->getParam('story_ids');
         if (!is_array($storyIds) || empty($storyIds)) {
@@ -1583,11 +1427,6 @@ class Reviewboard extends BaseControls\Control {
      */
     public function startjob() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized', 500);
-            return;
-        }
 
         $issueKey = $this->getParam('issue_key');
         if (!$issueKey) {

@@ -19,25 +19,11 @@ require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 
 class Knowledgebase extends BaseControls\Control {
 
-    private $userDbConnected = false;
     private $ragServiceUrl;
 
     public function __construct() {
         parent::__construct();
         $this->ragServiceUrl = getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501';
-    }
-
-    private function initUserDb() {
-        if (!$this->userDbConnected && $this->member) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
     }
 
     /**
@@ -52,12 +38,6 @@ class Knowledgebase extends BaseControls\Control {
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'Database not initialized');
-            Flight::redirect('/dashboard');
-            return;
-        }
 
         // Get all knowledge bases
         try {
@@ -142,11 +122,6 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         $name = trim($this->getParam('name') ?? '');
         $description = trim($this->getParam('description') ?? '');
         $agentProfileId = $this->getParam('agent_profile_id');
@@ -199,11 +174,6 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         $kbId = $this->getParam('id');
         if (empty($kbId)) {
             Flight::jsonError('Knowledge base ID required');
@@ -249,11 +219,6 @@ class Knowledgebase extends BaseControls\Control {
 
         if (Flight::request()->method !== 'POST') {
             Flight::jsonError('Invalid request method', 405);
-            return;
-        }
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
             return;
         }
 
@@ -399,11 +364,6 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         // Find document by job_id
         $doc = Bean::findOne('ragdocuments', ' job_id = ? ', [$jobId]);
         if (!$doc) {
@@ -462,11 +422,6 @@ class Knowledgebase extends BaseControls\Control {
 
         if (Flight::request()->method !== 'POST') {
             Flight::jsonError('Invalid request method', 405);
-            return;
-        }
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
             return;
         }
 
@@ -548,11 +503,6 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         $docId = $this->getParam('id');
         if (empty($docId)) {
             Flight::jsonError('Document ID required');
@@ -595,11 +545,6 @@ class Knowledgebase extends BaseControls\Control {
     public function status($id = null) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         $docId = $id ?? $this->getParam('id');
         if (empty($docId)) {
             Flight::jsonError('Document ID required');
@@ -636,12 +581,6 @@ class Knowledgebase extends BaseControls\Control {
         $tier = SubscriptionService::getTier($this->member->id);
         if (!TierFeatures::hasFeature($tier, 'knowledge_base_chat')) {
             $this->flash('warning', 'Chat feature requires an upgraded plan');
-            Flight::redirect('/knowledgebase');
-            return;
-        }
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'Database not initialized');
             Flight::redirect('/knowledgebase');
             return;
         }
@@ -930,11 +869,6 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
-            return;
-        }
-
         $kbId = $this->getParam('id');
         if (empty($kbId)) {
             Flight::jsonError('Knowledge base ID required');
@@ -992,12 +926,6 @@ class Knowledgebase extends BaseControls\Control {
     public function query() {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'Database not initialized');
-            Flight::redirect('/knowledgebase');
-            return;
-        }
-
         $kbId = $this->getParam('kb') ?? $_SESSION['selected_kb'] ?? null;
 
         // Get all knowledge bases
@@ -1040,11 +968,6 @@ class Knowledgebase extends BaseControls\Control {
 
         if (Flight::request()->method !== 'POST') {
             Flight::jsonError('Invalid request method', 405);
-            return;
-        }
-
-        if (!$this->initUserDb()) {
-            Flight::jsonError('Database not initialized');
             return;
         }
 

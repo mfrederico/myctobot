@@ -16,6 +16,7 @@ use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
 use \app\services\TmuxService;
 use \app\services\CeoDirectiveLogger;
+use \app\TenantResolver;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
@@ -138,52 +139,7 @@ class Webhook extends BaseControls\Control {
      * Switch to tenant database for webhook processing
      */
     private function switchToTenantForWebhook(string $tenant): bool {
-        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
-        if (!file_exists($configFile)) {
-            $this->logger->warning("Webhook tenant config not found: {$configFile}");
-            return false;
-        }
-
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
-            $this->logger->warning("Invalid tenant config: {$configFile}");
-            return false;
-        }
-
-        // Override config values
-        foreach ($tenantConfig as $section => $values) {
-            if (is_array($values)) {
-                foreach ($values as $key => $value) {
-                    Flight::set("{$section}.{$key}", $value);
-                }
-            }
-        }
-
-        // Add and switch to tenant database
-        try {
-            $dbConfig = $tenantConfig['database'];
-            $type = $dbConfig['type'] ?? 'mysql';
-
-            if ($type === 'sqlite') {
-                $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
-                $dsn = "sqlite:{$dbPath}";
-                Bean::useDatabase($tenant, $dsn);
-            } else {
-                $host = $dbConfig['host'] ?? 'localhost';
-                $port = $dbConfig['port'] ?? 3306;
-                $name = $dbConfig['name'] ?? $tenant;
-                $user = $dbConfig['user'] ?? 'root';
-                $pass = $dbConfig['pass'] ?? '';
-                $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                Bean::useDatabase($tenant, $dsn, $user, $pass);
-            }
-            Flight::set('tenant.slug', $tenant);
-            Flight::set('tenant.active', true);
-            return true;
-        } catch (\Exception $e) {
-            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
-            return false;
-        }
+        return TenantResolver::switchDatabase($tenant);
     }
 
     /**
@@ -673,6 +629,15 @@ class Webhook extends BaseControls\Control {
             if ($tmux->isClaudeRunning()) {
                 $tmux->sendExit();
                 $this->logger->info('Sent /exit to Claude', ['issue_key' => $issueKey]);
+
+                // Remove ai-dev and myctobot-working labels only when /exit is sent
+                if ($cloudId) {
+                    // Jira issue
+                    Atlassian::removeLabelsOnExit($issueKey, $memberId, $cloudId);
+                } elseif (preg_match('#^([^/]+)/([^#]+)#(\d+)$#', $issueKey, $matches)) {
+                    // GitHub issue (format: owner/repo#123)
+                    Github::removeLabelsOnExit($matches[1], $matches[2], (int) $matches[3], $memberId);
+                }
             }
 
             // Wait for script to cleanup gracefully
@@ -769,92 +734,6 @@ class Webhook extends BaseControls\Control {
                     break;
                 }
             }
-        }
-    }
-
-    /**
-     * Remove the ai-dev label from a Jira ticket
-     */
-    private function removeAiDevLabel(string $issueKey, int $memberId, string $cloudId): void {
-        try {
-            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
-            $jiraClient->removeLabel($issueKey, 'ai-dev');
-            $this->logger->info('Removed ai-dev label from ticket', [
-                'issue_key' => $issueKey,
-                'member_id' => $memberId
-            ]);
-        } catch (\Exception $e) {
-            $this->logger->warning('Failed to remove ai-dev label', [
-                'issue_key' => $issueKey,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Remove the myctobot-working label from a Jira ticket
-     */
-    private function removeWorkingLabel(string $issueKey, int $memberId, string $cloudId): void {
-        try {
-            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
-            $jiraClient->removeLabel($issueKey, 'myctobot-working');
-            $this->logger->info('Removed myctobot-working label from ticket', [
-                'issue_key' => $issueKey,
-                'member_id' => $memberId
-            ]);
-        } catch (\Exception $e) {
-            $this->logger->warning('Failed to remove myctobot-working label', [
-                'issue_key' => $issueKey,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Remove myctobot-working label from GitHub issue when session closes
-     */
-    private function removeGitHubWorkingLabel(string $owner, string $repo, int $issueNumber, int $memberId): void {
-        try {
-            // Get GitHub token from repo connection or enterprise settings
-            UserDatabaseService::connect($memberId);
-
-            $repoConnection = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ?', [$owner, $repo]);
-            $githubToken = $repoConnection->access_token ?? null;
-
-            // Fallback to enterprise settings if repo doesn't have token
-            if (empty($githubToken)) {
-                $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
-                if ($githubSetting && !empty($githubSetting->setting_value)) {
-                    $encryption = new \app\services\EncryptionService();
-                    $githubToken = $encryption->decrypt($githubSetting->setting_value);
-                }
-            }
-
-            if (empty($githubToken)) {
-                $this->logger->warning('No GitHub token available to remove label', [
-                    'owner' => $owner,
-                    'repo' => $repo,
-                    'issue' => $issueNumber
-                ]);
-                return;
-            }
-
-            $githubClient = new \app\services\GitHubClient($githubToken);
-            $githubClient->removeLabel($owner, $repo, $issueNumber, 'myctobot-working');
-
-            $this->logger->info('Removed myctobot-working label from GitHub issue', [
-                'owner' => $owner,
-                'repo' => $repo,
-                'issue' => $issueNumber,
-                'member_id' => $memberId
-            ]);
-        } catch (\Exception $e) {
-            $this->logger->warning('Failed to remove myctobot-working label from GitHub issue', [
-                'owner' => $owner,
-                'repo' => $repo,
-                'issue' => $issueNumber,
-                'error' => $e->getMessage()
-            ]);
         }
     }
 
@@ -1066,6 +945,12 @@ class Webhook extends BaseControls\Control {
         // Only process if there's a local session with Claude running
         if (!$tmux->exists() || !$tmux->isClaudeRunning()) {
             return;
+        }
+
+        // Ensure repo is cloned (re-clone if missing after /tmp cleanup)
+        $workDir = $tmux->getWorkDir();
+        if ($workDir) {
+            GitOperations::ensureRepoCloned($workDir, $issueKey, $memberId);
         }
 
         $event = $data['webhookEvent'] ?? '';
@@ -1287,6 +1172,12 @@ class Webhook extends BaseControls\Control {
                 'tenant' => $tenant
             ]);
             return;
+        }
+
+        // Ensure repo is cloned (re-clone if missing after /tmp cleanup)
+        $workDir = $tmux->getWorkDir();
+        if ($workDir) {
+            GitOperations::ensureRepoCloned($workDir, $issueKey, $memberId);
         }
 
         $this->logger->info('GitHub: Augmenting running session with new comment', [

@@ -19,28 +19,11 @@ require_once __DIR__ . '/../services/CeoDirectiveService.php';
 
 class Directives extends BaseControls\Control {
 
-    private bool $userDbConnected = false;
     private CeoDirectiveService $directiveService;
 
     public function __construct() {
         parent::__construct();
         $this->directiveService = new CeoDirectiveService();
-    }
-
-    /**
-     * Initialize user database connection
-     */
-    private function initUserDb(): bool {
-        if (!$this->userDbConnected && $this->member) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $this->userDbConnected = true;
-            } catch (\Exception $e) {
-                $this->logger->error('Failed to initialize user database: ' . $e->getMessage());
-                return false;
-            }
-        }
-        return $this->userDbConnected;
     }
 
     // ==================== UI Methods ====================
@@ -50,12 +33,6 @@ class Directives extends BaseControls\Control {
      */
     public function index() {
         if (!$this->requireLogin()) return;
-
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/settings/connections');
-            return;
-        }
 
         // Get filter parameters
         $status = $this->getParam('status');
@@ -110,11 +87,6 @@ class Directives extends BaseControls\Control {
     public function view($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            $this->flash('error', 'User database not initialized');
-            Flight::redirect('/directives');
-            return;
-        }
 
         // Get directive ID from URL
         $directiveId = $this->opId() ?? $this->getParam('id');
@@ -168,10 +140,6 @@ class Directives extends BaseControls\Control {
     public function retry($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         // Get directive ID from URL
         $directiveId = $this->opId() ?? $this->getParam('id');
@@ -223,10 +191,6 @@ class Directives extends BaseControls\Control {
     public function cancel($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         // Get directive ID from URL
         $directiveId = $this->opId() ?? $this->getParam('id');
@@ -279,10 +243,6 @@ class Directives extends BaseControls\Control {
     public function delete($params = []) {
         if (!$this->requireLogin()) return;
 
-        if (!$this->initUserDb()) {
-            Flight::jsonError('User database not initialized');
-            return;
-        }
 
         // Get directive ID from URL
         $directiveId = $this->opId() ?? $this->getParam('id');

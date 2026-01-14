@@ -35,8 +35,8 @@ class AtlassianAuth {
 
     /**
      * Get Atlassian configuration with hierarchy:
-     * 1. Load base config from conf/atlassian.ini
-     * 2. Override with tenant config from conf/config.{tenant}.ini [atlassian] section
+     * 1. Load base config from conf/atlassian.ini (primary source - shared OAuth app)
+     * 2. Fill in missing/blank values from conf/config.{tenant}.ini [atlassian] section
      * 3. Fall back to Flight::get() for backwards compatibility
      *
      * @return array Atlassian configuration
@@ -53,30 +53,38 @@ class AtlassianAuth {
             'scopes' => self::$defaultScopes,
         ];
 
-        // 1. Load base config from conf/atlassian.ini
+        // 1. Load base config from conf/atlassian.ini (primary source)
         $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 2);
         $atlassianIni = $basePath . '/conf/atlassian.ini';
         if (file_exists($atlassianIni)) {
             $baseConfig = parse_ini_file($atlassianIni, true);
             if ($baseConfig && isset($baseConfig['atlassian'])) {
-                $config = array_merge($config, $baseConfig['atlassian']);
+                foreach ($baseConfig['atlassian'] as $key => $value) {
+                    if (!empty($value)) {
+                        $config[$key] = $value;
+                    }
+                }
             }
         }
 
-        // 2. Check for tenant overrides
+        // 2. Fill in missing/blank values from tenant config
         $tenantSlug = $_SESSION['tenant_slug'] ?? null;
         if ($tenantSlug && $tenantSlug !== 'default') {
             $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
             if (file_exists($tenantIni)) {
                 $tenantConfig = parse_ini_file($tenantIni, true);
                 if ($tenantConfig && isset($tenantConfig['atlassian'])) {
-                    // Tenant overrides base config
-                    $config = array_merge($config, $tenantConfig['atlassian']);
+                    // Only fill in values that are still empty/missing
+                    foreach ($tenantConfig['atlassian'] as $key => $value) {
+                        if (empty($config[$key]) && !empty($value)) {
+                            $config[$key] = $value;
+                        }
+                    }
                 }
             }
         }
 
-        // 3. Fall back to Flight::get() for any missing values (backwards compatibility)
+        // 3. Fall back to Flight::get() for any still-missing values (backwards compatibility)
         if (empty($config['client_id'])) {
             $config['client_id'] = Flight::get('atlassian.client_id');
         }

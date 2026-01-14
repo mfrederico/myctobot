@@ -393,22 +393,173 @@ function findSecurityIssues(string $content): array
     return [$criticalIssues, $warningIssues];
 }
 
+// =========================================
+// FlightPHP/Architecture Checks
+// =========================================
+
+/**
+ * Check controller naming - BLOCKS CamelCase
+ * FlightPHP auto-routing requires all lowercase controller names.
+ *
+ * @param string $filePath File path being edited
+ * @return array [blocking_issues, warning_issues]
+ */
+function checkControllerNaming(string $filePath): array
+{
+    $blocking = [];
+    $warnings = [];
+
+    // Only check files in controls/ directory
+    if (strpos($filePath, '/controls/') === false) {
+        return [[], []];
+    }
+
+    // Skip BaseControls subdirectory
+    if (strpos($filePath, 'BaseControls') !== false) {
+        return [[], []];
+    }
+
+    $filename = basename($filePath);
+    if (!str_ends_with($filename, '.php')) {
+        return [[], []];
+    }
+
+    $controllerName = substr($filename, 0, -4); // Remove .php
+
+    // Count capital letters (excluding first letter)
+    $capitalCount = 0;
+    for ($i = 1; $i < strlen($controllerName); $i++) {
+        if (ctype_upper($controllerName[$i])) {
+            $capitalCount++;
+        }
+    }
+
+    // BLOCKING: CamelCase controllers
+    if ($capitalCount > 0) {
+        $lowercase = strtolower($controllerName);
+        $blocking[] = "CamelCase controller '{$controllerName}' is FORBIDDEN. "
+            . "FlightPHP auto-routing requires all lowercase controller names. "
+            . "Rename to '{$lowercase}' (file: {$lowercase}.php, class: {$lowercase}).";
+    }
+
+    return [$blocking, $warnings];
+}
+
+/**
+ * Check route file naming - BLOCKS hyphens
+ *
+ * @param string $filePath File path being edited
+ * @return array Blocking issues
+ */
+function checkRouteFileNaming(string $filePath): array
+{
+    $blocking = [];
+
+    // Only check files in routes/ directory
+    if (strpos($filePath, '/routes/') === false) {
+        return [];
+    }
+
+    $filename = basename($filePath);
+
+    // BLOCKING: Hyphens in route file names
+    if (strpos($filename, '-') !== false) {
+        $fixed = str_replace('-', '', $filename);
+        $blocking[] = "Hyphenated route file '{$filename}' is FORBIDDEN. "
+            . "Hyphens in URLs require explicit route files, which defeats auto-routing. "
+            . "Rename controller and route file to remove hyphens: '{$fixed}'.";
+    }
+
+    return $blocking;
+}
+
+/**
+ * Check for raw database switching that should use Bean::useDatabase()
+ *
+ * @param string $content PHP code to check
+ * @param string $filePath File path being edited
+ * @return array Warning issues
+ */
+function findRawDatabaseSwitching(string $content, string $filePath): array
+{
+    $issues = [];
+
+    // Skip if this IS the Bean.php file or bootstrap
+    if (strpos($filePath, '/lib/Bean.php') !== false
+        || strpos($filePath, '/bootstrap.php') !== false) {
+        return [];
+    }
+
+    // Check for raw R::addDatabase or R::selectDatabase
+    if (preg_match('/R::addDatabase\s*\(/', $content)) {
+        $issues[] = "Raw R::addDatabase() detected. Use Bean::useDatabase() instead for tenant switching. "
+            . "See Webhook::switchToTenantForWebhook() for the established pattern.";
+    }
+
+    if (preg_match('/R::selectDatabase\s*\(/', $content)) {
+        $issues[] = "Raw R::selectDatabase() detected. Use Bean::useDatabase() or Bean::selectDatabase() instead. "
+            . "For tenant switching in controllers, use the switchToTenantForWebhook() pattern.";
+    }
+
+    return $issues;
+}
+
+/**
+ * Check for inline config parsing that should use TenantResolver
+ *
+ * @param string $content PHP code to check
+ * @param string $filePath File path being edited
+ * @return array Warning issues
+ */
+function findInlineConfigParsing(string $content, string $filePath): array
+{
+    $issues = [];
+
+    // Skip if this is TenantResolver, bootstrap, or a script
+    if (strpos($filePath, '/lib/TenantResolver.php') !== false
+        || strpos($filePath, '/bootstrap.php') !== false
+        || strpos($filePath, '/scripts/') !== false) {
+        return [];
+    }
+
+    // Check for inline parse_ini_file with config pattern in controllers
+    if (strpos($filePath, '/controls/') !== false) {
+        if (preg_match('/parse_ini_file\s*\([^)]*config[^)]*\.ini/', $content)) {
+            $issues[] = "Inline parse_ini_file() for tenant config in controller. "
+                . "Use TenantResolver::setTenant() or the switchToTenantForWebhook() pattern instead. "
+                . "See controls/Webhook.php or controls/Auth.php for examples.";
+        }
+    }
+
+    return $issues;
+}
+
 /**
  * Run all validations on PHP content.
  *
  * @param string $content PHP code to check
+ * @param string $filePath File path being edited (optional, for path-based checks)
  * @return array [blocking_issues, warning_issues]
  */
-function validatePhpCode(string $content): array
+function validatePhpCode(string $content, string $filePath = ''): array
 {
     $blockingIssues = [];
     $warningIssues = [];
 
-    // Skip if not PHP
+    // File path based checks (always run if path provided)
+    if (!empty($filePath)) {
+        [$controllerBlocking, $controllerWarnings] = checkControllerNaming($filePath);
+        $blockingIssues = array_merge($blockingIssues, $controllerBlocking);
+        $warningIssues = array_merge($warningIssues, $controllerWarnings);
+
+        $blockingIssues = array_merge($blockingIssues, checkRouteFileNaming($filePath));
+    }
+
+    // Skip content checks if not PHP
     if (strpos($content, '<?php') === false && strpos($content, '<?=') === false) {
         // Check if it contains PHP-like RedBean code even without <?php tag
         if (strpos($content, 'R::') === false && strpos($content, 'Bean::') === false) {
-            return [[], []];
+            return [$blockingIssues, $warningIssues];
         }
     }
 
@@ -419,6 +570,10 @@ function validatePhpCode(string $content): array
     // Warning - suggestions for better practices
     $warningIssues = array_merge($warningIssues, findExecUsage($content));
     $warningIssues = array_merge($warningIssues, findManualFkAssignments($content));
+
+    // Architecture/Pattern Warnings
+    $warningIssues = array_merge($warningIssues, findRawDatabaseSwitching($content, $filePath));
+    $warningIssues = array_merge($warningIssues, findInlineConfigParsing($content, $filePath));
 
     // Security Scanning (OWASP Top 10)
     [$securityCritical, $securityWarnings] = findSecurityIssues($content);
@@ -468,8 +623,8 @@ function main(): void
             exit(0);
         }
 
-        // Run validations
-        [$blockingIssues, $warningIssues] = validatePhpCode($content);
+        // Run validations (pass filePath for path-based checks)
+        [$blockingIssues, $warningIssues] = validatePhpCode($content, $filePath);
 
         // Blocking issues - will prevent the operation
         if (!empty($blockingIssues)) {

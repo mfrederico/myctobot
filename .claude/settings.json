@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "php \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-tiknix-php.php",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/validate-php.php",
             "timeout": 30
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "php \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-git-commit.php",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/validate-git-commit.php",
             "timeout": 5
           }
         ]

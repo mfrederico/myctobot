@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `ceodirectives` (
 CREATE TABLE IF NOT EXISTS `ctoprojects` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `project_uid` VARCHAR(191),
-    `directive_id` INT UNSIGNED,
+    `ceodirectives_id` INT UNSIGNED,
     `member_id` INT UNSIGNED,
     `jiraboards_id` INT UNSIGNED,
     `repoconnections_id` INT UNSIGNED,

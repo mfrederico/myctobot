@@ -46,13 +46,14 @@ class Projects extends BaseControls\Control {
             'completed' => Bean::count('ctoprojects', 'status = ?', ['completed']),
         ];
 
-        // Enrich projects with epic counts
+        // Enrich projects with epic counts using associations
         foreach ($projects as $project) {
-            $project->epic_count = Bean::count('ctoepics', 'project_uid = ?', [$project->id]);
-            $project->story_count = Bean::count('ctostories',
-                'epic_id IN (SELECT id FROM ctoepics WHERE project_uid = ?)',
-                [$project->id]
-            );
+            $project->epic_count = $project->countOwn('ctoepics');
+            $storyCount = 0;
+            foreach ($project->ownCtoepicsList as $epic) {
+                $storyCount += $epic->countOwn('ctostories');
+            }
+            $project->story_count = $storyCount;
         }
 
         $this->render('projects/index', [
@@ -89,23 +90,17 @@ class Projects extends BaseControls\Control {
             return;
         }
 
-        // Get epics with their stories
-        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
+        // Get epics with their stories using associations
         $epicsWithStories = [];
-
-        foreach ($epics as $epic) {
-            $stories = Bean::find('ctostories', 'epic_id = ? ORDER BY sequence ASC', [$epic->id]);
+        foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
             $epicsWithStories[] = [
                 'epic' => $epic,
-                'stories' => $stories
+                'stories' => $epic->with(' ORDER BY sequence ASC ')->ownCtostoriesList
             ];
         }
 
-        // Get directive info
-        $directive = null;
-        if ($project->directive_id) {
-            $directive = Bean::load('ceodirectives', $project->directive_id);
-        }
+        // Get directive info via association
+        $directive = $project->ceodirectives;
 
         // Get progress using CompletionDetector
         $detector = new CompletionDetector($this->member->id);

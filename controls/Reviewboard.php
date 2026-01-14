@@ -48,21 +48,17 @@ class Reviewboard extends BaseControls\Control {
 
         $projectData = [];
         foreach ($projects as $project) {
-            // Get directive for this project
-            $directive = $project->directive_id
-                ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
-                : null;
+            // Get directive for this project via association
+            $directive = $project->ceodirectives;
 
-            // Get epics for this project
-            $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
-
+            // Get epics for this project via association
             $epicData = [];
             $pendingCount = 0;
             $approvedCount = 0;
 
-            foreach ($epics as $epic) {
-                // Get stories for this epic
-                $stories = Bean::find('ctostories', 'epic_id = ? ORDER BY sequence ASC', [$epic->id]);
+            foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
+                // Get stories for this epic via association
+                $stories = $epic->with(' ORDER BY sequence ASC ')->ownCtostoriesList;
 
                 $storyData = [];
                 foreach ($stories as $story) {
@@ -188,20 +184,15 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Get directive
-        $directive = $project->directive_id
-            ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
-            : null;
+        // Get directive via association
+        $directive = $project->ceodirectives;
 
-        // Get epics with stories
-        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
-
+        // Get epics with stories via associations
         $epicData = [];
-        foreach ($epics as $epic) {
-            $stories = Bean::find('ctostories', 'epic_id = ? ORDER BY sequence ASC', [$epic->id]);
+        foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
             $epicData[] = [
                 'epic' => $epic,
-                'stories' => $stories,
+                'stories' => $epic->with(' ORDER BY sequence ASC ')->ownCtostoriesList,
             ];
         }
 
@@ -377,14 +368,11 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Get all pending stories for this project
-        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
+        // Get all pending stories for this project via associations
         $storyIds = [];
-
-        foreach ($epics as $epic) {
-            $stories = Bean::find('ctostories', 'epic_id = ? AND status = ?', [$epic->id, 'pending_review']);
-            foreach ($stories as $story) {
-                $storyIds[] = $story->story_id;
+        foreach ($project->ownCtoepicsList as $epic) {
+            foreach ($epic->withCondition(' status = ? ', ['pending_review'])->ownCtostoriesList as $story) {
+                $storyIds[] = $story->story_uid;
             }
         }
 
@@ -414,30 +402,25 @@ class Reviewboard extends BaseControls\Control {
 
         $deleted = 0;
 
-        // Delete all pending stories for this project
-        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
-
-        foreach ($epics as $epic) {
-            $stories = Bean::find('ctostories', 'epic_id = ? AND status = ?', [$epic->id, 'pending_review']);
-            foreach ($stories as $story) {
+        // Delete all pending stories for this project via associations
+        foreach ($project->ownCtoepicsList as $epic) {
+            foreach ($epic->withCondition(' status = ? ', ['pending_review'])->ownCtostoriesList as $story) {
                 Bean::trash($story);
                 $deleted++;
             }
 
             // Update epic count
-            $remaining = Bean::count('ctostories', 'epic_id = ?', [$epic->id]);
-            $epic->story_count = $remaining;
+            $epic->story_count = $epic->countOwn('ctostories');
             Bean::store($epic);
 
             // Delete epic if no stories remain
-            if ($remaining === 0) {
+            if ($epic->story_count === 0) {
                 Bean::trash($epic);
             }
         }
 
         // Check if project should be deleted
-        $remainingEpics = Bean::count('ctoepics', 'project_uid = ?', [$project->id]);
-        if ($remainingEpics === 0) {
+        if ($project->countOwn('ctoepics') === 0) {
             $project->status = 'cancelled';
             Bean::store($project);
         }

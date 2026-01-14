@@ -95,7 +95,7 @@ PROMPT;
      */
     public function planProject(object $directive): array {
         $this->logger->info('CTOAgent: Planning project from directive', [
-            'directive_id' => $directive->directive_id,
+            'ceodirectives_id' => $directive->ceodirectives_id,
             'subject' => $directive->email_subject
         ]);
 
@@ -115,7 +115,7 @@ PROMPT;
 
             if (!$parsed) {
                 $this->logger->error('CTOAgent: Failed to parse response', [
-                    'directive_id' => $directive->directive_id,
+                    'ceodirectives_id' => $directive->ceodirectives_id,
                     'response_preview' => substr($response, 0, 500)
                 ]);
                 return [
@@ -148,7 +148,7 @@ PROMPT;
             }
 
             $this->logger->info('CTOAgent: Planning complete', [
-                'directive_id' => $directive->directive_id,
+                'ceodirectives_id' => $directive->ceodirectives_id,
                 'intent' => $parsed['intent'],
                 'project_uid' => $project ? $project->project_uid : null,
                 'epic_count' => count($parsed['epics'] ?? [])
@@ -163,7 +163,7 @@ PROMPT;
 
         } catch (\Exception $e) {
             $this->logger->error('CTOAgent: Exception during planning', [
-                'directive_id' => $directive->directive_id,
+                'ceodirectives_id' => $directive->ceodirectives_id,
                 'error' => $e->getMessage()
             ]);
 
@@ -235,7 +235,7 @@ PROMPT;
         // Create project
         $project = Bean::dispense('ctoprojects');
         $project->project_uid = $projectId;
-        $project->directive_id = $directive->id;
+        $project->ceodirectives_id = $directive->id;
         $project->member_id = $this->memberId;
         $project->name = $projectData['name'];
         $project->description = $projectData['description'] ?? '';
@@ -249,9 +249,7 @@ PROMPT;
 
         Bean::store($project);
 
-        // Link project to directive
-        $directive->project_uid = $project->id;
-        Bean::store($directive);
+        // Project is already linked to directive via ceodirectives association
 
         // Create epics
         if (!empty($parsed['epics'])) {
@@ -276,8 +274,8 @@ PROMPT;
             $epicId = bin2hex(random_bytes(16));
 
             $epic = Bean::dispense('ctoepics');
-            $epic->epic_id = $epicId;
-            $epic->project_uid = $project->id;
+            $epic->epic_uid = $epicId;
+            $epic->ctoprojects = $project; // Association creates ctoprojects_id FK
             $epic->title = $epicData['title'];
             $epic->description = $epicData['description'] ?? '';
             $epic->acceptance_criteria = json_encode($epicData['acceptance_criteria'] ?? []);
@@ -346,7 +344,7 @@ PROMPT;
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
+            $log->ceodirectives_id = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;
@@ -356,7 +354,7 @@ PROMPT;
         } catch (\Exception $e) {
             $this->logger->error('Failed to log directive event', [
                 'error' => $e->getMessage(),
-                'directive_id' => $directiveId
+                'ceodirectives_id' => $directiveId
             ]);
         }
     }

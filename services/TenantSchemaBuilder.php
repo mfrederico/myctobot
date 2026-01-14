@@ -23,6 +23,7 @@ class TenantSchemaBuilder {
     private $member;
     private $board;
     private $repo;
+    private $directive;
 
     public function __construct(string $dbName, string $dbUser, string $dbPass, string $dbHost = 'localhost') {
         $this->dbName = $dbName;
@@ -61,7 +62,7 @@ class TenantSchemaBuilder {
         $this->createAIDevJobsTable();
         $this->createAIDevJobLogsTable();
         $this->createDirectivesTable();
-        $this->createCeoDirectivesTable();
+        $this->directive = $this->createCeoDirectivesTable();
         $this->createCtoProjectsTable();
         $this->createCtoEpicsTable();
         $this->createCtoStoriesTable();
@@ -359,7 +360,7 @@ class TenantSchemaBuilder {
         R::trash($bean);
     }
 
-    private function createCeoDirectivesTable(): void {
+    private function createCeoDirectivesTable() {
         $bean = R::dispense('ceodirectives');
         $bean->directive_uid = 'schema-ceodirective-uid'; // _uid suffix
         $bean->member = $this->member; // Creates member_id FK
@@ -379,13 +380,13 @@ class TenantSchemaBuilder {
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
-        R::trash($bean);
+        return $bean; // Keep for ctoprojects association
     }
 
     private function createCtoProjectsTable(): void {
         $bean = R::dispense('ctoprojects');
         $bean->project_uid = 'schema-ctoproject-uid'; // _uid suffix
-        $bean->directive_id = 0; // FK to ceodirectives.id (integer, not _uid)
+        $bean->ceodirectives = $this->directive; // Creates ceodirectives_id FK
         $bean->member = $this->member; // Creates member_id FK
         $bean->jiraboards = $this->board; // Creates jiraboards_id FK (board_id equivalent)
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK (github_repo_id equivalent)
@@ -585,6 +586,9 @@ class TenantSchemaBuilder {
      * Clean up temporary beans used for schema creation
      */
     private function cleanupTempBeans(): void {
+        if ($this->directive) {
+            R::trash($this->directive);
+        }
         if ($this->repo) {
             R::trash($this->repo);
         }

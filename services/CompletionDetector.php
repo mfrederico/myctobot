@@ -280,7 +280,7 @@ class CompletionDetector {
      * Check completion of a single project
      */
     public function checkProjectCompletion(object $project): array {
-        $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
+        $epics = $project->ownCtoepicsList;
         $totalEpics = count($epics);
 
         if ($totalEpics === 0) {
@@ -312,8 +312,8 @@ class CompletionDetector {
             $completed = true;
 
             // Complete the directive
-            if ($project->directive_id) {
-                $this->completeDirective($project->directive_id);
+            if ($project->ceodirectives_id) {
+                $this->completeDirective($project->ceodirectives_id);
             }
 
             $this->logger->info('CompletionDetector: Project completed', [
@@ -405,7 +405,7 @@ class CompletionDetector {
         $project = Bean::load('ctoprojects', $epic->project_uid);
         if (!$project) return;
 
-        $directive = Bean::load('ceodirectives', $project->directive_id);
+        $directive = Bean::load('ceodirectives', $project->ceodirectives_id);
         if (!$directive) return;
 
         $this->logDirective($directive->id, 'escalation', 'warning',
@@ -417,7 +417,7 @@ class CompletionDetector {
 
         // TODO: Send escalation email to CEO
         $this->logger->warning('CompletionDetector: Escalation created', [
-            'directive_id' => $directive->directive_id,
+            'ceodirectives_id' => $directive->ceodirectives_id,
             'story_id' => $story->story_id,
             'reason' => $reason
         ]);
@@ -432,11 +432,10 @@ class CompletionDetector {
             return ['error' => 'Project not found'];
         }
 
-        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$projectId]);
         $epicProgress = [];
 
-        foreach ($epics as $epic) {
-            $stories = Bean::find('ctostories', 'epic_id = ?', [$epic->id]);
+        foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
+            $stories = $epic->ownCtostoriesList;
             $statusCounts = ['backlog' => 0, 'ready' => 0, 'in_progress' => 0, 'review' => 0, 'done' => 0, 'blocked' => 0];
 
             foreach ($stories as $story) {
@@ -468,7 +467,7 @@ class CompletionDetector {
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
+            $log->ceodirectives_id = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;

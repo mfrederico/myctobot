@@ -482,11 +482,10 @@ PROMPT;
      */
     public function createStoriesForProject(object $project, array $options = []): array {
         $results = [];
-        $epics = Bean::find('ctoepics', 'project_uid = ? ORDER BY sequence ASC', [$project->id]);
 
-        foreach ($epics as $epic) {
+        foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
             $result = $this->createStories($epic, $options);
-            $results[$epic->epic_id] = $result;
+            $results[$epic->epic_uid] = $result;
         }
 
         return $results;

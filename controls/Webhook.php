@@ -16,9 +16,11 @@ use \app\services\UserDatabaseService;
 use \app\services\MailgunService;
 use \app\services\TmuxService;
 use \app\services\CeoDirectiveLogger;
+use \app\services\GitOperations;
 use \app\TenantResolver;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
+require_once __DIR__ . '/../services/GitOperations.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
 require_once __DIR__ . '/../services/EncryptionService.php';

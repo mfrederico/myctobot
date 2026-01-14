@@ -12,6 +12,9 @@ use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\GitHubClient;
 use \app\services\EncryptionService;
+use \app\services\LLMProviders\LLMProviderFactory;
+
+require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 
 class Github extends BaseControls\Control {
 
@@ -431,7 +434,7 @@ class Github extends BaseControls\Control {
                     'id' => $agentBean->id,
                     'name' => $agentBean->name,
                     'provider' => $agentBean->provider ?: 'claude_cli',
-                    'provider_label' => $this->getProviderLabel($agentBean->provider),
+                    'provider_label' => LLMProviderFactory::getProviderLabel($agentBean->provider),
                     'is_default' => (bool) $agentBean->is_default
                 ];
             }
@@ -699,21 +702,6 @@ class Github extends BaseControls\Control {
         }
 
         return $repos;
-    }
-
-    /**
-     * Helper: Get runner type label
-     */
-    private function getProviderLabel(?string $provider): string {
-        if ($provider === null) {
-            return 'Claude CLI';
-        }
-        $labels = [
-            'claude_cli' => 'Claude CLI',
-            'anthropic_api' => 'Anthropic API',
-            'ollama' => 'Ollama'
-        ];
-        return $labels[$provider] ?? $provider;
     }
 
     // ========================================

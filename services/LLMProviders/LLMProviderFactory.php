@@ -314,4 +314,29 @@ class LLMProviderFactory
 
         return $provider->testConnection();
     }
+
+    /**
+     * Get human-readable label for a provider type
+     *
+     * @param string|null $provider Provider type key
+     * @return string Human-readable label
+     */
+    public static function getProviderLabel(?string $provider): string {
+        if ($provider === null) {
+            return 'Claude CLI';
+        }
+
+        // Check if it's in our providers list
+        if (isset(self::PROVIDERS[$provider])) {
+            return self::PROVIDERS[$provider]['name'];
+        }
+
+        // Legacy/alternate names
+        $legacyLabels = [
+            'anthropic_api' => 'Anthropic API',
+            'claude' => 'Claude',
+        ];
+
+        return $legacyLabels[$provider] ?? $provider;
+    }
 }

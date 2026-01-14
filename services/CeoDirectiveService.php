@@ -377,4 +377,33 @@ class CeoDirectiveService {
     public static function getRequiredFields(): array {
         return self::REQUIRED_FIELDS;
     }
+
+    /**
+     * Log a directive event to the directivelogs table
+     *
+     * @param int $directiveId The directive ID
+     * @param string $phase Processing phase (e.g., 'received', 'retry', 'cancelled')
+     * @param string $level Log level ('info', 'warning', 'error')
+     * @param string $message Log message
+     * @param array $context Additional context data
+     */
+    public static function logDirectiveEvent(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
+        try {
+            $log = Bean::dispense('directivelogs');
+            $log->directive_id = $directiveId;
+            $log->phase = $phase;
+            $log->log_level = $level;
+            $log->message = $message;
+            $log->context_json = !empty($context) ? json_encode($context) : null;
+            $log->created_at = date('Y-m-d H:i:s');
+            Bean::store($log);
+        } catch (\Exception $e) {
+            $logger = Flight::get('log');
+            $logger->error('Failed to log directive event', [
+                'error' => $e->getMessage(),
+                'directive_id' => $directiveId,
+                'phase' => $phase
+            ]);
+        }
+    }
 }

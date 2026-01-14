@@ -157,4 +157,27 @@ class EncryptionService {
     public static function hashHex(string $value): string {
         return bin2hex(self::hash($value));
     }
+
+    /**
+     * Mask an Anthropic API key for display
+     * Shows prefix and partial key for identification without exposing full secret
+     *
+     * @param string $key The API key to mask
+     * @return string The masked key (e.g., "sk-ant-api03-abc...xyz")
+     */
+    public static function maskAnthropicKey(string $key): string {
+        if (empty($key)) return '(empty)';
+
+        if (preg_match('/^(sk-ant-api\d+-)(.+)$/', $key, $matches)) {
+            $prefix = $matches[1];
+            $secret = $matches[2];
+            $secretLen = strlen($secret);
+            if ($secretLen > 7) {
+                return $prefix . substr($secret, 0, 3) . '...' . substr($secret, -4);
+            }
+            return $prefix . '***';
+        }
+
+        return substr($key, 0, 10) . '...' . substr($key, -4);
+    }
 }

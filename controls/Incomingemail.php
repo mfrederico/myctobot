@@ -10,9 +10,11 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\UserDatabaseService;
+use \app\services\CeoDirectiveService;
 use \app\TenantResolver;
 
 require_once __DIR__ . '/../services/UserDatabaseService.php';
+require_once __DIR__ . '/../services/CeoDirectiveService.php';
 
 class Incomingemail extends BaseControls\Control {
 
@@ -168,7 +170,7 @@ class Incomingemail extends BaseControls\Control {
             Bean::store($directive);
 
             // Log the directive creation
-            $this->logDirective($directive->id, 'received', 'info', 'Directive received from email', [
+            CeoDirectiveService::logDirectiveEvent($directive->id, 'received', 'info', 'Directive received from email', [
                 'from' => $from,
                 'subject' => $subject,
                 'approval_mode' => $approvalMode
@@ -285,27 +287,5 @@ class Incomingemail extends BaseControls\Control {
      */
     private function generateDirectiveId(): string {
         return bin2hex(random_bytes(16));
-    }
-
-    /**
-     * Log a directive processing event
-     */
-    private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
-        try {
-            $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
-            $log->phase = $phase;
-            $log->log_level = $level;
-            $log->message = $message;
-            $log->context_json = !empty($context) ? json_encode($context) : null;
-            $log->created_at = date('Y-m-d H:i:s');
-            Bean::store($log);
-        } catch (\Exception $e) {
-            $this->logger->error('Failed to log directive event', [
-                'error' => $e->getMessage(),
-                'directive_id' => $directiveId,
-                'phase' => $phase
-            ]);
-        }
     }
 }

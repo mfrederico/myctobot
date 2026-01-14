@@ -236,7 +236,7 @@ class Anthropic extends BaseControls\Control {
                 'id' => $key->id,
                 'name' => $key->name,
                 'model' => $key->model,
-                'masked_key' => $this->maskAnthropicKey($decrypted),
+                'masked_key' => EncryptionService::maskAnthropicKey($decrypted),
                 'shared' => (bool)$key->shared,
                 'is_owner' => $isOwner,
                 'owner_name' => $key->created_by_name,
@@ -432,24 +432,5 @@ class Anthropic extends BaseControls\Control {
             $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
             Flight::json(['success' => false, 'error' => $e->getMessage()]);
         }
-    }
-
-    /**
-     * Mask an Anthropic API key for display
-     */
-    private function maskAnthropicKey(string $key): string {
-        if (empty($key)) return '(empty)';
-
-        if (preg_match('/^(sk-ant-api\d+-)(.+)$/', $key, $matches)) {
-            $prefix = $matches[1];
-            $secret = $matches[2];
-            $secretLen = strlen($secret);
-            if ($secretLen > 7) {
-                return $prefix . substr($secret, 0, 3) . '...' . substr($secret, -4);
-            }
-            return $prefix . '***';
-        }
-
-        return substr($key, 0, 10) . '...' . substr($key, -4);
     }
 }

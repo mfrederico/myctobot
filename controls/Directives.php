@@ -172,7 +172,7 @@ class Directives extends BaseControls\Control {
         Bean::store($directive);
 
         // Log the retry
-        $this->logDirective($directive->id, 'retry', 'info', 'Directive queued for retry', [
+        CeoDirectiveService::logDirectiveEvent($directive->id, 'retry', 'info', 'Directive queued for retry', [
             'previous_status' => $directive->status,
             'retried_by' => $this->member->id
         ]);
@@ -223,7 +223,7 @@ class Directives extends BaseControls\Control {
         Bean::store($directive);
 
         // Log the cancellation
-        $this->logDirective($directive->id, 'cancelled', 'info', 'Directive cancelled by user', [
+        CeoDirectiveService::logDirectiveEvent($directive->id, 'cancelled', 'info', 'Directive cancelled by user', [
             'previous_status' => $oldStatus,
             'cancelled_by' => $this->member->id
         ]);
@@ -291,28 +291,6 @@ class Directives extends BaseControls\Control {
         Bean::trash($directive);
 
         Flight::jsonSuccess([], 'Directive deleted');
-    }
-
-    /**
-     * Log a directive processing event
-     */
-    private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
-        try {
-            $log = Bean::dispense('directivelogs');
-            $log->directive_id = $directiveId;
-            $log->phase = $phase;
-            $log->log_level = $level;
-            $log->message = $message;
-            $log->context_json = !empty($context) ? json_encode($context) : null;
-            $log->created_at = date('Y-m-d H:i:s');
-            Bean::store($log);
-        } catch (\Exception $e) {
-            $this->logger->error('Failed to log directive event', [
-                'error' => $e->getMessage(),
-                'directive_id' => $directiveId,
-                'phase' => $phase
-            ]);
-        }
     }
 
     // ==================== API Methods ====================

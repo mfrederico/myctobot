@@ -103,8 +103,8 @@ class Projects extends BaseControls\Control {
 
         // Get directive info
         $directive = null;
-        if ($project->directive_uid) {
-            $directive = Bean::load('ceodirectives', $project->directive_uid);
+        if ($project->directive_id) {
+            $directive = Bean::load('ceodirectives', $project->directive_id);
         }
 
         // Get progress using CompletionDetector

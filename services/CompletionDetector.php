@@ -312,8 +312,8 @@ class CompletionDetector {
             $completed = true;
 
             // Complete the directive
-            if ($project->directive_uid) {
-                $this->completeDirective($project->directive_uid);
+            if ($project->directive_id) {
+                $this->completeDirective($project->directive_id);
             }
 
             $this->logger->info('CompletionDetector: Project completed', [
@@ -405,7 +405,7 @@ class CompletionDetector {
         $project = Bean::load('ctoprojects', $epic->project_uid);
         if (!$project) return;
 
-        $directive = Bean::load('ceodirectives', $project->directive_uid);
+        $directive = Bean::load('ceodirectives', $project->directive_id);
         if (!$directive) return;
 
         $this->logDirective($directive->id, 'escalation', 'warning',
@@ -417,7 +417,7 @@ class CompletionDetector {
 
         // TODO: Send escalation email to CEO
         $this->logger->warning('CompletionDetector: Escalation created', [
-            'directive_uid' => $directive->directive_uid,
+            'directive_id' => $directive->directive_id,
             'story_id' => $story->story_id,
             'reason' => $reason
         ]);
@@ -468,7 +468,7 @@ class CompletionDetector {
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_uid = $directiveId;
+            $log->directive_id = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;

@@ -96,10 +96,10 @@ class Directives extends BaseControls\Control {
             return;
         }
 
-        // Find directive by ID or directive_uid
+        // Find directive by ID or directive_id
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_id = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             $this->flash('error', 'Directive not found');
@@ -109,7 +109,7 @@ class Directives extends BaseControls\Control {
 
         // Get processing logs
         $logs = Bean::find('directivelogs',
-            'directive_uid = ? ORDER BY created_at ASC',
+            'directive_id = ? ORDER BY created_at ASC',
             [$directive->id]
         );
 
@@ -151,7 +151,7 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_id = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
@@ -178,11 +178,11 @@ class Directives extends BaseControls\Control {
         ]);
 
         $this->logger->info('Directive queued for retry', [
-            'directive_uid' => $directive->directive_uid,
+            'directive_id' => $directive->directive_id,
             'member_id' => $this->member->id
         ]);
 
-        Flight::jsonSuccess(['directive_uid' => $directive->directive_uid], 'Directive queued for retry');
+        Flight::jsonSuccess(['directive_id' => $directive->directive_id], 'Directive queued for retry');
     }
 
     /**
@@ -202,7 +202,7 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_id = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
@@ -229,12 +229,12 @@ class Directives extends BaseControls\Control {
         ]);
 
         $this->logger->info('Directive cancelled', [
-            'directive_uid' => $directive->directive_uid,
+            'directive_id' => $directive->directive_id,
             'member_id' => $this->member->id,
             'previous_status' => $oldStatus
         ]);
 
-        Flight::jsonSuccess(['directive_uid' => $directive->directive_uid], 'Directive cancelled');
+        Flight::jsonSuccess(['directive_id' => $directive->directive_id], 'Directive cancelled');
     }
 
     /**
@@ -254,7 +254,7 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_id = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
@@ -262,13 +262,13 @@ class Directives extends BaseControls\Control {
         }
 
         // Delete associated logs
-        $logs = Bean::find('directivelogs', 'directive_uid = ?', [$directive->id]);
+        $logs = Bean::find('directivelogs', 'directive_id = ?', [$directive->id]);
         foreach ($logs as $log) {
             Bean::trash($log);
         }
 
         // Delete associated project if exists (cascade to epics and stories)
-        $project = Bean::findOne('ctoprojects', 'directive_uid = ?', [$directive->id]);
+        $project = Bean::findOne('ctoprojects', 'directive_id = ?', [$directive->id]);
         if ($project) {
             // Delete stories in each epic
             $epics = Bean::find('ctoepics', 'project_uid = ?', [$project->id]);
@@ -283,7 +283,7 @@ class Directives extends BaseControls\Control {
         }
 
         $this->logger->info('Directive deleted', [
-            'directive_uid' => $directive->directive_uid,
+            'directive_id' => $directive->directive_id,
             'member_id' => $this->member->id
         ]);
 
@@ -398,7 +398,7 @@ class Directives extends BaseControls\Control {
 
         // Success - directive queued
         $this->logger->info('Directive received and queued', [
-            'directive_uid' => $result['directive_uid'],
+            'directive_id' => $result['directive_id'],
             'directive_type' => $directive['directive_type'],
             'priority' => $directive['priority']
         ]);
@@ -407,7 +407,7 @@ class Directives extends BaseControls\Control {
         Flight::json([
             'success' => true,
             'message' => 'Directive received and queued for processing',
-            'directive_uid' => $result['directive_uid'],
+            'directive_id' => $result['directive_id'],
             'status' => $result['status'],
             'warnings' => $result['warnings'] ?? []
         ]);

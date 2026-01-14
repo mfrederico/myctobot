@@ -95,7 +95,7 @@ PROMPT;
      */
     public function planProject(object $directive): array {
         $this->logger->info('CTOAgent: Planning project from directive', [
-            'directive_uid' => $directive->directive_uid,
+            'directive_id' => $directive->directive_id,
             'subject' => $directive->email_subject
         ]);
 
@@ -115,7 +115,7 @@ PROMPT;
 
             if (!$parsed) {
                 $this->logger->error('CTOAgent: Failed to parse response', [
-                    'directive_uid' => $directive->directive_uid,
+                    'directive_id' => $directive->directive_id,
                     'response_preview' => substr($response, 0, 500)
                 ]);
                 return [
@@ -148,7 +148,7 @@ PROMPT;
             }
 
             $this->logger->info('CTOAgent: Planning complete', [
-                'directive_uid' => $directive->directive_uid,
+                'directive_id' => $directive->directive_id,
                 'intent' => $parsed['intent'],
                 'project_uid' => $project ? $project->project_uid : null,
                 'epic_count' => count($parsed['epics'] ?? [])
@@ -163,7 +163,7 @@ PROMPT;
 
         } catch (\Exception $e) {
             $this->logger->error('CTOAgent: Exception during planning', [
-                'directive_uid' => $directive->directive_uid,
+                'directive_id' => $directive->directive_id,
                 'error' => $e->getMessage()
             ]);
 
@@ -235,7 +235,7 @@ PROMPT;
         // Create project
         $project = Bean::dispense('ctoprojects');
         $project->project_uid = $projectId;
-        $project->directive_uid = $directive->id;
+        $project->directive_id = $directive->id;
         $project->member_id = $this->memberId;
         $project->name = $projectData['name'];
         $project->description = $projectData['description'] ?? '';
@@ -346,7 +346,7 @@ PROMPT;
     private function logDirective(int $directiveId, string $phase, string $level, string $message, array $context = []): void {
         try {
             $log = Bean::dispense('directivelogs');
-            $log->directive_uid = $directiveId;
+            $log->directive_id = $directiveId;
             $log->phase = $phase;
             $log->log_level = $level;
             $log->message = $message;
@@ -356,7 +356,7 @@ PROMPT;
         } catch (\Exception $e) {
             $this->logger->error('Failed to log directive event', [
                 'error' => $e->getMessage(),
-                'directive_uid' => $directiveId
+                'directive_id' => $directiveId
             ]);
         }
     }

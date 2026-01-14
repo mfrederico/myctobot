@@ -385,6 +385,7 @@ class TenantSchemaBuilder {
     private function createCtoProjectsTable(): void {
         $bean = R::dispense('ctoprojects');
         $bean->project_uid = 'schema-ctoproject-uid'; // _uid suffix
+        $bean->directive_id = 0; // FK to ceodirectives.id (integer, not _uid)
         $bean->member = $this->member; // Creates member_id FK
         $bean->jiraboards = $this->board; // Creates jiraboards_id FK (board_id equivalent)
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK (github_repo_id equivalent)

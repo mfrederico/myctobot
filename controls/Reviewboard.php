@@ -49,8 +49,8 @@ class Reviewboard extends BaseControls\Control {
         $projectData = [];
         foreach ($projects as $project) {
             // Get directive for this project
-            $directive = $project->directive_uid
-                ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_uid])
+            $directive = $project->directive_id
+                ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
                 : null;
 
             // Get epics for this project
@@ -189,8 +189,8 @@ class Reviewboard extends BaseControls\Control {
         }
 
         // Get directive
-        $directive = $project->directive_uid
-            ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_uid])
+        $directive = $project->directive_id
+            ? Bean::findOne('ceodirectives', 'id = ?', [$project->directive_id])
             : null;
 
         // Get epics with stories

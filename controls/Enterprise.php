@@ -394,6 +394,7 @@ class Enterprise extends BaseControls\Control {
             if (!$userSetting) {
                 $userSetting = Bean::dispense('enterprisesettings');
                 $userSetting->setting_key = 'github_user';
+                $userSetting->is_shared = 1;  // GitHub credentials are workspace-level
             }
             $userSetting->setting_value = json_encode($result['user']);
             $userSetting->is_encrypted = 0;
@@ -405,6 +406,7 @@ class Enterprise extends BaseControls\Control {
             if (!$tokenSetting) {
                 $tokenSetting = Bean::dispense('enterprisesettings');
                 $tokenSetting->setting_key = 'github_token';
+                $tokenSetting->is_shared = 1;  // GitHub credentials are workspace-level
             }
             $tokenSetting->setting_value = $encryptedToken;
             $tokenSetting->is_encrypted = 1;

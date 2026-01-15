@@ -579,7 +579,7 @@ class GitOperations {
             $provider = $repo->provider ?? 'github';
             $settingKey = $provider . '_token';  // github_token, gitlab_token, etc.
 
-            $tokenSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', [$settingKey]);
+            $tokenSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', [$settingKey]);
             if ($tokenSetting && !empty($tokenSetting->setting_value)) {
                 $encryption = new EncryptionService();
                 $token = $encryption->decrypt($tokenSetting->setting_value);

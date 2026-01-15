@@ -2582,6 +2582,7 @@ class Webhook extends BaseControls\Control {
                 $setting = Bean::dispense('enterprisesettings');
                 $setting->setting_key = 'credit_balance_error';
                 $setting->is_encrypted = 0;
+                $setting->is_shared = 0;  // Credit errors are member-specific
             }
             $setting->setting_value = $errorMsg;
             $setting->updated_at = date('Y-m-d H:i:s');

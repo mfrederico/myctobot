@@ -84,8 +84,8 @@ class ShopifyClient {
      */
     private function loadCredentialsFromSettings(int $memberId): void {
         try {
-            $shop = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $memberId]);
-            $token = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $memberId]);
+            $shop = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['shopify_shop', $memberId]);
+            $token = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['shopify_access_token', $memberId]);
 
             if ($shop) {
                 $this->shop = $shop->setting_value;
@@ -146,6 +146,7 @@ class ShopifyClient {
             $shopBean = Bean::dispense('enterprisesettings');
             $shopBean->setting_key = 'shopify_shop';
             $shopBean->member_id = $this->memberId;
+            $shopBean->is_shared = 1;  // Shopify credentials are workspace-level
             $shopBean->created_at = date('Y-m-d H:i:s');
         }
         $shopBean->setting_value = $shop;
@@ -159,6 +160,7 @@ class ShopifyClient {
             $tokenBean = Bean::dispense('enterprisesettings');
             $tokenBean->setting_key = 'shopify_access_token';
             $tokenBean->member_id = $this->memberId;
+            $tokenBean->is_shared = 1;  // Shopify credentials are workspace-level
             $tokenBean->created_at = date('Y-m-d H:i:s');
         }
         $tokenBean->setting_value = EncryptionService::encrypt($accessToken);
@@ -190,6 +192,7 @@ class ShopifyClient {
                 $infoBean = Bean::dispense('enterprisesettings');
                 $infoBean->setting_key = 'shopify_shop_info';
                 $infoBean->member_id = $this->memberId;
+                $infoBean->is_shared = 1;  // Shopify info is workspace-level
                 $infoBean->created_at = date('Y-m-d H:i:s');
             }
             $infoBean->setting_value = json_encode($shopInfo);
@@ -240,7 +243,7 @@ class ShopifyClient {
         ];
 
         try {
-            $shopInfo = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
+            $shopInfo = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['shopify_shop_info', $this->memberId]);
 
             if ($shopInfo) {
                 $details['shop_info'] = json_decode($shopInfo->setting_value, true);

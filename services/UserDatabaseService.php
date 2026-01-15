@@ -379,11 +379,12 @@ class UserDatabaseService {
      * @param mixed $value Setting value
      * @return bool
      */
-    public static function setSetting(string $key, $value): bool {
+    public static function setSetting(string $key, $value, bool $isShared = true): bool {
         $setting = Bean::findOne('enterprisesettings', ' setting_key = ? ', [$key]);
         if (!$setting) {
             $setting = Bean::dispense('enterprisesettings');
             $setting->setting_key = $key;
+            $setting->is_shared = $isShared ? 1 : 0;
             $setting->created_at = date('Y-m-d H:i:s');
         }
         $setting->setting_value = $value;

@@ -219,8 +219,8 @@ MD;
      * Get tenant display name
      */
     private function getTenantDisplayName(): string {
-        // Try to get from enterprisesettings
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
+        // Try to get from enterprisesettings (workspace-level, shared)
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['company_name']);
         if ($setting && $setting->setting_value) {
             return $setting->setting_value;
         }

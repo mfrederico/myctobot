@@ -40,7 +40,7 @@ class OpenAIProvider implements LLMProviderInterface
     {
         try {
             \app\services\UserDatabaseService::connect($memberId);
-            $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', [$settingKey]);
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', [$settingKey]);
             if ($setting && $setting->setting_value) {
                 return EncryptionService::decrypt($setting->setting_value);
             }

@@ -646,8 +646,8 @@ class AnalysisService {
             return $this->member->anthropic_api_key;
         }
 
-        // Check member's enterprise settings (key-value pattern)
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $this->memberId]);
+        // Check member's enterprise settings (key-value pattern, include shared)
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $this->memberId]);
         if ($setting && !empty($setting->setting_value)) {
             return $setting->setting_value;
         }

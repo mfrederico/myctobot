@@ -156,6 +156,7 @@ class SSHKeyService {
         $bean->public_key = $keyPair['public_key'];
         $bean->private_key_encrypted = $encryptedPrivateKey;
         $bean->fingerprint = $keyPair['fingerprint'];
+        $bean->is_shared = 0;
         $bean->created_at = date('Y-m-d H:i:s');
         Bean::store($bean);
 

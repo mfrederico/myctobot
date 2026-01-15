@@ -206,15 +206,15 @@ class ConnectionsService {
         ];
 
         try {
-            // Check for GitHub token (user database via Bean::)
-            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            // Check for GitHub token (workspace-level, shared)
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['github_token']);
 
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
                 return $result;
             }
 
             // Get user info
-            $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_user']);
+            $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['github_user']);
             $user = $userSetting ? json_decode($userSetting->setting_value, true) : null;
 
             // Get connected repositories

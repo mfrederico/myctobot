@@ -722,12 +722,12 @@ class DeliveryConfirmationService {
         $jiraEnabled = Flight::get('confirmation.jira_enabled') ?? true;
         $webhookEnabled = Flight::get('confirmation.webhook_enabled') ?? false;
 
-        // Check member-specific settings (override globals)
-        $emailSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        // Check member-specific or shared settings (override globals)
+        $emailSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_email_enabled', $memberId]);
-        $jiraSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $jiraSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_jira_enabled', $memberId]);
-        $webhookSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $webhookSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_webhook_enabled', $memberId]);
 
         if ($emailSetting) {
@@ -762,8 +762,8 @@ class DeliveryConfirmationService {
      * Get confirmation email address for a member
      */
     private function getConfirmationEmail(int $memberId): ?string {
-        // Check member-specific setting first
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        // Check member-specific or shared setting first
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_recipient_email', $memberId]);
 
         if ($setting && $setting->setting_value) {
@@ -784,7 +784,7 @@ class DeliveryConfirmationService {
      * Get webhook URL for a member
      */
     private function getWebhookUrl(int $memberId): ?string {
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_webhook_url', $memberId]);
 
         return $setting ? $setting->setting_value : Flight::get('confirmation.webhook_url');
@@ -794,7 +794,7 @@ class DeliveryConfirmationService {
      * Get webhook secret for a member
      */
     private function getWebhookSecret(int $memberId): ?string {
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?',
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)',
             ['confirmation_webhook_secret', $memberId]);
 
         if ($setting && $setting->setting_value) {

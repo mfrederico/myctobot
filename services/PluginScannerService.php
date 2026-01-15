@@ -193,9 +193,9 @@ class PluginScannerService {
             }
         }
 
-        // Fall back to global GitHub token if repo token is empty
+        // Fall back to global GitHub token if repo token is empty (workspace-level, shared)
         if (empty($accessToken)) {
-            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['github_token']);
             if ($tokenSetting) {
                 $accessToken = $tokenSetting->setting_value;
             }

@@ -68,16 +68,16 @@ class AtlassianAuth {
             }
         }
 
-        // 2. Fill in missing/blank values from tenant config
+        // 2. Override with tenant-specific config (tenant values take priority)
         $tenantSlug = $_SESSION['tenant_slug'] ?? null;
         if ($tenantSlug && $tenantSlug !== 'default') {
             $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
             if (file_exists($tenantIni)) {
                 $tenantConfig = parse_ini_file($tenantIni, true);
                 if ($tenantConfig && isset($tenantConfig['atlassian'])) {
-                    // Only fill in values that are still empty/missing
+                    // Tenant values override base config when present
                     foreach ($tenantConfig['atlassian'] as $key => $value) {
-                        if (empty($config[$key]) && !empty($value)) {
+                        if (!empty($value)) {
                             $config[$key] = $value;
                         }
                     }
@@ -299,6 +299,7 @@ class AtlassianAuth {
             $existing = Bean::dispense('atlassiantoken');
             $existing->cloud_uid = $resource['id'];  // External Atlassian ID
             $existing->created_at = date('Y-m-d H:i:s');
+            $existing->is_shared = 0;
             $member->ownAtlassiantokenList[] = $existing;  // Sets member_id automatically
         }
 

@@ -59,6 +59,7 @@ class Anthropic extends BaseControls\Control {
                         $setting = Bean::dispense('enterprisesettings');
                         $setting->setting_key = 'anthropic_api_key';
                         $setting->member_id = $memberId;
+                        $setting->is_shared = 0;
                     }
                     $setting->setting_value = $encrypted;
                     $setting->is_encrypted = 1;

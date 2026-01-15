@@ -422,8 +422,8 @@ class AIDevJobService {
         if ($iniMaxConcurrent !== null && $iniMaxConcurrent !== '') {
             $maxConcurrent = (int)$iniMaxConcurrent;
         } else {
-            // 2. Fall back to enterprisesettings (member-level setting)
-            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['max_concurrent_aidev_jobs', $memberId]);
+            // 2. Fall back to enterprisesettings (workspace or member-level setting)
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['max_concurrent_aidev_jobs', $memberId]);
             if ($setting && $setting->setting_value) {
                 $maxConcurrent = (int)$setting->setting_value;
             }
@@ -554,6 +554,7 @@ class AIDevJobService {
         if (!$setting) {
             $setting = Bean::dispense('enterprisesettings');
             $setting->setting_key = 'max_concurrent_local_runners';
+            $setting->is_shared = 1;  // Workspace-level setting
             $setting->created_at = date('Y-m-d H:i:s');
         }
 
@@ -763,8 +764,8 @@ class AIDevJobService {
         $user = $webhookData['user'] ?? [];
         $accountId = $user['accountId'] ?? '';
 
-        // Get the bot's Jira account ID for this member
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['jira_bot_account_id', $memberId]);
+        // Get the bot's Jira account ID (workspace-level or member-specific)
+        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['jira_bot_account_id', $memberId]);
         if ($setting && $setting->setting_value && $accountId === $setting->setting_value) {
             return true;
         }
@@ -1607,7 +1608,7 @@ class AIDevJobService {
         // Get GitHub token
         $githubToken = $repo->access_token ?? null;
         if (empty($githubToken)) {
-            $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+            $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['github_token']);
             if ($githubSetting && !empty($githubSetting->setting_value)) {
                 $encryption = new EncryptionService();
                 $githubToken = $encryption->decrypt($githubSetting->setting_value);
@@ -2271,13 +2272,13 @@ class AIDevJobService {
                     }
                     $settings['verify_with_playwright'] = (bool)$shopifyConn->verify_with_playwright;
                 } else {
-                    // Legacy: Get settings from enterprisesettings
-                    $passwordSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_storefront_password', $memberId]);
+                    // Legacy: Get settings from enterprisesettings (include shared)
+                    $passwordSetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['shopify_storefront_password', $memberId]);
                     if ($passwordSetting && $passwordSetting->setting_value) {
                         $settings['storefront_password'] = EncryptionService::decrypt($passwordSetting->setting_value);
                     }
 
-                    $verifySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_verify_playwright', $memberId]);
+                    $verifySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['shopify_verify_playwright', $memberId]);
                     $verifyEnabled = $verifySetting ? $verifySetting->setting_value : null;
                     $settings['verify_with_playwright'] = ($verifyEnabled === '1' || $verifyEnabled === 'true');
                 }

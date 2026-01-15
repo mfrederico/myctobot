@@ -433,8 +433,8 @@ class ShardRouter {
         // Get member using bean operations
         $member = Bean::load('member', $memberId);
 
-        // Get Atlassian/Jira token using bean operations
-        $whereClause = 'member_id = ?';
+        // Get Atlassian/Jira token using bean operations (include shared tokens)
+        $whereClause = '(member_id = ? OR is_shared = 1)';
         $params = [$memberId];
 
         if ($cloudId) {

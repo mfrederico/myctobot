@@ -16,6 +16,9 @@ use \app\TenantResolver;
 // Load Google Auth plugin
 require_once __DIR__ . '/../lib/plugins/GoogleAuth.php';
 
+// Load Mailer Service
+require_once __DIR__ . '/../services/MailerService.php';
+
 class Auth extends BaseControls\Control {
 
     /**

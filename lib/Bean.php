@@ -141,7 +141,8 @@ class Bean {
      * @return int Count
      */
     public static function count(string $type, ?string $sql = null, array $params = []) {
-        return R::count(self::normalize($type), $sql, $params);
+        // R::count calls trim() on $sql, so ensure it's never null
+        return R::count(self::normalize($type), $sql ?? '', $params);
     }
 
     /**

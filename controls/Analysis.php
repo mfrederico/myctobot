@@ -234,8 +234,11 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        // Get board info
-        $board = UserDatabaseService::getBoard($analysis['board_id']);
+        // Get board info (may be null for standalone analyses)
+        $board = null;
+        if (!empty($analysis['board_id'])) {
+            $board = UserDatabaseService::getBoard((int)$analysis['board_id']);
+        }
 
         // Convert markdown to HTML for the view
         $markdownHtml = $this->markdownToHtml($analysis['content_markdown'] ?? '');

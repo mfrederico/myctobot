@@ -8,17 +8,75 @@
 
 namespace app\services;
 
+require_once __DIR__ . '/SSHKeyService.php';
+
 class ShardDiagnosticService {
 
     private array $shard;
     private array $results = [];
     private float $startTime;
+    private ?string $tempKeyFile = null;
 
     /**
      * Create diagnostic service for a shard
      */
     public function __construct(array $shard) {
         $this->shard = $shard;
+    }
+
+    /**
+     * Cleanup temp key file on destruction
+     */
+    public function __destruct() {
+        $this->cleanupTempKey();
+    }
+
+    /**
+     * Prepare SSH key from database for use
+     * Writes decrypted private key to temp file with proper permissions
+     *
+     * @return string|null Path to temp key file, or null if no key configured
+     */
+    private function prepareSSHKey(): ?string {
+        $sshKeyId = $this->shard['sshkey_id'] ?? null;
+
+        if (!$sshKeyId) {
+            return null;
+        }
+
+        // Get key with decrypted private key
+        $key = SSHKeyService::getKey((int)$sshKeyId, true);
+        if (!$key || empty($key['private_key'])) {
+            return null;
+        }
+
+        // Create temp file with secure permissions
+        $tempDir = sys_get_temp_dir();
+        $this->tempKeyFile = $tempDir . '/shard_ssh_' . uniqid() . '_' . time();
+
+        // Write private key
+        file_put_contents($this->tempKeyFile, $key['private_key']);
+
+        // Set permissions to 0600 (required by SSH)
+        chmod($this->tempKeyFile, 0600);
+
+        // Mark key as used
+        SSHKeyService::markUsed((int)$sshKeyId);
+
+        return $this->tempKeyFile;
+    }
+
+    /**
+     * Clean up temp key file
+     */
+    private function cleanupTempKey(): void {
+        if ($this->tempKeyFile && file_exists($this->tempKeyFile)) {
+            // Overwrite with zeros before deleting (security)
+            $size = filesize($this->tempKeyFile);
+            file_put_contents($this->tempKeyFile, str_repeat("\0", $size));
+            unlink($this->tempKeyFile);
+            $this->tempKeyFile = null;
+        }
     }
 
     /**
@@ -74,7 +132,6 @@ class ShardDiagnosticService {
         $user = $this->shard['ssh_user'] ?? 'claudeuser';
         $host = $this->shard['host'];
         $port = $this->shard['ssh_port'] ?? 22;
-        $keyPath = $this->shard['ssh_key_path'] ?? null;
 
         $cmd = "ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes";
 
@@ -82,6 +139,10 @@ class ShardDiagnosticService {
             $cmd .= " -p {$port}";
         }
 
+        // Try to get key from database first
+        $keyPath = $this->prepareSSHKey();
+
+        // If no database key, fall back to default SSH key location
         if ($keyPath && file_exists($keyPath)) {
             $cmd .= " -i " . escapeshellarg($keyPath);
         }

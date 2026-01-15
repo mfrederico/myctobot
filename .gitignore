@@ -2,6 +2,7 @@
 /conf/config.ini
 /conf/config.*.ini
 /conf/mailgun.ini
+/conf/atlassian.ini
 config.ini
 stripe
 storage

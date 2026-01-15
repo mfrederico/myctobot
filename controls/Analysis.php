@@ -373,7 +373,7 @@ class Analysis extends BaseControls\Control {
         if ($request->method === 'GET') {
             // Check for any active shard jobs for this board
             $activeJob = Bean::findOne('digestjobs',
-                'member_id = ? AND board_id = ? AND status IN (?, ?)',
+                'member_id = ? AND boards_id = ? AND status IN (?, ?)',
                 [$this->member->id, $boardId, 'queued', 'running']
             );
 

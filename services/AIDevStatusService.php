@@ -60,10 +60,10 @@ class AIDevStatusService {
         return [
             'job_uid' => $bean->job_uid,
             'member_id' => (int) $bean->member_id,
-            'board_id' => (int) $bean->board_id,
+            'board_id' => (int) $bean->boards_id,  // API compatibility
             'issue_key' => $bean->issue_key,
             'project_type' => $bean->project_type ?? 'jira',
-            'repo_connection_id' => $bean->repo_connection_id ? (int) $bean->repo_connection_id : null,
+            'repo_connection_id' => $bean->repoconnections_id ? (int) $bean->repoconnections_id : null,  // API compatibility
             'cloud_uid' => $bean->cloud_uid,
             'status' => $bean->status,
             'progress' => (int) $bean->progress,
@@ -112,10 +112,10 @@ class AIDevStatusService {
         $job = Bean::dispense('aidevjobs');
         $job->job_uid = $jobId;
         $job->member_id = $memberId;
-        $job->board_id = $boardId;
+        $job->boards_id = $boardId;
         $job->issue_key = $issueKey;
         $job->project_type = $projectType;
-        $job->repo_connection_id = $repoConnectionId;
+        $job->repoconnections_id = $repoConnectionId;
         $job->cloud_uid = $cloudId;
         $job->status = self::STATUS_PENDING;
         $job->progress = 0;

@@ -50,7 +50,8 @@ class TenantSchemaBuilder {
         $this->createAuthControlTable();
 
         // Create tables with member association
-        $this->board = $this->createJiraBoardsTable();
+        $this->createJiraBoardsTable(); // Legacy table - keep for backwards compatibility
+        $this->board = $this->createBoardsTable(); // Generic boards - used for FK associations
         $this->repo = $this->createRepoConnectionsTable();
         $this->createAtlassianTokenTable();
         $this->createGitHubTokensTable();
@@ -97,7 +98,14 @@ class TenantSchemaBuilder {
      * @return array Result with success status and message
      */
     public function runMigration(string $tableName, bool $force = false): array {
-        $methodName = 'create' . $tableName . 'Table';
+        // Support createXxxTable, renameXxx, and migrateXxx methods
+        if (str_starts_with($tableName, 'Rename')) {
+            $methodName = lcfirst($tableName); // RenameBoardIdToJiraboardsId -> renameBoardIdToJiraboardsId
+        } elseif (str_starts_with($tableName, 'Migrate')) {
+            $methodName = lcfirst($tableName); // MigrateJiraboardsToBoards -> migrateJiraboardsToBoards
+        } else {
+            $methodName = 'create' . $tableName . 'Table';
+        }
 
         if (!method_exists($this, $methodName)) {
             return [
@@ -565,8 +573,17 @@ class TenantSchemaBuilder {
         $migrations = [];
 
         foreach ($methods as $method) {
+            // Match createXxxTable methods (table creation)
             if (preg_match('/^create(.+)Table$/', $method, $matches)) {
                 $migrations[] = $matches[1];
+            }
+            // Match renameXxx methods (column/table renames)
+            if (preg_match('/^rename(.+)$/', $method, $matches)) {
+                $migrations[] = 'Rename' . $matches[1];
+            }
+            // Match migrateXxx methods (data migrations)
+            if (preg_match('/^migrate(.+)$/', $method, $matches)) {
+                $migrations[] = 'Migrate' . $matches[1];
             }
         }
 
@@ -687,13 +704,19 @@ class TenantSchemaBuilder {
             });
         }
 
-        // Try to load existing board, or create temp one
-        $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
+        // Try to load existing board, or create temp one (prefer generic boards table)
+        $this->board = R::findOne('boards', ' LIMIT 1 ');
         if (!$this->board) {
-            $this->board = $this->createDependencyBean('jiraboards', $force, function() {
-                $bean = R::dispense('jiraboards');
+            // Fall back to jiraboards for backwards compatibility
+            $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
+        }
+        if (!$this->board) {
+            $this->board = $this->createDependencyBean('boards', $force, function() {
+                $bean = R::dispense('boards');
                 $bean->member = $this->member;
-                $bean->board_name = 'Migration Temp Board';
+                $bean->type = 'jira';
+                $bean->name = 'Migration Temp Board';
+                $bean->provider_config_json = '{}';
                 $bean->created_at = date('Y-m-d H:i:s');
                 R::store($bean);
                 return $bean;
@@ -736,7 +759,7 @@ class TenantSchemaBuilder {
             'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
             'subscription', 'usersettings',
             // Parent tables last
-            'repoconnections', 'jiraboards', 'member', 'authcontrol'
+            'repoconnections', 'boards', 'jiraboards', 'member', 'authcontrol'
         ];
 
         R::exec('SET FOREIGN_KEY_CHECKS = 0', []);
@@ -769,7 +792,7 @@ class TenantSchemaBuilder {
     private function dropTable(string $tableName): void {
         // Whitelist of allowed tables to drop
         $allowed = [
-            'member', 'jiraboards', 'repoconnections', 'aiagents', 'aidevjobs',
+            'member', 'boards', 'jiraboards', 'repoconnections', 'aiagents', 'aidevjobs',
             'aidevjoblogs', 'analysisresults', 'anthropickeys', 'atlassiantoken',
             'authcontrol', 'boardrepomapping', 'ceodirectives', 'ctoepics',
             'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
@@ -900,7 +923,7 @@ class TenantSchemaBuilder {
         $bean = R::dispense('aidevjobs');
         $bean->job_uid = 'schema-job-uid-placeholder'; // _uid suffix - string not FK
         $bean->member = $this->member; // Creates member_id FK
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK
         $bean->issue_key = 'SCHEMA-1';
         $bean->cloud_uid = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'; // _uid suffix
@@ -948,7 +971,7 @@ class TenantSchemaBuilder {
 
     private function createAnalysisResultsTable(): void {
         $bean = R::dispense('analysisresults');
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->analysis_type = 'sprint';
         $bean->content_json = '{}';
         $bean->content_markdown = 'Schema analysis content';
@@ -961,7 +984,7 @@ class TenantSchemaBuilder {
 
     private function createDigestHistoryTable(): void {
         $bean = R::dispense('digesthistory');
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->member = $this->member; // Creates member_id FK
         $bean->digest_type = 'daily';
         $bean->content_markdown = 'Schema digest content';
@@ -974,8 +997,7 @@ class TenantSchemaBuilder {
 
     private function createTicketAnalysisCacheTable(): void {
         $bean = R::dispense('ticketanalysiscache');
-        // Note: Uses board_id directly (legacy pattern) instead of jiraboards association
-        $bean->board_id = $this->board;
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->issue_key = 'SCHEMA-1';
         $bean->content_hash = 'schema_content_hash';
         $bean->clarity_score = 0;
@@ -1021,7 +1043,7 @@ class TenantSchemaBuilder {
 
     private function createBoardRepoMappingTable(): void {
         $bean = R::dispense('boardrepomapping');
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK
         $bean->is_primary = true;
         $bean->created_at = date('Y-m-d H:i:s');
@@ -1144,7 +1166,7 @@ class TenantSchemaBuilder {
         $bean->project_uid = 'schema-ctoproject-uid'; // _uid suffix
         $bean->ceodirectives = $this->directive; // Creates ceodirectives_id FK
         $bean->member = $this->member; // Creates member_id FK
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK (board_id equivalent)
+        $bean->boards = $this->board; // Creates boards_id FK (board_id equivalent)
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK (github_repo_id equivalent)
         $bean->name = 'Schema CTO Project';
         $bean->project_type = 'jira';
@@ -1210,7 +1232,7 @@ class TenantSchemaBuilder {
         $bean = R::dispense('projects');
         $bean->project_uid = 'schema-project-uid'; // _uid suffix
         $bean->member = $this->member; // Creates member_id FK
-        $bean->jiraboards = $this->board; // Creates jiraboards_id FK
+        $bean->boards = $this->board; // Creates boards_id FK
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK
         $bean->name = 'Schema Project';
         $bean->description = 'Schema project description';
@@ -1450,5 +1472,302 @@ class TenantSchemaBuilder {
             $bean->created_at = date('Y-m-d H:i:s');
             R::store($bean);
         }
+    }
+
+    // ========================================
+    // Column Rename Migrations
+    // ========================================
+
+    /**
+     * Rename board_id to jiraboards_id across all tables
+     * This aligns with RedBeanPHP's FK naming convention: {beantype}_id
+     *
+     * Note: Uses R::exec for DDL statements - table names are from hardcoded whitelist
+     */
+    private function renameBoardIdToJiraboardsId(): void {
+        // Whitelisted tables that have board_id column to rename
+        $tables = [
+            'aidevjobs',
+            'analysisresults',
+            'boardrepomapping',
+            'digesthistory',
+            'digestjobs',
+            'ticketanalysiscache',
+        ];
+
+        foreach ($tables as $table) {
+            $this->doColumnRename($table, 'board_id', 'jiraboards_id', 'INT(11) UNSIGNED DEFAULT NULL');
+        }
+    }
+
+    /**
+     * Rename repo_connection_id and repo_id to repoconnections_id
+     * This aligns with RedBeanPHP's FK naming convention: {beantype}_id
+     */
+    private function renameRepoConnectionIdToRepoconnectionsId(): void {
+        // Whitelisted tables with columns to rename
+        $renames = [
+            ['aidevjobs', 'repo_connection_id'],
+            ['aidevjobs', 'repo_id'],
+            ['boardrepomapping', 'repo_connection_id'],
+            ['shopifyconnections', 'repo_connection_id'],
+            ['discoveredplugins', 'repo_connection_id'],
+            ['pluginscans', 'repo_connection_id'],
+        ];
+
+        foreach ($renames as $rename) {
+            $this->doColumnRename($rename[0], $rename[1], 'repoconnections_id', 'INT(11) UNSIGNED DEFAULT NULL');
+        }
+    }
+
+    /**
+     * Helper: Rename a column if it exists and target doesn't exist
+     * Uses whitelisted table/column names only (no user input)
+     *
+     * @param string $table Table name (from whitelist)
+     * @param string $oldColumn Old column name
+     * @param string $newColumn New column name
+     * @param string $columnDef Column definition for ALTER
+     */
+    private function doColumnRename(string $table, string $oldColumn, string $newColumn, string $columnDef): void {
+        // Whitelist validation for table names
+        $allowedTables = [
+            'aidevjobs', 'analysisresults', 'boardrepomapping', 'digesthistory',
+            'digestjobs', 'ticketanalysiscache', 'shopifyconnections',
+            'discoveredplugins', 'pluginscans'
+        ];
+        if (!in_array($table, $allowedTables, true)) {
+            return;
+        }
+
+        // Check if table exists and has the old column
+        try {
+            $columns = R::inspect($table);
+        } catch (\Exception $e) {
+            return; // Table doesn't exist, skip
+        }
+        if (!$columns || !isset($columns[$oldColumn])) {
+            return;
+        }
+
+        // Skip if target column already exists
+        if (isset($columns[$newColumn])) {
+            return;
+        }
+
+        // Build and execute DDL (table/column names are whitelisted, not user input)
+        $sql = sprintf(
+            'ALTER TABLE `%s` CHANGE COLUMN `%s` `%s` %s',
+            $table, $oldColumn, $newColumn, $columnDef
+        );
+        R::exec($sql);
+
+        // Update indexes - drop old, create new
+        $this->safeDropIndex($table, 'idx_board');
+        $this->safeDropIndex($table, 'idx_repo');
+        $this->safeDropIndex($table, sprintf('index_foreignkey_%s_board', $table));
+        $this->safeDropIndex($table, sprintf('index_foreignkey_%s_repo', $table));
+        $this->safeDropIndex($table, sprintf('index_foreignkey_%s_repo_connection', $table));
+
+        // Create new index
+        $indexName = sprintf('index_foreignkey_%s_%s', $table, str_replace('_id', '', $newColumn));
+        $this->safeCreateIndex($table, $indexName, $newColumn);
+    }
+
+    /**
+     * Helper: Safely drop an index (ignore if doesn't exist)
+     */
+    private function safeDropIndex(string $table, string $indexName): void {
+        $sql = sprintf('ALTER TABLE `%s` DROP INDEX `%s`', $table, $indexName);
+        try {
+            R::exec($sql);
+        } catch (\Exception $e) {
+            // Index doesn't exist, ignore
+        }
+    }
+
+    /**
+     * Helper: Safely create an index (ignore if already exists)
+     */
+    private function safeCreateIndex(string $table, string $indexName, string $column): void {
+        $sql = sprintf('CREATE INDEX `%s` ON `%s` (`%s`)', $indexName, $table, $column);
+        try {
+            R::exec($sql);
+        } catch (\Exception $e) {
+            // Index already exists, ignore
+        }
+    }
+
+    /**
+     * Create generic boards table
+     * Supports multiple board types: jira, github, monday, zoho, etc.
+     * This is the provider-agnostic abstraction layer.
+     */
+    private function createBoardsTable() {
+        $bean = R::dispense('boards');
+        $bean->member = $this->member; // Creates member_id FK
+        $bean->type = 'jira'; // jira, github, monday, zoho, etc.
+        $bean->external_uid = 'cloud_id:board_id'; // Provider-specific unique identifier
+        $bean->name = 'Schema Template Board';
+        $bean->project_key = 'SCHEMA';
+        $bean->project_name = 'Schema Template Project';
+        $bean->is_active = true;
+        $bean->digest_enabled = true;
+        $bean->digest_frequency = 'daily';
+        $bean->digest_time = '09:00';
+        $bean->digest_day = 1;
+        $bean->last_digest_at = date('Y-m-d H:i:s');
+        $bean->provider_config_json = '{}'; // Provider-specific settings (JSON)
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        return $bean;
+    }
+
+    /**
+     * Migration: Copy jiraboards data to generic boards table
+     * Sets type='jira' and builds external_uid from cloud_uid:board_uid
+     */
+    private function migrateJiraboardsToBoards(): void {
+        // First ensure boards table exists
+        try {
+            R::inspect('boards');
+        } catch (\Exception $e) {
+            // Create boards table if it doesn't exist
+            $tempMember = R::dispense('member');
+            $tempMember->email = 'migration@temp.local';
+            R::store($tempMember);
+
+            $bean = R::dispense('boards');
+            $bean->member = $tempMember;
+            $bean->type = 'jira';
+            $bean->external_uid = 'temp';
+            $bean->name = 'temp';
+            $bean->project_key = 'TEMP';
+            $bean->is_active = false;
+            $bean->provider_config_json = '{}';
+            $bean->created_at = date('Y-m-d H:i:s');
+            R::store($bean);
+            R::trash($bean);
+            R::trash($tempMember);
+        }
+
+        // Check if jiraboards table exists and has data
+        try {
+            $jiraboards = R::findAll('jiraboards');
+        } catch (\Exception $e) {
+            return; // No jiraboards table
+        }
+
+        if (empty($jiraboards)) {
+            return; // No data to migrate
+        }
+
+        foreach ($jiraboards as $jb) {
+            // Check if already migrated (by external_uid)
+            $externalUid = ($jb->cloud_uid ?? '') . ':' . ($jb->board_uid ?? $jb->id);
+            $existing = R::findOne('boards', 'external_uid = ? AND type = ?', [$externalUid, 'jira']);
+            if ($existing) {
+                continue; // Already migrated
+            }
+
+            // Create board record
+            $board = R::dispense('boards');
+            $board->member_id = $jb->member_id;
+            $board->type = 'jira';
+            $board->external_uid = $externalUid;
+            $board->name = $jb->board_name;
+            $board->project_key = $jb->project_key;
+            $board->project_name = $jb->project_name;
+            $board->is_active = $jb->is_active;
+            $board->digest_enabled = $jb->digest_enabled;
+            $board->digest_frequency = $jb->digest_frequency;
+            $board->digest_time = $jb->digest_time;
+            $board->digest_day = $jb->digest_day;
+            $board->last_digest_at = $jb->last_digest_at;
+            $board->created_at = $jb->created_at;
+            $board->updated_at = $jb->updated_at;
+
+            // Store Jira-specific fields in provider_config_json
+            $board->provider_config_json = json_encode([
+                'cloud_uid' => $jb->cloud_uid,
+                'board_uid' => $jb->board_uid,
+                'board_type' => $jb->board_type, // scrum, kanban
+                'jiraboards_id' => $jb->id, // Reference back to original
+            ]);
+
+            R::store($board);
+        }
+    }
+
+    /**
+     * Migration: Rename board_id and jiraboards_id columns to boards_id
+     * This unifies FK references to the generic boards table
+     *
+     * Note: Uses R::exec for DDL statements - table names are from hardcoded whitelist
+     */
+    private function renameToBoardsId(): void {
+        // Tables that may have board_id or jiraboards_id columns
+        $tables = [
+            'aidevjobs',
+            'analysisresults',
+            'boardrepomapping',
+            'digesthistory',
+            'digestjobs',
+            'ticketanalysiscache',
+        ];
+
+        foreach ($tables as $table) {
+            // Try to rename jiraboards_id first (if previous migration was run)
+            $this->doColumnRenameToBoards($table, 'jiraboards_id', 'boards_id', 'INT(11) UNSIGNED DEFAULT NULL');
+            // Then try board_id (if previous migration was not run)
+            $this->doColumnRenameToBoards($table, 'board_id', 'boards_id', 'INT(11) UNSIGNED DEFAULT NULL');
+        }
+    }
+
+    /**
+     * Helper: Rename column to boards_id with proper index handling
+     */
+    private function doColumnRenameToBoards(string $table, string $oldColumn, string $newColumn, string $columnDef): void {
+        // Whitelist validation for table names
+        $allowedTables = [
+            'aidevjobs', 'analysisresults', 'boardrepomapping', 'digesthistory',
+            'digestjobs', 'ticketanalysiscache', 'shopifyconnections',
+            'discoveredplugins', 'pluginscans'
+        ];
+        if (!in_array($table, $allowedTables, true)) {
+            return;
+        }
+
+        // Check if table exists and has the old column
+        try {
+            $columns = R::inspect($table);
+        } catch (\Exception $e) {
+            return; // Table doesn't exist, skip
+        }
+        if (!$columns || !isset($columns[$oldColumn])) {
+            return;
+        }
+
+        // Skip if target column already exists
+        if (isset($columns[$newColumn])) {
+            return;
+        }
+
+        // Build and execute DDL (table/column names are whitelisted, not user input)
+        $sql = sprintf(
+            'ALTER TABLE `%s` CHANGE COLUMN `%s` `%s` %s',
+            $table, $oldColumn, $newColumn, $columnDef
+        );
+        R::exec($sql);
+
+        // Clean up old indexes
+        $this->safeDropIndex($table, 'idx_board');
+        $this->safeDropIndex($table, sprintf('index_foreignkey_%s_board', $table));
+        $this->safeDropIndex($table, sprintf('index_foreignkey_%s_jiraboards', $table));
+
+        // Create new index for boards_id
+        $indexName = sprintf('index_foreignkey_%s_boards', $table);
+        $this->safeCreateIndex($table, $indexName, $newColumn);
     }
 }

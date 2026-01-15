@@ -472,7 +472,7 @@ class AnalysisService {
         // Uses RedBeanPHP associations: member->ownDigestjobsList
         $digestJob = Bean::dispense('digestjobs');
         $digestJob->job_uid = $jobId;
-        $digestJob->board_id = $boardId;
+        $digestJob->boards_id = $boardId;
         $digestJob->shard_id = $shard['id'];  // External shard ID
         $digestJob->status = 'queued';
         $digestJob->send_email = $sendEmail ? 1 : 0;
@@ -625,7 +625,7 @@ class AnalysisService {
         return [
             'job_uid' => $job->job_uid,
             'status' => $job->status,
-            'board_id' => $job->board_id,
+            'board_id' => $job->boards_id,  // Return as board_id for API compatibility
             'board_name' => $job->board_name,
             'project_key' => $job->project_key,
             'shard_id' => $job->shard_id,

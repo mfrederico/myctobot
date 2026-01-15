@@ -1148,7 +1148,7 @@ class AIDevJobService {
     private function queueJob(
         int $memberId,
         string $issueKey,
-        int $boardId,
+        ?int $boardId,
         string $cloudId,
         ?int $repoId,
         ?string $tenant,
@@ -1181,10 +1181,10 @@ class AIDevJobService {
         $job = Bean::dispense('aidevjobs');
         $job->job_uid = bin2hex(random_bytes(16));  // Generate UUID
         $job->member_id = $memberId;
-        $job->board_id = $boardId;
+        $job->boards_id = $boardId;
         $job->issue_key = $issueKey;
         $job->cloud_uid = $cloudId;
-        $job->repo_connection_id = $repoId;
+        $job->repoconnections_id = $repoId;
         $job->status = 'queued';
         $job->current_step = 'Waiting in queue';
         $job->progress = 0;
@@ -1330,7 +1330,7 @@ class AIDevJobService {
 
                 $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
 
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repo_connection_id, $jobTenant)) {
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant)) {
                     $results['jobs_started']++;
 
                     AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [
@@ -1340,7 +1340,7 @@ class AIDevJobService {
 
                     // Trigger onJobStarted for Jira jobs
                     if (($job->project_type ?? 'jira') === self::PROJECT_TYPE_JIRA) {
-                        $this->onJobStarted($job->member_id, $job->cloud_uid, $job->issue_key, $job->board_id);
+                        $this->onJobStarted($job->member_id, $job->cloud_uid, $job->issue_key, $job->boards_id);
                     }
                 } else {
                     // Failed to spawn - mark as error
@@ -1574,7 +1574,7 @@ class AIDevJobService {
      * Cleanup GitHub labels for a job
      */
     private function cleanupGitHubLabels($job, int $memberId, array $result): array {
-        $repoConnectionId = $job->repo_connection_id ? (int) $job->repo_connection_id : null;
+        $repoConnectionId = $job->repoconnections_id ? (int) $job->repoconnections_id : null;
 
         if (!$repoConnectionId) {
             $result['errors'][] = 'No repo_connection_id for GitHub job';
@@ -2482,8 +2482,19 @@ class AIDevJobService {
 
         $staleJobs = [];
         foreach ($runningJobs as $job) {
+            // Get tenant from queue_metadata if available
+            $tenant = null;
+            if (!empty($job->queue_metadata)) {
+                $metadata = json_decode($job->queue_metadata, true);
+                $tenant = $metadata['tenant'] ?? null;
+            }
+            // Fallback to current session tenant
+            if (!$tenant) {
+                $tenant = $_SESSION['tenant_slug'] ?? null;
+            }
+
             // Check if tmux session still exists
-            $tmux = new TmuxService($job->member_id, $job->issue_key);
+            $tmux = new TmuxService($job->member_id, $job->issue_key, null, $tenant);
 
             if (!$tmux->exists()) {
                 // Session is gone - this is a stale job

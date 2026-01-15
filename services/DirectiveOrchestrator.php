@@ -376,7 +376,7 @@ class DirectiveOrchestrator {
             // Set context based on issue type
             if ($isGitHubIssue) {
                 $job->cloud_uid = null;
-                $job->board_id = null;  // GitHub workflows don't have a Jira board
+                $job->boards_id = null;  // GitHub workflows don't have a board
                 $job->issue_source = 'github';
 
                 // Find repo connection for this GitHub repo
@@ -387,7 +387,7 @@ class DirectiveOrchestrator {
                         [$repoFullName, $this->memberId]
                     );
                     if ($repoConn) {
-                        $job->repo_connection_id = $repoConn->id;
+                        $job->repoconnections_id = $repoConn->id;
                     }
                 }
             } else {

@@ -145,6 +145,7 @@ class Github extends BaseControls\Control {
 
             // Create repo (workspace-level - track who created it)
             $repo = Bean::dispense('repoconnections');
+            $repo->member = $this->member; // Required for webhook to trigger AI dev jobs
             $repo->created_by_member_id = $this->member->id;
             $repo->created_by_name = $this->member->display_name ?? $this->member->email;
             $repo->provider = 'github';
@@ -386,7 +387,7 @@ class Github extends BaseControls\Control {
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                $boardId = $bean->jiraboards_id ?? $bean->board_id;
+                $boardId = $bean->boards_id ?? $bean->jiraboards_id ?? $bean->board_id;
                 $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
 
                 if (!$boardId || !$repoId) continue;
@@ -560,8 +561,12 @@ class Github extends BaseControls\Control {
             }
         }
 
-        // Update repo
-        $repo->agent_uid = $agentId;
+        // Update repo using association (creates aiagents_id FK)
+        if ($agentId) {
+            $repo->aiagents = $agent;
+        } else {
+            $repo->aiagents_id = null;
+        }
         $repo->updated_at = date('Y-m-d H:i:s');
         Bean::store($repo);
 
@@ -649,8 +654,8 @@ class Github extends BaseControls\Control {
 
         try {
             $mapping = Bean::findOne('boardrepomapping',
-                '(jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
-                [$boardId, $boardId, $repoId, $repoId]
+                '(boards_id = ? OR jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
+                [$boardId, $boardId, $boardId, $repoId, $repoId]
             );
 
             if ($mapping) {

@@ -460,8 +460,8 @@ class Enterprise extends BaseControls\Control {
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                // Use association column names (jiraboards_id, repoconnections_id) with fallback to old schema
-                $boardId = $bean->jiraboards_id ?? $bean->board_id;
+                // Use association column names (boards_id, repoconnections_id) with fallback to old schema
+                $boardId = $bean->boards_id ?? $bean->jiraboards_id ?? $bean->board_id;
                 $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
 
                 if (!$boardId || !$repoId) continue; // Skip invalid mappings
@@ -793,8 +793,8 @@ class Enterprise extends BaseControls\Control {
 
             // Find and delete the mapping
             $mapping = Bean::findOne('boardrepomapping',
-                '(jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
-                [$boardId, $boardId, $repoId, $repoId]
+                '(boards_id = ? OR jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
+                [$boardId, $boardId, $boardId, $repoId, $repoId]
             );
 
             if ($mapping) {
@@ -1544,8 +1544,12 @@ class Enterprise extends BaseControls\Control {
             }
         }
 
-        // Update repo
-        $repo->agent_uid = $agentId;
+        // Update repo using association (creates aiagents_id FK)
+        if ($agentId) {
+            $repo->aiagents = $agent;
+        } else {
+            $repo->aiagents_id = null;
+        }
         $repo->updated_at = date('Y-m-d H:i:s');
         Bean::store($repo);
 

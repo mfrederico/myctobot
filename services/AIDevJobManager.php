@@ -50,8 +50,8 @@ class AIDevJobManager {
             // Create new job
             $job = Bean::dispense('aidevjobs');
             $job->issue_key = $issueKey;
-            $job->board_id = $boardId;
-            $job->repo_connection_id = $repoConnectionId;
+            $job->boards_id = $boardId;
+            $job->repoconnections_id = $repoConnectionId;
             $job->cloud_uid = $cloudId;
             $job->member_id = $this->memberId;
             $job->status = self::STATUS_PENDING;
@@ -320,8 +320,8 @@ class AIDevJobManager {
         return [
             'id' => $job->id,
             'issue_key' => $job->issue_key,
-            'board_id' => $job->board_id,
-            'repo_connection_id' => $job->repo_connection_id,
+            'board_id' => $job->boards_id,  // API compatibility
+            'repo_connection_id' => $job->repoconnections_id,  // API compatibility
             'cloud_uid' => $job->cloud_uid,
             'status' => $job->status,
             'current_shard_job_uid' => $job->current_shard_job_uid,

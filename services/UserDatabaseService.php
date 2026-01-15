@@ -192,9 +192,9 @@ class UserDatabaseService {
         }
 
         // Delete related records
-        Bean::exec('DELETE FROM analysisresults WHERE board_id = ?', [$id]);
-        Bean::exec('DELETE FROM digesthistory WHERE board_id = ?', [$id]);
-        Bean::exec('DELETE FROM ticketanalysiscache WHERE board_id = ?', [$id]);
+        Bean::exec('DELETE FROM analysisresults WHERE boards_id = ?', [$id]);
+        Bean::exec('DELETE FROM digesthistory WHERE boards_id = ?', [$id]);
+        Bean::exec('DELETE FROM ticketanalysiscache WHERE boards_id = ?', [$id]);
 
         Bean::trash($board);
         return true;
@@ -230,7 +230,7 @@ class UserDatabaseService {
      */
     public static function storeAnalysis(int $boardId, string $type, array $results, ?string $markdown = null): int {
         $analysis = Bean::dispense('analysisresults');
-        $analysis->board_id = $boardId;
+        $analysis->boards_id = $boardId;
         $analysis->analysis_type = $type;
         $analysis->content_json = json_encode($results, JSON_INVALID_UTF8_SUBSTITUTE);
         $analysis->content_markdown = $markdown;
@@ -264,7 +264,7 @@ class UserDatabaseService {
      */
     public static function getRecentAnalyses(int $boardId, int $limit = 10): array {
         return array_values(Bean::find('analysisresults',
-            ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
+            ' boards_id = ? ORDER BY created_at DESC LIMIT ? ',
             [$boardId, $limit]
         ));
     }
@@ -277,9 +277,9 @@ class UserDatabaseService {
     public static function getAllRecentAnalyses(int $limit = 20): array {
         try {
             return Bean::getAll("
-                SELECT a.*, b.board_name, b.project_key
+                SELECT a.*, b.name AS board_name, b.project_key
                 FROM analysisresults a
-                JOIN jiraboards b ON a.board_id = b.id
+                JOIN boards b ON a.boards_id = b.id
                 ORDER BY a.created_at DESC
                 LIMIT ?
             ", [$limit]) ?? [];
@@ -301,10 +301,10 @@ class UserDatabaseService {
             $boardId = $board->id ?? $board['id'];
             $result = Bean::exec("
                 DELETE FROM analysisresults
-                WHERE board_id = ?
+                WHERE boards_id = ?
                 AND id NOT IN (
                     SELECT id FROM analysisresults
-                    WHERE board_id = ?
+                    WHERE boards_id = ?
                     ORDER BY created_at DESC
                     LIMIT ?
                 )
@@ -329,7 +329,7 @@ class UserDatabaseService {
      */
     public static function logDigest(int $boardId, string $sentTo, string $subject, string $contentPreview, string $status = 'sent', ?string $errorMessage = null): int {
         $digest = Bean::dispense('digesthistory');
-        $digest->board_id = $boardId;
+        $digest->boards_id = $boardId;
         $digest->sent_to = $sentTo;
         $digest->subject = $subject;
         $digest->content_preview = substr($contentPreview, 0, 500);
@@ -353,7 +353,7 @@ class UserDatabaseService {
      */
     public static function getDigestHistory(int $boardId, int $limit = 20): array {
         return array_values(Bean::find('digesthistory',
-            ' board_id = ? ORDER BY created_at DESC LIMIT ? ',
+            ' boards_id = ? ORDER BY created_at DESC LIMIT ? ',
             [$boardId, $limit]
         ));
     }
@@ -441,7 +441,7 @@ class UserDatabaseService {
      * @return array|null Array with clarity_score, clarity_analysis, etc.
      */
     public static function getTicketAnalysisCache(int $boardId, string $issueKey): ?array {
-        $bean = Bean::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        $bean = Bean::findOne('ticketanalysiscache', ' boards_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
         if (!$bean) {
             return null;
         }
@@ -463,10 +463,10 @@ class UserDatabaseService {
      * @return bool
      */
     public static function setTicketAnalysisCache(int $boardId, string $issueKey, string $contentHash, array $data): bool {
-        $cache = Bean::findOne('ticketanalysiscache', ' board_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
+        $cache = Bean::findOne('ticketanalysiscache', ' boards_id = ? AND issue_key = ? ', [$boardId, $issueKey]);
         if (!$cache) {
             $cache = Bean::dispense('ticketanalysiscache');
-            $cache->board_id = $boardId;
+            $cache->boards_id = $boardId;
             $cache->issue_key = $issueKey;
             $cache->created_at = date('Y-m-d H:i:s');
         }
@@ -532,8 +532,8 @@ class UserDatabaseService {
 
         $job = Bean::dispense('aidevjobs');
         $job->issue_key = $issueKey;
-        $job->board_id = $boardId;
-        $job->repo_connection_id = $repoConnectionId;
+        $job->boards_id = $boardId;
+        $job->repoconnections_id = $repoConnectionId;
         $job->cloud_uid = $cloudId;
         $job->status = 'pending';
         $job->run_count = 0;
@@ -568,7 +568,7 @@ class UserDatabaseService {
             'status', 'current_shard_job_uid', 'branch_name', 'pr_url', 'pr_number',
             'clarification_comment_uid', 'clarification_questions', 'error_message',
             'run_count', 'last_output', 'last_result_json', 'files_changed',
-            'commit_sha', 'started_at', 'completed_at', 'board_id', 'repo_connection_id', 'cloud_uid'
+            'commit_sha', 'started_at', 'completed_at', 'boards_id', 'repoconnections_id', 'cloud_uid'
         ];
 
         foreach ($data as $key => $value) {

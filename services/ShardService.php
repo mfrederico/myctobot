@@ -65,7 +65,7 @@ class ShardService {
         $shard->execution_mode = $data['execution_mode'] ?? 'ssh_tmux';
         $shard->ssh_user = $data['ssh_user'] ?? 'claudeuser';
         $shard->ssh_port = $data['ssh_port'] ?? 22;
-        $shard->ssh_key_path = $data['ssh_key_path'] ?? null;
+        $shard->sshkey_id = $data['sshkey_id'] ?? null;
         $shard->ssh_validated = $data['ssh_validated'] ?? 0;
 
         return Bean::store($shard);
@@ -85,7 +85,7 @@ class ShardService {
             'name', 'description', 'host', 'port', 'api_key',
             'shard_type', 'capabilities', 'max_concurrent_jobs',
             'is_active', 'is_default', 'health_status',
-            'execution_mode', 'ssh_user', 'ssh_port', 'ssh_key_path',
+            'execution_mode', 'ssh_user', 'ssh_port', 'sshkey_id',
             'ssh_validated', 'ssh_last_diagnostic', 'ssh_last_check'
         ];
 

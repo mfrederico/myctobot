@@ -640,6 +640,7 @@ class Admin extends Control {
      */
     public function createshard($params = []) {
         require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/SSHKeyService.php';
 
         $request = Flight::request();
 
@@ -668,7 +669,7 @@ class Admin extends Control {
                 'execution_mode' => $executionMode,
                 'ssh_user' => trim($request->data->ssh_user ?? 'claudeuser'),
                 'ssh_port' => (int)($request->data->ssh_port ?? 22),
-                'ssh_key_path' => trim($request->data->ssh_key_path ?? '') ?: null,
+                'sshkey_id' => ($request->data->sshkey_id ?? '') ?: null,
                 'ssh_validated' => 0
             ];
 
@@ -700,6 +701,7 @@ class Admin extends Control {
         }
 
         $this->viewData['title'] = 'Create Shard';
+        $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
         $this->render('admin/shard_form', $this->viewData);
     }
 
@@ -708,6 +710,7 @@ class Admin extends Control {
      */
     public function editshard($params = []) {
         require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/SSHKeyService.php';
 
         $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
@@ -748,7 +751,7 @@ class Admin extends Control {
                 'execution_mode' => $executionMode,
                 'ssh_user' => trim($request->data->ssh_user ?? 'claudeuser'),
                 'ssh_port' => (int)($request->data->ssh_port ?? 22),
-                'ssh_key_path' => trim($request->data->ssh_key_path ?? '') ?: null
+                'sshkey_id' => ($request->data->sshkey_id ?? '') ?: null
             ];
 
             // Only update API key if provided
@@ -780,6 +783,7 @@ class Admin extends Control {
         $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         $this->viewData['title'] = 'Edit Shard';
         $this->viewData['shard'] = $shard;
+        $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
         $this->render('admin/shard_form', $this->viewData);
     }
 

@@ -99,11 +99,20 @@
                             </div>
 
                             <div class="mb-3">
-                                <label for="ssh_key_path" class="form-label">SSH Key Path (Optional)</label>
-                                <input type="text" class="form-control" id="ssh_key_path" name="ssh_key_path"
-                                       value="<?= htmlspecialchars($shard['ssh_key_path'] ?? '') ?>"
-                                       placeholder="Leave blank to use default ~/.ssh/id_rsa">
-                                <div class="form-text">Absolute path to SSH private key. Leave blank to use system default.</div>
+                                <label for="sshkey_id" class="form-label">SSH Key</label>
+                                <select class="form-select" id="sshkey_id" name="sshkey_id">
+                                    <option value="">Use system default (~/.ssh/id_rsa)</option>
+                                    <?php if (!empty($sshKeys)): ?>
+                                        <?php foreach ($sshKeys as $key): ?>
+                                        <option value="<?= $key['id'] ?>" <?= ($shard['sshkey_id'] ?? '') == $key['id'] ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($key['name']) ?> (<?= $key['key_type'] ?>) - <?= substr($key['fingerprint'], 0, 20) ?>...
+                                        </option>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </select>
+                                <div class="form-text">
+                                    Select an SSH key from your <a href="/admin/shards#sshkeys">SSH Keys</a> or use system default.
+                                </div>
                             </div>
 
                             <?php if (isset($shard)): ?>

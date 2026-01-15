@@ -266,13 +266,48 @@ class Agents extends BaseControls\Control {
         }
 
         $this->viewData['title'] = 'Edit Agent: ' . $agent->name;
+
+        // Get linked MCP servers via many-to-many
+        $linkedServers = [];
+        foreach ($agent->sharedMcpserversList as $server) {
+            $linkedServers[] = [
+                'id' => $server->id,
+                'name' => $server->name,
+                'description' => $server->description,
+                'server_type' => $server->server_type,
+                'command' => $server->command,
+                'args' => json_decode($server->args_json ?: '[]', true),
+                'url' => $server->url,
+                'headers' => json_decode($server->headers_json ?: '{}', true),
+                'env' => json_decode($server->env_json ?: '{}', true),
+                'is_shared' => (bool) $server->is_shared
+            ];
+        }
+
+        // Get all available MCP servers (own + shared)
+        $availableServers = [];
+        $allServers = Bean::find('mcpservers',
+            ' (member_id = ? OR is_shared = 1) ORDER BY name ASC',
+            [$this->member->id]
+        );
+        foreach ($allServers as $server) {
+            $availableServers[] = [
+                'id' => $server->id,
+                'name' => $server->name,
+                'description' => $server->description,
+                'server_type' => $server->server_type,
+                'is_shared' => (bool) $server->is_shared
+            ];
+        }
+
         $this->viewData['agent'] = [
             'id' => $agent->id,
             'name' => $agent->name,
             'description' => $agent->description,
             'provider' => $agent->provider ?: 'claude_cli',
             'provider_config' => json_decode($agent->provider_config ?: '{}', true),
-            'mcp_servers' => json_decode($agent->mcp_servers ?: '[]', true),
+            'mcp_servers' => json_decode($agent->mcp_servers ?: '[]', true), // Legacy JSON (for migration)
+            'linked_mcp_servers' => $linkedServers, // New many-to-many
             'hooks_config' => json_decode($agent->hooks_config ?: '{}', true),
             'capabilities' => json_decode($agent->capabilities ?: '[]', true),
             'expose_as_mcp' => (bool) $agent->expose_as_mcp,
@@ -281,6 +316,7 @@ class Agents extends BaseControls\Control {
             'is_active' => (bool) $agent->is_active,
             'is_default' => (bool) $agent->is_default
         ];
+        $this->viewData['availableMcpServers'] = $availableServers;
         $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
         $this->viewData['capabilities'] = self::CAPABILITIES;
         $this->viewData['providerConfigs'] = $this->getAllProviderConfigs();
@@ -383,18 +419,51 @@ class Agents extends BaseControls\Control {
 
     /**
      * Update MCP servers config
+     * Supports both linked servers (many-to-many) and legacy JSON
      */
     private function updateMcp($agent): void {
-        $mcpJson = $this->getParam('mcp_servers', '[]');
+        // Check if we have linked server IDs (new approach)
+        $linkedServerIds = $this->getParam('linked_server_ids');
 
-        // Validate JSON
-        $parsed = json_decode($mcpJson, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            $this->flash('error', 'Invalid MCP servers JSON');
-            return;
+        if ($linkedServerIds !== null) {
+            // New approach: Link servers via many-to-many
+            $serverIds = is_string($linkedServerIds)
+                ? json_decode($linkedServerIds, true)
+                : $linkedServerIds;
+
+            if (!is_array($serverIds)) {
+                $serverIds = [];
+            }
+
+            // Clear existing links and add new ones
+            $agent->sharedMcpserversList = [];
+            Bean::store($agent);
+
+            foreach ($serverIds as $serverId) {
+                $server = Bean::load('mcpservers', (int) $serverId);
+                if ($server->id) {
+                    // Verify access (own or shared)
+                    if ($server->member_id == $this->member->id || $server->is_shared) {
+                        $agent->sharedMcpserversList[] = $server;
+                    }
+                }
+            }
+
+            // Clear legacy JSON since we're using linked servers
+            $agent->mcp_servers = '[]';
+        } else {
+            // Legacy approach: Save as JSON
+            $mcpJson = $this->getParam('mcp_servers', '[]');
+
+            // Validate JSON
+            $parsed = json_decode($mcpJson, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $this->flash('error', 'Invalid MCP servers JSON');
+                return;
+            }
+
+            $agent->mcp_servers = json_encode($parsed);
         }
-
-        $agent->mcp_servers = json_encode($parsed);
     }
 
     /**

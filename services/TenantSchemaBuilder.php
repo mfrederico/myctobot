@@ -64,6 +64,7 @@ class TenantSchemaBuilder {
         $this->createEnterpriseSettingsTable();
         $this->createAnthropicKeysTable();
         $this->createAIAgentsTable();
+        $this->createMcpServersTable();
         $this->createSSHKeysTable();
 
         // Create tables with board/repo associations
@@ -765,8 +766,8 @@ class TenantSchemaBuilder {
             'atlassiantoken', 'boardrepomapping', 'ceodirectives', 'ctoepics',
             'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
             'directives', 'enterprisesettings', 'githubtokens', 'projects',
-            'sshkeys', 'ticketanalysiscache', 'aiagents', 'installedplugins',
-            'pluginscans', 'discoveredplugins',
+            'sshkeys', 'ticketanalysiscache', 'aiagents', 'mcpservers',
+            'aiagents_mcpservers', 'installedplugins', 'pluginscans', 'discoveredplugins',
             // Legacy tables that may have bad FK refs
             'agenttools', 'claudeshards', 'digestjobs', 'knowledgebases',
             'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
@@ -811,7 +812,7 @@ class TenantSchemaBuilder {
             'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
             'directives', 'enterprisesettings', 'githubtokens', 'projects',
             'sshkeys', 'ticketanalysiscache', 'discoveredplugins', 'pluginscans',
-            'installedplugins'
+            'installedplugins', 'mcpservers', 'aiagents_mcpservers'
         ];
 
         if (!in_array($tableName, $allowed, true)) {
@@ -855,6 +856,10 @@ class TenantSchemaBuilder {
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
+
+        // Add unique constraint
+        R::exec('ALTER TABLE `member` ADD UNIQUE INDEX IF NOT EXISTS `uk_email` (`email`)');
+
         return $bean;
     }
 
@@ -886,6 +891,9 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Add unique constraint
+        R::exec('ALTER TABLE `atlassiantoken` ADD UNIQUE INDEX IF NOT EXISTS `uk_member_cloud` (`member_id`, `cloud_uid`)');
     }
 
     private function createJiraBoardsTable() {
@@ -971,6 +979,15 @@ class TenantSchemaBuilder {
         $bean->queue_metadata = '{}';
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `steps_completed` JSON');
+        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `clarification_questions` JSON');
+        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `files_changed` JSON');
+        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `playwright_results` JSON');
+
+        // Add unique constraint
+        R::exec('ALTER TABLE `aidevjobs` ADD UNIQUE INDEX IF NOT EXISTS `uk_job_uid` (`job_uid`)');
     }
 
     private function createAIDevJobLogsTable(): void {
@@ -1023,6 +1040,9 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `ticketanalysiscache` MODIFY COLUMN `clarity_analysis` JSON');
     }
 
     private function createEnterpriseSettingsTable(): void {
@@ -1099,6 +1119,35 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `runner_config` JSON');
+        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `mcp_servers` JSON');
+        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `hooks_config` JSON');
+    }
+
+    private function createMcpServersTable(): void {
+        $bean = R::dispense('mcpservers');
+        $bean->member = $this->member; // Creates member_id FK (who created it)
+        $bean->name = 'Schema MCP Server';
+        $bean->description = 'Schema server description';
+        $bean->server_type = 'stdio'; // stdio or http
+        $bean->command = 'npx'; // For stdio: command to run
+        $bean->args_json = '[]'; // For stdio: command arguments (JSON array)
+        $bean->url = 'https://example.com/mcp'; // For http: server URL
+        $bean->headers_json = '{}'; // For http: request headers (JSON object)
+        $bean->env_json = '{}'; // Environment variables (JSON object)
+        $bean->is_shared = false; // Workspace sharing flag
+        $bean->is_active = true;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `mcpservers` MODIFY COLUMN `args_json` JSON');
+        R::exec('ALTER TABLE `mcpservers` MODIFY COLUMN `headers_json` JSON');
+        R::exec('ALTER TABLE `mcpservers` MODIFY COLUMN `env_json` JSON');
     }
 
     private function createSSHKeysTable(): void {
@@ -1141,6 +1190,11 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `directives` MODIFY COLUMN `context_json` JSON');
+        R::exec('ALTER TABLE `directives` MODIFY COLUMN `actions_json` JSON');
+        R::exec('ALTER TABLE `directives` MODIFY COLUMN `results_json` JSON');
     }
 
     private function createCeoDirectivesTable() {
@@ -1164,6 +1218,10 @@ class TenantSchemaBuilder {
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `ceodirectives` MODIFY COLUMN `parsed_requirements` JSON');
+
         return $bean; // Keep for ctoprojects association
     }
 
@@ -1177,6 +1235,9 @@ class TenantSchemaBuilder {
         $bean->created_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `directivelogs` MODIFY COLUMN `event_data` JSON');
     }
 
     private function createCtoProjectsTable(): void {
@@ -1201,6 +1262,12 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `goals` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `risk_assessment` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `tech_stack` JSON');
+        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `milestones` JSON');
     }
 
     private function createCtoEpicsTable(): void {
@@ -1221,6 +1288,9 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `ctoepics` MODIFY COLUMN `acceptance_criteria` JSON');
     }
 
     private function createCtoStoriesTable(): void {
@@ -1244,6 +1314,11 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `acceptance_criteria` JSON');
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `depends_on` JSON');
+        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `verification_result` JSON');
     }
 
     private function createProjectsTable(): void {
@@ -1274,6 +1349,13 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `projects` MODIFY COLUMN `goals_json` JSON');
+        R::exec('ALTER TABLE `projects` MODIFY COLUMN `constraints_json` JSON');
+        R::exec('ALTER TABLE `projects` MODIFY COLUMN `context_json` JSON');
+        R::exec('ALTER TABLE `projects` MODIFY COLUMN `plan_json` JSON');
+        R::exec('ALTER TABLE `projects` MODIFY COLUMN `progress_json` JSON');
     }
 
     private function createPluginTables(): void {
@@ -1327,60 +1409,22 @@ class TenantSchemaBuilder {
         R::trash($installed);
 
         R::trash($discovered);
+
+        // Apply JSON column types (MariaDB needs explicit JSON type)
+        R::exec('ALTER TABLE `discoveredplugins` MODIFY COLUMN `plugin_requires` JSON');
+        R::exec('ALTER TABLE `discoveredplugins` MODIFY COLUMN `plugin_json` JSON');
+        R::exec('ALTER TABLE `pluginscans` MODIFY COLUMN `error_log` JSON');
+        R::exec('ALTER TABLE `installedplugins` MODIFY COLUMN `config_json` JSON');
     }
 
     /**
-     * Apply JSON column types for MariaDB
+     * Apply additional schema constraints
+     * Note: Most JSON types and unique indexes are now in their respective create methods.
+     * This function is kept for backwards compatibility with migrations.
      */
     private function applyJsonColumnTypes(): void {
-        // JSON columns - MariaDB needs explicit JSON type for proper handling
-        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `steps_completed` JSON');
-        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `clarification_questions` JSON');
-        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `files_changed` JSON');
-        R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `playwright_results` JSON');
-
-        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `runner_config` JSON');
-        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `mcp_servers` JSON');
-        R::exec('ALTER TABLE `aiagents` MODIFY COLUMN `hooks_config` JSON');
-
-        R::exec('ALTER TABLE `directives` MODIFY COLUMN `context_json` JSON');
-        R::exec('ALTER TABLE `directives` MODIFY COLUMN `actions_json` JSON');
-        R::exec('ALTER TABLE `directives` MODIFY COLUMN `results_json` JSON');
-
-        R::exec('ALTER TABLE `projects` MODIFY COLUMN `goals_json` JSON');
-        R::exec('ALTER TABLE `projects` MODIFY COLUMN `constraints_json` JSON');
-        R::exec('ALTER TABLE `projects` MODIFY COLUMN `context_json` JSON');
-        R::exec('ALTER TABLE `projects` MODIFY COLUMN `plan_json` JSON');
-        R::exec('ALTER TABLE `projects` MODIFY COLUMN `progress_json` JSON');
-
-        R::exec('ALTER TABLE `discoveredplugins` MODIFY COLUMN `plugin_requires` JSON');
-        R::exec('ALTER TABLE `discoveredplugins` MODIFY COLUMN `plugin_json` JSON');
-
-        R::exec('ALTER TABLE `pluginscans` MODIFY COLUMN `error_log` JSON');
-
-        R::exec('ALTER TABLE `installedplugins` MODIFY COLUMN `config_json` JSON');
-
-        R::exec('ALTER TABLE `ceodirectives` MODIFY COLUMN `parsed_requirements` JSON');
-
-        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `goals` JSON');
-        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `risk_assessment` JSON');
-        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `tech_stack` JSON');
-        R::exec('ALTER TABLE `ctoprojects` MODIFY COLUMN `milestones` JSON');
-
-        R::exec('ALTER TABLE `ctoepics` MODIFY COLUMN `acceptance_criteria` JSON');
-
-        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `acceptance_criteria` JSON');
-        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `depends_on` JSON');
-        R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `verification_result` JSON');
-
-        R::exec('ALTER TABLE `directivelogs` MODIFY COLUMN `event_data` JSON');
-
-        R::exec('ALTER TABLE `ticketanalysiscache` MODIFY COLUMN `clarity_analysis` JSON');
-
-        // Add unique constraints
-        R::exec('ALTER TABLE `member` ADD UNIQUE INDEX IF NOT EXISTS `uk_email` (`email`)');
-        R::exec('ALTER TABLE `aidevjobs` ADD UNIQUE INDEX IF NOT EXISTS `uk_job_uid` (`job_uid`)');
-        R::exec('ALTER TABLE `atlassiantoken` ADD UNIQUE INDEX IF NOT EXISTS `uk_member_cloud` (`member_id`, `cloud_uid`)');
+        // Intentionally empty - all ALTER TABLE calls have been moved to create methods
+        // This function is kept for backwards compatibility with migration tracking
     }
 
     /**
@@ -1789,5 +1833,79 @@ class TenantSchemaBuilder {
         // Create new index for boards_id
         $indexName = sprintf('index_foreignkey_%s_boards', $table);
         $this->safeCreateIndex($table, $indexName, $newColumn);
+    }
+
+    /**
+     * Migration: Convert agent mcp_servers JSON to linked mcpservers records
+     * Creates mcpservers records and links them via many-to-many
+     */
+    private function migrateAgentMcpServersToLibrary(): void {
+        // First ensure mcpservers table exists
+        try {
+            R::inspect('mcpservers');
+        } catch (\Exception $e) {
+            return; // mcpservers table doesn't exist, skip
+        }
+
+        // Get all agents with mcp_servers JSON
+        $agents = R::findAll('aiagents');
+        if (empty($agents)) {
+            return;
+        }
+
+        foreach ($agents as $agent) {
+            $mcpJson = $agent->mcp_servers;
+            if (empty($mcpJson) || $mcpJson === '[]') {
+                continue;
+            }
+
+            $servers = json_decode($mcpJson, true);
+            if (empty($servers) || !is_array($servers)) {
+                continue;
+            }
+
+            foreach ($servers as $serverConfig) {
+                $name = $serverConfig['name'] ?? null;
+                if (!$name) {
+                    continue;
+                }
+
+                // Check if server already exists in library (by name and member)
+                $existing = R::findOne('mcpservers',
+                    ' name = ? AND member_id = ?',
+                    [$name, $agent->member_id]
+                );
+
+                if ($existing) {
+                    // Link existing server to agent
+                    $agent->sharedMcpserversList[] = $existing;
+                    continue;
+                }
+
+                // Create new server record
+                $server = R::dispense('mcpservers');
+                $server->member_id = $agent->member_id;
+                $server->name = $name;
+                $server->description = 'Migrated from agent: ' . $agent->name;
+                $server->server_type = $serverConfig['type'] ?? 'stdio';
+                $server->command = $serverConfig['command'] ?? null;
+                $server->args_json = json_encode($serverConfig['args'] ?? []);
+                $server->url = $serverConfig['url'] ?? null;
+                $server->headers_json = json_encode($serverConfig['headers'] ?? []);
+                $server->env_json = json_encode($serverConfig['env'] ?? []);
+                $server->is_shared = 0;
+                $server->is_active = 1;
+                $server->created_at = date('Y-m-d H:i:s');
+                $server->updated_at = date('Y-m-d H:i:s');
+                R::store($server);
+
+                // Link to agent
+                $agent->sharedMcpserversList[] = $server;
+            }
+
+            // Clear the legacy JSON and save
+            $agent->mcp_servers = '[]';
+            R::store($agent);
+        }
     }
 }

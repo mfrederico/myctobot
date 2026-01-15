@@ -36,6 +36,20 @@ class Admin extends Control {
     }
 
     /**
+     * Connect to user database (legacy no-op - all data now in single MySQL DB)
+     */
+    private function connectUserDb(): void {
+        // No-op: All data is now in single MySQL database per tenant
+    }
+
+    /**
+     * Disconnect from user database (legacy no-op)
+     */
+    private function disconnectUserDb(): void {
+        // No-op: No database switching needed
+    }
+
+    /**
      * Admin dashboard
      */
     public function index($params = []) {

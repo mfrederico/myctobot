@@ -102,6 +102,7 @@ class PermissionCache {
             'auth::google',
             'auth::googlecallback',
             'auth::invite',          // Accept invitation (public)
+            'auth::verifymember',    // Email verification (public)
             'error::notfound',
             'error::forbidden',
             'error::servererror',

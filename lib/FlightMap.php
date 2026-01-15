@@ -212,11 +212,15 @@ class CsrfWrapper {
     }
 
     /**
-     * Get token array for forms (backwards compatible)
+     * Get token array for forms and views
      */
     public function getTokenArray(): array {
+        $token = $this->getToken();
         return [
-            'csrf_token' => $this->getToken()
+            'csrf_token' => $token,
+            'token' => $token,
+            'name' => 'X-CSRF-TOKEN',
+            'field' => '<input type="hidden" name="csrf_token" value="' . htmlspecialchars($token) . '">'
         ];
     }
 

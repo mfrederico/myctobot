@@ -160,67 +160,16 @@ VALUES (MEMBER_ID, 'enterprise', 'active', NOW(), DATE_ADD(NOW(), INTERVAL 1 YEA
 ON DUPLICATE KEY UPDATE tier = 'enterprise', status = 'active';
 ```
 
-### Create Enterprise Tables for Existing Users
+### Database Schema
 
-If the customer already has a user database, run this SQL on their SQLite database:
+Enterprise tables are created automatically by `TenantSchemaBuilder.php` when a new tenant is provisioned.
+For existing tenants, run the migration tool:
 
 ```bash
-sqlite3 database/USER_DB_HASH.sqlite
+php scripts/run-migration.php --sync --tenant=TENANT_SLUG
 ```
 
-```sql
-CREATE TABLE IF NOT EXISTS enterprise_settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    setting_key TEXT NOT NULL UNIQUE,
-    setting_value TEXT NOT NULL,
-    is_encrypted INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT
-);
-
-CREATE TABLE IF NOT EXISTS repo_connections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    board_id INTEGER,
-    provider TEXT NOT NULL,
-    repo_owner TEXT NOT NULL,
-    repo_name TEXT NOT NULL,
-    default_branch TEXT DEFAULT 'main',
-    clone_url TEXT NOT NULL,
-    access_token TEXT,
-    enabled INTEGER DEFAULT 1,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT,
-    UNIQUE(provider, repo_owner, repo_name)
-);
-
-CREATE TABLE IF NOT EXISTS board_repo_mappings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    board_id INTEGER NOT NULL,
-    repo_connection_id INTEGER NOT NULL,
-    is_default INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(board_id, repo_connection_id)
-);
-
-CREATE TABLE IF NOT EXISTS ai_dev_jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id TEXT NOT NULL UNIQUE,
-    board_id INTEGER NOT NULL,
-    issue_key TEXT NOT NULL,
-    repo_connection_id INTEGER,
-    status TEXT DEFAULT 'pending',
-    branch_name TEXT,
-    pr_url TEXT,
-    pr_number INTEGER,
-    clarification_comment_id TEXT,
-    error_message TEXT,
-    progress_json TEXT,
-    started_at TEXT,
-    completed_at TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT
-);
-```
+See `services/TenantSchemaBuilder.php` for the complete schema definition.
 
 ---
 

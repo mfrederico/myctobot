@@ -217,7 +217,7 @@ class PluginScannerService {
         $pluginData = $this->parsePluginJson($pluginJson);
         $pluginData['repo_owner'] = $owner;
         $pluginData['repo_name'] = $repoName;
-        $pluginData['repo_connection_id'] = $repo->id;
+        $pluginData['repoconnections_id'] = $repo->id;
 
         // Save or update discovered plugin
         $pluginId = $this->saveDiscoveredPlugin($pluginData, $repo->id);
@@ -383,7 +383,7 @@ class PluginScannerService {
 
         $this->logger->info("Plugin scan started", [
             'scan_uid' => $scanId,
-            'repo_connection_id' => $repoConnectionId
+            'repoconnections_id' => $repoConnectionId
         ]);
 
         return $scanId;

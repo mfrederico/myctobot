@@ -209,7 +209,7 @@ class Pluginregistry extends BaseControls\Control {
             }
 
             // Get the associated repository connection
-            $repo = Bean::load('repoconnections', $plugin['repo_connection_id']);
+            $repo = Bean::load('repoconnections', $plugin['repoconnections_id']);
 
             if (Flight::request()->ajax) {
                 $this->jsonSuccess([

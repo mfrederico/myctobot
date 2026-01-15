@@ -396,7 +396,7 @@ class Github extends BaseControls\Control {
                 $isDupe = false;
                 if (isset($mappings[$boardId])) {
                     foreach ($mappings[$boardId] as $existing) {
-                        if ($existing['repo_connection_id'] == $repoId) {
+                        if ($existing['repoconnections_id'] == $repoId) {
                             $isDupe = true;
                             break;
                         }
@@ -406,8 +406,8 @@ class Github extends BaseControls\Control {
 
                 $mappings[$boardId][] = [
                     'id' => $bean->id,
-                    'board_id' => $boardId,
-                    'repo_connection_id' => $repoId,
+                    'boards_id' => $boardId,
+                    'repoconnections_id' => $repoId,
                     'is_default' => $bean->is_default,
                     'created_at' => $bean->created_at
                 ];

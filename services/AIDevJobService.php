@@ -1577,7 +1577,7 @@ class AIDevJobService {
         $repoConnectionId = $job->repoconnections_id ? (int) $job->repoconnections_id : null;
 
         if (!$repoConnectionId) {
-            $result['errors'][] = 'No repo_connection_id for GitHub job';
+            $result['errors'][] = 'No repoconnections_id for GitHub job';
             return $result;
         }
 

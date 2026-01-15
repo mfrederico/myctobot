@@ -553,7 +553,7 @@ class GitOperations {
         // Connect to user database to find job/repo info
         UserDatabaseService::connect($memberId);
 
-        // Find the job to get repo_connection_id
+        // Find the job to get repoconnections_id
         $job = \app\Bean::findOne('aidevjobs', 'issue_key = ? ORDER BY created_at DESC', [$issueKey]);
         if (!$job || !$job->repoconnections_id) {
             $logger->warning('GitOperations: No job or repoconnections_id found', [

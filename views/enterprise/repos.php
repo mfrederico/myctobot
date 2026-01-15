@@ -199,7 +199,7 @@
                                         <?php foreach ($boardMappings as $mapping):
                                             $repo = null;
                                             foreach ($repos as $r) {
-                                                if ($r['id'] == $mapping['repo_connection_id']) {
+                                                if ($r['id'] == $mapping['repoconnections_id']) {
                                                     $repo = $r;
                                                     break;
                                                 }
@@ -243,7 +243,7 @@
                             <?php if (!empty($repos)): ?>
                             <?php
                             // Find repos not yet mapped to this board
-                            $mappedRepoIds = array_map(fn($m) => $m['repo_connection_id'], $boardMappings);
+                            $mappedRepoIds = array_map(fn($m) => $m['repoconnections_id'], $boardMappings);
                             $unmappedRepos = array_filter($repos, fn($r) => !in_array($r['id'], $mappedRepoIds));
                             ?>
                             <?php if (!empty($unmappedRepos)): ?>

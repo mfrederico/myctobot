@@ -845,7 +845,7 @@ class ShopifyClient {
      * @return object|null Connection bean or null
      */
     public static function getConnectionByRepo(int $repoId): ?object {
-        return Bean::findOne('shopifyconnections', ' repo_connection_id = ? AND enabled = 1 ', [$repoId]);
+        return Bean::findOne('shopifyconnections', ' repoconnections_id = ? AND enabled = 1 ', [$repoId]);
     }
 
     /**
@@ -922,7 +922,7 @@ class ShopifyClient {
         }
 
         // Update allowed fields
-        $allowedFields = ['connection_name', 'storefront_password', 'verify_with_playwright', 'enabled', 'shared', 'repo_connection_id'];
+        $allowedFields = ['connection_name', 'storefront_password', 'verify_with_playwright', 'enabled', 'shared', 'repoconnections_id'];
         foreach ($allowedFields as $field) {
             if (array_key_exists($field, $data)) {
                 if ($field === 'storefront_password' && !empty($data[$field])) {
@@ -970,7 +970,7 @@ class ShopifyClient {
      * @return object Updated connection bean
      */
     public static function linkRepo(int $connectionId, int $repoId): object {
-        return self::updateConnection($connectionId, ['repo_connection_id' => $repoId]);
+        return self::updateConnection($connectionId, ['repoconnections_id' => $repoId]);
     }
 
     /**
@@ -980,7 +980,7 @@ class ShopifyClient {
      * @return object Updated connection bean
      */
     public static function unlinkRepo(int $connectionId): object {
-        return self::updateConnection($connectionId, ['repo_connection_id' => null]);
+        return self::updateConnection($connectionId, ['repoconnections_id' => null]);
     }
 
     /**

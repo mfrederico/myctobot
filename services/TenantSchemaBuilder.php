@@ -25,6 +25,9 @@ class TenantSchemaBuilder {
     private $repo;
     private $directive;
 
+    // Track if force-drop has been done this session
+    private bool $forceDropDone = false;
+
     public function __construct(string $dbName, string $dbUser, string $dbPass, string $dbHost = 'localhost') {
         $this->dbName = $dbName;
         $this->dbUser = $dbUser;
@@ -54,6 +57,7 @@ class TenantSchemaBuilder {
         $this->createEnterpriseSettingsTable();
         $this->createAnthropicKeysTable();
         $this->createAIAgentsTable();
+        $this->createSSHKeysTable();
 
         // Create tables with board/repo associations
         $this->createBoardRepoMappingTable();
@@ -82,6 +86,706 @@ class TenantSchemaBuilder {
 
         // Switch back to default database
         R::selectDatabase('default');
+    }
+
+    /**
+     * Run a specific migration (create table method) on an existing database
+     * Usage: $builder->runMigration('SSHKeys') to run createSSHKeysTable()
+     *
+     * @param string $tableName The table name (e.g., 'SSHKeys', 'AIAgents')
+     * @param bool $force Force run even if already recorded as migrated
+     * @return array Result with success status and message
+     */
+    public function runMigration(string $tableName, bool $force = false): array {
+        $methodName = 'create' . $tableName . 'Table';
+
+        if (!method_exists($this, $methodName)) {
+            return [
+                'success' => false,
+                'error' => "Migration method '$methodName' not found"
+            ];
+        }
+
+        try {
+            // Use a unique connection name per tenant to avoid collisions
+            $connName = 'migration_' . md5($this->dbName);
+
+            // Connect to tenant database (check if already connected)
+            $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
+            try {
+                R::selectDatabase($connName);
+            } catch (\Exception $e) {
+                // Database not registered yet, add it
+                R::addDatabase($connName, $dsn, $this->dbUser, $this->dbPass);
+                R::selectDatabase($connName);
+            }
+            R::freeze(false);
+
+            // Ensure migrations table exists
+            $this->ensureMigrationsTable();
+
+            // Check if already migrated (unless forced)
+            if (!$force) {
+                $existing = R::findOne('schemamigrations', 'migration_name = ?', [$tableName]);
+                if ($existing && $existing->id) {
+                    return [
+                        'success' => true,
+                        'skipped' => true,
+                        'message' => "Migration '$tableName' already applied on " . $existing->applied_at
+                    ];
+                }
+            }
+
+            // Set up base dependencies if needed (pass force to allow dropping bad tables)
+            $this->setupMigrationDependencies($force);
+
+            // Try to run the migration
+            $migrationError = null;
+            try {
+                $this->$methodName();
+            } catch (\Exception $e) {
+                $migrationError = $e;
+            }
+
+            // If migration failed and force is set, drop the table and retry
+            if ($migrationError && $force) {
+                $actualTableName = $this->getActualTableName($tableName);
+
+                // Drop the table completely
+                $this->dropTable($actualTableName);
+
+                // Reset dependencies (they may have been affected)
+                $this->member = null;
+                $this->board = null;
+                $this->repo = null;
+                $this->directive = null;
+                $this->setupMigrationDependencies($force);
+
+                // Retry the migration
+                $this->$methodName();
+                $migrationError = null; // Success on retry
+            }
+
+            // If still have an error, throw it
+            if ($migrationError) {
+                throw $migrationError;
+            }
+
+            // Record the migration
+            $this->recordMigration($tableName);
+
+            // Clean up temporary beans
+            $this->cleanupTempBeans();
+
+            return [
+                'success' => true,
+                'rebuilt' => $force,
+                'message' => "Migration '$tableName' completed successfully"
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Map migration name to actual database table name
+     * RedBeanPHP tables are always lowercase
+     */
+    private function getActualTableName(string $migrationName): string {
+        return strtolower($migrationName);
+    }
+
+    /**
+     * Ensure the schemamigrations table exists
+     */
+    private function ensureMigrationsTable(): void {
+        // Check if table exists by trying to query it
+        try {
+            R::getAll('SELECT 1 FROM schemamigrations LIMIT 1');
+        } catch (\Exception $e) {
+            // Table doesn't exist, create it - ensure unfrozen
+            R::freeze(false);
+            $bean = R::dispense('schemamigrations');
+            $bean->migration_name = '_schema_init';
+            $bean->applied_at = date('Y-m-d H:i:s');
+            $bean->batch = 0;
+            R::store($bean);
+            R::trash($bean);
+        }
+    }
+
+    /**
+     * Record a completed migration in the tracking table (if not already recorded)
+     */
+    private function recordMigration(string $tableName): void {
+        R::freeze(false); // Ensure unfrozen for schema modifications
+
+        // Check if already recorded (don't duplicate on force re-runs)
+        $existing = R::findOne('schemamigrations', 'migration_name = ?', [$tableName]);
+        if ($existing && $existing->id) {
+            // Update the applied_at timestamp instead of creating duplicate
+            $existing->applied_at = date('Y-m-d H:i:s');
+            R::store($existing);
+            return;
+        }
+
+        // Get current batch number
+        $lastBatch = R::getCell('SELECT MAX(batch) FROM schemamigrations') ?? 0;
+
+        $bean = R::dispense('schemamigrations');
+        $bean->migration_name = $tableName;
+        $bean->applied_at = date('Y-m-d H:i:s');
+        $bean->batch = $lastBatch + 1;
+        R::store($bean);
+    }
+
+    /**
+     * Mark a migration as applied without running it
+     * Used for existing databases that already have the tables
+     *
+     * @param string $tableName The table name (e.g., 'SSHKeys')
+     * @return array Result with success status
+     */
+    public function markMigration(string $tableName): array {
+        // Validate migration exists
+        $availableMigrations = self::getAvailableMigrations();
+        if (!in_array($tableName, $availableMigrations)) {
+            return [
+                'success' => false,
+                'error' => "Migration '$tableName' not found"
+            ];
+        }
+
+        try {
+            $connName = 'migration_' . md5($this->dbName);
+            $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
+            try {
+                R::selectDatabase($connName);
+            } catch (\Exception $e) {
+                R::addDatabase($connName, $dsn, $this->dbUser, $this->dbPass);
+                R::selectDatabase($connName);
+            }
+            R::freeze(false);
+
+            $this->ensureMigrationsTable();
+
+            // Check if already recorded
+            $existing = R::findOne('schemamigrations', 'migration_name = ?', [$tableName]);
+            if ($existing && $existing->id) {
+                return [
+                    'success' => true,
+                    'skipped' => true,
+                    'message' => "Migration '$tableName' already marked as applied"
+                ];
+            }
+
+            // Record it
+            $this->recordMigration($tableName);
+
+            return [
+                'success' => true,
+                'message' => "Migration '$tableName' marked as applied"
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Mark all migrations as applied for a tenant
+     *
+     * @return array Result with summary
+     */
+    public function markAllMigrations(): array {
+        $migrations = self::getAvailableMigrations();
+        $marked = [];
+        $skipped = [];
+        $errors = [];
+
+        foreach ($migrations as $migration) {
+            $result = $this->markMigration($migration);
+            if ($result['success']) {
+                if (!empty($result['skipped'])) {
+                    $skipped[] = $migration;
+                } else {
+                    $marked[] = $migration;
+                }
+            } else {
+                $errors[] = ['migration' => $migration, 'error' => $result['error']];
+            }
+        }
+
+        return [
+            'success' => empty($errors),
+            'marked' => $marked,
+            'skipped' => $skipped,
+            'errors' => $errors,
+            'message' => count($marked) . ' marked, ' . count($skipped) . ' already applied'
+        ];
+    }
+
+    /**
+     * Mark migrations as applied for a tenant by slug
+     *
+     * @param string|array $migrations Migration name(s) or 'all'
+     * @param string $tenantSlug Tenant slug
+     * @return array Result
+     */
+    public static function markForTenant($migrations, string $tenantSlug): array {
+        $projectDir = dirname(__DIR__);
+        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+
+        if (!file_exists($configFile)) {
+            return ['success' => false, 'error' => "Config file not found"];
+        }
+
+        $config = parse_ini_file($configFile, true);
+        if (!isset($config['database'])) {
+            return ['success' => false, 'error' => "No [database] section in config"];
+        }
+
+        $db = $config['database'];
+        $builder = new self(
+            $db['name'],
+            $db['user'],
+            $db['pass'] ?? '',
+            $db['host'] ?? 'localhost'
+        );
+
+        if ($migrations === 'all') {
+            return $builder->markAllMigrations();
+        }
+
+        if (is_string($migrations)) {
+            return $builder->markMigration($migrations);
+        }
+
+        // Array of migrations
+        $marked = [];
+        $skipped = [];
+        $errors = [];
+
+        foreach ($migrations as $migration) {
+            $result = $builder->markMigration($migration);
+            if ($result['success']) {
+                if (!empty($result['skipped'])) {
+                    $skipped[] = $migration;
+                } else {
+                    $marked[] = $migration;
+                }
+            } else {
+                $errors[] = ['migration' => $migration, 'error' => $result['error']];
+            }
+        }
+
+        return [
+            'success' => empty($errors),
+            'marked' => $marked,
+            'skipped' => $skipped,
+            'errors' => $errors
+        ];
+    }
+
+    /**
+     * Get list of pending migrations for a tenant
+     *
+     * @return array Result with pending migrations list
+     */
+    public function getPendingMigrations(): array {
+        try {
+            $connName = 'migration_' . md5($this->dbName);
+            $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
+            try {
+                R::selectDatabase($connName);
+            } catch (\Exception $e) {
+                R::addDatabase($connName, $dsn, $this->dbUser, $this->dbPass);
+                R::selectDatabase($connName);
+            }
+            R::freeze(false);
+
+            $this->ensureMigrationsTable();
+
+            $allMigrations = self::getAvailableMigrations();
+            $appliedRows = R::getAll('SELECT migration_name FROM schemamigrations');
+            $applied = array_column($appliedRows, 'migration_name');
+
+            $pending = array_diff($allMigrations, $applied);
+
+            R::close();
+
+            return [
+                'success' => true,
+                'pending' => array_values($pending),
+                'applied' => $applied
+            ];
+
+        } catch (\Exception $e) {
+            try { R::close(); } catch (\Exception $ignore) {}
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Run all pending migrations
+     *
+     * @return array Result with summary of what was run
+     */
+    public function runPendingMigrations(): array {
+        $pendingResult = $this->getPendingMigrations();
+        if (!$pendingResult['success']) {
+            return $pendingResult;
+        }
+
+        $pending = $pendingResult['pending'];
+        if (empty($pending)) {
+            return [
+                'success' => true,
+                'message' => 'All migrations are up to date',
+                'ran' => []
+            ];
+        }
+
+        $ran = [];
+        $failed = [];
+
+        foreach ($pending as $migration) {
+            $result = $this->runMigration($migration);
+            if ($result['success'] && empty($result['skipped'])) {
+                $ran[] = $migration;
+            } elseif (!$result['success']) {
+                $failed[] = ['migration' => $migration, 'error' => $result['error']];
+            }
+        }
+
+        return [
+            'success' => empty($failed),
+            'ran' => $ran,
+            'failed' => $failed,
+            'message' => count($ran) . ' migrations applied' . (count($failed) ? ', ' . count($failed) . ' failed' : '')
+        ];
+    }
+
+    /**
+     * Run pending migrations for a specific tenant by slug
+     *
+     * @param string $tenantSlug Tenant slug (e.g., 'gwt', 'tiknix')
+     * @return array Result with summary of what was run
+     */
+    public static function syncTenant(string $tenantSlug): array {
+        $projectDir = dirname(__DIR__);
+        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+
+        if (!file_exists($configFile)) {
+            return [
+                'success' => false,
+                'error' => "Config file not found: $configFile"
+            ];
+        }
+
+        $config = parse_ini_file($configFile, true);
+
+        if (!isset($config['database'])) {
+            return [
+                'success' => false,
+                'error' => "No [database] section in config file"
+            ];
+        }
+
+        $db = $config['database'];
+        if (empty($db['name']) || empty($db['user'])) {
+            return [
+                'success' => false,
+                'error' => "Missing database name or user in config"
+            ];
+        }
+
+        $builder = new self(
+            $db['name'],
+            $db['user'],
+            $db['pass'] ?? '',
+            $db['host'] ?? 'localhost'
+        );
+
+        return $builder->runPendingMigrations();
+    }
+
+    /**
+     * Get migration status for a tenant
+     *
+     * @param string $tenantSlug Tenant slug
+     * @return array Status with applied and pending migrations
+     */
+    public static function getTenantStatus(string $tenantSlug): array {
+        $projectDir = dirname(__DIR__);
+        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+
+        if (!file_exists($configFile)) {
+            return [
+                'success' => false,
+                'error' => "Config file not found: $configFile"
+            ];
+        }
+
+        $config = parse_ini_file($configFile, true);
+
+        if (!isset($config['database'])) {
+            return [
+                'success' => false,
+                'error' => "No [database] section in config file"
+            ];
+        }
+
+        $db = $config['database'];
+        $builder = new self(
+            $db['name'],
+            $db['user'],
+            $db['pass'] ?? '',
+            $db['host'] ?? 'localhost'
+        );
+
+        return $builder->getPendingMigrations();
+    }
+
+    /**
+     * Get list of available migrations (create*Table methods)
+     */
+    public static function getAvailableMigrations(): array {
+        $methods = get_class_methods(self::class);
+        $migrations = [];
+
+        foreach ($methods as $method) {
+            if (preg_match('/^create(.+)Table$/', $method, $matches)) {
+                $migrations[] = $matches[1];
+            }
+        }
+
+        sort($migrations);
+        return $migrations;
+    }
+
+    /**
+     * Run a migration for a specific tenant by slug
+     * Loads config from conf/config.{tenant}.ini automatically
+     *
+     * @param string $migration Migration name (e.g., 'SSHKeys')
+     * @param string $tenantSlug Tenant slug (e.g., 'gwt', 'tiknix')
+     * @return array Result with success status and message
+     */
+    public static function runMigrationForTenant(string $migration, string $tenantSlug): array {
+        $projectDir = dirname(__DIR__);
+        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+
+        if (!file_exists($configFile)) {
+            return [
+                'success' => false,
+                'error' => "Config file not found: $configFile"
+            ];
+        }
+
+        $config = parse_ini_file($configFile, true);
+
+        if (!isset($config['database'])) {
+            return [
+                'success' => false,
+                'error' => "No [database] section in config file"
+            ];
+        }
+
+        $db = $config['database'];
+        if (empty($db['name']) || empty($db['user'])) {
+            return [
+                'success' => false,
+                'error' => "Missing database name or user in config"
+            ];
+        }
+
+        $builder = new self(
+            $db['name'],
+            $db['user'],
+            $db['pass'] ?? '',
+            $db['host'] ?? 'localhost'
+        );
+
+        return $builder->runMigration($migration);
+    }
+
+    /**
+     * Get list of available tenants from config files
+     *
+     * @return array Array of tenant info [slug => ['db_name' => ..., 'config_file' => ...]]
+     */
+    public static function getAvailableTenants(): array {
+        $projectDir = dirname(__DIR__);
+        $tenants = [];
+        $configFiles = glob($projectDir . '/conf/config.*.ini');
+
+        foreach ($configFiles as $configFile) {
+            $filename = basename($configFile);
+
+            // Skip example config
+            if (strpos($filename, 'example') !== false) {
+                continue;
+            }
+
+            // Extract tenant slug from filename: config.{slug}.ini
+            if (preg_match('/^config\.(.+)\.ini$/', $filename, $matches)) {
+                $slug = $matches[1];
+                $config = parse_ini_file($configFile, true);
+
+                if (isset($config['database'])) {
+                    $tenants[$slug] = [
+                        'slug' => $slug,
+                        'config_file' => $configFile,
+                        'db_name' => $config['database']['name'] ?? null,
+                        'db_user' => $config['database']['user'] ?? null,
+                        'db_host' => $config['database']['host'] ?? 'localhost'
+                    ];
+                }
+            }
+        }
+
+        ksort($tenants);
+        return $tenants;
+    }
+
+    /**
+     * Set up dependencies needed for migrations (member, board, repo beans)
+     * @param bool $force If true, drop and rebuild tables that fail due to schema issues
+     */
+    private function setupMigrationDependencies(bool $force = false): void {
+        // If force mode, drop all core tables upfront to avoid FK type mismatches (only once per session)
+        if ($force && !$this->forceDropDone) {
+            $this->dropAllCoreTables();
+            $this->forceDropDone = true;
+        }
+
+        // Try to load existing member, or create temp one
+        $this->member = R::findOne('member', ' LIMIT 1 ');
+        if (!$this->member) {
+            $this->member = $this->createDependencyBean('member', $force, function() {
+                $bean = R::dispense('member');
+                $bean->email = 'migration@temp.local';
+                $bean->username = 'migration_temp';
+                $bean->password = 'x';
+                $bean->display_name = 'Migration Temp';
+                $bean->level = 100;
+                $bean->status = 'active';
+                $bean->created_at = date('Y-m-d H:i:s');
+                R::store($bean);
+                return $bean;
+            });
+        }
+
+        // Try to load existing board, or create temp one
+        $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
+        if (!$this->board) {
+            $this->board = $this->createDependencyBean('jiraboards', $force, function() {
+                $bean = R::dispense('jiraboards');
+                $bean->member = $this->member;
+                $bean->board_name = 'Migration Temp Board';
+                $bean->created_at = date('Y-m-d H:i:s');
+                R::store($bean);
+                return $bean;
+            });
+        }
+
+        // Try to load existing repo, or create temp one
+        $this->repo = R::findOne('repoconnections', ' LIMIT 1 ');
+        if (!$this->repo) {
+            $this->repo = $this->createDependencyBean('repoconnections', $force, function() {
+                $bean = R::dispense('repoconnections');
+                $bean->member = $this->member;
+                $bean->provider = 'github';
+                $bean->repo_name = 'migration-temp';
+                $bean->created_at = date('Y-m-d H:i:s');
+                R::store($bean);
+                return $bean;
+            });
+        }
+
+        // Try to load existing directive
+        $this->directive = R::findOne('ceodirectives', ' LIMIT 1 ');
+    }
+
+    /**
+     * Drop all core tables to allow fresh rebuild (used in force mode)
+     */
+    private function dropAllCoreTables(): void {
+        // All tables that might exist - drop everything except schemamigrations
+        $coreTables = [
+            // New schema tables
+            'aidevjoblogs', 'aidevjobs', 'analysisresults', 'anthropickeys',
+            'atlassiantoken', 'boardrepomapping', 'ceodirectives', 'ctoepics',
+            'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
+            'directives', 'enterprisesettings', 'githubtokens', 'projects',
+            'sshkeys', 'ticketanalysiscache', 'aiagents', 'installedplugins',
+            'pluginscans', 'discoveredplugins',
+            // Legacy tables that may have bad FK refs
+            'agenttools', 'claudeshards', 'digestjobs', 'knowledgebases',
+            'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
+            'subscription', 'usersettings',
+            // Parent tables last
+            'repoconnections', 'jiraboards', 'member', 'authcontrol'
+        ];
+
+        R::exec('SET FOREIGN_KEY_CHECKS = 0', []);
+        foreach ($coreTables as $table) {
+            // Safe: table names are hardcoded in this method
+            R::exec(sprintf('DROP TABLE IF EXISTS `%s`', $table), []);
+        }
+        R::exec('SET FOREIGN_KEY_CHECKS = 1', []);
+    }
+
+    /**
+     * Create a dependency bean, with force-drop-retry logic
+     */
+    private function createDependencyBean(string $tableName, bool $force, callable $creator) {
+        try {
+            return $creator();
+        } catch (\Exception $e) {
+            if ($force) {
+                // Drop the table completely and retry (wipe only truncates)
+                $this->dropTable($tableName);
+                return $creator();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Drop a table by name (whitelisted tables only for safety)
+     */
+    private function dropTable(string $tableName): void {
+        // Whitelist of allowed tables to drop
+        $allowed = [
+            'member', 'jiraboards', 'repoconnections', 'aiagents', 'aidevjobs',
+            'aidevjoblogs', 'analysisresults', 'anthropickeys', 'atlassiantoken',
+            'authcontrol', 'boardrepomapping', 'ceodirectives', 'ctoepics',
+            'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
+            'directives', 'enterprisesettings', 'githubtokens', 'projects',
+            'sshkeys', 'ticketanalysiscache', 'discoveredplugins', 'pluginscans',
+            'installedplugins'
+        ];
+
+        if (!in_array($tableName, $allowed, true)) {
+            throw new \Exception("Table '$tableName' not in whitelist for drop");
+        }
+
+        R::exec('SET FOREIGN_KEY_CHECKS = 0', []);
+        // Safe: tableName is validated against whitelist above
+        R::exec(sprintf('DROP TABLE IF EXISTS `%s`', $tableName), []);
+        R::exec('SET FOREIGN_KEY_CHECKS = 1', []);
     }
 
     private function createMemberTable() {
@@ -183,7 +887,7 @@ class TenantSchemaBuilder {
         $bean->issues_enabled = true;
         $bean->webhook_uid = 'schema_webhook_uid'; // _uid suffix - string not FK
         $bean->webhook_secret = 'schema_webhook_secret';
-        $bean->agent_uid = null; // Reference to aiagents.id (cross-table, uses _uid naming)
+        // aiagents association will be set later if needed (creates aiagents_id FK)
         $bean->is_active = true;
         $bean->last_webhook_at = date('Y-m-d H:i:s');
         $bean->created_at = date('Y-m-d H:i:s');
@@ -354,6 +1058,21 @@ class TenantSchemaBuilder {
         $bean->is_default = false;
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
+    private function createSSHKeysTable(): void {
+        $bean = R::dispense('sshkeys');
+        $bean->member = $this->member; // Creates member_id FK (who created it)
+        $bean->name = 'Schema SSH Key';
+        $bean->description = 'Schema key description';
+        $bean->key_type = 'ecdsa'; // ecdsa, ed25519, rsa
+        $bean->public_key = str_repeat('x', 500); // Public key content
+        $bean->private_key_encrypted = str_repeat('x', 2000); // Encrypted private key
+        $bean->fingerprint = 'SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->last_used_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
     }

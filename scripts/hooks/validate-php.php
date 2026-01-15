@@ -1,9 +1,16 @@
 #!/usr/bin/env php
 <?php
 /**
- * MyCTOBot PHP Code Validator Hook
+ * MyCTOBot Code Validator Hook
  *
- * Validates PHP code against MyCTOBot/RedBeanPHP/FlightPHP coding standards:
+ * Validates code against MyCTOBot/RedBeanPHP/FlightPHP coding standards:
+ *
+ * SQL File Blocking:
+ * - BLOCKS creation of .sql files
+ * - TenantSchemaBuilder.php is the source of truth for schemas
+ * - Redirects to use the migration tool instead
+ *
+ * PHP Code Standards:
  * 1. Bean type names must be all lowercase (no underscores) for R::dispense
  * 2. R::exec should almost NEVER be used - only in extreme situations
  * 3. Prefer RedBeanPHP associations (ownBeanList/sharedBeanList) over manual FK management
@@ -584,6 +591,37 @@ function validatePhpCode(string $content, string $filePath = ''): array
 }
 
 /**
+ * Check if Claude is trying to create/edit a SQL file
+ * TenantSchemaBuilder.php is the source of truth for database schemas.
+ *
+ * @param string $filePath File path being written/edited
+ * @return array|null Blocking response or null if not a SQL file
+ */
+function checkSqlFileCreation(string $filePath): ?array
+{
+    if (!str_ends_with(strtolower($filePath), '.sql')) {
+        return null;
+    }
+
+    $feedback = "SQL FILE CREATION BLOCKED:\n\n";
+    $feedback .= "TenantSchemaBuilder.php is the SOURCE OF TRUTH for database schemas.\n\n";
+    $feedback .= "Instead of creating/editing SQL files, you should:\n";
+    $feedback .= "1. Add your table schema to services/TenantSchemaBuilder.php\n";
+    $feedback .= "2. Use the migration tool to apply changes:\n";
+    $feedback .= "   php scripts/run-migration.php --migration=YourTable --tenant=footest4\n\n";
+    $feedback .= "See scripts/schema-dump.sh for migration tool usage.\n";
+    $feedback .= "See CLAUDE.md for RedBeanPHP schema conventions.\n\n";
+    $feedback .= "If you need to document the schema, use:\n";
+    $feedback .= "  ./scripts/schema-dump.sh tenant\n";
+    $feedback .= "This will generate sql/tenant_schema.sql from the actual database.";
+
+    return [
+        'decision' => 'block',
+        'reason' => $feedback
+    ];
+}
+
+/**
  * Main entry point
  */
 function main(): void
@@ -608,6 +646,13 @@ function main(): void
 
         // Get file path and content
         $filePath = $toolInput['file_path'] ?? '';
+
+        // Block SQL file creation - TenantSchemaBuilder is source of truth
+        $sqlBlock = checkSqlFileCreation($filePath);
+        if ($sqlBlock !== null) {
+            echo json_encode($sqlBlock);
+            exit(0);
+        }
 
         // Only validate PHP files
         if (!str_ends_with($filePath, '.php')) {

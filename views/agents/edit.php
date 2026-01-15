@@ -433,22 +433,40 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-plug"></i> MCP Servers Configuration</span>
-            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadDefaultMcp()">
-                <i class="bi bi-arrow-repeat"></i> Load Defaults
-            </button>
+            <div>
+                <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#addMcpModal">
+                    <i class="bi bi-plus-lg"></i> Add Server
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAdvancedMcp()">
+                    <i class="bi bi-code"></i> <span id="advancedToggleText">Advanced</span>
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
                 Configure <strong>additional</strong> MCP servers for this agent. <strong>Jira and Playwright are always enabled</strong> (auto-configured at runtime with your credentials).
-                Use "Load Defaults" to add common servers like GitHub and Fetch.
             </div>
 
-            <form method="POST" action="/agents/update/<?= $agentId ?>">
+            <!-- Visual Server List -->
+            <div id="mcpServerList" class="mb-4">
+                <!-- Servers rendered by JS -->
+            </div>
+
+            <div id="emptyMcpState" class="text-center py-5 text-muted" style="display: none;">
+                <i class="bi bi-plug display-4"></i>
+                <p class="mt-3">No additional MCP servers configured.</p>
+                <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addMcpModal">
+                    <i class="bi bi-plus-lg"></i> Add Your First Server
+                </button>
+            </div>
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>" id="mcpForm">
                 <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="mcp">
 
-                <div class="mb-3">
+                <!-- Advanced JSON Editor (hidden by default) -->
+                <div id="advancedMcpEditor" class="mb-3" style="display: none;">
                     <label class="form-label">MCP Servers (JSON)</label>
                     <textarea class="form-control font-monospace" id="mcp_servers" name="mcp_servers" rows="18"><?= htmlspecialchars(json_encode($mcpServers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '[]') ?></textarea>
                     <div class="form-text">
@@ -465,33 +483,414 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         </div>
     </div>
 
+    <!-- Add MCP Server Modal -->
+    <div class="modal fade" id="addMcpModal" tabindex="-1" aria-labelledby="addMcpModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="addMcpModalLabel"><i class="bi bi-plug"></i> Add MCP Server</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- Preset Templates -->
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Quick Add from Templates</label>
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('github')">
+                                    <i class="bi bi-github"></i> GitHub
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('fetch')">
+                                    <i class="bi bi-cloud-download"></i> Fetch
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('mantic')">
+                                    <i class="bi bi-search"></i> Mantic
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('filesystem')">
+                                    <i class="bi bi-folder"></i> Filesystem
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('memory')">
+                                    <i class="bi bi-brain"></i> Memory
+                                </button>
+                            </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('puppeteer')">
+                                    <i class="bi bi-browser-chrome"></i> Puppeteer
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Manual Configuration -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Server Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="mcpServerName" placeholder="e.g., github, fetch, custom-server">
+                        <div class="form-text">Unique identifier for this server</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Server Type <span class="text-danger">*</span></label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeStdio" value="stdio" checked onchange="toggleMcpTypeFields()">
+                            <label class="btn btn-outline-primary" for="mcpTypeStdio">
+                                <i class="bi bi-terminal"></i> STDIO (Local Process)
+                            </label>
+                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeHttp" value="http" onchange="toggleMcpTypeFields()">
+                            <label class="btn btn-outline-primary" for="mcpTypeHttp">
+                                <i class="bi bi-globe"></i> HTTP (Remote Server)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- STDIO Fields -->
+                    <div id="stdioFields">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Command <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="mcpCommand" placeholder="e.g., npx, uvx, node">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Arguments</label>
+                            <input type="text" class="form-control" id="mcpArgs" placeholder="e.g., -y, @modelcontextprotocol/server-github">
+                            <div class="form-text">Comma-separated arguments</div>
+                        </div>
+                    </div>
+
+                    <!-- HTTP Fields -->
+                    <div id="httpFields" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">URL <span class="text-danger">*</span></label>
+                            <input type="url" class="form-control" id="mcpUrl" placeholder="https://api.example.com/mcp">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Headers (JSON)</label>
+                            <textarea class="form-control font-monospace" id="mcpHeaders" rows="3" placeholder='{"Authorization": "Bearer token"}'></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Environment Variables -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Environment Variables (Optional)</label>
+                        <div id="envVarList">
+                            <!-- Dynamic env var rows -->
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="addEnvVarRow()">
+                            <i class="bi bi-plus"></i> Add Environment Variable
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="addMcpServer()">
+                        <i class="bi bi-plus-lg"></i> Add Server
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script>
-function loadDefaultMcp() {
-    // Note: Jira and Playwright are ALWAYS auto-added at runtime
-    // This loads additional useful servers
-    const defaultConfig = [
-        {
-            "name": "github",
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-github"],
-            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}
-        },
-        {
-            "name": "fetch",
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-fetch"]
-        },
-        {
-            "name": "mantic",
-            "type": "stdio",
-            "command": "npx",
-            "args": ["-y", "mantic-mcp"]
-        }
-    ];
-    document.getElementById('mcp_servers').value = JSON.stringify(defaultConfig, null, 2);
+// MCP Server data
+let mcpServers = <?= json_encode($mcpServers) ?>;
+let advancedMode = false;
+
+// Preset templates
+const mcpPresets = {
+    github: {
+        name: "github",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-github"],
+        env: {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}
+    },
+    fetch: {
+        name: "fetch",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-fetch"]
+    },
+    mantic: {
+        name: "mantic",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "mantic-mcp"]
+    },
+    filesystem: {
+        name: "filesystem",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
+    },
+    memory: {
+        name: "memory",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    puppeteer: {
+        name: "puppeteer",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-puppeteer"]
+    }
+};
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    renderMcpServerList();
+});
+
+// Render the server list
+function renderMcpServerList() {
+    const listEl = document.getElementById('mcpServerList');
+    const emptyEl = document.getElementById('emptyMcpState');
+
+    if (!mcpServers || mcpServers.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+    }
+
+    emptyEl.style.display = 'none';
+
+    let html = '<div class="row g-3">';
+    mcpServers.forEach((server, index) => {
+        const isStdio = server.type === 'stdio';
+        const typeIcon = isStdio ? 'bi-terminal' : 'bi-globe';
+        const typeBadge = isStdio ? 'bg-info' : 'bg-warning';
+
+        html += `
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0">
+                            <i class="bi ${typeIcon}"></i> ${escapeHtml(server.name)}
+                        </h6>
+                        <div>
+                            <span class="badge ${typeBadge} me-1">${server.type.toUpperCase()}</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeMcpServer(${index})" title="Remove server">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="small text-muted">
+                        ${isStdio ?
+                            `<code>${escapeHtml(server.command)} ${(server.args || []).join(' ')}</code>` :
+                            `<code>${escapeHtml(server.url || '')}</code>`
+                        }
+                    </div>
+                    ${server.env && Object.keys(server.env).length > 0 ?
+                        `<div class="mt-2 small"><span class="badge bg-secondary">ENV: ${Object.keys(server.env).join(', ')}</span></div>` : ''
+                    }
+                </div>
+            </div>
+        </div>
+        `;
+    });
+    html += '</div>';
+
+    listEl.innerHTML = html;
+    updateHiddenTextarea();
 }
+
+// Update hidden textarea with current server list
+function updateHiddenTextarea() {
+    document.getElementById('mcp_servers').value = JSON.stringify(mcpServers, null, 2);
+}
+
+// Toggle advanced mode
+function toggleAdvancedMcp() {
+    advancedMode = !advancedMode;
+    const editorEl = document.getElementById('advancedMcpEditor');
+    const listEl = document.getElementById('mcpServerList');
+    const emptyEl = document.getElementById('emptyMcpState');
+    const toggleText = document.getElementById('advancedToggleText');
+
+    if (advancedMode) {
+        editorEl.style.display = 'block';
+        listEl.style.display = 'none';
+        emptyEl.style.display = 'none';
+        toggleText.textContent = 'Visual';
+    } else {
+        // Parse JSON from textarea back to array
+        try {
+            mcpServers = JSON.parse(document.getElementById('mcp_servers').value || '[]');
+        } catch (e) {
+            alert('Invalid JSON. Please fix the syntax before switching to visual mode.');
+            return;
+        }
+        editorEl.style.display = 'none';
+        toggleText.textContent = 'Advanced';
+        renderMcpServerList();
+    }
+}
+
+// Toggle type fields in modal
+function toggleMcpTypeFields() {
+    const isStdio = document.getElementById('mcpTypeStdio').checked;
+    document.getElementById('stdioFields').style.display = isStdio ? 'block' : 'none';
+    document.getElementById('httpFields').style.display = isStdio ? 'none' : 'block';
+}
+
+// Load preset into modal
+function loadMcpPreset(presetName) {
+    const preset = mcpPresets[presetName];
+    if (!preset) return;
+
+    document.getElementById('mcpServerName').value = preset.name;
+
+    if (preset.type === 'stdio') {
+        document.getElementById('mcpTypeStdio').checked = true;
+        document.getElementById('mcpCommand').value = preset.command || '';
+        document.getElementById('mcpArgs').value = (preset.args || []).join(', ');
+    } else {
+        document.getElementById('mcpTypeHttp').checked = true;
+        document.getElementById('mcpUrl').value = preset.url || '';
+        document.getElementById('mcpHeaders').value = JSON.stringify(preset.headers || {}, null, 2);
+    }
+    toggleMcpTypeFields();
+
+    // Handle env vars
+    document.getElementById('envVarList').innerHTML = '';
+    if (preset.env) {
+        for (const [key, value] of Object.entries(preset.env)) {
+            addEnvVarRow(key, value);
+        }
+    }
+}
+
+// Add environment variable row
+function addEnvVarRow(key = '', value = '') {
+    const listEl = document.getElementById('envVarList');
+    const row = document.createElement('div');
+    row.className = 'row g-2 mb-2 env-var-row';
+    row.innerHTML = `
+        <div class="col-5">
+            <input type="text" class="form-control form-control-sm env-key" placeholder="KEY" value="${escapeHtml(key)}">
+        </div>
+        <div class="col-5">
+            <input type="text" class="form-control form-control-sm env-value" placeholder="value" value="${escapeHtml(value)}">
+        </div>
+        <div class="col-2">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.env-var-row').remove()">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+    `;
+    listEl.appendChild(row);
+}
+
+// Add MCP server from modal
+function addMcpServer() {
+    const name = document.getElementById('mcpServerName').value.trim();
+    if (!name) {
+        alert('Server name is required');
+        return;
+    }
+
+    // Check for duplicate names
+    if (mcpServers.some(s => s.name === name)) {
+        alert('A server with this name already exists');
+        return;
+    }
+
+    const isStdio = document.getElementById('mcpTypeStdio').checked;
+
+    let server = { name, type: isStdio ? 'stdio' : 'http' };
+
+    if (isStdio) {
+        const command = document.getElementById('mcpCommand').value.trim();
+        if (!command) {
+            alert('Command is required for STDIO servers');
+            return;
+        }
+        server.command = command;
+
+        const argsStr = document.getElementById('mcpArgs').value.trim();
+        if (argsStr) {
+            server.args = argsStr.split(',').map(a => a.trim()).filter(a => a);
+        }
+    } else {
+        const url = document.getElementById('mcpUrl').value.trim();
+        if (!url) {
+            alert('URL is required for HTTP servers');
+            return;
+        }
+        server.url = url;
+
+        const headersStr = document.getElementById('mcpHeaders').value.trim();
+        if (headersStr) {
+            try {
+                server.headers = JSON.parse(headersStr);
+            } catch (e) {
+                alert('Invalid JSON in headers');
+                return;
+            }
+        }
+    }
+
+    // Collect env vars
+    const envRows = document.querySelectorAll('.env-var-row');
+    const env = {};
+    envRows.forEach(row => {
+        const key = row.querySelector('.env-key').value.trim();
+        const value = row.querySelector('.env-value').value.trim();
+        if (key) {
+            env[key] = value;
+        }
+    });
+    if (Object.keys(env).length > 0) {
+        server.env = env;
+    }
+
+    mcpServers.push(server);
+    renderMcpServerList();
+
+    // Close modal and reset form
+    bootstrap.Modal.getInstance(document.getElementById('addMcpModal')).hide();
+    resetMcpModal();
+}
+
+// Remove MCP server
+function removeMcpServer(index) {
+    if (confirm('Remove this MCP server?')) {
+        mcpServers.splice(index, 1);
+        renderMcpServerList();
+    }
+}
+
+// Reset modal form
+function resetMcpModal() {
+    document.getElementById('mcpServerName').value = '';
+    document.getElementById('mcpTypeStdio').checked = true;
+    document.getElementById('mcpCommand').value = '';
+    document.getElementById('mcpArgs').value = '';
+    document.getElementById('mcpUrl').value = '';
+    document.getElementById('mcpHeaders').value = '';
+    document.getElementById('envVarList').innerHTML = '';
+    toggleMcpTypeFields();
+}
+
+// Escape HTML
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// Reset modal when closed
+document.getElementById('addMcpModal').addEventListener('hidden.bs.modal', resetMcpModal);
 </script>
 
     <?php elseif ($activeTab === 'hooks'): ?>

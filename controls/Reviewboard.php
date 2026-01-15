@@ -1102,6 +1102,15 @@ class Reviewboard extends BaseControls\Control {
         $result = $jobService->retryJob($jobId, $this->member->id, $tenant);
 
         if ($result['success']) {
+            // Update linked story status
+            if (!empty($result['issue_key'])) {
+                $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$result['issue_key']]);
+                if ($story && $story->id) {
+                    $story->status = 'queued';
+                    Bean::store($story);
+                }
+            }
+
             $this->logger->info('Job retry initiated', [
                 'member_id' => $this->member->id,
                 'job_uid' => $jobId,
@@ -1469,6 +1478,13 @@ class Reviewboard extends BaseControls\Control {
         );
 
         if ($result['success']) {
+            // Link job to story so it shows in UI
+            if (!empty($result['job_uid'])) {
+                $story->aidev_job_uid = $result['job_uid'];
+                $story->status = 'in_progress';
+                Bean::store($story);
+            }
+
             $this->logger->info('New job started from Review Board', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,

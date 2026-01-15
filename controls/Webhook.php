@@ -528,6 +528,16 @@ class Webhook extends BaseControls\Control {
             $isQueued = $result['queued'] ?? false;
             $jobId = $result['job_uid'] ?? null;
 
+            // Link job to existing story if one exists
+            if ($jobId) {
+                $story = \app\Bean::findOne('ctostories', 'jira_issue_key = ?', [$issueKey]);
+                if ($story && $story->id && empty($story->aidev_job_uid)) {
+                    $story->aidev_job_uid = $jobId;
+                    $story->status = $isQueued ? 'queued' : 'in_progress';
+                    \app\Bean::store($story);
+                }
+            }
+
             $this->logger->info($isQueued ? 'AI Developer job queued via webhook' : 'AI Developer job triggered via webhook', [
                 'member_id' => $memberId,
                 'job_uid' => $jobId,

@@ -343,7 +343,7 @@ class PluginScannerService {
             $plugin->discovered_at = date('Y-m-d H:i:s');
         }
 
-        $plugin->repo_connection_id = $repoConnectionId;
+        $plugin->repoconnections_id = $repoConnectionId;
         $plugin->repo_owner = $pluginData['repo_owner'];
         $plugin->repo_name = $pluginData['repo_name'];
         $plugin->plugin_name = $pluginData['name'];
@@ -372,7 +372,7 @@ class PluginScannerService {
 
         $scan = Bean::dispense('pluginscans');
         $scan->scan_uid = $scanId;
-        $scan->repo_connection_id = $repoConnectionId;
+        $scan->repoconnections_id = $repoConnectionId;
         $scan->status = 'running';
         $scan->started_at = date('Y-m-d H:i:s');
         $scan->repos_scanned = 0;

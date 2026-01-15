@@ -375,12 +375,11 @@ if ($repoIdParam) {
     }
 }
 
-// Load agent configuration for this repo
+// Load agent configuration for this repo (via association)
 $agentConfig = null;
-$agentId = $repoBean->agent_uid ?? null;
-if ($agentId) {
-    // Load agent by ID - repo is already validated for this member
-    $agentBean = R::load('aiagents', $agentId);
+$agentBean = $repoBean->aiagents;
+if ($agentBean && $agentBean->id) {
+    // Agent found via association
     if ($agentBean && $agentBean->id && $agentBean->is_active) {
         $agentConfig = [
             'id' => $agentBean->id,

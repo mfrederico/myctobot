@@ -533,7 +533,7 @@ class ConnectionsService {
                 'enabled' => $bean->enabled,
                 'issues_enabled' => $bean->issues_enabled ?? 0,
                 'webhook_uid' => $bean->webhook_uid,
-                'agent_uid' => $bean->agent_uid,
+                'aiagents_id' => ($agent && $agent->id) ? $agent->id : null,
                 'agent_name' => $agentName,
                 'created_at' => $bean->created_at,
                 'updated_at' => $bean->updated_at

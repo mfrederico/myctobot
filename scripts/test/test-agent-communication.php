@@ -198,7 +198,7 @@ function setupAgents(int $memberId, string $tenant, array $config) {
     echo "  Adding tools to Worker Agent...\n";
 
     $reviewTool = R::dispense('agenttools');
-    $reviewTool->agent_id = $workerId;
+    $reviewTool->aiagents_id = $workerId;
     $reviewTool->tool_name = 'review_code';
     $reviewTool->tool_description = 'Review code for issues and improvements';
     $reviewTool->parameters_schema = json_encode([
@@ -226,7 +226,7 @@ PROMPT;
     echo "    - review_code tool\n";
 
     $generateTool = R::dispense('agenttools');
-    $generateTool->agent_id = $workerId;
+    $generateTool->aiagents_id = $workerId;
     $generateTool->tool_name = 'generate_code';
     $generateTool->tool_description = 'Generate code based on requirements';
     $generateTool->parameters_schema = json_encode([
@@ -529,7 +529,7 @@ function cleanup(int $memberId, string $tenant) {
     // Find and delete tools first
     $agents = R::find('aiagents', 'member_id = ? AND name LIKE ?', [$memberId, 'Test%Agent%']);
     foreach ($agents as $agent) {
-        $tools = R::find('agenttools', 'agent_id = ?', [$agent->id]);
+        $tools = R::find('agenttools', 'aiagents_id = ?', [$agent->id]);
         foreach ($tools as $tool) {
             echo "  - Deleting tool: {$tool->tool_name}\n";
             R::trash($tool);

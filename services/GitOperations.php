@@ -555,8 +555,8 @@ class GitOperations {
 
         // Find the job to get repo_connection_id
         $job = \app\Bean::findOne('aidevjobs', 'issue_key = ? ORDER BY created_at DESC', [$issueKey]);
-        if (!$job || !$job->repo_connection_id) {
-            $logger->warning('GitOperations: No job or repo_connection_id found', [
+        if (!$job || !$job->repoconnections_id) {
+            $logger->warning('GitOperations: No job or repoconnections_id found', [
                 'issue_key' => $issueKey
             ]);
             return false;

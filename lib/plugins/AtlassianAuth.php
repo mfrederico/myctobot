@@ -27,8 +27,8 @@ class AtlassianAuth {
     private static $defaultScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software offline_access';
 
     // Write scopes for Enterprise tier (AI Developer feature) - includes webhook management and dev info
-    // read:source-code:jira - allows reading development panel info (branches, commits, PRs linked to issues)
-    private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook read:source-code:jira offline_access';
+    // read:source-code:jira-software - allows reading development panel info (branches, commits, PRs linked to issues)
+    private static $writeScopes = 'read:jira-work read:jira-user read:board-scope:jira-software read:project:jira read:sprint:jira-software write:jira-work manage:jira-webhook read:source-code:jira-software offline_access';
 
     /** @var array|null Cached Atlassian config */
     private static ?array $configCache = null;

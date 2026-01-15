@@ -25,6 +25,12 @@ class TenantSchemaBuilder {
     private $repo;
     private $directive;
 
+    // Track which beans were CREATED (temp) vs FOUND (existing) - only delete created ones
+    private bool $memberIsTemp = false;
+    private bool $boardIsTemp = false;
+    private bool $repoIsTemp = false;
+    private bool $directiveIsTemp = false;
+
     // Track if force-drop has been done this session
     private bool $forceDropDone = false;
 
@@ -689,6 +695,7 @@ class TenantSchemaBuilder {
 
         // Try to load existing member, or create temp one
         $this->member = R::findOne('member', ' LIMIT 1 ');
+        $this->memberIsTemp = false;
         if (!$this->member) {
             $this->member = $this->createDependencyBean('member', $force, function() {
                 $bean = R::dispense('member');
@@ -702,10 +709,12 @@ class TenantSchemaBuilder {
                 R::store($bean);
                 return $bean;
             });
+            $this->memberIsTemp = true;
         }
 
         // Try to load existing board, or create temp one (prefer generic boards table)
         $this->board = R::findOne('boards', ' LIMIT 1 ');
+        $this->boardIsTemp = false;
         if (!$this->board) {
             // Fall back to jiraboards for backwards compatibility
             $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
@@ -721,10 +730,12 @@ class TenantSchemaBuilder {
                 R::store($bean);
                 return $bean;
             });
+            $this->boardIsTemp = true;
         }
 
         // Try to load existing repo, or create temp one
         $this->repo = R::findOne('repoconnections', ' LIMIT 1 ');
+        $this->repoIsTemp = false;
         if (!$this->repo) {
             $this->repo = $this->createDependencyBean('repoconnections', $force, function() {
                 $bean = R::dispense('repoconnections');
@@ -735,10 +746,12 @@ class TenantSchemaBuilder {
                 R::store($bean);
                 return $bean;
             });
+            $this->repoIsTemp = true;
         }
 
         // Try to load existing directive
         $this->directive = R::findOne('ceodirectives', ' LIMIT 1 ');
+        $this->directiveIsTemp = false;  // Directives are never created as temp
     }
 
     /**
@@ -1367,18 +1380,20 @@ class TenantSchemaBuilder {
 
     /**
      * Clean up temporary beans used for schema creation
+     * IMPORTANT: Only delete beans we CREATED, not existing ones we found
      */
     private function cleanupTempBeans(): void {
-        if ($this->directive) {
+        // Only delete beans that were created as temporary placeholders
+        if ($this->directive && $this->directiveIsTemp) {
             R::trash($this->directive);
         }
-        if ($this->repo) {
+        if ($this->repo && $this->repoIsTemp) {
             R::trash($this->repo);
         }
-        if ($this->board) {
+        if ($this->board && $this->boardIsTemp) {
             R::trash($this->board);
         }
-        if ($this->member) {
+        if ($this->member && $this->memberIsTemp) {
             R::trash($this->member);
         }
     }

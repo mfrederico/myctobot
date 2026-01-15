@@ -416,9 +416,14 @@ class Auth extends BaseControls\Control {
     public function verifymember() {
         $token = $this->getParam('token');
 
+        // Get workspace from current tenant context for redirects
+        $workspace = TenantResolver::getCurrentTenant() ?? '';
+        $loginUrl = $workspace ? "/login/{$workspace}" : '/login';
+        $registerUrl = $workspace ? "/auth/register?workspace={$workspace}" : '/register';
+
         if (empty($token)) {
             $this->flash('error', 'Invalid verification link.');
-            Flight::redirect('/login');
+            Flight::redirect($loginUrl);
             return;
         }
 
@@ -427,7 +432,7 @@ class Auth extends BaseControls\Control {
 
         if (!$member) {
             $this->flash('error', 'Invalid or expired verification link. Please register again.');
-            Flight::redirect('/register');
+            Flight::redirect($registerUrl);
             return;
         }
 
@@ -436,7 +441,7 @@ class Auth extends BaseControls\Control {
             // Delete expired pending member
             Bean::trash($member);
             $this->flash('error', 'Verification link has expired. Please register again.');
-            Flight::redirect('/register');
+            Flight::redirect($registerUrl);
             return;
         }
 
@@ -454,13 +459,18 @@ class Auth extends BaseControls\Control {
             session_regenerate_id(true);
             $_SESSION['member'] = $member->export();
 
+            // Set tenant in session for workspace logins
+            if (!empty($workspace)) {
+                TenantResolver::setTenant($workspace);
+            }
+
             $this->flash('success', 'Your email has been verified! Welcome to ' . Flight::get('app.name') . '!');
             Flight::redirect('/settings/connections');
 
         } catch (\Exception $e) {
             Flight::get('log')->error('Member verification failed: ' . $e->getMessage());
             $this->flash('error', 'Verification failed. Please try again.');
-            Flight::redirect('/register');
+            Flight::redirect($registerUrl);
         }
     }
 

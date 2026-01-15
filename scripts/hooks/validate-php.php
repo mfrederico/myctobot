@@ -107,7 +107,7 @@ function findExecUsage(string $content): array
  * - _uid or _uuid suffix = external/unique identifier (direct assignment OK)
  *
  * Examples:
- * - member_id, jiraboards_id, aidevjobs_id = FK relationships
+ * - member_id, boards_id, repoconnections_id = FK relationships
  * - cloud_uid, project_uid, issue_uid = external identifiers (Jira, etc.)
  *
  * RedBeanPHP's ownBeanList pattern is preferred over manual FK assignment because:
@@ -152,7 +152,7 @@ function findManualFkAssignments(string $content): array
                 // Check if this looks like an FK (_id suffix or Id suffix)
                 if (preg_match('/_id$/i', $fkColumn) || preg_match('/[a-z]Id$/', $fkColumn)) {
                     // Derive the parent bean type from the FK name
-                    // e.g., member_id -> member, jiraboards_id -> jiraboards, parentId -> parent
+                    // e.g., member_id -> member, boards_id -> boards, parentId -> parent
                     $parentType = preg_replace('/(_id|Id)$/i', '', $fkColumn);
                     $parentType = strtolower(str_replace('_', '', $parentType));
 

@@ -128,11 +128,25 @@ class Auth extends BaseControls\Control {
             }
 
             // Find member by username or email (in current database - tenant or default)
-            $member = Bean::findOne('member', '(username = ? OR email = ?) AND status = ?', [$login, $login, 'active']);
+            $member = Bean::findOne('member', '(username = ? OR email = ?)', [$login, $login]);
 
             if (!$member || !password_verify($password, $member->password)) {
                 $this->logger->warning('Failed login attempt', ['login' => $login, 'workspace' => $workspace ?: 'default']);
                 $this->flash('error', 'Invalid credentials');
+                $this->redirectToLogin($workspace);
+                return;
+            }
+
+            // Check if account is pending verification
+            if ($member->status === 'pending') {
+                $this->flash('error', 'Please verify your email address before logging in. Check your inbox for the verification link.');
+                $this->redirectToLogin($workspace);
+                return;
+            }
+
+            // Check if account is active
+            if ($member->status !== 'active') {
+                $this->flash('error', 'Your account is not active. Please contact support.');
                 $this->redirectToLogin($workspace);
                 return;
             }
@@ -292,7 +306,7 @@ class Auth extends BaseControls\Control {
     }
 
     /**
-     * Process registration (simple version - no email verification)
+     * Process registration - requires email verification
      */
     public function doregister() {
         // Non-tenant (main site) should use /signup for tenant registration
@@ -334,9 +348,14 @@ class Auth extends BaseControls\Control {
             $errors[] = 'Passwords do not match';
         }
 
-        // Check if email exists
-        if (Bean::count('member', 'email = ?', [$email]) > 0) {
-            $errors[] = 'Email already registered';
+        // Check if email exists (active members only)
+        $existingMember = Bean::findOne('member', 'email = ?', [$email]);
+        if ($existingMember) {
+            if ($existingMember->status === 'pending') {
+                $errors[] = 'Email already registered - please check your inbox for verification email';
+            } else {
+                $errors[] = 'Email already registered';
+            }
         }
 
         // Check if username exists
@@ -355,31 +374,33 @@ class Auth extends BaseControls\Control {
         }
 
         try {
-            // Create member
+            // Generate verification token
+            $token = bin2hex(random_bytes(32));
+            $expiresAt = date('Y-m-d H:i:s', strtotime('+24 hours'));
+
+            // Create member with pending status
             $member = Bean::dispense('member');
             $member->email = $email;
             $member->username = $username;
             $member->password = password_hash($password, PASSWORD_DEFAULT);
             $member->level = LEVELS['MEMBER'];
-            $member->status = 'active'; // Active immediately - no email verification
+            $member->status = 'pending';  // Requires email verification
+            $member->verification_token = $token;
+            $member->verification_expires_at = $expiresAt;
             $member->created_at = date('Y-m-d H:i:s');
 
             $id = Bean::store($member);
-            $member->id = $id;
 
-            // Create user's database
-            $this->ensureUserDatabase($member);
+            Flight::get('log')->info('Pending member registration', ['id' => $id, 'email' => $email]);
 
-            Flight::get('log')->info('New user registered', ['id' => $id, 'username' => $username]);
+            // Send verification email
+            $this->sendMemberVerificationEmail($email, $username, $token);
 
-            // Regenerate session ID to prevent session fixation attacks
-            session_regenerate_id(true);
-
-            // Auto-login after registration
-            $_SESSION['member'] = $member->export();
-
-            $this->flash('success', 'Welcome to ' . Flight::get('app.name') . '! Your account has been created.');
-            Flight::redirect('/settings/connections');
+            // Redirect to pending page
+            $this->render('auth/register_pending', [
+                'title' => 'Verify Your Email',
+                'email' => $email
+            ]);
 
         } catch (\Exception $e) {
             Flight::get('log')->error('Registration failed: ' . $e->getMessage());
@@ -388,6 +409,133 @@ class Auth extends BaseControls\Control {
                 'errors' => ['Registration failed. Please try again.'],
                 'data' => $request->data->getData(),
                 'googleEnabled' => GoogleAuth::isConfigured()
+            ]);
+        }
+    }
+
+    /**
+     * Verify member email and activate account
+     */
+    public function verifymember() {
+        $token = $this->getParam('token');
+
+        if (empty($token)) {
+            $this->flash('error', 'Invalid verification link.');
+            Flight::redirect('/login');
+            return;
+        }
+
+        // Find pending member by token
+        $member = Bean::findOne('member', 'verification_token = ? AND status = ?', [$token, 'pending']);
+
+        if (!$member) {
+            $this->flash('error', 'Invalid or expired verification link. Please register again.');
+            Flight::redirect('/register');
+            return;
+        }
+
+        // Check if token expired
+        if (strtotime($member->verification_expires_at) < time()) {
+            // Delete expired pending member
+            Bean::trash($member);
+            $this->flash('error', 'Verification link has expired. Please register again.');
+            Flight::redirect('/register');
+            return;
+        }
+
+        try {
+            // Activate the member
+            $member->status = 'active';
+            $member->verification_token = null;
+            $member->verification_expires_at = null;
+            $member->verified_at = date('Y-m-d H:i:s');
+            Bean::store($member);
+
+            // Create user's database
+            $this->ensureUserDatabase($member);
+
+            Flight::get('log')->info('Member verified and activated', ['id' => $member->id, 'email' => $member->email]);
+
+            // Auto-login after verification
+            session_regenerate_id(true);
+            $_SESSION['member'] = $member->export();
+
+            $this->flash('success', 'Your email has been verified! Welcome to ' . Flight::get('app.name') . '!');
+            Flight::redirect('/settings/connections');
+
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Member verification failed: ' . $e->getMessage());
+            $this->flash('error', 'Verification failed. Please try again.');
+            Flight::redirect('/register');
+        }
+    }
+
+    /**
+     * Send member verification email
+     */
+    private function sendMemberVerificationEmail(string $email, string $username, string $token): void {
+        $tenant = Flight::get('tenant.slug');
+        $baseUrl = Flight::get('app.base_url');
+        $appName = Flight::get('app.name');
+
+        // Build verification URL for this tenant
+        $verifyUrl = "{$baseUrl}/auth/verifymember?token={$token}";
+
+        $subject = "Verify your email - {$appName}";
+
+        $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .button { display: inline-block; padding: 12px 24px; background-color: #0d6efd; color: white !important; text-decoration: none; border-radius: 6px; margin: 20px 0; }
+        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Welcome to {$appName}!</h2>
+        <p>Hi {$username},</p>
+        <p>Thank you for registering. Please verify your email address to activate your account.</p>
+        <p>
+            <a href="{$verifyUrl}" class="button">Verify Email Address</a>
+        </p>
+        <p>Or copy and paste this link into your browser:</p>
+        <p style="word-break: break-all; color: #666;">{$verifyUrl}</p>
+        <p>This link will expire in 24 hours.</p>
+        <div class="footer">
+            <p>If you didn't create an account, you can safely ignore this email.</p>
+        </div>
+    </div>
+</body>
+</html>
+HTML;
+
+        $textBody = <<<TEXT
+Welcome to {$appName}!
+
+Hi {$username},
+
+Thank you for registering. Please verify your email address to activate your account.
+
+Click the link below to verify:
+{$verifyUrl}
+
+This link will expire in 24 hours.
+
+If you didn't create an account, you can safely ignore this email.
+TEXT;
+
+        try {
+            $mailer = new \app\services\MailerService();
+            $mailer->send($email, $subject, $htmlBody, $textBody);
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Failed to send verification email', [
+                'email' => $email,
+                'error' => $e->getMessage()
             ]);
         }
     }

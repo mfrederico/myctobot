@@ -88,12 +88,20 @@ class Github extends BaseControls\Control {
             ]);
 
             $this->flash('success', 'GitHub connected successfully!');
-            Flight::redirect('/settings/connections');
+
+            // Check for custom return URL (e.g., from Enterprise controller)
+            $returnUrl = $_SESSION['github_oauth_return'] ?? '/settings/connections';
+            unset($_SESSION['github_oauth_return']);
+            Flight::redirect($returnUrl);
 
         } catch (\Exception $e) {
             $this->logger->error('GitHub OAuth failed', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to connect GitHub: ' . $e->getMessage());
-            Flight::redirect('/settings/connections');
+
+            // Check for custom return URL for errors too
+            $returnUrl = $_SESSION['github_oauth_return'] ?? '/settings/connections';
+            unset($_SESSION['github_oauth_return']);
+            Flight::redirect($returnUrl);
         }
     }
 

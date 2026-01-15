@@ -260,17 +260,21 @@ message = "We are currently performing maintenance. Please check back soon."
 allowed_ips = "127.0.0.1"
 
 [atlassian]
-; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is tenant-specific
+; Atlassian OAuth - credentials from conf/atlassian.ini
+; redirect_uri must match exactly what's registered in Atlassian app settings
+; Workspace context is handled via session (user must be logged in for callback)
 client_id = ""
 client_secret = ""
-redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$subdomain}"
+redirect_uri = "https://myctobot.ai/atlassian/callback"
 scopes = ""
 
 [github]
-; GitHub OAuth - credentials from conf/github.ini, redirect_uri is tenant-specific
+; GitHub OAuth - credentials from conf/github.ini
+; redirect_uri must match exactly what's registered in GitHub OAuth app settings
+; Workspace context is handled via session (user must be logged in for callback)
 client_id = ""
 client_secret = ""
-redirect_uri = "https://myctobot.ai/enterprise/githubcallback?workspace={$subdomain}"
+redirect_uri = "https://myctobot.ai/github/callback"
 
 [stripe]
 ; Handled at platform level

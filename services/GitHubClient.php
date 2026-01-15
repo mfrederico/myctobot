@@ -52,6 +52,13 @@ class GitHubClient {
             throw new \Exception('GitHub client_id not configured');
         }
 
+        // Strip any query params from redirect_uri (e.g., ?workspace=xxx from legacy configs)
+        // GitHub OAuth requires exact match with registered callback URL
+        // Workspace context is handled via session since callback requires login
+        if (strpos($redirectUri, '?') !== false) {
+            $redirectUri = explode('?', $redirectUri)[0];
+        }
+
         $params = [
             'client_id' => $clientId,
             'redirect_uri' => $redirectUri,

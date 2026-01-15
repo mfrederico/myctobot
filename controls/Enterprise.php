@@ -328,107 +328,30 @@ class Enterprise extends BaseControls\Control {
     }
 
     // ========================================
-    // GitHub OAuth
+    // GitHub OAuth (consolidated to /github/*)
     // ========================================
 
     /**
-     * Start GitHub OAuth flow
+     * Start GitHub OAuth flow - redirects to consolidated endpoint
      */
     public function github() {
-        // GitHub connection is free for all tiers
         if (!$this->requireLogin()) return;
 
-        if (!GitHubClient::isConfigured()) {
-            $this->flash('error', 'GitHub integration is not configured.');
-            Flight::redirect('/enterprise');
-            return;
-        }
+        // Store return URL so Github controller redirects back here after success
+        $_SESSION['github_oauth_return'] = '/enterprise/repos';
 
-        $state = bin2hex(random_bytes(16));
-        $_SESSION['github_oauth_state'] = $state;
-
-        $loginUrl = GitHubClient::getLoginUrl($state);
-        Flight::redirect($loginUrl);
+        Flight::redirect('/github/connect');
     }
 
     /**
-     * Handle GitHub OAuth callback
+     * Legacy callback URL - redirect to consolidated endpoint
+     * Kept for any in-flight OAuth flows using old callback URL
      */
     public function githubcallback() {
-        if (!$this->requireLogin()) return;
-
-        $code = Flight::request()->query->code ?? '';
-        $state = Flight::request()->query->state ?? '';
-        $error = Flight::request()->query->error ?? '';
-
-        if ($error) {
-            $this->logger->warning('GitHub OAuth error', ['error' => $error]);
-            $this->flash('error', 'GitHub authentication was cancelled or failed.');
-            Flight::redirect('/enterprise');
-            return;
-        }
-
-        // Verify state
-        if (empty($state) || $state !== ($_SESSION['github_oauth_state'] ?? '')) {
-            $this->flash('error', 'Invalid OAuth state. Please try again.');
-            Flight::redirect('/enterprise');
-            return;
-        }
-        unset($_SESSION['github_oauth_state']);
-
-        try {
-            $result = GitHubClient::handleCallback($code, $state);
-
-            // Encrypt the access token
-            $encryptedToken = EncryptionService::encrypt($result['access_token']);
-
-            // Get user's repositories
-            $github = new GitHubClient($result['access_token']);
-            $repos = $github->listRepositories('owner', 'updated', 10);
-
-            // Store the connection using RedBean
-            $this->connectUserDb();
-
-            // Store GitHub user info for reference
-            $userSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_user']);
-            if (!$userSetting) {
-                $userSetting = Bean::dispense('enterprisesettings');
-                $userSetting->setting_key = 'github_user';
-                $userSetting->is_shared = 1;  // GitHub credentials are workspace-level
-            }
-            $userSetting->setting_value = json_encode($result['user']);
-            $userSetting->is_encrypted = 0;
-            $userSetting->updated_at = date('Y-m-d H:i:s');
-            Bean::store($userSetting);
-
-            // Store GitHub token
-            $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
-            if (!$tokenSetting) {
-                $tokenSetting = Bean::dispense('enterprisesettings');
-                $tokenSetting->setting_key = 'github_token';
-                $tokenSetting->is_shared = 1;  // GitHub credentials are workspace-level
-            }
-            $tokenSetting->setting_value = $encryptedToken;
-            $tokenSetting->is_encrypted = 1;
-            $tokenSetting->updated_at = date('Y-m-d H:i:s');
-            Bean::store($tokenSetting);
-
-            $this->disconnectUserDb();
-
-            $this->flash('success', 'GitHub connected successfully! You can now add repositories.');
-            $this->logger->info('GitHub connected', [
-                'member_id' => $this->member->id,
-                'github_user' => $result['user']['login'] ?? ''
-            ]);
-
-            Flight::redirect('/enterprise/repos');
-
-        } catch (Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('GitHub OAuth callback failed', ['error' => $e->getMessage()]);
-            $this->flash('error', 'Failed to connect GitHub: ' . $e->getMessage());
-            Flight::redirect('/enterprise');
-        }
+        // Forward query params to the consolidated callback
+        $query = $_SERVER['QUERY_STRING'] ?? '';
+        $redirectUrl = '/github/callback' . ($query ? '?' . $query : '');
+        Flight::redirect($redirectUrl);
     }
 
     // ========================================

@@ -364,9 +364,9 @@ class Github extends BaseControls\Control {
         if (!$setting) {
             $setting = Bean::dispense('enterprisesettings');
             $setting->setting_key = $key;
-            $setting->is_shared = 1;  // GitHub settings are workspace-level
         }
         $setting->setting_value = $value;
+        $setting->is_shared = 1;  // GitHub settings are workspace-level (always set)
         $setting->updated_at = date('Y-m-d H:i:s');
         Bean::store($setting);
     }

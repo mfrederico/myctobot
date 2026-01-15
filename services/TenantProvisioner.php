@@ -260,12 +260,10 @@ message = "We are currently performing maintenance. Please check back soon."
 allowed_ips = "127.0.0.1"
 
 [atlassian]
-; Atlassian OAuth - credentials from conf/atlassian.ini
-; redirect_uri must match exactly what's registered in Atlassian app settings
-; Workspace context is handled via session (user must be logged in for callback)
+; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is tenant-specific
 client_id = ""
 client_secret = ""
-redirect_uri = "https://myctobot.ai/atlassian/callback"
+redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$subdomain}"
 scopes = ""
 
 [github]

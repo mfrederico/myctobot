@@ -130,40 +130,63 @@ class GitHubClient {
     }
 
     /**
-     * Get GitHub config from Flight or fallback to conf/github.ini
+     * Get GitHub configuration with hierarchy:
+     * 1. Load base config from conf/github.ini (primary source - shared OAuth app)
+     * 2. Fill in missing/blank values from tenant config [github] section
+     * 3. Fall back to Flight::get() for backwards compatibility
      */
     private static function getConfig(): array {
-        // Try Flight config first (tenant config)
-        $clientId = Flight::get('github.client_id') ?? '';
-        $clientSecret = Flight::get('github.client_secret') ?? '';
+        $config = [
+            'client_id' => null,
+            'client_secret' => null,
+            'redirect_uri' => null,
+        ];
 
-        if (!empty($clientId) && !empty($clientSecret)) {
-            return [
-                'client_id' => $clientId,
-                'client_secret' => $clientSecret,
-                'redirect_uri' => Flight::get('github.redirect_uri') ?? '',
-            ];
-        }
+        $basePath = dirname(__DIR__);
 
-        // Fall back to conf/github.ini
-        $iniPath = dirname(__DIR__) . '/conf/github.ini';
-        if (file_exists($iniPath)) {
-            $config = parse_ini_file($iniPath);
-            if ($config && !empty($config['client_id']) && !empty($config['client_secret'])) {
-                return $config;
+        // 1. Load base config from conf/github.ini (primary source)
+        $githubIni = $basePath . '/conf/github.ini';
+        if (file_exists($githubIni)) {
+            $baseConfig = parse_ini_file($githubIni, true);
+            // Handle both [github] section and flat format
+            $githubSection = $baseConfig['github'] ?? $baseConfig;
+            if ($githubSection) {
+                foreach ($githubSection as $key => $value) {
+                    if (!empty($value)) {
+                        $config[$key] = $value;
+                    }
+                }
             }
         }
 
-        // Fall back to main config.ini [github] section
-        $mainConfigPath = dirname(__DIR__) . '/conf/config.ini';
-        if (file_exists($mainConfigPath)) {
-            $mainConfig = parse_ini_file($mainConfigPath, true);
-            if (!empty($mainConfig['github']['client_id']) && !empty($mainConfig['github']['client_secret'])) {
-                return $mainConfig['github'];
+        // 2. Override with tenant-specific config (tenant values take priority when not empty)
+        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+        if ($tenantSlug && $tenantSlug !== 'default') {
+            $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
+            if (file_exists($tenantIni)) {
+                $tenantConfig = parse_ini_file($tenantIni, true);
+                if ($tenantConfig && isset($tenantConfig['github'])) {
+                    foreach ($tenantConfig['github'] as $key => $value) {
+                        if (!empty($value)) {
+                            $config[$key] = $value;
+                        }
+                    }
+                }
             }
         }
 
-        return [];
+        // 3. Fall back to Flight::get() for any still-missing values (backwards compatibility)
+        if (empty($config['client_id'])) {
+            $config['client_id'] = Flight::get('github.client_id');
+        }
+        if (empty($config['client_secret'])) {
+            $config['client_secret'] = Flight::get('github.client_secret');
+        }
+        if (empty($config['redirect_uri'])) {
+            $config['redirect_uri'] = Flight::get('github.redirect_uri');
+        }
+
+        return $config;
     }
 
     // ========================================

@@ -1162,12 +1162,18 @@ echo ""
 echo "==========================================="
 echo ""
 
-# Clean repo dir if exists (for re-runs) - git clone creates fresh
-if [[ -d "{$workDir}/repo" ]]; then
-    echo "Cleaning existing repo directory..."
-    rm -rf "{$workDir}/repo"
+# Repo was pre-cloned by PHP, verify it exists
+if [[ ! -d "{$workDir}/repo" ]]; then
+    echo "ERROR: Repository not found at {$workDir}/repo"
+    echo "Clone may have failed. Check the startup logs."
+    exit 1
 fi
 mkdir -p "{$workDir}/attachments" 2>/dev/null
+
+# Copy support files to repo directory (Claude runs from there after cd repo)
+cp -f "{$workDir}/.mcp.json" "{$workDir}/repo/.mcp.json" 2>/dev/null || true
+cp -f "{$workDir}/finish_job.sh" "{$workDir}/repo/finish_job.sh" 2>/dev/null || true
+chmod +x "{$workDir}/repo/finish_job.sh" 2>/dev/null || true
 
 cd {$workDir}
 

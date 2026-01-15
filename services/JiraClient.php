@@ -1176,8 +1176,9 @@ class JiraClient {
         // devStatusBase = https://api.atlassian.com/ex/jira/{cloudId}/rest/dev-status/latest
         $devStatusBase = str_replace('/rest/api/3', '/rest/dev-status/latest', $this->baseUrl);
 
-        // Try multiple application types (GitHub, stash/Bitbucket Server, bitbucket Cloud)
-        $appTypes = ['GitHub', 'stash', 'bitbucket'];
+        // Only query GitHub - stash/bitbucket removed to avoid unnecessary 401 errors
+        // TODO: Make this configurable based on actual repo connections
+        $appTypes = ['GitHub'];
         $logger = Flight::get('log');
 
         foreach ($appTypes as $appType) {

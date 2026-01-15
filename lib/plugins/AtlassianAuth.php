@@ -793,7 +793,7 @@ class AtlassianAuth {
     private static function storeWebhookId(int $memberId, string $cloudId, ?string $webhookId): void {
         try {
             // Find the token for this member/cloudId
-            $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+            $token = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
 
             if (!$token) {
                 return;
@@ -801,7 +801,7 @@ class AtlassianAuth {
 
             // Store webhook_uid on the token record
             $token->webhook_uid = $webhookId;
-            R::store($token);
+            Bean::store($token);
         } catch (\Exception $e) {
             Flight::get('log')->error('Failed to store webhook ID', [
                 'error' => $e->getMessage()
@@ -826,7 +826,7 @@ class AtlassianAuth {
 
         try {
             // Get stored webhook ID from token record
-            $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+            $token = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
             $webhookId = $token ? $token->webhook_uid : null;
 
             if (!$webhookId) {

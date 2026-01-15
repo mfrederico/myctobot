@@ -206,7 +206,12 @@ class CsrfWrapper {
 
     public function getToken(): string {
         $tokens = $this->getTokenArray();
-        return $tokens['csrf_token'] ?? '';
+        return $tokens['_CSRF_TOKEN'] ?? '';
+    }
+
+    public function getIndex(): string {
+        $tokens = $this->getTokenArray();
+        return $tokens['_CSRF_INDEX'] ?? '';
     }
 
     public function getTokenArray(): array {
@@ -214,6 +219,22 @@ class CsrfWrapper {
     }
 
     public function validateRequest(): bool {
+        return $this->csrf->validateRequest();
+    }
+
+    /**
+     * Validate CSRF from JSON request body
+     * For AJAX/fetch requests that send JSON instead of form data
+     * Also populates $_POST so subsequent code can access the JSON data
+     */
+    public function validateJson(): bool {
+        $rawInput = file_get_contents('php://input');
+        $input = json_decode($rawInput, true);
+        if (!$input) {
+            return false;
+        }
+        // Populate $_POST with JSON data for AntiCSRF and subsequent use
+        $_POST = array_merge($_POST, $input);
         return $this->csrf->validateRequest();
     }
 }

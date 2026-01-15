@@ -329,6 +329,7 @@
 
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
+const csrfIndex = '<?= Flight::csrf()->getIndex() ?>';
 
 // Load SSH keys when tab is shown
 document.getElementById('sshkeys-tab').addEventListener('shown.bs.tab', function() {
@@ -421,6 +422,10 @@ async function generateKey() {
     const form = document.getElementById('generateKeyForm');
     const formData = new FormData(form);
     const data = Object.fromEntries(formData.entries());
+
+    // Add CSRF token to request body (AntiCSRF expects these keys)
+    data._CSRF_TOKEN = csrfToken;
+    data._CSRF_INDEX = csrfIndex;
 
     const btn = event.target;
     const originalText = btn.innerHTML;

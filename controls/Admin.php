@@ -961,16 +961,16 @@ class Admin extends Control {
             return;
         }
 
-        if (!Flight::csrf()->validateRequest()) {
+        if (!Flight::csrf()->validateJson()) {
             $this->json(['success' => false, 'error' => 'Invalid CSRF token']);
             return;
         }
 
-        $input = json_decode(file_get_contents('php://input'), true);
-        $name = trim($input['name'] ?? '');
-        $description = trim($input['description'] ?? '');
-        $keyType = $input['key_type'] ?? 'ecdsa';
-        $comment = trim($input['comment'] ?? '');
+        // validateJson() populates $_POST with JSON data
+        $name = trim($_POST['name'] ?? '');
+        $description = trim($_POST['description'] ?? '');
+        $keyType = $_POST['key_type'] ?? 'ecdsa';
+        $comment = trim($_POST['comment'] ?? '');
 
         if (empty($name)) {
             $this->json(['success' => false, 'error' => 'Name is required']);

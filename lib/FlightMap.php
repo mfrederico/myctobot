@@ -3,7 +3,6 @@ use \Flight as Flight;
 use \RedBeanPHP\R as R; // Keep for Flight::register('R') below
 use \app\Bean;
 use \Exception as Exception;
-use \ParagonIE\AntiCSRF\AntiCSRF;
 
 // Define permission levels - customize as needed
 define('LEVELS', ['ROOT'=>1, 'ADMIN'=>50, 'MEMBER'=>100, 'PUBLIC'=>101]);
@@ -195,36 +194,42 @@ Flight::map('hasLevel', function($requiredLevel) {
 });
 
 /**
- * CSRF Protection wrapper with helper methods
+ * Simple CSRF Protection
+ * Generates and validates tokens stored in session
  */
 class CsrfWrapper {
-    private AntiCSRF $csrf;
+    private const SESSION_KEY = '_csrf_token';
+    private const TOKEN_LENGTH = 32;
 
-    public function __construct() {
-        $this->csrf = new AntiCSRF();
-    }
-
+    /**
+     * Get or generate CSRF token
+     */
     public function getToken(): string {
-        $tokens = $this->getTokenArray();
-        return $tokens['_CSRF_TOKEN'] ?? '';
+        if (empty($_SESSION[self::SESSION_KEY])) {
+            $_SESSION[self::SESSION_KEY] = bin2hex(random_bytes(self::TOKEN_LENGTH));
+        }
+        return $_SESSION[self::SESSION_KEY];
     }
 
-    public function getIndex(): string {
-        $tokens = $this->getTokenArray();
-        return $tokens['_CSRF_INDEX'] ?? '';
-    }
-
+    /**
+     * Get token array for forms (backwards compatible)
+     */
     public function getTokenArray(): array {
-        return $this->csrf->getTokenArray();
+        return [
+            'csrf_token' => $this->getToken()
+        ];
     }
 
+    /**
+     * Validate CSRF from form POST data
+     */
     public function validateRequest(): bool {
-        return $this->csrf->validateRequest();
+        $token = $_POST['csrf_token'] ?? '';
+        return $this->validate($token);
     }
 
     /**
      * Validate CSRF from JSON request body
-     * For AJAX/fetch requests that send JSON instead of form data
      * Also populates $_POST so subsequent code can access the JSON data
      */
     public function validateJson(): bool {
@@ -233,9 +238,28 @@ class CsrfWrapper {
         if (!$input) {
             return false;
         }
-        // Populate $_POST with JSON data for AntiCSRF and subsequent use
+        // Populate $_POST with JSON data for subsequent use
         $_POST = array_merge($_POST, $input);
-        return $this->csrf->validateRequest();
+        $token = $input['csrf_token'] ?? '';
+        return $this->validate($token);
+    }
+
+    /**
+     * Validate a token against session
+     */
+    private function validate(string $token): bool {
+        if (empty($token) || empty($_SESSION[self::SESSION_KEY])) {
+            return false;
+        }
+        return hash_equals($_SESSION[self::SESSION_KEY], $token);
+    }
+
+    /**
+     * Regenerate token (call after successful validation if desired)
+     */
+    public function regenerate(): string {
+        $_SESSION[self::SESSION_KEY] = bin2hex(random_bytes(self::TOKEN_LENGTH));
+        return $_SESSION[self::SESSION_KEY];
     }
 }
 

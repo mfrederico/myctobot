@@ -70,7 +70,7 @@ class Enterprise extends BaseControls\Control {
 
         // Check setup status
         // Check API key
-        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $memberId]);
         $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
         // Check GitHub connections (workspace-level - all members share repos)
@@ -79,14 +79,14 @@ class Enterprise extends BaseControls\Control {
 
         // Check credit balance errors (within last 24 hours)
         $creditSetting = Bean::findOne('enterprisesettings',
-            'setting_key = ? AND member_id = ? AND updated_at > ?',
+            'setting_key = ? AND (member_id = ? OR is_shared = 1) AND updated_at > ?',
             ['credit_balance_error', $memberId, date('Y-m-d H:i:s', strtotime('-24 hours'))]
         );
         $creditBalanceError = $creditSetting ? $creditSetting->setting_value : null;
 
-        // Get boards
+        // Get boards (shared boards available to all workspace members)
         $boards = [];
-        $boardBeans = Bean::findAll('jiraboards', 'member_id = ? ORDER BY board_name ASC', [$memberId]);
+        $boardBeans = Bean::findAll('jiraboards', '(member_id = ? OR is_shared = 1) ORDER BY board_name ASC', [$memberId]);
         foreach ($boardBeans as $board) {
             $boards[] = [
                 'id' => $board->id,
@@ -155,8 +155,8 @@ class Enterprise extends BaseControls\Control {
 
         $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
-            // Try to get from member's first Atlassian token
-            $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            // Try to get from member's first Atlassian token (or shared)
+            $token = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$this->member->id]);
             if ($token) {
                 $cloudId = $token->cloud_uid;
             }

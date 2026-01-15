@@ -1044,7 +1044,7 @@ class Webhook extends BaseControls\Control {
                 // Also check board's configured complete status
                 if (!$shouldClose) {
                     $projectKey = explode('-', $issueKey)[0] ?? '';
-                    $board = Bean::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+                    $board = Bean::findOne('jiraboards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
                     if ($board) {
                         $boardCompleteStatus = $board->aidev_status_complete ?? null;
                         if ($boardCompleteStatus && strcasecmp($newStatus, $boardCompleteStatus) === 0) {
@@ -2048,14 +2048,14 @@ class Webhook extends BaseControls\Control {
         // Get the project key from the issue key
         $projectKey = explode('-', $issueKey)[0] ?? '';
 
-        // Find the board for this project to get the cloud_uid
-        $board = Bean::findOne('jiraboards', 'member_id = ? AND project_key = ?', [$memberId, $projectKey]);
+        // Find the board for this project to get the cloud_uid (shared boards available to all)
+        $board = Bean::findOne('jiraboards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
         if ($board && !empty($board->cloud_uid)) {
             return $board->cloud_uid;
         }
 
-        // Fall back to first token for member
-        $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+        // Fall back to first token for member (or shared)
+        $token = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
         if ($token) {
             return $token->cloud_uid;
         }

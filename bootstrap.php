@@ -111,23 +111,30 @@ class Bootstrap {
 
 		if (empty($config['log.name'])) $config['log.name'] = 'app';
 
-		// Set up logging for legacy 
+		// Set up logging for legacy
 		Flight::register('log', 'Monolog\Logger', array($config['log.name']), function($log) use ($config) {
 			// Create logger
 			$log = new Logger($config['log.name']);
-			
-			// Create formatter for better readability
+
+			// Create formatter with tenant ID prefix for better readability
 			$formatter = new LineFormatter(
-				"[%datetime%] %channel%.%level_name%: %message% %context% %extra%\n",
+				"[%datetime%] [%extra.tenant%] %channel%.%level_name%: %message% %context%\n",
 				"Y-m-d H:i:s",
 				true,
 				true
 			);
-        
+
 			// Add rotating file handler (new file each day, keep 30 days)
 			$handler = new RotatingFileHandler($config['logFile'], 30, constant("Monolog\Logger::{$config['logLevel']}"));
 			$handler->setFormatter($formatter);
 			$log->pushHandler($handler);
+
+			// Add processor to include tenant ID in every log entry
+			$log->pushProcessor(function ($record) {
+				$tenant = $_SESSION['tenant_slug'] ?? 'default';
+				$record['extra']['tenant'] = $tenant;
+				return $record;
+			});
 
 			// Sets up the cached flight logger
 			Flight::set('log',$log);

@@ -157,7 +157,7 @@ try {
     }
 
     // Get API key using RedBeanPHP (single MySQL database)
-    $apiKeySetting = Bean::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'anthropic_api_key']);
+    $apiKeySetting = Bean::findOne('enterprisesettings', '(member_id = ? OR is_shared = 1) AND setting_key = ?', [$memberId, 'anthropic_api_key']);
 
     if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
         throw new \Exception("Anthropic API key not configured");

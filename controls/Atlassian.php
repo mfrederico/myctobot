@@ -358,8 +358,8 @@ class Atlassian extends BaseControls\Control {
 
         $cloudId = $this->getParam('cloud_uid');
         if (empty($cloudId)) {
-            // Try to get from member's first Atlassian token
-            $token = Bean::findOne('atlassiantoken', 'member_id = ?', [$this->member->id]);
+            // Try to get from member's first Atlassian token (or shared)
+            $token = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$this->member->id]);
             if ($token) {
                 $cloudId = $token->cloud_uid;
             }

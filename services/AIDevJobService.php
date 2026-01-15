@@ -71,7 +71,8 @@ class AIDevJobService {
             // Auto-detect board ID from issue key if not provided (Jira only)
             if (!$boardId && $projectType === self::PROJECT_TYPE_JIRA) {
                 $projectKey = explode('-', $issueKey)[0];
-                $board = Bean::findOne('jiraboards', 'project_key = ? AND member_id = ?', [$projectKey, $memberId]);
+                // Allow shared workspace boards (is_shared = 1) or member-specific boards
+                $board = Bean::findOne('jiraboards', 'project_key = ? AND (member_id = ? OR is_shared = 1)', [$projectKey, $memberId]);
                 if (!$board) {
                     return ['success' => false, 'error' => "No board found for project: {$projectKey}"];
                 }

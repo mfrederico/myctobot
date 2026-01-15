@@ -430,24 +430,24 @@ class AtlassianAuth {
     }
 
     /**
-     * Get all connected Atlassian sites for a member
+     * Get all connected Atlassian sites for a member (includes shared tokens)
      *
      * @param int $memberId Member ID
      * @return array Array of token records
      */
     public static function getConnectedSites($memberId) {
-        return Bean::findAll('atlassiantoken', 'member_id = ?', [$memberId]);
+        return Bean::findAll('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
     }
 
     /**
-     * Get a specific connected site by cloud ID
+     * Get a specific connected site by cloud ID (includes shared tokens)
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @return object|null Token bean with site_name, site_url, etc.
      */
     public static function getSiteByCloudId($memberId, $cloudId) {
-        return Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+        return Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1) AND cloud_uid = ?', [$memberId, $cloudId]);
     }
 
     /**

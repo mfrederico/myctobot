@@ -147,10 +147,10 @@ $workDir = "/tmp/{$sessionName}";
 // Update session with actual work directory
 $aoeSession->projectPath = $workDir;
 
-// Look up cloudId from member's Atlassian connection
+// Look up cloudId from member's Atlassian connection (or shared)
 $cloudId = null;
 if ($provider === 'jira') {
-    $atlassianTokenCheck = Bean::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+    $atlassianTokenCheck = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
     if ($atlassianTokenCheck) {
         $cloudId = $atlassianTokenCheck->cloud_uid;
     } else {
@@ -455,7 +455,7 @@ $jiraOAuthToken = '';
 $jiraSiteUrl = '';
 
 try {
-    $atlassianToken = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+    $atlassianToken = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1) AND cloud_uid = ?', [$memberId, $cloudId]);
     if ($atlassianToken) {
         $jiraEmail = $atlassianToken->email ?? '';
         // Get the site URL for ticket links

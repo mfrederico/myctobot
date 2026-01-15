@@ -83,8 +83,8 @@ class Anthropic extends BaseControls\Control {
             return;
         }
 
-        // Get current status
-        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+        // Get current status (include shared settings)
+        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $memberId]);
         $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
 
         // Check for credit balance warnings
@@ -113,7 +113,7 @@ class Anthropic extends BaseControls\Control {
         $apiKey = null;
 
         try {
-            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['anthropic_api_key', $memberId]);
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $memberId]);
 
             if (!$setting || empty($setting->setting_value)) {
                 $this->json(['success' => false, 'error' => 'No API key configured']);

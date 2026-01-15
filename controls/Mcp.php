@@ -202,8 +202,8 @@ class Mcp extends Control {
             return false;
         }
 
-        // Verify member has a token for this cloud
-        $token = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?',
+        // Verify member has a token for this cloud (or shared)
+        $token = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1) AND cloud_uid = ?',
             [$this->memberId, $this->cloudId]);
 
         $this->logger->debug('MCP auth token lookup', ['found' => !empty($token)]);

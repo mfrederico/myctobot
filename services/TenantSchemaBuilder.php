@@ -881,6 +881,7 @@ class TenantSchemaBuilder {
         $bean->site_url = 'https://example.atlassian.net';
         $bean->site_name = 'Schema Example Site';
         $bean->scopes = 'read:jira-work read:jira-user offline_access';
+        $bean->is_shared = false; // Workspace sharing flag
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
@@ -897,6 +898,7 @@ class TenantSchemaBuilder {
         $bean->project_key = 'SCHEMA';
         $bean->project_name = 'Schema Template Project';
         $bean->is_active = true;
+        $bean->is_shared = false; // Workspace sharing flag
         $bean->digest_enabled = true;
         $bean->digest_frequency = 'daily';
         $bean->digest_time = '09:00';
@@ -1025,10 +1027,12 @@ class TenantSchemaBuilder {
 
     private function createEnterpriseSettingsTable(): void {
         $bean = R::dispense('enterprisesettings');
+        $bean->member = $this->member; // Creates member_id FK
         $bean->setting_key = 'schema_key';
         $bean->setting_value = 'schema_value';
         $bean->setting_type = 'string';
         $bean->is_encrypted = false;
+        $bean->is_shared = false; // Workspace sharing flag
         $bean->description = 'Schema setting';
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
@@ -1106,6 +1110,7 @@ class TenantSchemaBuilder {
         $bean->public_key = str_repeat('x', 500); // Public key content
         $bean->private_key_encrypted = str_repeat('x', 2000); // Encrypted private key
         $bean->fingerprint = 'SHA256:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+        $bean->is_shared = false; // Workspace sharing flag
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->last_used_at = date('Y-m-d H:i:s');
         R::store($bean);

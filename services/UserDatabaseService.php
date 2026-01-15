@@ -144,6 +144,8 @@ class UserDatabaseService {
         $board->digest_time = $data['digest_time'] ?? '08:00';
         $board->timezone = $data['timezone'] ?? 'UTC';
         $board->status_filter = $data['status_filter'] ?? 'To Do';
+        $board->member_id = $data['member_id'] ?? null;
+        $board->is_shared = $data['is_shared'] ?? 0;
         $board->created_at = date('Y-m-d H:i:s');
         return Bean::store($board);
     }
@@ -161,7 +163,7 @@ class UserDatabaseService {
         }
 
         $allowedFields = [
-            'board_name', 'project_key', 'board_type', 'enabled',
+            'board_name', 'project_key', 'board_type', 'enabled', 'is_shared',
             'digest_enabled', 'digest_time', 'digest_cc', 'timezone', 'status_filter',
             'priority_weights', 'goals', 'last_analysis_at', 'last_digest_at',
             'aidev_status_working', 'aidev_status_pr_created',

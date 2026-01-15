@@ -50,7 +50,7 @@ class AtlassianAuth {
             'client_id' => null,
             'client_secret' => null,
             'redirect_uri' => null,
-            'scopes' => self::$defaultScopes,
+            'scopes' => null,  // Don't default here - let Flight::get() override
         ];
 
         // 1. Load base config from conf/atlassian.ini (primary source)

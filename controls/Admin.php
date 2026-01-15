@@ -911,6 +911,163 @@ class Admin extends Control {
     }
 
     // ========================================
+    // SSH Key Management
+    // ========================================
+
+    /**
+     * List SSH keys (AJAX)
+     */
+    public function sshkeys($params = []) {
+        require_once __DIR__ . '/../services/SSHKeyService.php';
+
+        // Connect to user database for tenant-specific keys
+        $this->connectUserDb();
+
+        $keys = \app\services\SSHKeyService::getKeys();
+
+        $this->disconnectUserDb();
+
+        $this->json([
+            'success' => true,
+            'keys' => $keys,
+            'key_types' => \app\services\SSHKeyService::getSupportedTypes()
+        ]);
+    }
+
+    /**
+     * Generate a new SSH key
+     */
+    public function generatesshkey($params = []) {
+        require_once __DIR__ . '/../services/SSHKeyService.php';
+
+        $request = Flight::request();
+
+        if ($request->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
+
+        if (!Flight::csrf()->validateRequest()) {
+            $this->json(['success' => false, 'error' => 'Invalid CSRF token']);
+            return;
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        $name = trim($input['name'] ?? '');
+        $description = trim($input['description'] ?? '');
+        $keyType = $input['key_type'] ?? 'ecdsa';
+        $comment = trim($input['comment'] ?? '');
+
+        if (empty($name)) {
+            $this->json(['success' => false, 'error' => 'Name is required']);
+            return;
+        }
+
+        // Connect to user database for tenant-specific keys
+        $this->connectUserDb();
+
+        try {
+            $key = \app\services\SSHKeyService::createKey(
+                $this->member->id,
+                $name,
+                $keyType,
+                $description,
+                $comment
+            );
+
+            $this->logger->info('SSH key generated', [
+                'member_id' => $this->member->id,
+                'key_id' => $key['id'],
+                'key_type' => $keyType,
+                'fingerprint' => $key['fingerprint']
+            ]);
+
+            $this->disconnectUserDb();
+
+            $this->json([
+                'success' => true,
+                'key' => $key,
+                'message' => 'SSH key generated successfully. Save the private key now - it cannot be retrieved later.'
+            ]);
+
+        } catch (\Exception $e) {
+            $this->disconnectUserDb();
+            $this->logger->error('SSH key generation failed', [
+                'error' => $e->getMessage()
+            ]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Get SSH key details (with private key for download)
+     */
+    public function getsshkey($params = []) {
+        require_once __DIR__ . '/../services/SSHKeyService.php';
+
+        $keyId = (int)($this->opId() ?? 0);
+        if (!$keyId) {
+            $this->json(['success' => false, 'error' => 'Key ID required']);
+            return;
+        }
+
+        $includePrivate = $this->getParam('include_private') === '1';
+
+        $this->connectUserDb();
+        $key = \app\services\SSHKeyService::getKey($keyId, $includePrivate);
+        $this->disconnectUserDb();
+
+        if (!$key) {
+            $this->json(['success' => false, 'error' => 'Key not found']);
+            return;
+        }
+
+        $this->json([
+            'success' => true,
+            'key' => $key
+        ]);
+    }
+
+    /**
+     * Delete an SSH key
+     */
+    public function deletesshkey($params = []) {
+        require_once __DIR__ . '/../services/SSHKeyService.php';
+
+        $keyId = (int)($this->opId() ?? 0);
+        if (!$keyId) {
+            $this->json(['success' => false, 'error' => 'Key ID required']);
+            return;
+        }
+
+        $this->connectUserDb();
+
+        // Get key info for logging
+        $key = \app\services\SSHKeyService::getKey($keyId);
+        if (!$key) {
+            $this->disconnectUserDb();
+            $this->json(['success' => false, 'error' => 'Key not found']);
+            return;
+        }
+
+        $deleted = \app\services\SSHKeyService::deleteKey($keyId);
+
+        $this->logger->info('SSH key deleted', [
+            'member_id' => $this->member->id,
+            'key_id' => $keyId,
+            'key_name' => $key['name'],
+            'fingerprint' => $key['fingerprint']
+        ]);
+
+        $this->disconnectUserDb();
+
+        $this->json([
+            'success' => $deleted,
+            'message' => $deleted ? 'Key deleted successfully' : 'Failed to delete key'
+        ]);
+    }
+
+    // ========================================
     // Plugin Registry Cache Management
     // ========================================
 

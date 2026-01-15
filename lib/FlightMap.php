@@ -1,6 +1,7 @@
 <?php
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \RedBeanPHP\R as R; // Keep for Flight::register('R') below
+use \app\Bean;
 use \Exception as Exception;
 use \ParagonIE\AntiCSRF\AntiCSRF;
 
@@ -134,7 +135,7 @@ Flight::map('getMember', function() {
     }
 
     // Refresh member data from database
-    $member = R::load('member', $_SESSION['member']['id']);
+    $member = Bean::load('member', $_SESSION['member']['id']);
     if ($member->id) {
         $_SESSION['member'] = $member->export();
         return $member;
@@ -374,7 +375,7 @@ Flight::map('setSetting', function($key, $value) {
 
     if (!$setting) {
         // Create new setting via association
-        $setting = R::dispense('settings');
+        $setting = Bean::dispense('settings');
         $setting->setting_key = $key;
         $member->ownSettingsList[] = $setting;
     }
@@ -382,7 +383,7 @@ Flight::map('setSetting', function($key, $value) {
     $setting->setting_value = $value;
     $setting->updated_at = date('Y-m-d H:i:s');
 
-    return R::store($member);
+    return Bean::store($member);
 });
 
 /**
@@ -390,19 +391,19 @@ Flight::map('setSetting', function($key, $value) {
  * These are global application settings not tied to any user
  */
 Flight::map('getSystemSetting', function($key) {
-    $setting = R::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
+    $setting = Bean::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
     return $setting ? $setting->setting_value : null;
 });
 
 Flight::map('setSystemSetting', function($key, $value) {
-    $setting = R::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
+    $setting = Bean::findOne('settings', 'member_id IS NULL AND setting_key = ?', [$key]);
     if (!$setting) {
-        $setting = R::dispense('settings');
+        $setting = Bean::dispense('settings');
         $setting->memberId = null; // System-wide settings have NULL member_id
         $setting->settingKey = $key;
     }
     $setting->settingValue = $value;
     $setting->updatedAt = date('Y-m-d H:i:s');
 
-    return R::store($setting);
+    return Bean::store($setting);
 });

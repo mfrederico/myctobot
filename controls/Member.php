@@ -2,7 +2,6 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
 use \app\Bean;
 use \Exception as Exception;
 use app\BaseControls\Control;
@@ -38,7 +37,7 @@ class Member extends Control {
             } else {
             
             $request = Flight::request();
-            $member = R::load('member', $this->member->id);
+            $member = Bean::load('member', $this->member->id);
 
             // Validate input
             $username = trim($request->data->username ?? '');
@@ -62,13 +61,13 @@ class Member extends Control {
                 $this->viewData['error'] = 'Invalid email format';
             } else {
                 // Check for duplicate username (excluding current member)
-                $existingUsername = R::findOne('member', 'username = ? AND id != ?', [$username, $member->id]);
+                $existingUsername = Bean::findOne('member', 'username = ? AND id != ?', [$username, $member->id]);
 
                 if ($existingUsername) {
                     $this->viewData['error'] = 'Username already taken';
                 } else {
                     // Check for duplicate email (excluding current member)
-                    $existingEmail = R::findOne('member', 'email = ? AND id != ?', [$email, $member->id]);
+                    $existingEmail = Bean::findOne('member', 'email = ? AND id != ?', [$email, $member->id]);
 
                     if ($existingEmail) {
                         $this->viewData['error'] = 'Email already exists';
@@ -106,7 +105,7 @@ class Member extends Control {
                 $member->updated_at = date('Y-m-d H:i:s');
                 
                 try {
-                    R::store($member);
+                    Bean::store($member);
                     $_SESSION['member'] = $member->export();
                     $this->member = $member; // Update current member object
                     if (empty($this->viewData['success'])) {

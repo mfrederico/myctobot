@@ -10,7 +10,7 @@
 namespace app\services;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Stripe\Stripe;
 use \Stripe\Customer;
 use \Stripe\Checkout\Session as CheckoutSession;
@@ -112,7 +112,7 @@ class StripeService {
         $subscription = SubscriptionService::ensureSubscription($billingEmail, $billingName);
         $subscription->stripe_customer_id = $customer->id;
         $subscription->updated_at = date('Y-m-d H:i:s');
-        R::store($subscription);
+        Bean::store($subscription);
 
         return $customer->id;
     }
@@ -280,7 +280,7 @@ class StripeService {
         $customerId = $stripeSubscription->customer;
 
         // Find workspace subscription by Stripe customer ID
-        $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
+        $subscription = Bean::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
 
         if (!$subscription) {
             Flight::get('log')->warning('Subscription update for unknown customer', [
@@ -316,7 +316,7 @@ class StripeService {
             $subscription->cancelled_at = null;
         }
 
-        R::store($subscription);
+        Bean::store($subscription);
 
         Flight::get('log')->info('Workspace subscription updated', [
             'tier' => $tier,
@@ -330,7 +330,7 @@ class StripeService {
     private static function handleSubscriptionCanceled($stripeSubscription): void {
         $customerId = $stripeSubscription->customer;
 
-        $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
+        $subscription = Bean::findOne('subscription', 'stripe_customer_id = ?', [$customerId]);
         if (!$subscription) {
             return;
         }
@@ -341,7 +341,7 @@ class StripeService {
         $subscription->cancelled_at = date('Y-m-d H:i:s');
         $subscription->updated_at = date('Y-m-d H:i:s');
 
-        R::store($subscription);
+        Bean::store($subscription);
 
         Flight::get('log')->info('Workspace subscription canceled');
     }
@@ -367,11 +367,11 @@ class StripeService {
         ]);
 
         // Mark workspace subscription as past_due
-        $subscription = R::findOne('subscription', 'stripe_customer_id = ?', [$invoice->customer]);
+        $subscription = Bean::findOne('subscription', 'stripe_customer_id = ?', [$invoice->customer]);
         if ($subscription) {
             $subscription->status = 'past_due';
             $subscription->updated_at = date('Y-m-d H:i:s');
-            R::store($subscription);
+            Bean::store($subscription);
         }
     }
 
@@ -427,7 +427,7 @@ class StripeService {
 
             $subscription->cancelled_at = date('Y-m-d H:i:s');
             $subscription->updated_at = date('Y-m-d H:i:s');
-            R::store($subscription);
+            Bean::store($subscription);
 
             return true;
         } catch (\Exception $e) {
@@ -458,7 +458,7 @@ class StripeService {
 
             $subscription->cancelled_at = null;
             $subscription->updated_at = date('Y-m-d H:i:s');
-            R::store($subscription);
+            Bean::store($subscription);
 
             return true;
         } catch (\Exception $e) {

@@ -7,8 +7,8 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
 use \app\Bean;
+use \RedBeanPHP\R as R; // Keep for R::close()
 use \app\services\AIDevJobService;
 use \app\services\AIDevJobManager;
 use \app\services\EncryptionService;
@@ -2164,7 +2164,7 @@ class Webhook extends BaseControls\Control {
                     $digestJob->partial_output = $partialOutput;
                 }
 
-                R::store($digestJob);
+                Bean::store($digestJob);
 
                 $this->logger->debug('Digest progress update', [
                     'job_uid' => $jobId,
@@ -2206,7 +2206,7 @@ class Webhook extends BaseControls\Control {
             }
 
             $digestJob->result = json_encode($result);
-            R::store($digestJob);
+            Bean::store($digestJob);
 
             echo json_encode(['success' => true, 'items_count' => $itemsCount]);
 

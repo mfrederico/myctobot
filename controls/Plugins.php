@@ -13,7 +13,7 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\services\PluginSearchService;
 
@@ -248,7 +248,7 @@ class Plugins extends BaseControls\Control {
                 $params[] = $category;
             }
 
-            return (int) R::getCell($sql, $params);
+            return (int) Bean::getCell($sql, $params);
 
         } catch (Exception $e) {
             return 0;
@@ -276,7 +276,7 @@ class Plugins extends BaseControls\Control {
         try {
             // NOTE: Future upgrade consideration:
             // Could track unique views per user/session for more accurate analytics
-            R::exec("UPDATE plugins SET download_count = download_count + 1 WHERE id = ?", [$pluginId]);
+            Bean::exec("UPDATE plugins SET download_count = download_count + 1 WHERE id = ?", [$pluginId]);
         } catch (Exception $e) {
             // Silent failure - don't affect user experience
             $this->logger->debug('Failed to increment view count: ' . $e->getMessage());

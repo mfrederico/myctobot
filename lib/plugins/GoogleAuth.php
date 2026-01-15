@@ -12,7 +12,7 @@
 namespace app\plugins;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class GoogleAuth {
 
@@ -187,7 +187,7 @@ class GoogleAuth {
         $googleId = $googleUser['id'];
 
         // First try to find by Google ID
-        $member = R::findOne('member', 'google_id = ?', [$googleId]);
+        $member = Bean::findOne('member', 'google_id = ?', [$googleId]);
 
         if ($member) {
             // Update last login and avatar if changed
@@ -198,12 +198,12 @@ class GoogleAuth {
                 $member->avatar_url = $googleUser['picture'];
             }
 
-            R::store($member);
+            Bean::store($member);
             return $member;
         }
 
         // Try to find by email
-        $member = R::findOne('member', 'email = ?', [$email]);
+        $member = Bean::findOne('member', 'email = ?', [$email]);
 
         if ($member) {
             // Link existing account with Google ID
@@ -215,13 +215,13 @@ class GoogleAuth {
                 $member->avatar_url = $googleUser['picture'];
             }
 
-            R::store($member);
+            Bean::store($member);
             $logger->info('Linked existing account to Google', ['id' => $member->id]);
             return $member;
         }
 
         // Create new user - no email verification needed for Google auth
-        $member = R::dispense('member');
+        $member = Bean::dispense('member');
         $member->email = $email;
         $member->username = self::generateUsername($googleUser);
         $member->password = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT); // Random password
@@ -243,7 +243,7 @@ class GoogleAuth {
             $member->display_name = $googleUser['name'];
         }
 
-        $id = R::store($member);
+        $id = Bean::store($member);
         $member->id = $id;
 
         $logger->info('Created new user from Google OAuth', [
@@ -280,7 +280,7 @@ class GoogleAuth {
         $username = $base;
         $counter = 1;
 
-        while (R::count('member', 'username = ?', [$username]) > 0) {
+        while (Bean::count('member', 'username = ?', [$username]) > 0) {
             $username = $base . $counter;
             $counter++;
         }
@@ -293,7 +293,7 @@ class GoogleAuth {
      * Useful for displaying profile info
      */
     public static function getMemberGoogleInfo(int $memberId): ?array {
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
 
         if (!$member || empty($member->google_id)) {
             return null;

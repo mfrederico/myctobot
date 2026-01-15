@@ -7,7 +7,7 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 
 class Permissions extends BaseControls\Control {
@@ -51,11 +51,11 @@ class Permissions extends BaseControls\Control {
         }
         
         // Check database for permission
-        $auth = R::findOne('authcontrol', 'control = ? AND method = ?', [$control, $method]);
+        $auth = Bean::findOne('authcontrol', 'control = ? AND method = ?', [$control, $method]);
         
         if (!$auth) {
             // Check for wildcard permission (entire controller)
-            $auth = R::findOne('authcontrol', 'control = ? AND method = ?', [$control, '*']);
+            $auth = Bean::findOne('authcontrol', 'control = ? AND method = ?', [$control, '*']);
         }
         
         if ($auth) {
@@ -70,13 +70,13 @@ class Permissions extends BaseControls\Control {
         if (Flight::get('build')) {
             $this->logger->info("Build mode: Creating permission for {$control}:{$method}");
             
-            $auth = R::dispense('authcontrol');
+            $auth = Bean::dispense('authcontrol');
             $auth->control = $control;
             $auth->method = $method;
             $auth->level = LEVELS['ADMIN']; // Default to admin
             $auth->description = "Auto-generated permission for {$control}:{$method}";
             $auth->created_at = date('Y-m-d H:i:s');
-            R::store($auth);
+            Bean::store($auth);
 
             // Clear cache after creating permission
             \app\PermissionCache::clear();
@@ -102,7 +102,7 @@ class Permissions extends BaseControls\Control {
         }
         
         // Get all permissions
-        $permissions = R::findAll('authcontrol', 'ORDER BY control, method');
+        $permissions = Bean::findAll('authcontrol', 'ORDER BY control, method');
         
         $this->render('permissions/index', [
             'title' => 'Permission Management',
@@ -123,14 +123,14 @@ class Permissions extends BaseControls\Control {
         $id = $this->opType() ?? 0;
         
         if ($id) {
-            $permission = R::load('authcontrol', $id);
+            $permission = Bean::load('authcontrol', $id);
             if (!$permission->id) {
                 $this->flash('error', 'Permission not found');
                 Flight::redirect('/permissions');
                 return;
             }
         } else {
-            $permission = R::dispense('authcontrol');
+            $permission = Bean::dispense('authcontrol');
         }
         
         $this->render('permissions/edit', [
@@ -158,12 +158,12 @@ class Permissions extends BaseControls\Control {
             $id = $this->getParam('id', 0);
             
             if ($id) {
-                $permission = R::load('authcontrol', $id);
+                $permission = Bean::load('authcontrol', $id);
                 if (!$permission->id) {
                     throw new Exception('Permission not found');
                 }
             } else {
-                $permission = R::dispense('authcontrol');
+                $permission = Bean::dispense('authcontrol');
                 $permission->created_at = date('Y-m-d H:i:s');
             }
             
@@ -173,7 +173,7 @@ class Permissions extends BaseControls\Control {
             $permission->description = $this->sanitize($this->getParam('description'));
             $permission->updated_at = date('Y-m-d H:i:s');
             
-            R::store($permission);
+            Bean::store($permission);
 
             // Clear both local and APCu cache
             self::$cache = [];
@@ -203,10 +203,10 @@ class Permissions extends BaseControls\Control {
         
         try {
             $id = $this->getParam('id');
-            $permission = R::load('authcontrol', $id);
+            $permission = Bean::load('authcontrol', $id);
             
             if ($permission->id) {
-                R::trash($permission);
+                Bean::trash($permission);
 
                 // Clear both local and APCu cache
                 self::$cache = [];
@@ -278,7 +278,7 @@ class Permissions extends BaseControls\Control {
                             $methodName = strtolower($method->name);
                             
                             // Check if permission exists
-                            $exists = R::count('authcontrol', 
+                            $exists = Bean::count('authcontrol', 
                                 'control = ? AND method = ?', 
                                 [$controlName, $methodName]) > 0;
                             

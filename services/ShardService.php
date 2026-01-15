@@ -6,7 +6,7 @@
 
 namespace app\services;
 
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 
@@ -22,14 +22,14 @@ class ShardService {
         }
         $sql .= " ORDER BY name ASC";
 
-        return R::getAll($sql);
+        return Bean::getAll($sql);
     }
 
     /**
      * Get a shard by ID
      */
     public static function getShard(int $shardId): ?array {
-        $shard = R::getRow("SELECT * FROM claudeshards WHERE id = ?", [$shardId]);
+        $shard = Bean::getRow("SELECT * FROM claudeshards WHERE id = ?", [$shardId]);
         return $shard ?: null;
     }
 
@@ -37,7 +37,7 @@ class ShardService {
      * Get shard by host and port
      */
     public static function getShardByHost(string $host, int $port = 3500): ?array {
-        $shard = R::getRow(
+        $shard = Bean::getRow(
             "SELECT * FROM claudeshards WHERE host = ? AND port = ?",
             [$host, $port]
         );
@@ -48,7 +48,7 @@ class ShardService {
      * Create a new shard
      */
     public static function createShard(array $data): int {
-        $shard = R::dispense('claudeshards');
+        $shard = Bean::dispense('claudeshards');
         $shard->name = $data['name'];
         $shard->description = $data['description'] ?? '';
         $shard->host = $data['host'];
@@ -68,14 +68,14 @@ class ShardService {
         $shard->ssh_key_path = $data['ssh_key_path'] ?? null;
         $shard->ssh_validated = $data['ssh_validated'] ?? 0;
 
-        return R::store($shard);
+        return Bean::store($shard);
     }
 
     /**
      * Update a shard
      */
     public static function updateShard(int $shardId, array $data): bool {
-        $shard = R::load('claudeshards', $shardId);
+        $shard = Bean::load('claudeshards', $shardId);
         if (!$shard->id) {
             return false;
         }
@@ -99,7 +99,7 @@ class ShardService {
             }
         }
 
-        R::store($shard);
+        Bean::store($shard);
         return true;
     }
 
@@ -107,12 +107,12 @@ class ShardService {
      * Delete a shard
      */
     public static function deleteShard(int $shardId): bool {
-        $shard = R::load('claudeshards', $shardId);
+        $shard = Bean::load('claudeshards', $shardId);
         if (!$shard->id) {
             return false;
         }
 
-        R::trash($shard);
+        Bean::trash($shard);
         return true;
     }
 
@@ -135,10 +135,10 @@ class ShardService {
             $data = json_decode($response->getBody()->getContents(), true);
 
             // Update health status
-            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean = Bean::load('claudeshards', $shardId);
             $shardBean->health_status = 'healthy';
             $shardBean->last_health_check = date('Y-m-d H:i:s');
-            R::store($shardBean);
+            Bean::store($shardBean);
 
             return [
                 'healthy' => true,
@@ -147,10 +147,10 @@ class ShardService {
 
         } catch (GuzzleException $e) {
             // Update health status
-            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean = Bean::load('claudeshards', $shardId);
             $shardBean->health_status = 'unhealthy';
             $shardBean->last_health_check = date('Y-m-d H:i:s');
-            R::store($shardBean);
+            Bean::store($shardBean);
 
             return [
                 'healthy' => false,
@@ -190,7 +190,7 @@ class ShardService {
      * Get shards assigned to a member
      */
     public static function getMemberShards(int $memberId): array {
-        return R::getAll("
+        return Bean::getAll("
             SELECT s.*, sa.priority
             FROM claudeshards s
             JOIN shardassignments sa ON s.id = sa.shard_id
@@ -205,20 +205,20 @@ class ShardService {
     public static function assignShard(int $memberId, int $shardId, int $priority = 0): bool {
         try {
             // Check if assignment already exists
-            $assignment = R::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
+            $assignment = Bean::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
 
             if ($assignment) {
                 // Update existing
                 $assignment->priority = $priority;
             } else {
                 // Create new
-                $assignment = R::dispense('shardassignments');
+                $assignment = Bean::dispense('shardassignments');
                 $assignment->member_id = $memberId;
                 $assignment->shard_id = $shardId;
                 $assignment->priority = $priority;
             }
 
-            R::store($assignment);
+            Bean::store($assignment);
             return true;
         } catch (\Exception $e) {
             return false;
@@ -229,9 +229,9 @@ class ShardService {
      * Remove shard assignment from member
      */
     public static function unassignShard(int $memberId, int $shardId): bool {
-        $assignment = R::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
+        $assignment = Bean::findOne('shardassignments', 'member_id = ? AND shard_id = ?', [$memberId, $shardId]);
         if ($assignment) {
-            R::trash($assignment);
+            Bean::trash($assignment);
         }
         return true;
     }
@@ -240,7 +240,7 @@ class ShardService {
      * Get default shards (available to all members)
      */
     public static function getDefaultShards(): array {
-        return R::getAll("
+        return Bean::getAll("
             SELECT * FROM claudeshards
             WHERE is_active = 1 AND is_default = 1
             ORDER BY name ASC
@@ -251,7 +251,7 @@ class ShardService {
      * Get shard stats
      */
     public static function getShardStats(int $shardId): array {
-        $stats = R::getRow("
+        $stats = Bean::getRow("
             SELECT
                 COUNT(*) as total_jobs,
                 SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_jobs,
@@ -275,7 +275,7 @@ class ShardService {
      * Get running job count for a shard (from local DB)
      */
     public static function getRunningJobCount(int $shardId): int {
-        return (int) R::getCell(
+        return (int) Bean::getCell(
             "SELECT COUNT(*) FROM shardjobs WHERE shard_id = ? AND status = 'running'",
             [$shardId]
         );

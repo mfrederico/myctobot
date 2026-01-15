@@ -150,7 +150,7 @@ $aoeSession->projectPath = $workDir;
 // Look up cloudId from member's Atlassian connection
 $cloudId = null;
 if ($provider === 'jira') {
-    $atlassianTokenCheck = R::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+    $atlassianTokenCheck = Bean::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
     if ($atlassianTokenCheck) {
         $cloudId = $atlassianTokenCheck->cloud_uid;
     } else {
@@ -349,7 +349,7 @@ if ($provider === 'github') {
 // Get Repository Configuration
 // ============================================
 echo "Getting repository configuration...\n";
-$member = R::load('member', $memberId);
+$member = Bean::load('member', $memberId);
 if (!$member || !$member->id) {
     echo "Error: Member not found\n";
     exit(1);
@@ -399,7 +399,7 @@ if ($agentBean && $agentBean->id) {
 
 // If no agent assigned, check for default agent (workspace-level)
 if (!$agentConfig) {
-    $defaultAgent = R::findOne('aiagents', 'is_default = 1 AND is_active = 1');
+    $defaultAgent = Bean::findOne('aiagents', 'is_default = 1 AND is_active = 1');
     if ($defaultAgent) {
         $agentConfig = [
             'id' => $defaultAgent->id,
@@ -455,7 +455,7 @@ $jiraOAuthToken = '';
 $jiraSiteUrl = '';
 
 try {
-    $atlassianToken = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+    $atlassianToken = Bean::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
     if ($atlassianToken) {
         $jiraEmail = $atlassianToken->email ?? '';
         // Get the site URL for ticket links

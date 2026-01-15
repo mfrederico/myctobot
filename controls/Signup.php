@@ -13,7 +13,7 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\services\TenantProvisioner;
 use \app\services\MailgunService;
 
@@ -58,7 +58,7 @@ class Signup extends BaseControls\Control {
 
             // Also check if subdomain is pending verification
             if ($result['valid']) {
-                $pending = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+                $pending = Bean::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
                 if ($pending) {
                     $result = ['valid' => false, 'error' => 'This subdomain is reserved (pending verification)'];
                 }
@@ -162,10 +162,10 @@ class Signup extends BaseControls\Control {
             }
 
             // Check if subdomain is already pending
-            $existing = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+            $existing = Bean::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
             if ($existing) {
                 // Delete old pending signup to allow retry
-                R::trash($existing);
+                Bean::trash($existing);
             }
 
             // Generate verification token
@@ -173,7 +173,7 @@ class Signup extends BaseControls\Control {
             $expiresAt = date('Y-m-d H:i:s', strtotime('+24 hours'));
 
             // Store pending signup
-            $pending = R::dispense('pendingsignup');
+            $pending = Bean::dispense('pendingsignup');
             $pending->subdomain = $subdomain;
             $pending->business_name = $businessName;
             $pending->email = $email;
@@ -181,7 +181,7 @@ class Signup extends BaseControls\Control {
             $pending->verification_token = $token;
             $pending->expires_at = $expiresAt;
             $pending->resend_count = 0;
-            R::store($pending);
+            Bean::store($pending);
 
             // Send verification email
             $this->sendVerificationEmail($email, $businessName, $subdomain, $token);
@@ -236,7 +236,7 @@ class Signup extends BaseControls\Control {
 
         // Also check pending signups
         if ($validation['valid']) {
-            $pending = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+            $pending = Bean::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
             if ($pending) {
                 $validation['valid'] = false;
             }
@@ -252,7 +252,7 @@ class Signup extends BaseControls\Control {
             $validation = $provisioner->validateSubdomain($subdomain);
 
             if ($validation['valid']) {
-                $pending = R::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
+                $pending = Bean::findOne('pendingsignup', 'subdomain = ?', [$subdomain]);
                 if (!$pending) {
                     return $subdomain;
                 }
@@ -306,7 +306,7 @@ class Signup extends BaseControls\Control {
         }
 
         // Find pending signup by token
-        $pending = R::findOne('pendingsignup', 'verification_token = ?', [$token]);
+        $pending = Bean::findOne('pendingsignup', 'verification_token = ?', [$token]);
 
         if (!$pending) {
             $this->logger->warning('Verify: token not found in pendingsignup', ['token' => $token]);
@@ -392,7 +392,7 @@ class Signup extends BaseControls\Control {
             );
 
             // Delete the pending signup
-            R::trash($pending);
+            Bean::trash($pending);
 
             $this->logger->info('Tenant provisioned after email verification', [
                 'subdomain' => $pending->subdomain,
@@ -434,7 +434,7 @@ class Signup extends BaseControls\Control {
             return;
         }
 
-        $pending = R::findOne('pendingsignup', 'email = ?', [$email]);
+        $pending = Bean::findOne('pendingsignup', 'email = ?', [$email]);
 
         if (!$pending) {
             Flight::json(['success' => false, 'error' => 'No pending signup found for this email']);
@@ -458,7 +458,7 @@ class Signup extends BaseControls\Control {
         $pending->expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
         $pending->resend_count = $pending->resend_count + 1;
         $pending->last_resend_at = date('Y-m-d H:i:s');
-        R::store($pending);
+        Bean::store($pending);
 
         // Send verification email
         $this->sendVerificationEmail($pending->email, $pending->business_name, $pending->subdomain, $token);

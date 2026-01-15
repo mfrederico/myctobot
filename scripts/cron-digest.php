@@ -67,7 +67,7 @@ require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/bootstrap.php';
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\services\AnalysisService;
 
 // Load the service
@@ -133,7 +133,7 @@ try {
             }
 
             // Process all boards with digests enabled for this tenant
-            $boards = R::findAll('jiraboards', 'is_active = 1 AND digest_enabled = 1');
+            $boards = Bean::findAll('jiraboards', 'is_active = 1 AND digest_enabled = 1');
             $processedCount = 0;
             $errorCount = 0;
 
@@ -155,7 +155,7 @@ try {
             }
 
             foreach ($memberBoards as $memberId => $memberBoardList) {
-                $member = R::load('member', $memberId);
+                $member = Bean::load('member', $memberId);
                 if (!$member->id || $member->status !== 'active') {
                     continue; // Skip inactive members
                 }
@@ -272,7 +272,7 @@ function processMemberDigests($member, array $boards, bool $verbose, bool $dryRu
                 if ($analysisResult['success']) {
                     // Update last_digest_at using RedBeanPHP
                     $board->last_digest_at = date('Y-m-d H:i:s');
-                    R::store($board);
+                    Bean::store($board);
                     $processedCount++;
 
                     if ($verbose) {

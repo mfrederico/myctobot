@@ -23,6 +23,7 @@
  */
 
 use RedBeanPHP\R as R;
+use \app\Bean;
 
 class TenantHookHelper
 {
@@ -196,7 +197,7 @@ class TenantHookHelper
         }
 
         try {
-            $job = R::load('aidevjobs', $this->jobId);
+            $job = Bean::load('aidevjobs', $this->jobId);
             return $job->id ? $job : null;
         } catch (\Exception $e) {
             $this->log('ERROR', "Failed to load job {$this->jobId}: " . $e->getMessage());
@@ -214,7 +215,7 @@ class TenantHookHelper
         }
 
         try {
-            R::store($job);
+            Bean::store($job);
             return true;
         } catch (\Exception $e) {
             $this->log('ERROR', "Failed to save job: " . $e->getMessage());
@@ -232,13 +233,13 @@ class TenantHookHelper
         }
 
         try {
-            $log = R::dispense('aidevjoblogs');
+            $log = Bean::dispense('aidevjoblogs');
             $log->job_uid = $this->jobId;
             $log->level = $level;
             $log->log_type = $type;
             $log->message = $this->truncate($message, 4000);
             $log->created_at = date('Y-m-d H:i:s');
-            R::store($log);
+            Bean::store($log);
             return true;
         } catch (\Exception $e) {
             $this->log('ERROR', "Failed to add job log: " . $e->getMessage());

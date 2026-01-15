@@ -7,43 +7,39 @@ This project uses FlightPHP and RedBeanPHP. You MUST follow these conventions st
 > **Official Documentation**: https://redbeanphp.com/
 > Always refer to the official docs for the most accurate information.
 
-### Bean Wrapper Class (REQUIRED for User Database)
+### Bean Wrapper Class (REQUIRED)
 
-**For user database operations, use the `Bean` wrapper class instead of direct R:: calls.**
+**ALWAYS use the `Bean` wrapper class for database operations.**
 
 The Bean class (`lib/Bean.php`) normalizes bean type names to all lowercase, which is required
-by RedBeanPHP's R::dispense(). It accepts camelCase, snake_case, or lowercase and converts them.
+by RedBeanPHP's R::dispense(). It wraps R:: calls internally while accepting camelCase,
+snake_case, or lowercase table names and converting them.
 
 ```php
 use \app\Bean;
 
-// User database operations - use Bean::
+// ALL database operations should use Bean::
 $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['api_key']);
 $job = Bean::dispense('aidevjobs');
 Bean::store($job);
 Bean::trash($job);
 
-// Default database operations - R:: is still fine
-$member = R::load('member', $memberId);
-$tokens = R::find('atlassiantoken', 'cloud_id = ?', [$cloudId]);
+$member = Bean::load('member', $memberId);
+$tokens = Bean::find('atlassiantoken', 'cloud_uid = ?', [$cloudId]);
 ```
 
-**User database table names (all lowercase, no underscores):**
-| Bean Type | Table Name |
-|-----------|------------|
-| `aidevjobs` | aidevjobs |
-| `aidevjoblogs` | aidevjoblogs |
-| `enterprisesettings` | enterprisesettings |
-| `repoconnections` | repoconnections |
-| `boardrepomapping` | boardrepomapping |
-| `jiraboards` | jiraboards |
+**R:: is only needed for low-level operations:**
+- `R::setup()` - Database connection
+- `R::freeze()` - Schema freezing
+- `R::close()` - Connection closing
+- `R::begin()`, `R::commit()`, `R::rollback()` - Transaction management
+- `R::addDatabase()`, `R::selectDatabase()`, `R::hasDatabase()` - Multi-database switching
+- `R::getDatabaseAdapter()` - Low-level adapter access
+- `R::exec()` - Raw SQL (use sparingly, see Bean Operations below)
 
 ### Naming Conventions (IMPORTANT)
 
-For **default database** tables (member, atlassiantoken, etc.), RedBeanPHP automatically
-converts camelCase in PHP to underscore_case in the database.
-
-For **user database** tables, always use all lowercase with no underscores (via Bean::).
+All table names should be lowercase without underscores (handled by Bean::).
 
 **Column names - use snake_case (these map directly to database columns):**
 ```php
@@ -171,7 +167,7 @@ Benefits of associations:
 **ALWAYS use bean operations for CRUD. R::exec/Bean::exec should ONLY be used for DDL (schema) or extreme situations.**
 
 ```php
-// CORRECT - User database (use Bean::)
+// CORRECT - Use Bean:: for all CRUD operations
 $job = Bean::dispense('aidevjobs');
 $job->issue_key = 'PROJ-123';
 $job->status = 'pending';
@@ -180,13 +176,12 @@ Bean::store($job);
 $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['api_key']);
 Bean::trash($setting);
 
-// CORRECT - Default database (use R::)
-$member = R::load('member', $id);
+$member = Bean::load('member', $id);
 $member->lastLogin = date('Y-m-d H:i:s');
-R::store($member);
+Bean::store($member);
 
 // WRONG - NEVER use exec for simple CRUD
-R::exec('INSERT INTO member (email) VALUES (?)', [$email]);  // WRONG!
+Bean::exec('INSERT INTO member (email) VALUES (?)', [$email]);  // WRONG!
 Bean::exec('UPDATE aidevjobs SET status = ?', ['done']);     // WRONG!
 ```
 
@@ -199,10 +194,10 @@ R::exec('CREATE TABLE IF NOT EXISTS mytable (...)');
 R::exec('UPDATE member SET loginCount = loginCount + 1 WHERE id = ?', [$id]);
 ```
 
-**If you think you need R::exec, ask yourself:**
-1. Can this be done with R::load + R::store? → Use that instead
-2. Can this be done with R::find + loop + R::store? → Use that instead
-3. Is this a complex aggregate/batch that truly can't use beans? → Only then use R::exec
+**If you think you need Bean::exec, ask yourself:**
+1. Can this be done with Bean::load + Bean::store? → Use that instead
+2. Can this be done with Bean::find + loop + Bean::store? → Use that instead
+3. Is this a complex aggregate/batch that truly can't use beans? → Only then use Bean::exec
 
 ### Why Bean Operations Are Mandatory
 
@@ -216,7 +211,7 @@ If you use R::exec for simple CRUD, the ORM becomes useless and models are ignor
 
 ### Query Methods Reference
 
-**For user database tables, use Bean:: methods (same API as R::):**
+**Use Bean:: methods for all database operations:**
 
 | Method | Returns | Use Case |
 |--------|---------|----------|
@@ -228,15 +223,9 @@ If you use R::exec for simple CRUD, the ORM becomes useless and models are ignor
 | `Bean::dispense($type)` | New bean | Create new bean |
 | `Bean::store($bean)` | ID | Save bean |
 | `Bean::trash($bean)` | void | Delete bean |
-
-**For default database tables, use R:: methods:**
-
-| Method | Returns | Use Case |
-|--------|---------|----------|
-| `R::load($type, $id)` | Single bean (empty if not found) | Get by ID |
-| `R::findOne($type, $sql, $params)` | Single bean or NULL | Get first match |
-| `R::find($type, $sql, $params)` | Array of beans | Get matching rows |
-| `R::getAll($sql, $params)` | Array of arrays | Complex SELECT with joins |
+| `Bean::getAll($sql, $params)` | Array of arrays | Complex SELECT with joins |
+| `Bean::getRow($sql, $params)` | Array or null | Single row as array |
+| `Bean::getCell($sql, $params)` | Mixed | Single value |
 
 ### Quick Reference: PHP Property → Database Column
 

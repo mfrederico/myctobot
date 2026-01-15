@@ -8,7 +8,8 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \RedBeanPHP\R as R; // Keep for hasDatabase/addDatabase/selectDatabase
+use \app\Bean;
 use \Exception as Exception;
 use \app\services\UserDatabaseService;
 use \app\services\LLMProviders\LLMProviderFactory;
@@ -45,7 +46,7 @@ class Api extends BaseControls\Control {
         }
 
         // Look up member by API token in main database
-        $member = R::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
+        $member = Bean::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
         if (!$member) {
             return null;
         }
@@ -99,10 +100,10 @@ class Api extends BaseControls\Control {
 
             // Get member from tenant by email (main member has same email)
             $mainMember = R::selectDatabase('default');
-            $mainMember = R::load('member', $mainMemberId);
+            $mainMember = Bean::load('member', $mainMemberId);
             R::selectDatabase($this->tenantSlug);
 
-            $tenantMember = R::findOne('member', 'email = ?', [$mainMember->email]);
+            $tenantMember = Bean::findOne('member', 'email = ?', [$mainMember->email]);
             if ($tenantMember) {
                 $this->tenantMemberId = (int) $tenantMember->id;
             } else {
@@ -134,12 +135,12 @@ class Api extends BaseControls\Control {
         }
 
         // Get all agents with expose_as_mcp = 1 (use tenant member ID)
-        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
             // Get tools for this agent
-            $agentTools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
+            $agentTools = Bean::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
 
             foreach ($agentTools as $tool) {
                 $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
@@ -215,14 +216,14 @@ class Api extends BaseControls\Control {
         }
 
         // Find the tool
-        $tool = R::findOne('agenttools', 'tool_name = ? AND is_active = 1', [$toolName]);
+        $tool = Bean::findOne('agenttools', 'tool_name = ? AND is_active = 1', [$toolName]);
         if (!$tool) {
             Flight::jsonError("Tool not found: {$toolName}", 404);
             return;
         }
 
         // Verify agent ownership and get agent config (use tenant member ID)
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+        $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
             [$tool->aiagents_id, $this->tenantMemberId]);
         if (!$agent) {
             Flight::jsonError("Tool's agent not accessible", 403);
@@ -389,11 +390,11 @@ class Api extends BaseControls\Control {
         }
 
         // Get all agents with expose_as_mcp = 1
-        $agents = R::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
-            $agentTools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
+            $agentTools = Bean::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
 
             foreach ($agentTools as $tool) {
                 $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
@@ -458,14 +459,14 @@ class Api extends BaseControls\Control {
         }
 
         // Find the tool
-        $tool = R::findOne('agenttools', 'tool_name = ? AND is_active = 1', [$toolName]);
+        $tool = Bean::findOne('agenttools', 'tool_name = ? AND is_active = 1', [$toolName]);
         if (!$tool) {
             $this->jsonRpcError(-32602, "Tool not found: {$toolName}", $id);
             return;
         }
 
         // Verify agent ownership
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+        $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
             [$tool->aiagents_id, $this->tenantMemberId]);
         if (!$agent) {
             $this->jsonRpcError(-32000, "Tool's agent not accessible", $id);
@@ -605,7 +606,7 @@ class Api extends BaseControls\Control {
         }
 
         // Get the agent
-        $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
+        $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
             [$agentId, $this->tenantMemberId]);
 
         if (!$agent) {
@@ -614,7 +615,7 @@ class Api extends BaseControls\Control {
         }
 
         // Get tools for this agent
-        $tools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agentId]);
+        $tools = Bean::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agentId]);
 
         // Build tool descriptions for the config
         $toolDescriptions = [];

@@ -165,7 +165,7 @@ $processingConfig = [
 output("Config: " . json_encode($processingConfig));
 
 // Find a member to use for processing (first admin or first member)
-$member = R::findOne('member', 'level <= ? ORDER BY level ASC, id ASC', [50]);
+$member = Bean::findOne('member', 'level <= ? ORDER BY level ASC, id ASC', [50]);
 if (!$member) {
     echo "Error: No member found to process directives\n";
     exit(1);

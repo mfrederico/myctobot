@@ -112,13 +112,13 @@ try {
 
 // Find member to use
 if ($memberIdParam) {
-    $member = R::load('member', $memberIdParam);
+    $member = Bean::load('member', $memberIdParam);
     if (!$member || !$member->id) {
         echo "Error: Member not found: {$memberIdParam}\n";
         exit(1);
     }
 } else {
-    $member = R::findOne('member', 'level <= ? ORDER BY level ASC, id ASC', [50]);
+    $member = Bean::findOne('member', 'level <= ? ORDER BY level ASC, id ASC', [50]);
     if (!$member) {
         echo "Error: No admin member found\n";
         exit(1);

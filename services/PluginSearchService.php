@@ -12,7 +12,7 @@
 
 namespace app\services;
 
-use \RedBeanPHP\R as R;
+use \app\Bean;
 
 class PluginSearchService {
 
@@ -96,7 +96,7 @@ class PluginSearchService {
         $params[] = $limit;
         $params[] = $offset;
 
-        $results = R::getAll($sql, $params);
+        $results = Bean::getAll($sql, $params);
 
         // Format results
         return array_map(function($row) {
@@ -135,7 +135,7 @@ class PluginSearchService {
             LIMIT ?
         ";
 
-        $results = R::getAll($sql, [
+        $results = Bean::getAll($sql, [
             $searchTerm,
             $searchTerm,
             $searchTerm,
@@ -181,7 +181,7 @@ class PluginSearchService {
         $params[] = $limit;
         $params[] = $offset;
 
-        $results = R::getAll($sql, $params);
+        $results = Bean::getAll($sql, $params);
 
         return array_map(function($row) {
             return self::formatPluginResult($row);
@@ -198,7 +198,7 @@ class PluginSearchService {
         $suggestions = [];
 
         // Get popular categories
-        $popularCategories = R::getAll("
+        $popularCategories = Bean::getAll("
             SELECT category, COUNT(*) as count
             FROM plugins
             WHERE is_active = 1
@@ -208,7 +208,7 @@ class PluginSearchService {
         ");
 
         // Get popular plugins
-        $popularPlugins = R::getAll("
+        $popularPlugins = Bean::getAll("
             SELECT id, name, slug, category
             FROM plugins
             WHERE is_active = 1
@@ -251,7 +251,7 @@ class PluginSearchService {
      * @return array Categories with counts
      */
     public static function getCategoriesWithCounts(): array {
-        $results = R::getAll("
+        $results = Bean::getAll("
             SELECT category, COUNT(*) as count
             FROM plugins
             WHERE is_active = 1
@@ -377,7 +377,7 @@ class PluginSearchService {
      * @return array|null Plugin data or null
      */
     public static function getById(int $id): ?array {
-        $row = R::getRow("
+        $row = Bean::getRow("
             SELECT * FROM plugins WHERE id = ? AND is_active = 1
         ", [$id]);
 
@@ -391,7 +391,7 @@ class PluginSearchService {
      * @return array|null Plugin data or null
      */
     public static function getBySlug(string $slug): ?array {
-        $row = R::getRow("
+        $row = Bean::getRow("
             SELECT * FROM plugins WHERE slug = ? AND is_active = 1
         ", [$slug]);
 
@@ -407,12 +407,12 @@ class PluginSearchService {
      */
     public static function getRelated(int $pluginId, int $limit = 4): array {
         // Get the current plugin's info
-        $plugin = R::getRow("SELECT category, tags FROM plugins WHERE id = ?", [$pluginId]);
+        $plugin = Bean::getRow("SELECT category, tags FROM plugins WHERE id = ?", [$pluginId]);
         if (!$plugin) {
             return [];
         }
 
-        $results = R::getAll("
+        $results = Bean::getAll("
             SELECT *
             FROM plugins
             WHERE id != ?

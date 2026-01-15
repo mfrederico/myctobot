@@ -2,8 +2,8 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
 use \app\Bean;
+use \RedBeanPHP\R as R; // Keep for getDatabaseAdapter()
 use \Exception as Exception;
 use app\BaseControls\Control;
 
@@ -58,7 +58,7 @@ class Admin extends Control {
         // Get system stats
         $this->viewData['stats'] = [
             'members' => Bean::count('member'),
-            'permissions' => R::count('authcontrol'),
+            'permissions' => Bean::count('authcontrol'),
             'active_sessions' => $this->getActiveSessions(),
         ];
 
@@ -289,9 +289,9 @@ class Admin extends Control {
         
         // Handle delete action
         if ($request->query->delete && is_numeric($request->query->delete)) {
-            $auth = R::load('authcontrol', $request->query->delete);
+            $auth = Bean::load('authcontrol', $request->query->delete);
             if ($auth->id) {
-                R::trash($auth);
+                Bean::trash($auth);
                 $this->logger->info('Deleted permission', ['id' => $request->query->delete]);
             }
             Flight::redirect('/admin/permissions');
@@ -299,7 +299,7 @@ class Admin extends Control {
         }
         
         // Get all permissions grouped by control
-        $_auths = R::findAll('authcontrol', 'ORDER BY control ASC, method ASC');
+        $_auths = Bean::findAll('authcontrol', 'ORDER BY control ASC, method ASC');
         $auths = [];
         
         foreach ($_auths as $_control) {
@@ -320,9 +320,9 @@ class Admin extends Control {
         
         if (!$permId) {
             // Create new permission
-            $permission = R::dispense('authcontrol');
+            $permission = Bean::dispense('authcontrol');
         } else {
-            $permission = R::load('authcontrol', $permId);
+            $permission = Bean::load('authcontrol', $permId);
             if (!$permission->id && $permId) {
                 Flight::redirect('/admin/permissions');
                 return;
@@ -347,7 +347,7 @@ class Admin extends Control {
                 }
                 
                 try {
-                    R::store($permission);
+                    Bean::store($permission);
                     Flight::redirect('/admin/permissions');
                     return;
                 } catch (Exception $e) {
@@ -386,7 +386,7 @@ class Admin extends Control {
         }
         
         // Get current settings (system-wide settings have NULL member_id)
-        $this->viewData['settings'] = R::findAll('settings', 'member_id IS NULL');
+        $this->viewData['settings'] = Bean::findAll('settings', 'member_id IS NULL');
         
         $this->render('admin/settings', $this->viewData);
     }
@@ -835,10 +835,10 @@ class Admin extends Control {
 
             // Update health status in database
             $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
-            $shardBean = R::load('claudeshards', $shardId);
+            $shardBean = Bean::load('claudeshards', $shardId);
             $shardBean->health_status = $healthStatus;
             $shardBean->last_health_check = date('Y-m-d H:i:s');
-            R::store($shardBean);
+            Bean::store($shardBean);
 
             $this->json([
                 'success' => $result['connected'],
@@ -896,11 +896,11 @@ class Admin extends Control {
 
         // Save diagnostic result to database using bean (auto-creates columns if needed)
         $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
-        $shardBean = R::load('claudeshards', $shardId);
+        $shardBean = Bean::load('claudeshards', $shardId);
         $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
         $shardBean->health_status = $healthStatus;
         $shardBean->last_health_check = date('Y-m-d H:i:s');
-        R::store($shardBean);
+        Bean::store($shardBean);
 
         // If ready, also get install commands for anything missing
         if (!$result['ready']) {

@@ -6,7 +6,7 @@
 
 namespace app\services;
 
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Flight as Flight;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -182,7 +182,7 @@ class ShardRouter {
     public static function getJobStatus(string $jobId): ?array {
 
         // Get job record using bean operations
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
@@ -226,7 +226,7 @@ class ShardRouter {
      */
     public static function getJobOutput(string $jobId): ?array {
 
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
@@ -258,7 +258,7 @@ class ShardRouter {
      */
     public static function cancelJob(string $jobId): bool {
 
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return false;
         }
@@ -292,7 +292,7 @@ class ShardRouter {
      */
     private static function recordJob(string $jobId, int $memberId, int $shardId, array $payload): void {
 
-        $job = R::dispense('shardjobs');
+        $job = Bean::dispense('shardjobs');
         $job->job_uid = $jobId;
         $job->member_id = $memberId;
         $job->shard_id = $shardId;
@@ -300,7 +300,7 @@ class ShardRouter {
         $job->status = 'queued';
         $job->request_payload = json_encode($payload);
         $job->created_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
@@ -308,7 +308,7 @@ class ShardRouter {
      */
     public static function updateJobStatus(string $jobId, string $status, ?string $error = null): void {
 
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->status = $status;
@@ -326,7 +326,7 @@ class ShardRouter {
             $job->error_message = $error;
         }
 
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
@@ -334,13 +334,13 @@ class ShardRouter {
      */
     public static function updateJobResult(string $jobId, array $result): void {
 
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->result_payload = json_encode($result);
         $job->status = 'completed';
         $job->completed_at = date('Y-m-d H:i:s');
-        R::store($job);
+        Bean::store($job);
     }
 
     /**
@@ -348,7 +348,7 @@ class ShardRouter {
      */
     public static function getMemberJobs(int $memberId, int $limit = 50): array {
 
-        return R::getAll("
+        return Bean::getAll("
             SELECT sj.*, cs.name as shard_name
             FROM shardjobs sj
             JOIN claudeshards cs ON sj.shard_id = cs.id
@@ -363,7 +363,7 @@ class ShardRouter {
      */
     public static function getMemberActiveJobs(int $memberId): array {
 
-        return R::getAll("
+        return Bean::getAll("
             SELECT sj.*, cs.name as shard_name
             FROM shardjobs sj
             JOIN claudeshards cs ON sj.shard_id = cs.id
@@ -431,7 +431,7 @@ class ShardRouter {
         $credentials = [];
 
         // Get member using bean operations
-        $member = R::load('member', $memberId);
+        $member = Bean::load('member', $memberId);
 
         // Get Atlassian/Jira token using bean operations
         $whereClause = 'member_id = ?';
@@ -443,7 +443,7 @@ class ShardRouter {
         }
 
         $whereClause .= ' ORDER BY updated_at DESC LIMIT 1';
-        $token = R::findOne('atlassiantoken', $whereClause, $params);
+        $token = Bean::findOne('atlassiantoken', $whereClause, $params);
 
         if ($token) {
             // For OAuth tokens, must use Atlassian API gateway URL (not site_url)
@@ -470,7 +470,7 @@ class ShardRouter {
      */
     public static function getStreamUrl(string $jobId): ?string {
 
-        $job = R::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }

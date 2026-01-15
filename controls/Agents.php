@@ -8,7 +8,7 @@
 namespace app;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \Exception as Exception;
 use \app\services\TierFeatures;
 use \app\services\EncryptionService;
@@ -21,7 +21,6 @@ require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 require_once __DIR__ . '/../services/LLMProviders/OllamaProvider.php';
 require_once __DIR__ . '/../services/LLMProviders/OpenAIProvider.php';
-use \app\Bean;
 
 class Agents extends BaseControls\Control {
 
@@ -103,7 +102,7 @@ class Agents extends BaseControls\Control {
         $shardCount = 0;
         if (!$useLocalRunner) {
             // Check for active shards in default database
-            $shardCount = (int) R::getCell("SELECT COUNT(*) FROM claudeshards WHERE is_active = 1");
+            $shardCount = (int) Bean::getCell("SELECT COUNT(*) FROM claudeshards WHERE is_active = 1");
         }
         $this->viewData['has_shards'] = $useLocalRunner || $shardCount > 0;
         $this->viewData['use_local_runner'] = $useLocalRunner;

@@ -11,7 +11,7 @@
 namespace app\services;
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\lib\SemVer;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -47,10 +47,10 @@ class PluginVersionService {
         $slug = $metadata['slug'] ?? self::generateSlug($name);
 
         // Check if plugin already exists
-        $plugin = R::findOne('pluginregistry', 'slug = ?', [$slug]);
+        $plugin = Bean::findOne('pluginregistry', 'slug = ?', [$slug]);
 
         if (!$plugin) {
-            $plugin = R::dispense('pluginregistry');
+            $plugin = Bean::dispense('pluginregistry');
             $plugin->installed_at = date('Y-m-d H:i:s');
         }
 
@@ -66,7 +66,7 @@ class PluginVersionService {
         $plugin->requires_php = $metadata['requires_php'] ?? $plugin->requires_php;
         $plugin->status = $metadata['status'] ?? $plugin->status ?? 'active';
 
-        R::store($plugin);
+        Bean::store($plugin);
 
         self::log('Plugin registered', [
             'name' => $name,
@@ -88,9 +88,9 @@ class PluginVersionService {
         $results = [];
 
         if ($pluginSlug !== null) {
-            $plugins = R::find('pluginregistry', 'slug = ? AND status != ?', [$pluginSlug, 'disabled']);
+            $plugins = Bean::find('pluginregistry', 'slug = ? AND status != ?', [$pluginSlug, 'disabled']);
         } else {
-            $plugins = R::find('pluginregistry', 'status != ?', ['disabled']);
+            $plugins = Bean::find('pluginregistry', 'status != ?', ['disabled']);
         }
 
         foreach ($plugins as $plugin) {
@@ -131,7 +131,7 @@ class PluginVersionService {
     private static function checkPluginForUpdates(\RedBeanPHP\OODBBean $plugin): array {
         if (empty($plugin->repository_url)) {
             $plugin->last_checked_at = date('Y-m-d H:i:s');
-            R::store($plugin);
+            Bean::store($plugin);
 
             return [
                 'update_available' => false,
@@ -153,7 +153,7 @@ class PluginVersionService {
 
         if (empty($releases)) {
             $plugin->markUpToDate();
-            R::store($plugin);
+            Bean::store($plugin);
 
             return [
                 'update_available' => false,
@@ -181,7 +181,7 @@ class PluginVersionService {
 
         if (!$latestVersion) {
             $plugin->markUpToDate();
-            R::store($plugin);
+            Bean::store($plugin);
 
             return [
                 'update_available' => false,
@@ -207,7 +207,7 @@ class PluginVersionService {
 
         if ($updateType !== null) {
             $plugin->markUpdateAvailable($latestVersion, $updateType);
-            R::store($plugin);
+            Bean::store($plugin);
 
             self::log('Update available', [
                 'plugin' => $plugin->slug,
@@ -227,7 +227,7 @@ class PluginVersionService {
         }
 
         $plugin->markUpToDate();
-        R::store($plugin);
+        Bean::store($plugin);
 
         return [
             'update_available' => false,
@@ -244,10 +244,10 @@ class PluginVersionService {
      */
     public static function getInstalledPlugins(?string $status = null): array {
         if ($status !== null) {
-            return R::find('pluginregistry', 'status = ? ORDER BY name ASC', [$status]);
+            return Bean::find('pluginregistry', 'status = ? ORDER BY name ASC', [$status]);
         }
 
-        return R::find('pluginregistry', ' ORDER BY name ASC');
+        return Bean::find('pluginregistry', ' ORDER BY name ASC');
     }
 
     /**
@@ -258,14 +258,14 @@ class PluginVersionService {
      */
     public static function getPluginsWithUpdates(?string $updateType = null): array {
         if ($updateType !== null) {
-            return R::find(
+            return Bean::find(
                 'pluginregistry',
                 'update_available = ? AND update_type = ? ORDER BY name ASC',
                 [true, $updateType]
             );
         }
 
-        return R::find('pluginregistry', 'update_available = ? ORDER BY name ASC', [true]);
+        return Bean::find('pluginregistry', 'update_available = ? ORDER BY name ASC', [true]);
     }
 
     /**
@@ -287,7 +287,7 @@ class PluginVersionService {
         ?string $downloadUrl = null,
         bool $isPrerelease = false
     ): ?\RedBeanPHP\OODBBean {
-        $plugin = R::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
+        $plugin = Bean::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
 
         if (!$plugin) {
             return null;
@@ -296,7 +296,7 @@ class PluginVersionService {
         $normalizedVersion = SemVer::normalize($version) ?? $version;
 
         // Check if this version already exists
-        $existingVersion = R::findOne(
+        $existingVersion = Bean::findOne(
             'pluginversion',
             'pluginregistry_id = ? AND version = ?',
             [$plugin->id, $normalizedVersion]
@@ -306,13 +306,13 @@ class PluginVersionService {
             // Update existing record if release notes changed
             if ($releaseNotes !== null && $existingVersion->release_notes !== $releaseNotes) {
                 $existingVersion->release_notes = $releaseNotes;
-                R::store($existingVersion);
+                Bean::store($existingVersion);
             }
             return $existingVersion;
         }
 
         // Create new version record
-        $versionBean = R::dispense('pluginversion');
+        $versionBean = Bean::dispense('pluginversion');
         $versionBean->pluginregistry_id = $plugin->id;
         $versionBean->version = $normalizedVersion;
         $versionBean->release_notes = $releaseNotes;
@@ -320,7 +320,7 @@ class PluginVersionService {
         $versionBean->is_prerelease = $isPrerelease ? 1 : 0;
         $versionBean->released_at = $releasedAt ? date('Y-m-d H:i:s', strtotime($releasedAt)) : null;
 
-        R::store($versionBean);
+        Bean::store($versionBean);
 
         return $versionBean;
     }
@@ -354,7 +354,7 @@ class PluginVersionService {
      * @return \RedBeanPHP\OODBBean|null Plugin bean or null
      */
     public static function getPlugin(string $slug): ?\RedBeanPHP\OODBBean {
-        return R::findOne('pluginregistry', 'slug = ?', [$slug]);
+        return Bean::findOne('pluginregistry', 'slug = ?', [$slug]);
     }
 
     /**
@@ -365,7 +365,7 @@ class PluginVersionService {
      * @return array Array of version beans
      */
     public static function getVersionHistory(string $pluginSlug, ?int $limit = null): array {
-        $plugin = R::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
+        $plugin = Bean::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
 
         if (!$plugin) {
             return [];
@@ -378,7 +378,7 @@ class PluginVersionService {
             $sql .= ' LIMIT ' . (int) $limit;
         }
 
-        return R::find('pluginversion', $sql, $params);
+        return Bean::find('pluginversion', $sql, $params);
     }
 
     /**
@@ -388,14 +388,14 @@ class PluginVersionService {
      * @return bool True if successfully removed
      */
     public static function unregisterPlugin(string $pluginSlug): bool {
-        $plugin = R::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
+        $plugin = Bean::findOne('pluginregistry', 'slug = ?', [$pluginSlug]);
 
         if (!$plugin) {
             return false;
         }
 
         // This will cascade delete version history due to FK constraint
-        R::trash($plugin);
+        Bean::trash($plugin);
 
         self::log('Plugin unregistered', ['slug' => $pluginSlug]);
 
@@ -408,11 +408,11 @@ class PluginVersionService {
      * @return array Statistics about plugin updates
      */
     public static function getUpdateStats(): array {
-        $total = R::count('pluginregistry', 'status != ?', ['disabled']);
-        $withUpdates = R::count('pluginregistry', 'update_available = ? AND status != ?', [true, 'disabled']);
-        $majorUpdates = R::count('pluginregistry', 'update_type = ? AND status != ?', ['major', 'disabled']);
-        $minorUpdates = R::count('pluginregistry', 'update_type = ? AND status != ?', ['minor', 'disabled']);
-        $patchUpdates = R::count('pluginregistry', 'update_type = ? AND status != ?', ['patch', 'disabled']);
+        $total = Bean::count('pluginregistry', 'status != ?', ['disabled']);
+        $withUpdates = Bean::count('pluginregistry', 'update_available = ? AND status != ?', [true, 'disabled']);
+        $majorUpdates = Bean::count('pluginregistry', 'update_type = ? AND status != ?', ['major', 'disabled']);
+        $minorUpdates = Bean::count('pluginregistry', 'update_type = ? AND status != ?', ['minor', 'disabled']);
+        $patchUpdates = Bean::count('pluginregistry', 'update_type = ? AND status != ?', ['patch', 'disabled']);
 
         return [
             'total_plugins' => $total,

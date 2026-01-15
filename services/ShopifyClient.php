@@ -20,7 +20,6 @@ namespace app\services;
 
 use \Flight as Flight;
 use \GuzzleHttp\Client;
-use \RedBeanPHP\R as R;
 use \app\Bean;
 use \Exception;
 
@@ -85,8 +84,8 @@ class ShopifyClient {
      */
     private function loadCredentialsFromSettings(int $memberId): void {
         try {
-            $shop = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $memberId]);
-            $token = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $memberId]);
+            $shop = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $memberId]);
+            $token = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $memberId]);
 
             if ($shop) {
                 $this->shop = $shop->setting_value;
@@ -142,9 +141,9 @@ class ShopifyClient {
         }
 
         // Store shop domain (not encrypted)
-        $shopBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $this->memberId]);
+        $shopBean = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop', $this->memberId]);
         if (!$shopBean) {
-            $shopBean = R::dispense('enterprisesettings');
+            $shopBean = Bean::dispense('enterprisesettings');
             $shopBean->setting_key = 'shopify_shop';
             $shopBean->member_id = $this->memberId;
             $shopBean->created_at = date('Y-m-d H:i:s');
@@ -152,12 +151,12 @@ class ShopifyClient {
         $shopBean->setting_value = $shop;
         $shopBean->is_encrypted = 0;
         $shopBean->updated_at = date('Y-m-d H:i:s');
-        R::store($shopBean);
+        Bean::store($shopBean);
 
         // Store encrypted access token
-        $tokenBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $this->memberId]);
+        $tokenBean = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_access_token', $this->memberId]);
         if (!$tokenBean) {
-            $tokenBean = R::dispense('enterprisesettings');
+            $tokenBean = Bean::dispense('enterprisesettings');
             $tokenBean->setting_key = 'shopify_access_token';
             $tokenBean->member_id = $this->memberId;
             $tokenBean->created_at = date('Y-m-d H:i:s');
@@ -165,7 +164,7 @@ class ShopifyClient {
         $tokenBean->setting_value = EncryptionService::encrypt($accessToken);
         $tokenBean->is_encrypted = 1;
         $tokenBean->updated_at = date('Y-m-d H:i:s');
-        R::store($tokenBean);
+        Bean::store($tokenBean);
 
         // Update local state
         $this->shop = $shop;
@@ -186,9 +185,9 @@ class ShopifyClient {
         $shopInfo = $this->getShopInfo();
 
         if (!empty($shopInfo)) {
-            $infoBean = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
+            $infoBean = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
             if (!$infoBean) {
-                $infoBean = R::dispense('enterprisesettings');
+                $infoBean = Bean::dispense('enterprisesettings');
                 $infoBean->setting_key = 'shopify_shop_info';
                 $infoBean->member_id = $this->memberId;
                 $infoBean->created_at = date('Y-m-d H:i:s');
@@ -196,7 +195,7 @@ class ShopifyClient {
             $infoBean->setting_value = json_encode($shopInfo);
             $infoBean->is_encrypted = 0;
             $infoBean->updated_at = date('Y-m-d H:i:s');
-            R::store($infoBean);
+            Bean::store($infoBean);
         }
     }
 
@@ -241,7 +240,7 @@ class ShopifyClient {
         ];
 
         try {
-            $shopInfo = R::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
+            $shopInfo = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['shopify_shop_info', $this->memberId]);
 
             if ($shopInfo) {
                 $details['shop_info'] = json_decode($shopInfo->setting_value, true);
@@ -737,9 +736,9 @@ class ShopifyClient {
      * Remove all Shopify configuration (full reset)
      */
     public function removeAllConfig(): void {
-        $beans = R::find('enterprisesettings', 'setting_key LIKE ? AND member_id = ?', ['shopify_%', $this->memberId]);
+        $beans = Bean::find('enterprisesettings', 'setting_key LIKE ? AND member_id = ?', ['shopify_%', $this->memberId]);
         foreach ($beans as $bean) {
-            R::trash($bean);
+            Bean::trash($bean);
         }
 
         $this->shop = null;

@@ -39,7 +39,7 @@ require_once $baseDir . '/services/AIDevAgent.php';
 require_once $baseDir . '/services/AIDevStatusService.php';
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
+use \app\Bean;
 use \app\services\EncryptionService;
 use \app\services\AIDevAgent;
 use \app\services\AIDevStatusService;
@@ -151,13 +151,13 @@ try {
     logMessage("Action: {$action}, Member: {$memberId}, Job: {$jobId}");
 
     // Load member
-    $member = R::load('member', $memberId);
+    $member = Bean::load('member', $memberId);
     if (!$member || !$member->id) {
         throw new \Exception("Member not found: {$memberId}");
     }
 
     // Get API key using RedBeanPHP (single MySQL database)
-    $apiKeySetting = R::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'anthropic_api_key']);
+    $apiKeySetting = Bean::findOne('enterprisesettings', 'member_id = ? AND setting_key = ?', [$memberId, 'anthropic_api_key']);
 
     if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
         throw new \Exception("Anthropic API key not configured");
@@ -214,7 +214,7 @@ try {
         // Get cloud_uid if not in job data
         if (empty($cloudId)) {
             // Try to find it from board using RedBeanPHP
-            $boardBean = R::load('jiraboards', (int)$job['board_id']);
+            $boardBean = Bean::load('jiraboards', (int)$job['board_id']);
             $cloudId = $boardBean->cloud_uid ?? '';
         }
 
@@ -254,7 +254,7 @@ try {
 
         // Get cloud_uid if not in job data using RedBeanPHP
         if (empty($cloudId)) {
-            $boardBean = R::load('jiraboards', (int)$job['board_id']);
+            $boardBean = Bean::load('jiraboards', (int)$job['board_id']);
             $cloudId = $boardBean->cloud_uid ?? '';
         }
 

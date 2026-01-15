@@ -469,10 +469,18 @@ class Auth extends BaseControls\Control {
      */
     private function sendMemberVerificationEmail(string $email, string $username, string $token): void {
         $tenant = Flight::get('tenant.slug');
-        $baseUrl = Flight::get('app.base_url');
         $appName = Flight::get('app.name');
 
         // Build verification URL for this tenant
+        if (!empty($tenant)) {
+            // Use tenant subdomain URL
+            $protocol = Flight::get('app.protocol') ?? 'https';
+            $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
+            $baseUrl = "{$protocol}://{$tenant}.{$baseDomain}";
+        } else {
+            $baseUrl = Flight::get('app.base_url');
+        }
+
         $verifyUrl = "{$baseUrl}/auth/verifymember?token={$token}";
 
         $subject = "Verify your email - {$appName}";

@@ -416,8 +416,8 @@ class Auth extends BaseControls\Control {
     public function verifymember() {
         $token = $this->getParam('token');
 
-        // Get workspace from current tenant context for redirects
-        $workspace = TenantResolver::getCurrentTenant() ?? '';
+        // Get workspace from query param (added by subdomain redirect) or session
+        $workspace = $this->getParam('workspace') ?? TenantResolver::getSessionTenant() ?? '';
         $loginUrl = $workspace ? "/login/{$workspace}" : '/login';
         $registerUrl = $workspace ? "/auth/register?workspace={$workspace}" : '/register';
 

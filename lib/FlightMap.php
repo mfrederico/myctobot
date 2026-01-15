@@ -194,12 +194,33 @@ Flight::map('hasLevel', function($requiredLevel) {
 });
 
 /**
- * CSRF Protection
+ * CSRF Protection wrapper with helper methods
  */
+class CsrfWrapper {
+    private AntiCSRF $csrf;
+
+    public function __construct() {
+        $this->csrf = new AntiCSRF();
+    }
+
+    public function getToken(): string {
+        $tokens = $this->getTokenArray();
+        return $tokens['csrf_token'] ?? '';
+    }
+
+    public function getTokenArray(): array {
+        return $this->csrf->getTokenArray();
+    }
+
+    public function validateRequest(): bool {
+        return $this->csrf->validateRequest();
+    }
+}
+
 Flight::map('csrf', function() {
     static $csrf = null;
     if ($csrf === null) {
-        $csrf = new AntiCSRF();
+        $csrf = new CsrfWrapper();
     }
     return $csrf;
 });

@@ -535,7 +535,7 @@ class AssociationRegressionTest {
         // Test 1: Create digest job via association
         $digestJob = R::dispense('digestjobs');
         $digestJob->job_uid = 'test-job-' . time();
-        $digestJob->board_id = 1;
+        $digestJob->boards_id = 1;
         $digestJob->status = 'queued';
         $digestJob->created_at = date('Y-m-d H:i:s');
         $member->ownDigestjobsList[] = $digestJob;

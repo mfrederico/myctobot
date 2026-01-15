@@ -2225,7 +2225,7 @@ class Webhook extends BaseControls\Control {
      */
     private function processDigestResult($digestJob, array $result): void {
         $memberId = (int) $digestJob->member_id;
-        $boardId = (int) $digestJob->board_id;
+        $boardId = (int) $digestJob->boards_id;
 
         // Get markdown report from result
         $markdown = $result['markdown_report'] ?? '';
@@ -2524,9 +2524,9 @@ class Webhook extends BaseControls\Control {
                 'job_uid' => $shardJobId,
                 'issue_key' => $job->issue_key,
                 'cloud_uid' => $job->cloud_uid,
-                'board_id' => (int) $job->board_id,
+                'board_id' => (int) $job->boards_id,
                 'status' => $job->status,
-                'repo_connection_id' => $job->repo_connection_id
+                'repo_connection_id' => $job->repoconnections_id
             ];
         }
 

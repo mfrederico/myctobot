@@ -442,7 +442,7 @@ class Analysis extends BaseControls\Control {
         // If complete, find the analysis and redirect
         if ($job->status === 'completed') {
             // Find the most recent analysis for this board
-            $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
+            $analysis = UserDatabaseService::getRecentAnalyses($job->boards_id, 1);
             if (!empty($analysis)) {
                 $this->flash('success', 'Shard analysis completed successfully!');
                 Flight::redirect('/analysis/view/' . $analysis[0]['id']);
@@ -495,7 +495,7 @@ class Analysis extends BaseControls\Control {
         $response = [
             'job_uid' => $job->job_uid,
             'status' => $job->status,
-            'board_id' => $job->board_id,
+            'board_id' => $job->boards_id,
             'board_name' => $job->board_name,
             'project_key' => $job->project_key,
             'shard_id' => $job->shard_id,
@@ -511,7 +511,7 @@ class Analysis extends BaseControls\Control {
 
         // If completed, include analysis_id if we can find it
         if ($job->status === 'completed') {
-            $analysis = UserDatabaseService::getRecentAnalyses($job->board_id, 1);
+            $analysis = UserDatabaseService::getRecentAnalyses($job->boards_id, 1);
             if (!empty($analysis)) {
                 $response['analysis_id'] = $analysis[0]['id'];
             }

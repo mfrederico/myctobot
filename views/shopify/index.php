@@ -73,11 +73,11 @@
                                 <label class="form-label small text-muted mb-1">
                                     <i class="bi bi-github me-1"></i> Linked Repository
                                 </label>
-                                <?php if ($conn->repo_connection_id): ?>
+                                <?php if ($conn->repoconnections_id): ?>
                                     <?php
                                     $linkedRepo = null;
                                     foreach ($repos as $repo) {
-                                        if ($repo->id == $conn->repo_connection_id) {
+                                        if ($repo->id == $conn->repoconnections_id) {
                                             $linkedRepo = $repo;
                                             break;
                                         }
@@ -85,7 +85,7 @@
                                     ?>
                                     <div class="d-flex align-items-center">
                                         <span class="badge bg-primary me-2">
-                                            <?= $linkedRepo ? htmlspecialchars("{$linkedRepo->repo_owner}/{$linkedRepo->repo_name}") : "Repo #{$conn->repo_connection_id}" ?>
+                                            <?= $linkedRepo ? htmlspecialchars("{$linkedRepo->repo_owner}/{$linkedRepo->repo_name}") : "Repo #{$conn->repoconnections_id}" ?>
                                         </span>
                                         <button type="button" class="btn btn-sm btn-outline-secondary unlink-repo-btn"
                                                 data-id="<?= $conn->id ?>">

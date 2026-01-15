@@ -589,7 +589,7 @@ class GitOperations {
         if (empty($cloneUrl)) {
             $logger->warning('GitOperations: No clone URL available', [
                 'issue_key' => $issueKey,
-                'repo_connection_id' => $job->repo_connection_id
+                'repoconnections_id' => $job->repoconnections_id
             ]);
             return false;
         }

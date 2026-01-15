@@ -455,14 +455,11 @@ class Enterprise extends BaseControls\Control {
         }
         try {
             // Get board-repo mappings
-            // Note: mapboard() uses RedBeanPHP associations which create jiraboards_id and repoconnections_id
-            // Support both old schema (board_id, repo_connection_id) and new association columns
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                // Use association column names (boards_id, repoconnections_id) with fallback to old schema
-                $boardId = $bean->boards_id ?? $bean->jiraboards_id ?? $bean->board_id;
-                $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
+                $boardId = $bean->boards_id;
+                $repoId = $bean->repoconnections_id;
 
                 if (!$boardId || !$repoId) continue; // Skip invalid mappings
 
@@ -793,8 +790,8 @@ class Enterprise extends BaseControls\Control {
 
             // Find and delete the mapping
             $mapping = Bean::findOne('boardrepomapping',
-                '(boards_id = ? OR jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
-                [$boardId, $boardId, $boardId, $repoId, $repoId]
+                'boards_id = ? AND repoconnections_id = ?',
+                [$boardId, $repoId]
             );
 
             if ($mapping) {
@@ -1385,7 +1382,7 @@ class Enterprise extends BaseControls\Control {
             // Get cloud_uid from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
-                $board = Bean::load('jiraboards', (int)$job->board_id);
+                $board = Bean::load('jiraboards', (int)$job->boards_id);
                 $cloudId = $board->cloud_uid ?? null;
             }
 

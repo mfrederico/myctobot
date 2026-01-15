@@ -387,8 +387,8 @@ class Github extends BaseControls\Control {
             $mappings = [];
             $mappingBeans = Bean::findAll('boardrepomapping');
             foreach ($mappingBeans as $bean) {
-                $boardId = $bean->boards_id ?? $bean->jiraboards_id ?? $bean->board_id;
-                $repoId = $bean->repoconnections_id ?? $bean->repo_connection_id;
+                $boardId = $bean->boards_id;
+                $repoId = $bean->repoconnections_id;
 
                 if (!$boardId || !$repoId) continue;
 
@@ -654,8 +654,8 @@ class Github extends BaseControls\Control {
 
         try {
             $mapping = Bean::findOne('boardrepomapping',
-                '(boards_id = ? OR jiraboards_id = ? OR board_id = ?) AND (repoconnections_id = ? OR repo_connection_id = ?)',
-                [$boardId, $boardId, $boardId, $repoId, $repoId]
+                'boards_id = ? AND repoconnections_id = ?',
+                [$boardId, $repoId]
             );
 
             if ($mapping) {

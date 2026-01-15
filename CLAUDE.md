@@ -149,7 +149,7 @@ RedBeanPHP automatically names FKs as `[parent_type]_id`:
 ```php
 // BAD - Manual FK management
 $result = Bean::dispense('analysisresults');
-$result->board_id = $boardId;  // Manual FK assignment
+$result->boards_id = $boardId;  // Manual FK assignment
 Bean::store($result);
 
 // GOOD - Use association

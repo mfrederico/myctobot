@@ -363,7 +363,7 @@ class ConnectionsService {
                     'shared' => (bool)$store->shared,
                     'is_owner' => $isOwner,
                     'owner_name' => $store->created_by_name,
-                    'repo_linked' => !empty($store->repo_connection_id)
+                    'repo_linked' => !empty($store->repoconnections_id)
                 ];
 
                 if ($isOwner) {

@@ -1033,6 +1033,13 @@ if (file_exists($finishJobSrc)) {
     copy($finishJobSrc, $finishJobDst);
     chmod($finishJobDst, 0755);
     echo "  Copied finish_job.sh to work directory\n";
+
+    // Also copy to repo directory since Claude runs from there (after cd repo)
+    if (is_dir($repoDir)) {
+        copy($finishJobSrc, "{$repoDir}/finish_job.sh");
+        chmod("{$repoDir}/finish_job.sh", 0755);
+        echo "  Copied finish_job.sh to repo directory\n";
+    }
 }
 
 // Build provider-specific environment section

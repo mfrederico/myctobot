@@ -352,9 +352,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         board_id: boardId,
                         repo_id: repoId,
                         cloud_uid: cloudId,
-                        <?php if (!empty($csrf)): ?>
-                        csrf_token: '<?= $csrf['csrf_token'] ?? '' ?>'
-                        <?php endif; ?>
+                        csrf_token: '<?= Flight::csrf()->getToken() ?>'
                     })
                 });
 

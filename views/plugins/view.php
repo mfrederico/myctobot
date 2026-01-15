@@ -1,4 +1,3 @@
-<?php $csrf = $csrf['csrf_token'] ?? ''; ?>
 <div class="container py-4">
     <!-- Breadcrumb -->
     <nav aria-label="breadcrumb" class="mb-4">

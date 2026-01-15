@@ -5,7 +5,6 @@
  * Step-by-step wizard for creating AI agents with pre-configured profiles.
  * Designed for users who are new to AI development systems.
  */
-$csrf = $csrf['csrf_token'] ?? '';
 $hasShards = $wizardHasShards ?? false;
 $useLocalRunner = $wizardUseLocalRunner ?? false;
 ?>
@@ -881,7 +880,7 @@ $useLocalRunner = $wizardUseLocalRunner ?? false;
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRF-Token': '<?= $csrf ?>'
+                'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
             },
             body: JSON.stringify(data)
         })

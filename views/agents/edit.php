@@ -1,7 +1,6 @@
 <?php
 $isNew = empty($agent);
 $agentId = $agent['id'] ?? 0;
-$csrf = $csrf['csrf_token'] ?? '';
 $agentName = $agent['name'] ?? '';
 $provider = $agent['provider'] ?? 'claude_cli';
 $providerConfig = $agent['provider_config'] ?? [];
@@ -95,7 +94,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         </div>
         <div class="card-body">
             <form method="POST" action="<?= $isNew ? '/agents/store' : '/agents/update/' . $agentId ?>">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="general">
 
                 <div class="mb-3">
@@ -357,7 +356,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRF-Token': '<?= $csrf ?>'
+                'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
             },
             body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
         })
@@ -446,7 +445,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
             </div>
 
             <form method="POST" action="/agents/update/<?= $agentId ?>">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="mcp">
 
                 <div class="mb-3">
@@ -622,7 +621,7 @@ function loadDefaultMcp() {
 
 
             <form method="POST" action="/agents/update/<?= $agentId ?>">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="hooks">
 
                 <div class="mb-3">
@@ -862,7 +861,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
 
             <form method="POST" action="/agents/update/<?= $agentId ?>" onsubmit="prepareProviderConfig()">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="provider">
 
                 <div class="mb-4">
@@ -1151,7 +1150,7 @@ function loadClaudeOllamaModels() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
         },
         body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
     })
@@ -1251,7 +1250,7 @@ function testClaudeOllamaConnection() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
         },
         body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
     })
@@ -1365,7 +1364,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
 
             <form method="POST" action="/agents/update/<?= $agentId ?>">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
                 <input type="hidden" name="tab" value="capabilities">
 
                 <div class="row">
@@ -1529,7 +1528,7 @@ Respond concisely."></textarea>
 
 <script>
 const agentId = <?= $agentId ?>;
-const csrfToken = '<?= $csrf ?>';
+const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 let toolsData = [];
 let parameterIndex = 0;
 
@@ -1883,7 +1882,7 @@ function loadProviderCapabilities() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': '<?= $csrf ?>'
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
         },
         body: 'provider=' + encodeURIComponent(provider) + '&provider_config=' + encodeURIComponent(JSON.stringify(providerConfig))
     })

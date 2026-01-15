@@ -783,7 +783,7 @@ $mcpServers = (object) [
     'playwright' => (object) [
         'type' => 'stdio',
         'command' => 'npx',
-        'args' => ['@ejazullah/mcp-playwright'],
+        'args' => ['@playwright/mcp@latest'],
         'env' => new \stdClass()
     ]
 ];

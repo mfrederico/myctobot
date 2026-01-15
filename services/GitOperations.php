@@ -562,11 +562,11 @@ class GitOperations {
             return false;
         }
 
-        // Get repo connection details
-        $repo = \app\Bean::load('repoconnections', $job->repo_connection_id);
+        // Get repo connection details via association
+        $repo = $job->repoconnections;
         if (!$repo || !$repo->id) {
             $logger->warning('GitOperations: Repo connection not found', [
-                'repo_connection_id' => $job->repo_connection_id
+                'job_uid' => $job->job_uid
             ]);
             return false;
         }

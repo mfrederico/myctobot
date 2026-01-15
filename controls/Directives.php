@@ -96,10 +96,10 @@ class Directives extends BaseControls\Control {
             return;
         }
 
-        // Find directive by ID or ceodirectives_id
+        // Find directive by ID or directive_uid
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'ceodirectives_id = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             $this->flash('error', 'Directive not found');
@@ -107,17 +107,12 @@ class Directives extends BaseControls\Control {
             return;
         }
 
-        // Get processing logs
-        $logs = Bean::find('directivelogs',
-            'ceodirectives_id = ? ORDER BY created_at ASC',
-            [$directive->id]
-        );
+        // Get processing logs via association
+        $logs = $directive->with(' ORDER BY created_at ASC ')->ownDirectivelogsList;
 
-        // Get linked project if any
-        $project = null;
-        if ($directive->project_uid) {
-            $project = Bean::load('ctoprojects', $directive->project_uid);
-        }
+        // Get linked project via association (directive owns projects)
+        $projects = $directive->ownCtoprojectsList;
+        $project = !empty($projects) ? reset($projects) : null;
 
         // Get member info if available
         $member = null;
@@ -151,7 +146,7 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'ceodirectives_id = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
@@ -202,7 +197,7 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'ceodirectives_id = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
@@ -254,21 +249,22 @@ class Directives extends BaseControls\Control {
         // Find directive
         $directive = is_numeric($directiveId)
             ? Bean::load('ceodirectives', $directiveId)
-            : Bean::findOne('ceodirectives', 'ceodirectives_id = ?', [$directiveId]);
+            : Bean::findOne('ceodirectives', 'directive_uid = ?', [$directiveId]);
 
         if (!$directive || !$directive->id) {
             Flight::jsonError('Directive not found');
             return;
         }
 
-        // Delete associated logs
-        $logs = Bean::find('directivelogs', 'ceodirectives_id = ?', [$directive->id]);
-        foreach ($logs as $log) {
+        // Delete associated logs via association
+        foreach ($directive->ownDirectivelogsList as $log) {
             Bean::trash($log);
         }
 
         // Delete associated project if exists (cascade to epics and stories)
-        $project = Bean::findOne('ctoprojects', 'ceodirectives_id = ?', [$directive->id]);
+        // Directive has many projects - get first one
+        $projects = $directive->ownCtoprojectsList;
+        $project = reset($projects);
         if ($project) {
             // Delete stories in each epic using associations
             foreach ($project->ownCtoepicsList as $epic) {

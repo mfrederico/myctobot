@@ -179,7 +179,7 @@ $cloudId = null;
 $projectKey = null;
 
 try {
-    $boards = Bean::findAll('jiraboards', ' enabled = 1 ORDER BY id ASC LIMIT 1 ');
+    $boards = Bean::findAll('jiraboards', ' is_active = 1 ORDER BY id ASC LIMIT 1 ');
     if (!empty($boards)) {
         $board = reset($boards);
         $cloudId = $board->cloud_uid;

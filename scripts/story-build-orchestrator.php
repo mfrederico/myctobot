@@ -626,8 +626,11 @@ class StoryBuildOrchestrator {
 
         Bean::store($story);
 
-        // Update epic progress
-        $this->updateEpicProgress($story->epic_id);
+        // Update epic progress via association
+        $epic = $story->ctoepics;
+        if ($epic && $epic->id) {
+            $this->updateEpicProgress($epic);
+        }
     }
 
     /**
@@ -673,23 +676,28 @@ class StoryBuildOrchestrator {
     }
 
     /**
-     * Update epic completion stats
+     * Update epic completion stats via associations
      */
-    private function updateEpicProgress(int $epicId): void {
-        if (!$epicId) return;
-
-        $epic = Bean::load('ctoepics', $epicId);
+    private function updateEpicProgress(object $epic): void {
         if (!$epic || !$epic->id) return;
 
-        $totalStories = Bean::count('ctostories', 'epic_id = ?', [$epicId]);
-        $completedStories = Bean::count('ctostories', 'epic_id = ? AND status = ?', [$epicId, 'done']);
+        // Count stories via association
+        $stories = $epic->ownCtostoriesList;
+        $totalStories = count($stories);
+        $completedStories = 0;
+
+        foreach ($stories as $story) {
+            if ($story->status === 'done') {
+                $completedStories++;
+            }
+        }
 
         $epic->story_count = $totalStories;
         $epic->stories_completed = $completedStories;
 
         if ($completedStories >= $totalStories && $totalStories > 0) {
             $epic->status = 'completed';
-            output("  Epic {$epicId} completed!", true);
+            output("  Epic {$epic->epic_uid} completed!", true);
         } elseif ($completedStories > 0) {
             $epic->status = 'in_progress';
         }

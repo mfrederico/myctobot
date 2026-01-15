@@ -517,11 +517,9 @@ class ConnectionsService {
         foreach ($repoBeans as $bean) {
             // Get agent name if assigned (aiagents is in MySQL)
             $agentName = null;
-            if ($bean->agent_id) {
-                $agent = Bean::load('aiagents', $bean->agent_id);
-                if ($agent->id) {
-                    $agentName = $agent->name;
-                }
+            $agent = $bean->aiagents;
+            if ($agent && $agent->id) {
+                $agentName = $agent->name;
             }
 
             $repos[] = [
@@ -535,7 +533,7 @@ class ConnectionsService {
                 'enabled' => $bean->enabled,
                 'issues_enabled' => $bean->issues_enabled ?? 0,
                 'webhook_uid' => $bean->webhook_uid,
-                'agent_id' => $bean->agent_id,
+                'agent_uid' => $bean->agent_uid,
                 'agent_name' => $agentName,
                 'created_at' => $bean->created_at,
                 'updated_at' => $bean->updated_at

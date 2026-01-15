@@ -2395,7 +2395,7 @@ class Webhook extends BaseControls\Control {
 
             } elseif ($status === 'preview_ready' && !empty($result['shopify_preview_url'])) {
                 // Shopify preview is ready - update status and post to Jira
-                $themeId = (int)($result['shopify_theme_id'] ?? 0);
+                $themeId = (int)($result['shopify_themeid'] ?? 0);
                 $previewUrl = $result['shopify_preview_url'];
                 $playwrightResults = $result['playwright_results'] ?? null;
 

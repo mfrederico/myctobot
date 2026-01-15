@@ -80,7 +80,7 @@
                                 <option value="">-- Use Default --</option>
                                 <?php foreach ($agents ?? [] as $agent): ?>
                                 <option value="<?= $agent['id'] ?>"
-                                        <?= ($repo['agent_id'] ?? null) == $agent['id'] ? 'selected' : '' ?>>
+                                        <?= ($repo['agent_uid'] ?? null) == $agent['id'] ? 'selected' : '' ?>>
                                     <?= htmlspecialchars($agent['name']) ?>
                                     (<?= htmlspecialchars($agent['provider_label'] ?? $agent['provider']) ?>)
                                     <?= $agent['is_default'] ? '[Default]' : '' ?>

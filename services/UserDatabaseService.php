@@ -87,7 +87,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getEnabledBoards(): array {
-        return array_values(Bean::find('jiraboards', ' enabled = 1 ORDER BY board_name ASC '));
+        return array_values(Bean::find('jiraboards', ' is_active = 1 ORDER BY board_name ASC '));
     }
 
     /**
@@ -95,7 +95,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoardsForDigest(): array {
-        return array_values(Bean::find('jiraboards', ' enabled = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
+        return array_values(Bean::find('jiraboards', ' is_active = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
     }
 
     /**
@@ -115,7 +115,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoardByJiraId(int $boardId, string $cloudId) {
-        return Bean::findOne('jiraboards', ' board_id = ? AND cloud_uid = ? ', [$boardId, $cloudId]);
+        return Bean::findOne('jiraboards', ' board_uid = ? AND cloud_uid = ? ', [$boardId, $cloudId]);
     }
 
     /**
@@ -134,7 +134,7 @@ class UserDatabaseService {
      */
     public static function addBoard(array $data): int {
         $board = Bean::dispense('jiraboards');
-        $board->board_id = $data['board_id'];
+        $board->board_uid = $data['board_uid'] ?? $data['board_id'] ?? null;
         $board->board_name = $data['board_name'];
         $board->project_key = $data['project_key'];
         $board->cloud_uid = $data['cloud_uid'];
@@ -413,7 +413,7 @@ class UserDatabaseService {
         try {
             return [
                 'total_boards' => Bean::count('jiraboards') ?? 0,
-                'enabled_boards' => Bean::count('jiraboards', ' enabled = 1 ') ?? 0,
+                'enabled_boards' => Bean::count('jiraboards', ' is_active = 1 ') ?? 0,
                 'digest_enabled_boards' => Bean::count('jiraboards', ' digest_enabled = 1 ') ?? 0,
                 'total_analyses' => Bean::count('analysisresults') ?? 0,
                 'total_digests' => Bean::count('digesthistory', ' status = ? ', ['sent']) ?? 0,

@@ -268,7 +268,7 @@ class DirectiveOrchestrator {
 
             // Check if we can queue more stories
             $runningStories = Bean::count('ctostories',
-                'epic_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?) AND status = ?',
+                'ctoepics_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?) AND status = ?',
                 [$project->id, 'in_progress']
             );
 
@@ -293,7 +293,7 @@ class DirectiveOrchestrator {
 
         // Find ready stories that aren't blocked
         $stories = Bean::find('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?)
+            'ctoepics_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?)
              AND status = ?
              AND (depends_on IS NULL OR depends_on = "[]")
              ORDER BY sequence ASC
@@ -445,12 +445,12 @@ class DirectiveOrchestrator {
     private function updateProjectCompletion(object $project): void {
         // Count total and completed stories
         $totalStories = Bean::count('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?)',
+            'ctoepics_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?)',
             [$project->id]
         );
 
         $completedStories = Bean::count('ctostories',
-            'epic_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?) AND status = ?',
+            'ctoepics_id IN (SELECT id FROM ctoepics WHERE ctoprojects_id = ?) AND status = ?',
             [$project->id, 'done']
         );
 
@@ -466,7 +466,7 @@ class DirectiveOrchestrator {
             $project->status = 'completed';
 
             // Also complete the directive
-            $directive = Bean::load('ceodirectives', $project->ceodirectives_id);
+            $directive = $project->ceodirectives;
             if ($directive && $directive->id) {
                 $directive->status = 'completed';
                 $directive->current_phase = 'complete';

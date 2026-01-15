@@ -377,7 +377,7 @@ if ($repoIdParam) {
 
 // Load agent configuration for this repo
 $agentConfig = null;
-$agentId = $repoBean->agent_id ?? null;
+$agentId = $repoBean->agent_uid ?? null;
 if ($agentId) {
     // Load agent by ID - repo is already validated for this member
     $agentBean = R::load('aiagents', $agentId);

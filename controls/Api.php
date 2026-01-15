@@ -139,7 +139,7 @@ class Api extends BaseControls\Control {
         $tools = [];
         foreach ($agents as $agent) {
             // Get tools for this agent
-            $agentTools = R::find('agenttools', 'agent_id = ? AND is_active = 1', [$agent->id]);
+            $agentTools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
 
             foreach ($agentTools as $tool) {
                 $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
@@ -223,7 +223,7 @@ class Api extends BaseControls\Control {
 
         // Verify agent ownership and get agent config (use tenant member ID)
         $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id, $this->tenantMemberId]);
+            [$tool->aiagents_id, $this->tenantMemberId]);
         if (!$agent) {
             Flight::jsonError("Tool's agent not accessible", 403);
             return;
@@ -393,7 +393,7 @@ class Api extends BaseControls\Control {
 
         $tools = [];
         foreach ($agents as $agent) {
-            $agentTools = R::find('agenttools', 'agent_id = ? AND is_active = 1', [$agent->id]);
+            $agentTools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
 
             foreach ($agentTools as $tool) {
                 $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
@@ -466,7 +466,7 @@ class Api extends BaseControls\Control {
 
         // Verify agent ownership
         $agent = R::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->agent_id, $this->tenantMemberId]);
+            [$tool->aiagents_id, $this->tenantMemberId]);
         if (!$agent) {
             $this->jsonRpcError(-32000, "Tool's agent not accessible", $id);
             return;
@@ -614,7 +614,7 @@ class Api extends BaseControls\Control {
         }
 
         // Get tools for this agent
-        $tools = R::find('agenttools', 'agent_id = ? AND is_active = 1', [$agentId]);
+        $tools = R::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agentId]);
 
         // Build tool descriptions for the config
         $toolDescriptions = [];
@@ -780,10 +780,10 @@ class Api extends BaseControls\Control {
 
         $result = [];
         foreach ($beans as $s) {
-            $epic = Bean::load('ctoepics', $s->epic_id);
+            $epic = $s->ctoepics;
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_uid);
+            $project = $epic->ctoprojects;
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
             if ($projectId && $project->project_uid !== $projectId) continue;
 
@@ -825,10 +825,10 @@ class Api extends BaseControls\Control {
             $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$job->issue_key]);
             if (!$story) continue;
 
-            $epic = Bean::load('ctoepics', $story->epic_id);
+            $epic = $story->ctoepics;
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_uid);
+            $project = $epic->ctoprojects;
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
             if ($projectId && $project->project_uid !== $projectId) continue;
 
@@ -862,10 +862,10 @@ class Api extends BaseControls\Control {
 
         $result = [];
         foreach ($beans as $s) {
-            $epic = Bean::load('ctoepics', $s->epic_id);
+            $epic = $s->ctoepics;
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_uid);
+            $project = $epic->ctoprojects;
             if (!$project->id || !in_array($project->status, ['planning', 'in_progress'])) continue;
             if ($projectId && $project->project_uid !== $projectId) continue;
 
@@ -901,10 +901,10 @@ class Api extends BaseControls\Control {
             $story = Bean::findOne('ctostories', 'jira_issue_key = ?', [$job->issue_key]);
             if (!$story) continue;
 
-            $epic = Bean::load('ctoepics', $story->epic_id);
+            $epic = $story->ctoepics;
             if (!$epic->id) continue;
 
-            $project = Bean::load('ctoprojects', $epic->project_uid);
+            $project = $epic->ctoprojects;
             if (!$project->id) continue;
             if ($projectId && $project->project_uid !== $projectId) continue;
 

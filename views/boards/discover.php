@@ -50,7 +50,7 @@
                                     $isTracked = false;
                                     $trackedBoardId = null;
                                     foreach ($existingBoards as $existing) {
-                                        if ($existing['board_id'] == $board['id'] && $existing['cloud_uid'] == $site->cloud_uid) {
+                                        if ($existing['board_uid'] == $board['id'] && $existing['cloud_uid'] == $site->cloud_uid) {
                                             $isTracked = true;
                                             $trackedBoardId = $existing['id'];
                                             break;

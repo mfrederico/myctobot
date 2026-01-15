@@ -332,7 +332,7 @@ class AIDevJobService {
                 'existing_branch' => $existingBranch,
                 // Shopify integration
                 'shopify' => $shopifySettings,
-                'existing_shopify_theme_id' => $existingThemeId,
+                'existing_shopify_themeid' => $existingThemeId,
                 // Agent orchestrator pattern
                 'use_orchestrator' => $useOrchestrator
             ];

@@ -221,7 +221,7 @@ class AIDevAgent {
             // Add Shopify info if available
             if ($shopifyResult) {
                 $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
-                $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
             }
 
             return $result;
@@ -327,7 +327,7 @@ class AIDevAgent {
 
             if ($shopifyResult) {
                 $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
-                $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
             }
 
             return $result;
@@ -442,7 +442,7 @@ class AIDevAgent {
 
                 if ($shopifyResult) {
                     $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
-                    $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                    $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
                 }
 
                 return $result;
@@ -469,7 +469,7 @@ class AIDevAgent {
 
                 if ($shopifyResult) {
                     $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
-                    $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                    $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
                 }
 
                 return $result;

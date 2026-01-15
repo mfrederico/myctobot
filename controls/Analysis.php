@@ -858,7 +858,7 @@ PROMPT;
 
         // Shopify integration settings
         $shopifySettings = $input['shopify'] ?? [];
-        $existingShopifyThemeId = $input['existing_shopify_theme_id'] ?? null;
+        $existingShopifyThemeId = $input['existing_shopify_themeid'] ?? null;
 
         // Return accepted immediately and continue processing in background
         // Use Flight's response to avoid conflicts with its internal handling
@@ -1357,7 +1357,7 @@ PROMPT;
             );
 
             if ($shopifyResult) {
-                $result['shopify_theme_id'] = $shopifyResult['theme_id'] ?? null;
+                $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
                 $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
                 fwrite($logHandle, "Preview URL: " . ($shopifyResult['preview_url'] ?? 'N/A') . "\n");
 

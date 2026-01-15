@@ -137,7 +137,7 @@ PROMPT;
         $githubLabels = $options['github_labels'] ?? ['ctobot-generated'];
 
         $this->logger->info('PMAgent: Creating stories from epic', [
-            'epic_id' => $epic->epic_id,
+            'epic_uid' => $epic->epic_uid,
             'title' => $epic->title,
             'require_approval' => $requireApproval,
             'create_jira' => $createJiraIssues,
@@ -160,7 +160,7 @@ PROMPT;
 
             if (!$parsed || empty($parsed['stories'])) {
                 $this->logger->error('PMAgent: Failed to parse response or no stories', [
-                    'epic_id' => $epic->epic_id,
+                    'epic_uid' => $epic->epic_uid,
                     'response_preview' => substr($response, 0, 500)
                 ]);
                 return [
@@ -186,7 +186,7 @@ PROMPT;
 
                 // Track dependencies for later resolution
                 if (!empty($storyData['depends_on'])) {
-                    $storyDependencies[$story->story_id] = $storyData['depends_on'];
+                    $storyDependencies[$story->story_uid] = $storyData['depends_on'];
                 }
 
                 // Create Jira issue if requested
@@ -204,7 +204,7 @@ PROMPT;
             $this->resolveDependencies($createdStories, $storyDependencies);
 
             $this->logger->info('PMAgent: Stories created', [
-                'epic_id' => $epic->epic_id,
+                'epic_uid' => $epic->epic_uid,
                 'story_count' => count($createdStories)
             ]);
 
@@ -216,7 +216,7 @@ PROMPT;
 
         } catch (\Exception $e) {
             $this->logger->error('PMAgent: Exception during story creation', [
-                'epic_id' => $epic->epic_id,
+                'epic_uid' => $epic->epic_uid,
                 'error' => $e->getMessage()
             ]);
 
@@ -284,8 +284,8 @@ PROMPT;
         $storyId = bin2hex(random_bytes(16));
 
         $story = Bean::dispense('ctostories');
-        $story->story_id = $storyId;
-        $story->epic_id = $epic->id;
+        $story->story_uid = $storyId;
+        $story->ctoepics = $epic;  // Association creates ctoepics_id FK
         $story->title = $storyData['title'];
         $story->description = $storyData['description'] ?? '';
         $story->acceptance_criteria = json_encode($storyData['acceptance_criteria'] ?? []);
@@ -366,14 +366,14 @@ PROMPT;
                 Bean::store($story);
 
                 $this->logger->info('PMAgent: Jira issue created', [
-                    'story_id' => $story->story_id,
+                    'story_id' => $story->story_uid,
                     'jira_key' => $result['key']
                 ]);
             }
 
         } catch (\Exception $e) {
             $this->logger->error('PMAgent: Failed to create Jira issue', [
-                'story_id' => $story->story_id,
+                'story_id' => $story->story_uid,
                 'error' => $e->getMessage()
             ]);
         }
@@ -410,7 +410,7 @@ PROMPT;
             $body .= "---\n\n";
             $body .= "**Story Points:** " . ($story->story_points ?? 'TBD') . "\n";
             $body .= "**Epic:** " . $epic->title . "\n";
-            $body .= "**Story ID:** `" . $story->story_id . "`\n";
+            $body .= "**Story ID:** `" . $story->story_uid . "`\n";
 
             // Merge default label with any additional labels
             $allLabels = array_unique(array_merge(['ctobot-generated'], $labels));
@@ -431,7 +431,7 @@ PROMPT;
                 Bean::store($story);
 
                 $this->logger->info('PMAgent: GitHub issue created', [
-                    'story_id' => $story->story_id,
+                    'story_id' => $story->story_uid,
                     'github_issue' => $result['number'],
                     'url' => $result['html_url'] ?? ''
                 ]);
@@ -439,7 +439,7 @@ PROMPT;
 
         } catch (\Exception $e) {
             $this->logger->error('PMAgent: Failed to create GitHub issue', [
-                'story_id' => $story->story_id,
+                'story_id' => $story->story_uid,
                 'error' => $e->getMessage()
             ]);
         }
@@ -454,7 +454,7 @@ PROMPT;
         foreach ($stories as $story) {
             // Normalize title for matching
             $normalizedTitle = strtolower(trim($story->title));
-            $titleMap[$normalizedTitle] = $story->story_id;
+            $titleMap[$normalizedTitle] = $story->story_uid;
         }
 
         // Resolve dependencies
@@ -468,7 +468,7 @@ PROMPT;
             }
 
             if (!empty($resolvedIds)) {
-                $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+                $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
                 if ($story) {
                     $story->depends_on = json_encode($resolvedIds);
                     Bean::store($story);

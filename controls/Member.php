@@ -38,30 +38,48 @@ class Member extends Control {
             } else {
             
             $request = Flight::request();
-            $member = Bean::load('member', $this->member->id);
-            
+            $member = R::load('member', $this->member->id);
+
             // Validate input
+            $username = trim($request->data->username ?? '');
             $email = trim($request->data->email ?? '');
             $first_name = trim($request->data->first_name ?? '');
             $last_name = trim($request->data->last_name ?? '');
             $bio = trim($request->data->bio ?? '');
-            
-            if (empty($email)) {
+
+            // Validate username
+            if (empty($username)) {
+                $this->viewData['error'] = 'Username is required';
+            } elseif (strlen($username) < 3) {
+                $this->viewData['error'] = 'Username must be at least 3 characters';
+            } elseif (strlen($username) > 30) {
+                $this->viewData['error'] = 'Username must be 30 characters or less';
+            } elseif (!preg_match('/^[a-zA-Z0-9_-]+$/', $username)) {
+                $this->viewData['error'] = 'Username can only contain letters, numbers, underscores, and hyphens';
+            } elseif (empty($email)) {
                 $this->viewData['error'] = 'Email is required';
             } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $this->viewData['error'] = 'Invalid email format';
             } else {
-                // Check for duplicate email (excluding current member)
-                $existingEmail = Bean::findOne('member', 'email = ? AND id != ?', [$email, $member->id]);
-                
-                if ($existingEmail) {
-                    $this->viewData['error'] = 'Email already exists';
+                // Check for duplicate username (excluding current member)
+                $existingUsername = R::findOne('member', 'username = ? AND id != ?', [$username, $member->id]);
+
+                if ($existingUsername) {
+                    $this->viewData['error'] = 'Username already taken';
                 } else {
-                    // Update allowed fields
-                    $member->email = $email;
-                    $member->first_name = $first_name;
-                    $member->last_name = $last_name;
-                    $member->bio = $bio;
+                    // Check for duplicate email (excluding current member)
+                    $existingEmail = R::findOne('member', 'email = ? AND id != ?', [$email, $member->id]);
+
+                    if ($existingEmail) {
+                        $this->viewData['error'] = 'Email already exists';
+                    } else {
+                        // Update allowed fields
+                        $member->username = $username;
+                        $member->email = $email;
+                        $member->first_name = $first_name;
+                        $member->last_name = $last_name;
+                        $member->bio = $bio;
+                    }
                 }
             }
             
@@ -88,7 +106,7 @@ class Member extends Control {
                 $member->updated_at = date('Y-m-d H:i:s');
                 
                 try {
-                    Bean::store($member);
+                    R::store($member);
                     $_SESSION['member'] = $member->export();
                     $this->member = $member; // Update current member object
                     if (empty($this->viewData['success'])) {

@@ -124,8 +124,8 @@ class CompletionDetector {
                     $changed = true;
                     $newStatus = 'done';
 
-                    // Update epic completion count
-                    $this->incrementEpicCompletion($story->epic_id);
+                    // Update epic completion count via association
+                    $this->incrementEpicCompletion($story);
                 }
                 break;
 
@@ -170,10 +170,11 @@ class CompletionDetector {
     }
 
     /**
-     * Increment epic completion count
+     * Increment epic completion count via association
      */
-    private function incrementEpicCompletion(int $epicId): void {
-        $epic = Bean::load('ctoepics', $epicId);
+    private function incrementEpicCompletion(object $story): void {
+        // Access parent epic via association
+        $epic = $story->ctoepics;
         if ($epic && $epic->id) {
             $epic->stories_completed = ($epic->stories_completed ?? 0) + 1;
             $epic->updated_at = date('Y-m-d H:i:s');
@@ -204,7 +205,8 @@ class CompletionDetector {
      * Check completion of a single epic
      */
     public function checkEpicCompletion(object $epic): array {
-        $stories = Bean::find('ctostories', 'epic_id = ?', [$epic->id]);
+        // Get stories via association
+        $stories = $epic->ownCtostoriesList;
         $totalStories = count($stories);
 
         if ($totalStories === 0) {
@@ -398,15 +400,15 @@ class CompletionDetector {
      * Escalate an issue to the CEO
      */
     private function escalate(object $story, string $reason): void {
-        // Find the project's directive
-        $epic = Bean::load('ctoepics', $story->epic_id);
-        if (!$epic) return;
+        // Navigate up via associations: story -> epic -> project -> directive
+        $epic = $story->ctoepics;
+        if (!$epic || !$epic->id) return;
 
-        $project = Bean::load('ctoprojects', $epic->project_uid);
-        if (!$project) return;
+        $project = $epic->ctoprojects;
+        if (!$project || !$project->id) return;
 
-        $directive = Bean::load('ceodirectives', $project->ceodirectives_id);
-        if (!$directive) return;
+        $directive = $project->ceodirectives;
+        if (!$directive || !$directive->id) return;
 
         $this->logDirective($directive->id, 'escalation', 'warning',
             "Escalation: Story '{$story->title}' - {$reason}", [

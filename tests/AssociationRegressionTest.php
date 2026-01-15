@@ -566,7 +566,7 @@ class AssociationRegressionTest {
 
         // Create a board
         $board = Bean::dispense('jiraboards');
-        $board->board_id = 123;
+        $board->board_uid = 123;
         $board->board_name = 'Test Board';
         $board->project_key = 'TEST';
         $board->cloud_uid = 'test-cloud';

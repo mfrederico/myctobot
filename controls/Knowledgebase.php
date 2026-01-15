@@ -60,14 +60,15 @@ class Knowledgebase extends BaseControls\Control {
             $_SESSION['selected_kb'] = $selectedKbId;
         }
 
-        // Get documents for selected KB
+        // Get documents for selected KB via association
         $documents = [];
         $selectedKb = null;
         if ($selectedKbId && $selectedKbId !== 'undefined') {
             try {
                 $selectedKb = Bean::load('knowledgebases', (int)$selectedKbId);
                 if ($selectedKb->id) {
-                    $documents = Bean::find('ragdocuments', ' knowledgebase_id = ? ORDER BY created_at DESC ', [$selectedKbId]);
+                    // Use association with ordering
+                    $documents = $selectedKb->with(' ORDER BY created_at DESC ')->ownRagdocumentsList;
                 }
             } catch (Exception $e) {
                 $documents = [];
@@ -187,10 +188,9 @@ class Knowledgebase extends BaseControls\Control {
                 return;
             }
 
-            // Delete all documents in this KB
-            $documents = Bean::find('ragdocuments', ' knowledgebase_id = ? ', [$kbId]);
+            // Delete all documents in this KB via association
             $tenantSlug = $this->getTenantSlug();
-            foreach ($documents as $doc) {
+            foreach ($kb->ownRagdocumentsList as $doc) {
                 $this->deleteFromRagService($tenantSlug, $doc->filename);
                 Bean::trash($doc);
             }

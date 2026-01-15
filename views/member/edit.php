@@ -1,141 +1,260 @@
 <div class="container py-4">
-    <h1 class="h2 mb-4">Edit Profile</h1>
-    
-    <div class="row">
-        <div class="col-md-8">
-            <div class="card">
-                <div class="card-body">
-                    <?php if (!empty($error)): ?>
-                        <div class="alert alert-danger"><?= htmlspecialchars($error) ?></div>
-                    <?php endif; ?>
-                    
-                    <?php if (!empty($success)): ?>
-                        <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
-                    <?php endif; ?>
-                    
-                    <form method="POST">
-                        <?php if (!empty($csrf) && is_array($csrf)): ?>
-                            <?php foreach ($csrf as $name => $value): ?>
-                                <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                        
-                        <h5 class="mb-3">Account Information</h5>
-                        
-                        <div class="mb-3">
-                            <label for="username" class="form-label">Username</label>
-                            <input type="text" class="form-control" id="username" value="<?= htmlspecialchars($member->username ?? '') ?>" readonly>
-                            <small class="form-text text-muted">Username cannot be changed</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="email" class="form-label">Email Address</label>
-                            <input type="email" class="form-control" id="email" name="email" 
-                                   value="<?= htmlspecialchars($member->email ?? '') ?>" required>
-                        </div>
-                        
-                        <hr class="my-4">
-                        
-                        <h5 class="mb-3">Change Password</h5>
-                        <p class="text-muted">Leave blank to keep current password</p>
-                        
-                        <div class="mb-3">
-                            <label for="current_password" class="form-label">Current Password</label>
-                            <input type="password" class="form-control" id="current_password" name="current_password">
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="password" class="form-label">New Password</label>
-                            <input type="password" class="form-control" id="password" name="password">
-                            <small class="form-text text-muted">Minimum 8 characters</small>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="password_confirm" class="form-label">Confirm New Password</label>
-                            <input type="password" class="form-control" id="password_confirm" name="password_confirm">
-                        </div>
-                        
-                        <hr class="my-4">
-                        
-                        <h5 class="mb-3">Profile Details</h5>
-                        
-                        <div class="mb-3">
-                            <label for="first_name" class="form-label">First Name</label>
-                            <input type="text" class="form-control" id="first_name" name="first_name" 
-                                   value="<?= htmlspecialchars($member->first_name ?? '') ?>">
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="last_name" class="form-label">Last Name</label>
-                            <input type="text" class="form-control" id="last_name" name="last_name" 
-                                   value="<?= htmlspecialchars($member->last_name ?? '') ?>">
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="bio" class="form-label">Bio</label>
-                            <textarea class="form-control" id="bio" name="bio" rows="3"><?= htmlspecialchars($member->bio ?? '') ?></textarea>
-                        </div>
-                        
-                        <div class="d-flex justify-content-between">
-                            <a href="/member/profile" class="btn btn-secondary">Cancel</a>
-                            <button type="submit" class="btn btn-primary">Save Changes</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-        
-        <div class="col-md-4">
-            <div class="card">
-                <div class="card-body">
-                    <h5 class="card-title">Account Status</h5>
-                    <dl>
-                        <dt>Account Level</dt>
-                        <dd>
-                            <?php
-                            $levelName = 'Unknown';
-                            switch($member->level) {
-                                case 0:
-                                case 1:
-                                    $levelName = 'ROOT';
-                                    break;
-                                case 50:
-                                    $levelName = 'ADMIN';
-                                    break;
-                                case 100:
-                                    $levelName = 'MEMBER';
-                                    break;
-                                case 101:
-                                    $levelName = 'PUBLIC';
-                                    break;
-                            }
-                            ?>
-                            <?= $levelName ?>
-                        </dd>
-                        
-                        <dt>Status</dt>
-                        <dd><?= htmlspecialchars($member->status ?? 'active') ?></dd>
-                        
-                        <dt>Member Since</dt>
-                        <dd><?= date('F j, Y', strtotime($member->created_at ?? 'now')) ?></dd>
-                        
-                        <dt>Last Updated</dt>
-                        <dd><?= date('F j, Y', strtotime($member->updated_at ?? 'now')) ?></dd>
-                    </dl>
-                </div>
-            </div>
-            
-            <div class="card mt-3">
-                <div class="card-body">
-                    <h5 class="card-title">Password Requirements</h5>
-                    <ul class="small">
-                        <li>Minimum 8 characters</li>
-                        <li>Mix of letters and numbers recommended</li>
-                        <li>Special characters encouraged</li>
-                        <li>Avoid common words</li>
-                    </ul>
-                </div>
-            </div>
+    <div class="row mb-4">
+        <div class="col">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-0">
+                    <li class="breadcrumb-item"><a href="/member/dashboard">Dashboard</a></li>
+                    <li class="breadcrumb-item"><a href="/member/profile">Profile</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Edit</li>
+                </ol>
+            </nav>
         </div>
     </div>
+
+    <?php if (!empty($error)): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <?= htmlspecialchars($error) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <?php endif; ?>
+
+    <?php if (!empty($success)): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>
+            <?= htmlspecialchars($success) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    <?php endif; ?>
+
+    <form method="POST">
+        <?php if (!empty($csrf) && is_array($csrf)): ?>
+            <?php foreach ($csrf as $name => $value): ?>
+                <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
+            <?php endforeach; ?>
+        <?php endif; ?>
+
+        <div class="row">
+            <!-- Left Column - Main Form -->
+            <div class="col-lg-8">
+                <!-- Profile Header Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-4">
+                            <?php
+                            $initials = strtoupper(substr($member->first_name ?? $member->username ?? 'U', 0, 1));
+                            if (!empty($member->last_name)) {
+                                $initials .= strtoupper(substr($member->last_name, 0, 1));
+                            }
+                            $colors = ['#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4', '#3b82f6'];
+                            $colorIndex = abs(crc32($member->username ?? 'user')) % count($colors);
+                            $avatarColor = $colors[$colorIndex];
+                            ?>
+                            <div class="avatar-lg rounded-circle d-flex align-items-center justify-content-center me-3"
+                                 style="width: 72px; height: 72px; background: <?= $avatarColor ?>; color: white; font-size: 1.5rem; font-weight: 600;">
+                                <?= $initials ?>
+                            </div>
+                            <div>
+                                <h4 class="mb-1"><?= htmlspecialchars(trim(($member->first_name ?? '') . ' ' . ($member->last_name ?? '')) ?: $member->username) ?></h4>
+                                <span class="text-muted">@<?= htmlspecialchars($member->username ?? '') ?></span>
+                            </div>
+                        </div>
+
+                        <h5 class="border-bottom pb-2 mb-3">
+                            <i class="bi bi-person-badge me-2 text-primary"></i>Account Identity
+                        </h5>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="username" class="form-label fw-semibold">Username</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light">@</span>
+                                    <input type="text" class="form-control" id="username" name="username"
+                                           value="<?= htmlspecialchars($member->username ?? '') ?>"
+                                           pattern="[a-zA-Z0-9_\-]+"
+                                           minlength="3" maxlength="30" required>
+                                </div>
+                                <div class="form-text">3-30 characters: letters, numbers, underscores, hyphens</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="email" class="form-label fw-semibold">Email Address</label>
+                                <input type="email" class="form-control" id="email" name="email"
+                                       value="<?= htmlspecialchars($member->email ?? '') ?>" required>
+                                <div class="form-text">Used for login and notifications</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Personal Info Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="border-bottom pb-2 mb-3">
+                            <i class="bi bi-person me-2 text-primary"></i>Personal Information
+                        </h5>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="first_name" class="form-label fw-semibold">First Name</label>
+                                <input type="text" class="form-control" id="first_name" name="first_name"
+                                       value="<?= htmlspecialchars($member->first_name ?? '') ?>"
+                                       placeholder="Enter your first name">
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="last_name" class="form-label fw-semibold">Last Name</label>
+                                <input type="text" class="form-control" id="last_name" name="last_name"
+                                       value="<?= htmlspecialchars($member->last_name ?? '') ?>"
+                                       placeholder="Enter your last name">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="bio" class="form-label fw-semibold">Bio</label>
+                            <textarea class="form-control" id="bio" name="bio" rows="3"
+                                      placeholder="Tell us a bit about yourself..."><?= htmlspecialchars($member->bio ?? '') ?></textarea>
+                            <div class="form-text">Optional. Brief description shown on your profile.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="border-bottom pb-2 mb-3">
+                            <i class="bi bi-shield-lock me-2 text-primary"></i>Security
+                        </h5>
+                        <p class="text-muted mb-3">Leave password fields empty to keep your current password.</p>
+
+                        <div class="mb-3">
+                            <label for="current_password" class="form-label fw-semibold">Current Password</label>
+                            <input type="password" class="form-control" id="current_password" name="current_password"
+                                   placeholder="Enter current password to change it">
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="password" class="form-label fw-semibold">New Password</label>
+                                <input type="password" class="form-control" id="password" name="password"
+                                       placeholder="New password" minlength="8">
+                                <div class="form-text">Minimum 8 characters</div>
+                            </div>
+
+                            <div class="col-md-6 mb-3">
+                                <label for="password_confirm" class="form-label fw-semibold">Confirm Password</label>
+                                <input type="password" class="form-control" id="password_confirm" name="password_confirm"
+                                       placeholder="Confirm new password">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="d-flex gap-2 mb-4">
+                    <button type="submit" class="btn btn-primary px-4">
+                        <i class="bi bi-check-lg me-1"></i>Save Changes
+                    </button>
+                    <a href="/member/profile" class="btn btn-outline-secondary">Cancel</a>
+                </div>
+            </div>
+
+            <!-- Right Column - Sidebar -->
+            <div class="col-lg-4">
+                <!-- Account Status Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-transparent border-bottom-0 pt-4 pb-0">
+                        <h6 class="mb-0">
+                            <i class="bi bi-info-circle me-2 text-primary"></i>Account Status
+                        </h6>
+                    </div>
+                    <div class="card-body pt-3">
+                        <?php
+                        $levelName = 'Unknown';
+                        $levelBadge = 'bg-secondary';
+                        switch($member->level) {
+                            case 0:
+                            case 1:
+                                $levelName = 'Root';
+                                $levelBadge = 'bg-danger';
+                                break;
+                            case 50:
+                                $levelName = 'Admin';
+                                $levelBadge = 'bg-warning text-dark';
+                                break;
+                            case 100:
+                                $levelName = 'Member';
+                                $levelBadge = 'bg-primary';
+                                break;
+                            case 101:
+                                $levelName = 'Public';
+                                $levelBadge = 'bg-secondary';
+                                break;
+                        }
+                        ?>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted">Role</span>
+                            <span class="badge <?= $levelBadge ?>"><?= $levelName ?></span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted">Status</span>
+                            <span class="badge <?= ($member->status ?? 'active') === 'active' ? 'bg-success' : 'bg-secondary' ?>">
+                                <?= ucfirst(htmlspecialchars($member->status ?? 'active')) ?>
+                            </span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted">Member Since</span>
+                            <span class="small"><?= date('M j, Y', strtotime($member->created_at ?? 'now')) ?></span>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-muted">Last Updated</span>
+                            <span class="small"><?= date('M j, Y', strtotime($member->updated_at ?? 'now')) ?></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Links Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-transparent border-bottom-0 pt-4 pb-0">
+                        <h6 class="mb-0">
+                            <i class="bi bi-lightning me-2 text-primary"></i>Quick Links
+                        </h6>
+                    </div>
+                    <div class="card-body pt-3">
+                        <div class="list-group list-group-flush">
+                            <a href="/member/profile" class="list-group-item list-group-item-action border-0 px-0 py-2">
+                                <i class="bi bi-person me-2 text-muted"></i>View Profile
+                            </a>
+                            <a href="/member/settings" class="list-group-item list-group-item-action border-0 px-0 py-2">
+                                <i class="bi bi-gear me-2 text-muted"></i>Settings
+                            </a>
+                            <a href="/member/dashboard" class="list-group-item list-group-item-action border-0 px-0 py-2">
+                                <i class="bi bi-speedometer2 me-2 text-muted"></i>Dashboard
+                            </a>
+                            <?php if ($member->level <= 50): ?>
+                            <a href="/admin" class="list-group-item list-group-item-action border-0 px-0 py-2">
+                                <i class="bi bi-sliders me-2 text-muted"></i>Admin Panel
+                            </a>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tips Card -->
+                <div class="card border-0 shadow-sm bg-light">
+                    <div class="card-body">
+                        <h6 class="mb-3">
+                            <i class="bi bi-lightbulb me-2 text-warning"></i>Password Tips
+                        </h6>
+                        <ul class="small text-muted mb-0 ps-3">
+                            <li class="mb-1">Use at least 8 characters</li>
+                            <li class="mb-1">Mix letters, numbers & symbols</li>
+                            <li class="mb-1">Avoid common words or patterns</li>
+                            <li>Don't reuse passwords</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
 </div>

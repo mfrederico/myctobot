@@ -149,9 +149,10 @@ class Reviewboard extends BaseControls\Control {
             $epic = null;
 
             if ($story) {
-                $epic = Bean::load('ctoepics', $story->epic_id);
+                // Navigate up via associations: story -> epic -> project
+                $epic = $story->ctoepics;
                 if ($epic && $epic->id) {
-                    $project = Bean::load('ctoprojects', $epic->project_uid);
+                    $project = $epic->ctoprojects;
                 }
             }
 
@@ -215,7 +216,7 @@ class Reviewboard extends BaseControls\Control {
         $acceptanceCriteria = $this->getParam('acceptance_criteria');
         $storyPoints = $this->getParam('story_points');
 
-        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+        $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
         if (!$story) {
             Flight::jsonError('Story not found', 404);
             return;
@@ -251,7 +252,7 @@ class Reviewboard extends BaseControls\Control {
 
         $storyId = $this->getParam('story_id');
 
-        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+        $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
         if (!$story) {
             Flight::jsonError('Story not found', 404);
             return;
@@ -263,9 +264,9 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Update epic story count
-        $epic = Bean::load('ctoepics', $story->epic_id);
-        if ($epic && $epic->story_count > 0) {
+        // Update epic story count via association
+        $epic = $story->ctoepics;
+        if ($epic && $epic->id && $epic->story_count > 0) {
             $epic->story_count--;
             Bean::store($epic);
         }
@@ -303,7 +304,7 @@ class Reviewboard extends BaseControls\Control {
         ];
 
         foreach ($storyIds as $storyId) {
-            $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+            $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
             if (!$story) {
                 $results['errors'][] = "Story not found: {$storyId}";
                 continue;
@@ -315,8 +316,8 @@ class Reviewboard extends BaseControls\Control {
             }
 
             try {
-                // Get epic for labels/context
-                $epic = Bean::load('ctoepics', $story->epic_id);
+                // Get epic for labels/context via association
+                $epic = $story->ctoepics;
 
                 // Create GitHub issue if configured
                 if ($githubConfig) {
@@ -493,7 +494,7 @@ class Reviewboard extends BaseControls\Control {
      */
     private function getJiraConfig(): ?array {
         // Check for enabled Jira board
-        $board = Bean::findOne('jiraboards', 'member_id = ? AND enabled = ?', [$this->member->id, 1]);
+        $board = Bean::findOne('jiraboards', 'member_id = ? AND is_active = ?', [$this->member->id, 1]);
         if (!$board) {
             return null;
         }
@@ -604,7 +605,7 @@ class Reviewboard extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         $storyId = $this->getParam('story_id');
-        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+        $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
 
         if (!$story) {
             Flight::jsonError('Story not found', 404);
@@ -661,20 +662,26 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Get max sequence for ordering
-        $maxSeq = Bean::getCell('SELECT MAX(sequence) FROM ctoepics WHERE project_uid = ?', [$project->id]);
+        // Get max sequence for ordering from existing epics
+        $existingEpics = $project->ownCtoepicsList;
+        $maxSeq = 0;
+        foreach ($existingEpics as $existingEpic) {
+            if (($existingEpic->sequence ?? 0) > $maxSeq) {
+                $maxSeq = $existingEpic->sequence;
+            }
+        }
 
         $epic = Bean::dispense('ctoepics');
-        $epic->epic_id = bin2hex(random_bytes(16));
-        $epic->project_uid = $project->id;
+        $epic->epic_uid = bin2hex(random_bytes(16));
+        $epic->ctoprojects = $project;  // Association creates ctoprojects_id FK
         $epic->title = $title;
         $epic->description = $description;
         $epic->status = 'backlog';
-        $epic->sequence = ($maxSeq ?? 0) + 1;
+        $epic->sequence = $maxSeq + 1;
         $epic->created_at = date('Y-m-d H:i:s');
         Bean::store($epic);
 
-        Flight::jsonSuccess(['message' => 'Epic created', 'epic_id' => $epic->epic_id]);
+        Flight::jsonSuccess(['message' => 'Epic created', 'epic_uid' => $epic->epic_uid]);
     }
 
     /**
@@ -687,7 +694,7 @@ class Reviewboard extends BaseControls\Control {
         $title = $this->getParam('title');
         $description = $this->getParam('description');
 
-        $epic = Bean::findOne('ctoepics', 'epic_id = ?', [$epicId]);
+        $epic = Bean::findOne('ctoepics', 'epic_uid = ?', [$epicId]);
         if (!$epic) {
             Flight::jsonError('Epic not found', 404);
             return;
@@ -715,7 +722,7 @@ class Reviewboard extends BaseControls\Control {
         $storyPoints = $this->getParam('story_points');
         $acceptanceCriteria = $this->getParam('acceptance_criteria');
 
-        $epic = Bean::findOne('ctoepics', 'epic_id = ?', [$epicId]);
+        $epic = Bean::findOne('ctoepics', 'epic_uid = ?', [$epicId]);
         if (!$epic) {
             Flight::jsonError('Epic not found', 404);
             return;
@@ -727,8 +734,8 @@ class Reviewboard extends BaseControls\Control {
         }
 
         $story = Bean::dispense('ctostories');
-        $story->story_id = bin2hex(random_bytes(16));
-        $story->epic_id = $epic->id;
+        $story->story_uid = bin2hex(random_bytes(16));
+        $story->ctoepics = $epic;  // Association creates ctoepics_id FK
         $story->title = $title;
         $story->description = $description;
         $story->story_points = $storyPoints ? (int)$storyPoints : null;
@@ -741,7 +748,7 @@ class Reviewboard extends BaseControls\Control {
         $epic->story_count = ($epic->story_count ?? 0) + 1;
         Bean::store($epic);
 
-        Flight::jsonSuccess(['message' => 'Story created', 'story_id' => $story->story_id]);
+        Flight::jsonSuccess(['message' => 'Story created', 'story_uid' => $story->story_uid]);
     }
 
     /**
@@ -753,27 +760,27 @@ class Reviewboard extends BaseControls\Control {
         $storyId = $this->getParam('story_id');
         $targetEpicId = $this->getParam('epic_id');
 
-        $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+        $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
         if (!$story) {
             Flight::jsonError('Story not found', 404);
             return;
         }
 
-        $targetEpic = Bean::findOne('ctoepics', 'epic_id = ?', [$targetEpicId]);
+        $targetEpic = Bean::findOne('ctoepics', 'epic_uid = ?', [$targetEpicId]);
         if (!$targetEpic) {
             Flight::jsonError('Target epic not found', 404);
             return;
         }
 
-        // Update old epic's story count
-        $oldEpic = Bean::load('ctoepics', $story->epic_id);
-        if ($oldEpic->id) {
+        // Update old epic's story count via association
+        $oldEpic = $story->ctoepics;
+        if ($oldEpic && $oldEpic->id) {
             $oldEpic->story_count = max(0, ($oldEpic->story_count ?? 1) - 1);
             Bean::store($oldEpic);
         }
 
-        // Move story
-        $story->epic_id = $targetEpic->id;
+        // Move story via association
+        $story->ctoepics = $targetEpic;  // Association updates ctoepics_id FK
         $story->updated_at = date('Y-m-d H:i:s');
         Bean::store($story);
 
@@ -1139,10 +1146,11 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Determine project from first story
+        // Determine project from first story via associations
         $firstStory = Bean::findOne('ctostories', 'id = ?', [$validStoryIds[0]]);
-        $epic = Bean::load('ctoepics', $firstStory->epic_id);
-        $projectId = $epic->project_uid ?? null;
+        $epic = $firstStory->ctoepics;
+        $project = $epic ? $epic->ctoprojects : null;
+        $projectId = $project ? $project->id : null;
 
         if (!$projectId) {
             Flight::jsonError('Could not determine project', 400);
@@ -1284,7 +1292,7 @@ class Reviewboard extends BaseControls\Control {
         $errors = [];
 
         foreach ($storyIds as $storyId) {
-            $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+            $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
             if (!$story) {
                 $errors[] = "Story not found: {$storyId}";
                 continue;
@@ -1326,7 +1334,7 @@ class Reviewboard extends BaseControls\Control {
         $githubConfig = $this->getGitHubConfig();
 
         foreach ($storyIds as $storyId) {
-            $story = Bean::findOne('ctostories', 'story_id = ?', [$storyId]);
+            $story = Bean::findOne('ctostories', 'story_uid = ?', [$storyId]);
             if (!$story) {
                 $errors[] = "Story not found: {$storyId}";
                 continue;

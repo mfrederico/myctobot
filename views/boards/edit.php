@@ -18,7 +18,7 @@
                     <div class="row mb-4">
                         <div class="col-md-6">
                             <label class="form-label text-muted">Board ID</label>
-                            <input type="text" class="form-control form-control-sm" value="<?= $board['board_id'] ?>" readonly disabled>
+                            <input type="text" class="form-control form-control-sm" value="<?= $board['board_uid'] ?>" readonly disabled>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label text-muted">Site</label>

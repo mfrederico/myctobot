@@ -59,10 +59,12 @@ class TenantSchemaBuilder {
         $this->createBoardRepoMappingTable();
         $this->createAnalysisResultsTable();
         $this->createDigestHistoryTable();
+        $this->createTicketAnalysisCacheTable();
         $this->createAIDevJobsTable();
         $this->createAIDevJobLogsTable();
         $this->createDirectivesTable();
         $this->directive = $this->createCeoDirectivesTable();
+        $this->createDirectiveLogsTable();
         $this->createCtoProjectsTable();
         $this->createCtoEpicsTable();
         $this->createCtoStoriesTable();
@@ -149,7 +151,7 @@ class TenantSchemaBuilder {
         $bean = R::dispense('jiraboards');
         $bean->member = $this->member; // Creates member_id FK
         $bean->cloud_uid = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'; // _uid suffix - string not FK
-        $bean->board_id = 1; // This IS an integer (Jira board ID)
+        $bean->board_uid = 1; // External Jira board ID
         $bean->board_name = 'Schema Template Board';
         $bean->board_type = 'scrum';
         $bean->project_key = 'SCHEMA';
@@ -169,13 +171,19 @@ class TenantSchemaBuilder {
     private function createRepoConnectionsTable() {
         $bean = R::dispense('repoconnections');
         $bean->member = $this->member; // Creates member_id FK
+        $bean->created_by_member_id = $this->member; // Cross-DB ref to default.member
         $bean->provider = 'github';
         $bean->repo_owner = 'schema-owner';
         $bean->repo_name = 'schema-repo';
         $bean->repo_full_name = 'schema-owner/schema-repo';
         $bean->default_branch = 'main';
+        $bean->clone_url = 'https://github.com/schema-owner/schema-repo.git';
+        $bean->access_token = 'schema_access_token';
+        $bean->enabled = true;
+        $bean->issues_enabled = true;
         $bean->webhook_uid = 'schema_webhook_uid'; // _uid suffix - string not FK
         $bean->webhook_secret = 'schema_webhook_secret';
+        $bean->agent_uid = null; // Reference to aiagents.id (cross-table, uses _uid naming)
         $bean->is_active = true;
         $bean->last_webhook_at = date('Y-m-d H:i:s');
         $bean->created_at = date('Y-m-d H:i:s');
@@ -209,7 +217,7 @@ class TenantSchemaBuilder {
         $bean->last_result_json = '{}';
         $bean->files_changed = '[]';
         $bean->commit_sha = 'abc123def456';
-        $bean->shopify_theme_id = 0; // This IS an integer
+        $bean->shopify_themeid = 0; // This IS an integer
         $bean->shopify_preview_url = 'https://example.myshopify.com';
         $bean->playwright_results = '[]';
         $bean->preserve_branch = true;
@@ -256,6 +264,22 @@ class TenantSchemaBuilder {
         $bean->email_sent = false;
         $bean->email_to = 'schema@example.com';
         $bean->created_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+    }
+
+    private function createTicketAnalysisCacheTable(): void {
+        $bean = R::dispense('ticketanalysiscache');
+        // Note: Uses board_id directly (legacy pattern) instead of jiraboards association
+        $bean->board_id = $this->board;
+        $bean->issue_key = 'SCHEMA-1';
+        $bean->content_hash = 'schema_content_hash';
+        $bean->clarity_score = 0;
+        $bean->clarity_analysis = '{}';
+        $bean->reporter_name = 'Schema Reporter';
+        $bean->reporter_email = 'reporter@example.com';
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         R::trash($bean);
     }
@@ -318,7 +342,7 @@ class TenantSchemaBuilder {
     private function createAIAgentsTable(): void {
         $bean = R::dispense('aiagents');
         $bean->member = $this->member; // Creates member_id FK
-        $bean->created_by_member_id = $this->member->id;
+        $bean->created_by_member_id = $this->member;
         $bean->created_by_name = 'Schema User';
         $bean->name = 'Default Agent';
         $bean->description = 'Schema agent description';
@@ -371,6 +395,7 @@ class TenantSchemaBuilder {
         $bean->parsed_intent = 'project';
         $bean->parsed_summary = 'Schema summary';
         $bean->parsed_requirements = '[]';
+        $bean->project_uid = null; // Reference to ctoprojects.project_uid (string identifier)
         $bean->status = 'received';
         $bean->current_phase = 'initial';
         $bean->error_message = 'Schema error';
@@ -381,6 +406,18 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         return $bean; // Keep for ctoprojects association
+    }
+
+    private function createDirectiveLogsTable(): void {
+        $bean = R::dispense('directivelogs');
+        $bean->ceodirectives = $this->directive; // Creates ceodirectives_id FK
+        $bean->directive_uid = 'schema-directive-log-uid'; // _uid suffix for string identifier
+        $bean->event_type = 'status_change';
+        $bean->event_data = '{}';
+        $bean->message = 'Schema log message';
+        $bean->created_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
     }
 
     private function createCtoProjectsTable(): void {
@@ -435,6 +472,7 @@ class TenantSchemaBuilder {
         $bean->description = 'Schema story description';
         $bean->acceptance_criteria = '[]';
         $bean->story_points = 0;
+        $bean->sequence = 0; // Order within epic
         $bean->jira_issue_key = 'SCHEMA-2';
         $bean->jira_issue_uid = 'schema-jira-issue-uid';
         $bean->aidev_job_uid = 'schema-aidev-job-uid';
@@ -575,6 +613,10 @@ class TenantSchemaBuilder {
         R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `acceptance_criteria` JSON');
         R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `depends_on` JSON');
         R::exec('ALTER TABLE `ctostories` MODIFY COLUMN `verification_result` JSON');
+
+        R::exec('ALTER TABLE `directivelogs` MODIFY COLUMN `event_data` JSON');
+
+        R::exec('ALTER TABLE `ticketanalysiscache` MODIFY COLUMN `clarity_analysis` JSON');
 
         // Add unique constraints
         R::exec('ALTER TABLE `member` ADD UNIQUE INDEX IF NOT EXISTS `uk_email` (`email`)');

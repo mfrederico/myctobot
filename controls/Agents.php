@@ -61,8 +61,8 @@ class Agents extends BaseControls\Control {
             $hooksConfig = json_decode($bean->hooks_config ?: '{}', true);
             $capabilities = json_decode($bean->capabilities ?: '[]', true);
 
-            // Count repos using this agent (repoconnections is in user SQLite database)
-            $repoCount = Bean::count('repoconnections', 'agent_id = ?', [$bean->id]);
+            // Count repos using this agent via association
+            $repoCount = $bean->countOwn('repoconnections');
 
             // Get provider info
             $provider = $bean->provider ?: 'claude_cli';
@@ -434,8 +434,8 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        // Check if any repos are using this agent (repoconnections is in user SQLite database)
-        $repoCount = Bean::count('repoconnections', 'agent_id = ?', [$id]);
+        // Check if any repos are using this agent via association
+        $repoCount = $agent->countOwn('repoconnections');
         if ($repoCount > 0) {
             Flight::jsonError('Cannot delete agent that is assigned to repositories', 400);
             return;
@@ -747,10 +747,8 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        $tools = Bean::find('agenttools', 'agent_id = ? ORDER BY tool_name ASC', [$agentId]);
-
         $result = [];
-        foreach ($tools as $tool) {
+        foreach ($agent->with(' ORDER BY tool_name ASC ')->ownAgenttoolsList as $tool) {
             $result[] = [
                 'id' => (int) $tool->id,
                 'tool_name' => $tool->tool_name,
@@ -829,7 +827,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Check for duplicate tool name (excluding current tool if updating)
-        $existingTool = Bean::findOne('agenttools', 'agent_id = ? AND tool_name = ? AND id != ?', [$agentId, $toolName, $toolId]);
+        $existingTool = Bean::findOne('agenttools', 'aiagents_id = ? AND tool_name = ? AND id != ?', [$agentId, $toolName, $toolId]);
         if ($existingTool) {
             Flight::jsonError('A tool with this name already exists for this agent', 400);
             return;
@@ -837,14 +835,14 @@ class Agents extends BaseControls\Control {
 
         // Create or update tool
         if ($toolId > 0) {
-            $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+            $tool = Bean::findOne('agenttools', 'id = ? AND aiagents_id = ?', [$toolId, $agentId]);
             if (!$tool) {
                 Flight::jsonError('Tool not found', 404);
                 return;
             }
         } else {
             $tool = Bean::dispense('agenttools');
-            $tool->agent_id = $agentId;
+            $tool->aiagents = $agent;  // Association creates aiagents_id FK
             $tool->created_at = date('Y-m-d H:i:s');
         }
 
@@ -888,7 +886,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Find and delete tool
-        $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        $tool = Bean::findOne('agenttools', 'id = ? AND aiagents_id = ?', [$toolId, $agentId]);
         if (!$tool) {
             Flight::jsonError('Tool not found', 404);
             return;
@@ -920,7 +918,7 @@ class Agents extends BaseControls\Control {
         }
 
         // Find tool
-        $tool = Bean::findOne('agenttools', 'id = ? AND agent_id = ?', [$toolId, $agentId]);
+        $tool = Bean::findOne('agenttools', 'id = ? AND aiagents_id = ?', [$toolId, $agentId]);
         if (!$tool) {
             Flight::jsonError('Tool not found', 404);
             return;

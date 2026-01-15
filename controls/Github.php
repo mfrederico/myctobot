@@ -561,7 +561,7 @@ class Github extends BaseControls\Control {
         }
 
         // Update repo
-        $repo->agent_id = $agentId;
+        $repo->agent_uid = $agentId;
         $repo->updated_at = date('Y-m-d H:i:s');
         Bean::store($repo);
 

@@ -133,7 +133,7 @@ try {
             }
 
             // Process all boards with digests enabled for this tenant
-            $boards = R::findAll('jiraboards', 'enabled = 1 AND digest_enabled = 1');
+            $boards = R::findAll('jiraboards', 'is_active = 1 AND digest_enabled = 1');
             $processedCount = 0;
             $errorCount = 0;
 

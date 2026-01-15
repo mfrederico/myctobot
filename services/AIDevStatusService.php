@@ -78,7 +78,7 @@ class AIDevStatusService {
             'files_changed' => json_decode($bean->files_changed ?: '[]', true),
             'commit_sha' => $bean->commit_sha,
             'error' => $bean->error_message,
-            'shopify_theme_id' => $bean->shopify_theme_id ? (int) $bean->shopify_theme_id : null,
+            'shopify_themeid' => $bean->shopify_themeid ? (int) $bean->shopify_themeid : null,
             'shopify_preview_url' => $bean->shopify_preview_url,
             'playwright_results' => json_decode($bean->playwright_results ?: 'null', true),
             'preserve_branch' => (bool) $bean->preserve_branch,
@@ -186,7 +186,7 @@ class AIDevStatusService {
 
         $allowedFields = [
             'branch_name', 'pr_url', 'pr_number', 'commit_sha',
-            'shopify_theme_id', 'shopify_preview_url', 'playwright_results',
+            'shopify_themeid', 'shopify_preview_url', 'playwright_results',
             'files_changed', 'preserve_branch', 'current_shard_job_uid'
         ];
 
@@ -490,7 +490,7 @@ class AIDevStatusService {
         $job->status = self::STATUS_PREVIEW_READY;
         $job->progress = 75;
         $job->current_step = 'Preview ready';
-        $job->shopify_theme_id = $shopifyThemeId;
+        $job->shopify_themeid = $shopifyThemeId;
         $job->shopify_preview_url = $previewUrl;
         if ($playwrightResults !== null) {
             $job->playwright_results = json_encode($playwrightResults);
@@ -519,7 +519,7 @@ class AIDevStatusService {
             return;
         }
 
-        $job->shopify_theme_id = $themeId;
+        $job->shopify_themeid = $themeId;
         $job->shopify_preview_url = $previewUrl;
         $job->updated_at = date('Y-m-d H:i:s');
 
@@ -531,11 +531,11 @@ class AIDevStatusService {
      */
     public static function getShopifyThemeForIssue(int $memberId, string $issueKey): ?int {
         $job = Bean::findOne('aidevjobs',
-            'member_id = ? AND issue_key = ? AND shopify_theme_id IS NOT NULL ORDER BY updated_at DESC',
+            'member_id = ? AND issue_key = ? AND shopify_themeid IS NOT NULL ORDER BY updated_at DESC',
             [$memberId, $issueKey]
         );
 
-        return $job ? (int) $job->shopify_theme_id : null;
+        return $job ? (int) $job->shopify_themeid : null;
     }
 
     // ========================================

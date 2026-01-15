@@ -100,7 +100,21 @@ function findExecUsage(string $content): array
 }
 
 /**
- * Detect manual foreign key assignments and suggest using associations instead.
+ * Detect manual foreign key assignments and suggest using RedBeanPHP associations.
+ *
+ * NAMING CONVENTION:
+ * - _id suffix = foreign key to another bean (use ownBeanList associations)
+ * - _uid or _uuid suffix = external/unique identifier (direct assignment OK)
+ *
+ * Examples:
+ * - member_id, jiraboards_id, aidevjobs_id = FK relationships
+ * - cloud_uid, project_uid, issue_uid = external identifiers (Jira, etc.)
+ *
+ * RedBeanPHP's ownBeanList pattern is preferred over manual FK assignment because:
+ * - FK values are set automatically when you add to ownList
+ * - Lazy loading - related beans only queried when accessed
+ * - Cascade delete with xown prefix
+ * - Cleaner, more maintainable code
  *
  * @param string $content PHP code to check
  * @return array List of warning issues
@@ -108,62 +122,97 @@ function findExecUsage(string $content): array
 function findManualFkAssignments(string $content): array
 {
     $issues = [];
-    $reported = false;
+    $reportedFks = []; // Track which FKs we've already reported
 
-    // Known FK columns that should use associations
-    $knownFks = [
-        'board_id', 'boardId', 'jiraboards_id',
-        'job_uid', 'jobId', 'aidevjobs_id',
-        'repo_id', 'repoId', 'repoconnections_id',
-        'member_id', 'memberId',
-        'parent_id', 'parentId',
-        'team_id', 'teamId',
-        'task_id', 'taskId',
-    ];
-
-    // Pattern: $bean->something_id = or $bean->somethingId =
+    // Pattern: $bean->something_id = $value or $bean->somethingId = $value
+    // NOTE: Only matches _id suffix, NOT _uid or _uuid (those are external identifiers)
+    // Captures: variable name, FK column name
     $fkPatterns = [
-        '/\$\w+->(\\w+_id)\s*=/',
-        '/\$\w+->(\\w+Id)\s*=/',
+        '/\$(\w+)->(\w+_id)\s*=\s*/',      // snake_case: $bean->parent_id =
+        '/\$(\w+)->(\w+Id)\s*=\s*(?!\$)/', // camelCase: $bean->parentId = (but not $bean->parentId = $other->...)
     ];
 
     foreach ($fkPatterns as $pattern) {
-        if (preg_match_all($pattern, $content, $matches)) {
-            foreach ($matches[1] as $fkColumn) {
+        if (preg_match_all($pattern, $content, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $varName = $match[1];
+                $fkColumn = $match[2];
                 $fkLower = strtolower($fkColumn);
-                $isKnownFk = false;
-                foreach ($knownFks as $known) {
-                    if (strtolower($known) === $fkLower) {
-                        $isKnownFk = true;
-                        break;
-                    }
+
+                // Skip if already reported this FK
+                if (isset($reportedFks[$fkLower])) {
+                    continue;
                 }
 
-                if ($isKnownFk || preg_match('/_id$/i', $fkColumn) || preg_match('/Id$/', $fkColumn)) {
-                    if (!$reported) {
-                        $issues[] = "Manual FK assignment detected: \${$fkColumn}. "
-                            . "Consider using RedBeanPHP associations instead: "
-                            . "\$parent->ownChildList[] = \$child (auto-sets FK, lazy loading, cascade delete with xown). "
-                            . "Use with(' ORDER BY col DESC ') for ordering, withCondition(' col = ? ', [\$val]) for filtering. "
-                            . "See CLAUDE.md for examples.";
-                        $reported = true;
+                // Skip _uid and _uuid suffixes - these are external identifiers, not FKs
+                if (preg_match('/_(uid|uuid)$/i', $fkColumn)) {
+                    continue;
+                }
+
+                // Check if this looks like an FK (_id suffix or Id suffix)
+                if (preg_match('/_id$/i', $fkColumn) || preg_match('/[a-z]Id$/', $fkColumn)) {
+                    // Derive the parent bean type from the FK name
+                    // e.g., member_id -> member, jiraboards_id -> jiraboards, parentId -> parent
+                    $parentType = preg_replace('/(_id|Id)$/i', '', $fkColumn);
+                    $parentType = strtolower(str_replace('_', '', $parentType));
+
+                    // Derive child type from variable name (best guess)
+                    $childType = strtolower($varName);
+                    if (in_array($childType, ['bean', 'record', 'item', 'row', 'obj', 'entity'])) {
+                        $childType = 'child'; // Generic if variable name isn't descriptive
                     }
-                    break;
+
+                    $issues[] = "Manual FK assignment: \${$varName}->{$fkColumn} = ... "
+                        . "Use RedBeanPHP associations instead:\n"
+                        . "   \${$parentType}->own" . ucfirst($childType) . "List[] = \${$varName};\n"
+                        . "   Bean::store(\${$parentType}); // FK set automatically\n"
+                        . "Or load parent first: \${$varName}->{$parentType} = \${$parentType}; // Sets {$fkColumn} automatically\n"
+                        . "NOTE: If this is an external ID (not a FK), rename to {$parentType}_uid instead.";
+
+                    $reportedFks[$fkLower] = true;
                 }
             }
         }
-        if ($reported) break;
     }
 
-    // Detect find queries with FK WHERE clauses
-    if (!$reported && preg_match("/(?:R|Bean)::(?:find|findOne|findAll)\s*\(\s*['\"](\w+)['\"],\s*['\"](\w+_id)\s*=/", $content, $match)) {
-        $childTable = $match[1];
-        $fkColumn = $match[2];
+    // Detect find/findOne queries with FK WHERE clauses
+    // Pattern: Bean::find('tablename', 'something_id = ?', [...])
+    // NOTE: Only matches _id suffix, NOT _uid or _uuid
+    if (preg_match_all("/(?:R|Bean)::(?:find|findOne|findAll)\s*\(\s*['\"](\w+)['\"],\s*['\"](\w+_id)\s*=/", $content, $matches, PREG_SET_ORDER)) {
+        foreach ($matches as $match) {
+            $childTable = $match[1];
+            $fkColumn = $match[2];
+            $fkLower = strtolower($fkColumn);
 
-        $issues[] = "Manual FK query detected: Bean::find('{$childTable}', '{$fkColumn} = ?'). "
-            . "Consider using associations: \$parent->own" . ucfirst($childTable) . "List (lazy loads, auto-cached). "
-            . "For ordering: \$parent->with(' ORDER BY col DESC ')->own" . ucfirst($childTable) . "List. "
-            . "See CLAUDE.md for examples.";
+            // Skip if already reported
+            if (isset($reportedFks[$fkLower . '_query'])) {
+                continue;
+            }
+
+            // Skip _uid and _uuid suffixes
+            if (preg_match('/_(uid|uuid)$/i', $fkColumn)) {
+                continue;
+            }
+
+            $parentType = preg_replace('/_id$/i', '', $fkColumn);
+            $parentType = strtolower(str_replace('_', '', $parentType));
+
+            $issues[] = "Manual FK query: Bean::find('{$childTable}', '{$fkColumn} = ?', ...) "
+                . "Use associations instead:\n"
+                . "   \${$parentType}->own" . ucfirst($childTable) . "List // Lazy loads all children\n"
+                . "   \${$parentType}->with(' ORDER BY created_at DESC ')->own" . ucfirst($childTable) . "List // With ordering\n"
+                . "   \${$parentType}->withCondition(' status = ? ', ['active'])->own" . ucfirst($childTable) . "List // With filter\n"
+                . "NOTE: If this is an external ID query, rename column to {$parentType}_uid.";
+
+            $reportedFks[$fkLower . '_query'] = true;
+        }
+    }
+
+    // Add a summary note if we found issues
+    if (!empty($issues)) {
+        $issues[] = "NAMING CONVENTION: Use _id for FK relationships (triggers this warning), "
+            . "use _uid or _uuid for external identifiers (no warning). "
+            . "See CLAUDE.md 'Relations - USE ASSOCIATIONS' section.";
     }
 
     return $issues;

@@ -352,7 +352,7 @@ class DirectiveOrchestrator {
         // Check if story has an issue key (Jira or GitHub)
         if (empty($story->jira_issue_key)) {
             $this->logger->warning('DirectiveOrchestrator: Story has no issue reference', [
-                'story_id' => $story->story_id
+                'story_uid' => $story->story_uid
             ]);
             return null;
         }
@@ -399,7 +399,7 @@ class DirectiveOrchestrator {
             Bean::store($job);
 
             $this->logger->info('DirectiveOrchestrator: Story queued to dev agent', [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'job_uid' => $jobId,
                 'issue_key' => $story->jira_issue_key,
                 'issue_source' => $isGitHubIssue ? 'github' : 'jira'
@@ -409,7 +409,7 @@ class DirectiveOrchestrator {
 
         } catch (\Exception $e) {
             $this->logger->error('DirectiveOrchestrator: Failed to queue story', [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'error' => $e->getMessage()
             ]);
             return null;

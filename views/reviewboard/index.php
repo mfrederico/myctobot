@@ -226,13 +226,13 @@
                 <div class="card-body kanban-column" data-status="pending_review">
                     <?php foreach ($pendingReview as $card): ?>
                     <?php $story = $card['story']; $project = $card['project']; $epic = $card['epic']; ?>
-                    <div class="card mb-2 kanban-card" data-story-id="<?= $story->story_id ?>" data-project="<?= htmlspecialchars($project->name) ?>">
+                    <div class="card mb-2 kanban-card" data-story-id="<?= $story->story_uid ?>" data-project="<?= htmlspecialchars($project->name) ?>">
                         <div class="card-body p-2">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <div class="form-check">
                                     <input class="form-check-input pending-select-checkbox" type="checkbox"
                                            value="<?= $story->id ?>"
-                                           data-story-id="<?= $story->story_id ?>"
+                                           data-story-id="<?= $story->story_uid ?>"
                                            data-issue-key="<?= htmlspecialchars($story->jira_issue_key ?? '') ?>"
                                            data-title="<?= htmlspecialchars($story->title) ?>"
                                            onchange="updatePendingSelection()">
@@ -260,13 +260,13 @@
                             </small>
                             <?php endif; ?>
                             <div class="btn-group btn-group-sm w-100">
-                                <button class="btn btn-success" onclick="approveStory('<?= $story->story_id ?>')" title="Approve">
+                                <button class="btn btn-success" onclick="approveStory('<?= $story->story_uid ?>')" title="Approve">
                                     <i class="bi bi-check"></i>
                                 </button>
-                                <button class="btn btn-outline-primary" onclick="editStory('<?= $story->story_id ?>')" title="Edit">
+                                <button class="btn btn-outline-primary" onclick="editStory('<?= $story->story_uid ?>')" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-outline-danger" onclick="deleteStory('<?= $story->story_id ?>')" title="Delete">
+                                <button class="btn btn-outline-danger" onclick="deleteStory('<?= $story->story_uid ?>')" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -293,7 +293,7 @@
                 <div class="card-body kanban-column" data-status="approved">
                     <?php foreach ($approved as $card): ?>
                     <?php $story = $card['story']; $project = $card['project']; $epic = $card['epic']; $job = $card['job']; ?>
-                    <div class="card mb-2 kanban-card" data-story-id="<?= $story->story_id ?>" data-project="<?= htmlspecialchars($project->name) ?>">
+                    <div class="card mb-2 kanban-card" data-story-id="<?= $story->story_uid ?>" data-project="<?= htmlspecialchars($project->name) ?>">
                         <div class="card-body p-2">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <small class="text-muted text-truncate" style="max-width: 60%;">
@@ -358,7 +358,7 @@
                 <div class="card-body kanban-column" data-status="in_progress">
                     <?php foreach ($inProgress as $card): ?>
                     <?php $story = $card['story']; $project = $card['project']; $job = $card['job']; ?>
-                    <div class="card mb-2 kanban-card border-primary" data-story-id="<?= $story->story_id ?>" data-project="<?= htmlspecialchars($project->name) ?>">
+                    <div class="card mb-2 kanban-card border-primary" data-story-id="<?= $story->story_uid ?>" data-project="<?= htmlspecialchars($project->name) ?>">
                         <div class="card-body p-2">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <small class="text-muted text-truncate" style="max-width: 60%;">
@@ -428,13 +428,13 @@
                 <div class="card-body kanban-column" data-status="complete">
                     <?php foreach ($complete as $card): ?>
                     <?php $story = $card['story']; $project = $card['project']; $job = $card['job']; ?>
-                    <div class="card mb-2 kanban-card border-success" data-story-id="<?= $story->story_id ?>" data-project="<?= htmlspecialchars($project->name) ?>" data-issue-key="<?= htmlspecialchars($story->jira_issue_key ?? '') ?>">
+                    <div class="card mb-2 kanban-card border-success" data-story-id="<?= $story->story_uid ?>" data-project="<?= htmlspecialchars($project->name) ?>" data-issue-key="<?= htmlspecialchars($story->jira_issue_key ?? '') ?>">
                         <div class="card-body p-2">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <div class="form-check">
                                     <input class="form-check-input qa-select-checkbox" type="checkbox"
                                            value="<?= $story->id ?>"
-                                           data-story-id="<?= $story->story_id ?>"
+                                           data-story-id="<?= $story->story_uid ?>"
                                            data-issue-key="<?= htmlspecialchars($story->jira_issue_key ?? '') ?>"
                                            data-project-id="<?= $project->id ?>"
                                            data-title="<?= htmlspecialchars($story->title) ?>"
@@ -556,7 +556,7 @@
                 <?php foreach ($failed as $card): ?>
                 <?php $story = $card['story']; $project = $card['project']; $job = $card['job']; ?>
                 <div class="col-md-3 failed-card-col" data-project="<?= htmlspecialchars($project->name) ?>">
-                    <div class="card border-danger kanban-card" data-story-id="<?= $story->story_id ?>" data-project="<?= htmlspecialchars($project->name) ?>">
+                    <div class="card border-danger kanban-card" data-story-id="<?= $story->story_uid ?>" data-project="<?= htmlspecialchars($project->name) ?>">
                         <div class="card-body p-2">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <small class="text-muted text-truncate" style="max-width: 50%;">

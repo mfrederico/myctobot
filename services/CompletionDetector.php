@@ -93,7 +93,7 @@ class CompletionDetector {
 
         if (!$job) {
             $this->logger->warning('CompletionDetector: aidevjob not found', [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'job_uid' => $story->aidev_job_uid
             ]);
             return ['changed' => false];
@@ -157,7 +157,7 @@ class CompletionDetector {
             Bean::store($story);
 
             $this->logger->info('CompletionDetector: Story status updated', [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'new_status' => $newStatus,
                 'job_status' => $job->status
             ]);
@@ -246,7 +246,7 @@ class CompletionDetector {
             $changed = true;
 
             $this->logger->info('CompletionDetector: Epic status updated', [
-                'epic_id' => $epic->epic_id,
+                'epic_id' => $epic->epic_uid,
                 'status' => $epic->status,
                 'completion' => "{$completedStories}/{$totalStories}"
             ]);
@@ -368,7 +368,7 @@ class CompletionDetector {
             if ($this->areDependenciesMet($story)) {
                 // Dependencies are met - story can be queued
                 $this->logger->info('CompletionDetector: Story dependencies met', [
-                    'story_id' => $story->story_id
+                    'story_uid' => $story->story_uid
                 ]);
                 $unblocked++;
             }
@@ -412,7 +412,7 @@ class CompletionDetector {
 
         $this->logDirective($directive->id, 'escalation', 'warning',
             "Escalation: Story '{$story->title}' - {$reason}", [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'jira_key' => $story->jira_issue_key,
                 'reason' => $reason
             ]);
@@ -420,7 +420,7 @@ class CompletionDetector {
         // TODO: Send escalation email to CEO
         $this->logger->warning('CompletionDetector: Escalation created', [
             'ceodirectives_id' => $directive->ceodirectives_id,
-            'story_id' => $story->story_id,
+            'story_uid' => $story->story_uid,
             'reason' => $reason
         ]);
     }
@@ -445,7 +445,7 @@ class CompletionDetector {
             }
 
             $epicProgress[] = [
-                'epic_id' => $epic->epic_id,
+                'epic_id' => $epic->epic_uid,
                 'title' => $epic->title,
                 'status' => $epic->status,
                 'story_count' => $epic->story_count,

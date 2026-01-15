@@ -52,10 +52,10 @@
                         <span class="badge bg-secondary ms-2"><?= count($stories) ?> stories</span>
                     </div>
                     <div>
-                        <button class="btn btn-sm btn-outline-primary" onclick="editEpic('<?= $epic->epic_id ?>')">
+                        <button class="btn btn-sm btn-outline-primary" onclick="editEpic('<?= $epic->epic_uid ?>')">
                             <i class="bi bi-pencil"></i> Edit Epic
                         </button>
-                        <button class="btn btn-sm btn-outline-success" onclick="addStory('<?= $epic->epic_id ?>')">
+                        <button class="btn btn-sm btn-outline-success" onclick="addStory('<?= $epic->epic_uid ?>')">
                             <i class="bi bi-plus"></i> Add Story
                         </button>
                     </div>
@@ -82,7 +82,7 @@
                         </thead>
                         <tbody>
                             <?php foreach ($stories as $story): ?>
-                            <tr id="story-row-<?= $story->story_id ?>">
+                            <tr id="story-row-<?= $story->story_uid ?>">
                                 <td>
                                     <strong><?= htmlspecialchars($story->title) ?></strong>
                                     <?php if ($story->jira_issue_key): ?>
@@ -118,18 +118,18 @@
                                     <span class="badge bg-<?= $color ?>"><?= ucfirst(str_replace('_', ' ', $story->status)) ?></span>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="editStory('<?= $story->story_id ?>')" title="Edit">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editStory('<?= $story->story_uid ?>')" title="Edit">
                                         <i class="bi bi-pencil"></i>
                                     </button>
                                     <?php if ($story->status === 'pending_review'): ?>
-                                    <button class="btn btn-sm btn-outline-success" onclick="approveStory('<?= $story->story_id ?>')" title="Approve">
+                                    <button class="btn btn-sm btn-outline-success" onclick="approveStory('<?= $story->story_uid ?>')" title="Approve">
                                         <i class="bi bi-check"></i>
                                     </button>
                                     <?php endif; ?>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteStory('<?= $story->story_id ?>')" title="Delete">
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteStory('<?= $story->story_uid ?>')" title="Delete">
                                         <i class="bi bi-trash"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="moveStory('<?= $story->story_id ?>')" title="Move to Epic">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="moveStory('<?= $story->story_uid ?>')" title="Move to Epic">
                                         <i class="bi bi-arrows-move"></i>
                                     </button>
                                 </td>
@@ -286,7 +286,7 @@
                     <label class="form-label">Move to Epic</label>
                     <select class="form-select" id="move-story-epic">
                         <?php foreach ($epics as $epicData): ?>
-                        <option value="<?= $epicData['epic']->epic_id ?>"><?= htmlspecialchars($epicData['epic']->title) ?></option>
+                        <option value="<?= $epicData['epic']->epic_uid ?>"><?= htmlspecialchars($epicData['epic']->title) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

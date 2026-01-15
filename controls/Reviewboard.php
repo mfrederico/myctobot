@@ -346,7 +346,7 @@ class Reviewboard extends BaseControls\Control {
             } catch (\Exception $e) {
                 $results['errors'][] = "Error processing {$story->title}: " . $e->getMessage();
                 $this->logger->error('Error approving story', [
-                    'story_id' => $storyId,
+                    'story_uid' => $storyId,
                     'error' => $e->getMessage()
                 ]);
             }
@@ -561,7 +561,7 @@ class Reviewboard extends BaseControls\Control {
             $issueKey = "{$config['owner']}/{$config['repo']}#{$result['number']}";
 
             $this->logger->info('GitHub issue created', [
-                'story_id' => $story->story_id,
+                'story_uid' => $story->story_uid,
                 'issue' => $issueKey,
             ]);
 
@@ -586,7 +586,7 @@ class Reviewboard extends BaseControls\Control {
      */
     private function storyToArray(object $story): array {
         return [
-            'story_id' => $story->story_id,
+            'story_uid' => $story->story_uid,
             'title' => $story->title,
             'description' => $story->description,
             'acceptance_criteria' => json_decode($story->acceptance_criteria, true),

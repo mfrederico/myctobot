@@ -789,14 +789,14 @@ class Api extends BaseControls\Control {
 
             $result[] = [
                 'id' => $s->id,
-                'story_id' => $s->story_id,
+                'story_id' => $s->story_uid,
                 'title' => $s->title,
                 'description' => $s->description,
                 'status' => $s->status,
                 'story_points' => $s->story_points,
                 'jira_issue_key' => $s->jira_issue_key,
                 'epic_title' => $epic->title,
-                'epic_id' => $epic->epic_id,
+                'epic_id' => $epic->epic_uid,
                 'project_name' => $project->name
             ];
         }
@@ -834,14 +834,14 @@ class Api extends BaseControls\Control {
 
             $result[] = [
                 'id' => $story->id,
-                'story_id' => $story->story_id,
+                'story_id' => $story->story_uid,
                 'title' => $story->title,
                 'status' => $story->status,
                 'story_points' => $story->story_points,
                 'jira_issue_key' => $story->jira_issue_key,
                 'updated_at' => $story->updated_at,
                 'epic_title' => $epic->title,
-                'epic_id' => $epic->epic_id,
+                'epic_id' => $epic->epic_uid,
                 'epic_sequence' => $epic->sequence,
                 'project_name' => $project->name,
                 'job_status' => $job->status,
@@ -871,7 +871,7 @@ class Api extends BaseControls\Control {
 
             $result[] = [
                 'id' => $s->id,
-                'story_id' => $s->story_id,
+                'story_id' => $s->story_uid,
                 'title' => $s->title,
                 'description' => $s->description,
                 'jira_issue_key' => $s->jira_issue_key,
@@ -910,7 +910,7 @@ class Api extends BaseControls\Control {
 
             $result[] = [
                 'id' => $story->id,
-                'story_id' => $story->story_id,
+                'story_id' => $story->story_uid,
                 'title' => $story->title,
                 'story_points' => $story->story_points,
                 'jira_issue_key' => $story->jira_issue_key,

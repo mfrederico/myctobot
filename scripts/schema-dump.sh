@@ -54,6 +54,9 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 SQL_DIR="$PROJECT_DIR/sql"
 CONFIG_FILE="$PROJECT_DIR/conf/config.ini"
 
+# Create sql directory if it doesn't exist (not tracked in git)
+mkdir -p "$SQL_DIR"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'

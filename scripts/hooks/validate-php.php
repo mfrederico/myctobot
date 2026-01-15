@@ -660,9 +660,8 @@ function checkSqlFileCreation(string $filePath): ?array
     $feedback .= "   php scripts/run-migration.php --migration=YourTable --tenant=footest4\n\n";
     $feedback .= "See scripts/schema-dump.sh for migration tool usage.\n";
     $feedback .= "See CLAUDE.md for RedBeanPHP schema conventions.\n\n";
-    $feedback .= "If you need to document the schema, use:\n";
-    $feedback .= "  ./scripts/schema-dump.sh tenant\n";
-    $feedback .= "This will generate sql/tenant_schema.sql from the actual database.";
+    $feedback .= "Schema is defined in services/TenantSchemaBuilder.php (source of truth).\n";
+    $feedback .= "To dump current schema for reference, use: ./scripts/schema-dump.sh tenant";
 
     return [
         'decision' => 'block',

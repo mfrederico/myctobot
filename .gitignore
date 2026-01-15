@@ -111,3 +111,4 @@ Desktop.ini
 # Keep important directories with .gitkeep
 !.gitkeep
 sql/
+database/

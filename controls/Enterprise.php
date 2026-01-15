@@ -752,7 +752,7 @@ class Enterprise extends BaseControls\Control {
                 $mapping = Bean::dispense('boardrepomapping');
                 $mapping->created_at = date('Y-m-d H:i:s');
                 $mapping->repoconnections = $repo;  // Sets repoconnections_id automatically
-                $board->ownBoardrepomappingList[] = $mapping;  // Sets jiraboards_id automatically
+                $board->ownBoardrepomappingList[] = $mapping;  // Sets boards_id automatically
             }
 
             $mapping->is_default = $isDefault;

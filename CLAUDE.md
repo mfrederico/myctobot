@@ -137,11 +137,11 @@ $boards = $repo->sharedJiraboardsList;
 ### Foreign Key Naming (Automatic)
 
 RedBeanPHP automatically names FKs as `[parent_type]_id`:
-- `jiraboards_id` in analysisresults (result belongs to board)
+- `boards_id` in analysisresults (result belongs to board)
 - `repoconnections_id` in boardrepomapping (mapping belongs to repo)
 
 **Note:** For lowercase table names, the FK is also lowercase:
-- `jiraboards` → `jiraboards_id`
+- `boards` → `boards_id`
 - `aidevjobs` → `aidevjobs_id`
 
 ### Why Associations Over Manual FKs

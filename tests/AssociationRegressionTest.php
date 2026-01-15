@@ -188,7 +188,7 @@ class AssociationRegressionTest {
 
         $pdo->exec('CREATE TABLE IF NOT EXISTS aidevjobs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            jiraboards_id INTEGER,
+            boards_id INTEGER,
             repoconnections_id INTEGER,
             issue_key TEXT,
             status TEXT,
@@ -206,7 +206,7 @@ class AssociationRegressionTest {
 
         $pdo->exec('CREATE TABLE IF NOT EXISTS boardrepomapping (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            jiraboards_id INTEGER,
+            boards_id INTEGER,
             repoconnections_id INTEGER,
             is_default INTEGER,
             created_at TEXT
@@ -601,11 +601,11 @@ class AssociationRegressionTest {
             'AI Dev job created via board association'
         );
 
-        // Test 2: Verify board FK (jiraboards_id)
+        // Test 2: Verify board FK (boards_id)
         $reloadedJob = Bean::load('aidevjobs', $job->id);
         self::assert(
-            (int)$reloadedJob->jiraboards_id === (int)$board->id,
-            'Job jiraboards_id auto-set by association'
+            (int)$reloadedJob->boards_id === (int)$board->id,
+            'Job boards_id auto-set by association'
         );
 
         // Test 3: Verify repo FK (repoconnections_id)
@@ -656,8 +656,8 @@ class AssociationRegressionTest {
         // Test 2: Verify FKs
         $reloadedMapping = Bean::load('boardrepomapping', $mapping->id);
         self::assert(
-            (int)$reloadedMapping->jiraboards_id === (int)$board->id,
-            'Mapping jiraboards_id auto-set'
+            (int)$reloadedMapping->boards_id === (int)$board->id,
+            'Mapping boards_id auto-set'
         );
         self::assert(
             (int)$reloadedMapping->repoconnections_id === (int)$repo->id,

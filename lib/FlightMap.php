@@ -198,7 +198,7 @@ Flight::map('hasLevel', function($requiredLevel) {
  * Generates and validates tokens stored in session
  */
 class CsrfWrapper {
-    private const SESSION_KEY = '_csrf_token';
+    private const SESSION_KEY = 'csrf_token';
     private const TOKEN_LENGTH = 32;
 
     /**

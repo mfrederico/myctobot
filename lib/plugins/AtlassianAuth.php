@@ -784,43 +784,24 @@ class AtlassianAuth {
     }
 
     /**
-     * Store webhook ID in member's database for management
+     * Store webhook ID on the atlassiantoken record for management
      *
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
-     * @param string|null $webhookId Webhook ID
+     * @param string|null $webhookId Webhook ID (null to clear)
      */
     private static function storeWebhookId(int $memberId, string $cloudId, ?string $webhookId): void {
-        if (!$webhookId) return;
-
-        $member = Bean::load('member', $memberId);
-        if (!$member || empty($member->ceobot_db)) return;
-
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-
-        if (!file_exists($dbFile)) return;
-
         try {
-            $db = new \SQLite3($dbFile);
+            // Find the token for this member/cloudId
+            $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
 
-            // Ensure table exists
-            $db->exec("CREATE TABLE IF NOT EXISTS jira_webhooks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cloud_uid TEXT NOT NULL,
-                webhook_uid TEXT NOT NULL,
-                webhook_type TEXT DEFAULT 'aidev',
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(cloud_uid, webhook_type)
-            )");
+            if (!$token) {
+                return;
+            }
 
-            // Insert or replace webhook ID
-            $stmt = $db->prepare("INSERT OR REPLACE INTO jira_webhooks (cloud_uid, webhook_uid, webhook_type) VALUES (?, ?, 'aidev')");
-            $stmt->bindValue(1, $cloudId, SQLITE3_TEXT);
-            $stmt->bindValue(2, $webhookId, SQLITE3_TEXT);
-            $stmt->execute();
-
-            $db->close();
+            // Store webhook_uid on the token record
+            $token->webhook_uid = $webhookId;
+            R::store($token);
         } catch (\Exception $e) {
             Flight::get('log')->error('Failed to store webhook ID', [
                 'error' => $e->getMessage()
@@ -843,19 +824,10 @@ class AtlassianAuth {
             return false;
         }
 
-        // Get stored webhook ID
-        $member = Bean::load('member', $memberId);
-        if (!$member || empty($member->ceobot_db)) return false;
-
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-
-        if (!file_exists($dbFile)) return false;
-
         try {
-            $db = new \SQLite3($dbFile);
-            $webhookId = $db->querySingle("SELECT webhook_uid FROM jira_webhooks WHERE cloud_uid = '{$db->escapeString($cloudId)}' AND webhook_type = 'aidev'");
-            $db->close();
+            // Get stored webhook ID from token record
+            $token = R::findOne('atlassiantoken', 'member_id = ? AND cloud_uid = ?', [$memberId, $cloudId]);
+            $webhookId = $token ? $token->webhook_uid : null;
 
             if (!$webhookId) {
                 return true; // No webhook to remove

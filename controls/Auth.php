@@ -151,12 +151,6 @@ class Auth extends BaseControls\Control {
                 return;
             }
 
-            // For workspace logins, user database is already the tenant DB
-            // For default logins (no workspace), ensure user has their SQLite set up
-            if (empty($workspace)) {
-                $this->ensureUserDatabase($member);
-            }
-
             // Update last login
             $member->last_login = date('Y-m-d H:i:s');
             $member->login_count = ($member->login_count ?? 0) + 1;
@@ -450,9 +444,6 @@ class Auth extends BaseControls\Control {
             $member->verification_expires_at = null;
             $member->verified_at = date('Y-m-d H:i:s');
             Bean::store($member);
-
-            // Create user's database
-            $this->ensureUserDatabase($member);
 
             Flight::get('log')->info('Member verified and activated', ['id' => $member->id, 'email' => $member->email]);
 
@@ -868,9 +859,6 @@ HTML;
 
                 // Set tenant in session
                 TenantResolver::setTenant($workspace);
-            } else {
-                // Ensure user has their database set up (main site login)
-                $this->ensureUserDatabase($member);
             }
 
             // Regenerate session ID to prevent session fixation attacks
@@ -891,228 +879,6 @@ HTML;
         } catch (Exception $e) {
             $this->handleException($e, 'Google login failed');
             Flight::redirect('/auth/login');
-        }
-    }
-
-    /**
-     * Ensure user has their SQLite database set up
-     */
-    private function ensureUserDatabase($member) {
-        if (empty($member->ceobot_db)) {
-            // Generate unique database name using SHA256 hash
-            $dbHash = hash('sha256', $member->id . $member->email . $member->created_at);
-            $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-            $dbFile = $dbPath . $dbHash . '.sqlite';
-
-            // Store the database reference on the member
-            $member->ceobot_db = $dbHash;
-            Bean::store($member);
-
-            // Create the SQLite database directory if needed
-            if (!is_dir($dbPath)) {
-                mkdir($dbPath, 0755, true);
-            }
-
-            // Initialize the user's database with MyCTOBot schema
-            $userDb = new \SQLite3($dbFile);
-
-            // Create jiraboards table
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS jiraboards (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board_id INTEGER NOT NULL,
-                    board_name TEXT NOT NULL,
-                    project_key TEXT NOT NULL,
-                    cloud_uid TEXT NOT NULL,
-                    board_type TEXT DEFAULT 'scrum',
-                    enabled INTEGER DEFAULT 1,
-                    digest_enabled INTEGER DEFAULT 0,
-                    digest_time TEXT DEFAULT '08:00',
-                    timezone TEXT DEFAULT 'UTC',
-                    status_filter TEXT DEFAULT 'To Do',
-                    last_analysis_at TEXT,
-                    last_digest_at TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    UNIQUE(board_id, cloud_uid)
-                )
-            ");
-
-            // Create analysisresults table
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS analysisresults (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board_id INTEGER NOT NULL,
-                    analysis_type TEXT NOT NULL,
-                    content_json TEXT NOT NULL,
-                    content_markdown TEXT,
-                    issue_count INTEGER,
-                    status_filter TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
-                )
-            ");
-
-            // Create digesthistory table
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS digesthistory (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board_id INTEGER NOT NULL,
-                    sent_to TEXT NOT NULL,
-                    subject TEXT,
-                    content_preview TEXT,
-                    status TEXT DEFAULT 'sent',
-                    error_message TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
-                )
-            ");
-
-            // Create usersettings table
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS usersettings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ");
-
-            // Create indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_uid)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysisresults(created_at DESC)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digesthistory(board_id)");
-
-            // Insert default settings
-            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('digest_email', '')");
-            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_status_filter', 'To Do')");
-            $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_digest_time', '08:00')");
-
-            // Enterprise: Settings table for encrypted API keys and configuration
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS enterprisesettings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    setting_key TEXT NOT NULL UNIQUE,
-                    setting_value TEXT NOT NULL,
-                    is_encrypted INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT
-                )
-            ");
-
-            // Enterprise: Git repository connections
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS repoconnections (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider TEXT NOT NULL,
-                    repo_owner TEXT NOT NULL,
-                    repo_name TEXT NOT NULL,
-                    default_branch TEXT DEFAULT 'main',
-                    clone_url TEXT NOT NULL,
-                    access_token TEXT,
-                    enabled INTEGER DEFAULT 1,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    UNIQUE(provider, repo_owner, repo_name)
-                )
-            ");
-
-            // Enterprise: Board to repository mappings
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS boardrepomappings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board_id INTEGER NOT NULL,
-                    repo_connection_id INTEGER NOT NULL,
-                    is_default INTEGER DEFAULT 0,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(board_id, repo_connection_id),
-                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE CASCADE
-                )
-            ");
-
-            // Enterprise: AI Developer jobs (one record per Jira issue)
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS aidevjobs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    issue_key TEXT NOT NULL UNIQUE,
-                    board_id INTEGER NOT NULL,
-                    repo_connection_id INTEGER,
-                    cloud_uid TEXT,
-                    status TEXT DEFAULT 'pending',
-                    current_shard_job_uid TEXT,
-                    branch_name TEXT,
-                    pr_url TEXT,
-                    pr_number INTEGER,
-                    clarification_comment_uid TEXT,
-                    clarification_questions TEXT,
-                    error_message TEXT,
-                    run_count INTEGER DEFAULT 0,
-                    last_output TEXT,
-                    last_result_json TEXT,
-                    files_changed TEXT,
-                    commit_sha TEXT,
-                    started_at TEXT,
-                    completed_at TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    FOREIGN KEY (repo_connection_id) REFERENCES repoconnections(id) ON DELETE SET NULL
-                )
-            ");
-
-            // Enterprise: AI Developer job logs
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS aidevjoblogs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    job_uid TEXT NOT NULL,
-                    log_level TEXT DEFAULT 'info',
-                    message TEXT NOT NULL,
-                    context_json TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-                )
-            ");
-
-            // Plugin Registry: Repository sources for plugin discovery
-            $userDb->exec("
-                CREATE TABLE IF NOT EXISTS pluginrepositorysource (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    member_id INTEGER,
-                    provider TEXT NOT NULL,
-                    repository_url TEXT NOT NULL,
-                    source_type TEXT DEFAULT 'repository',
-                    access_token TEXT,
-                    validation_status TEXT DEFAULT 'pending',
-                    validation_error TEXT,
-                    last_validated_at TEXT,
-                    is_active INTEGER DEFAULT 1,
-                    description TEXT,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT,
-                    UNIQUE(provider, repository_url, member_id)
-                )
-            ");
-
-            // Enterprise indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_provider ON repoconnections(provider)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_repo_enabled ON repoconnections(enabled)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_mapping_board ON boardrepomappings(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_status ON aidevjobs(status)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_issue ON aidevjobs(issue_key)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_job_board ON aidevjobs(board_id)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_ai_log_job ON aidevjoblogs(job_uid)");
-
-            // Plugin Registry indexes
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_provider ON pluginrepositorysource(provider)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_active ON pluginrepositorysource(is_active)");
-            $userDb->exec("CREATE INDEX IF NOT EXISTS idx_plugin_source_status ON pluginrepositorysource(validation_status)");
-
-            $userDb->close();
-
-            $this->logger->info('Created user database', [
-                'member_id' => $member->id,
-                'db_hash' => $dbHash
-            ]);
         }
     }
 

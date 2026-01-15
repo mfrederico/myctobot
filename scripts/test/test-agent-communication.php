@@ -334,7 +334,7 @@ function runTest(int $memberId, string $tenant, array $config) {
         if (!empty($mainDbConfig)) {
             R::addDatabase('main', "mysql:host={$mainDbConfig['host']};dbname={$mainDbConfig['name']}", $mainDbConfig['user'], $mainDbConfig['pass']);
             R::selectDatabase('main');
-            $mainMember = R::findOne('member', 'ceobot_db = ?', [$tenant]);
+            $mainMember = R::findOne('member', 'tenant_slug = ?', [$tenant]);
             if ($mainMember && $mainMember->api_token) {
                 $apiKey = $mainMember->api_token;
                 echo "Found API key for tenant '$tenant'\n";

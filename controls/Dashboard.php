@@ -36,16 +36,14 @@ class Dashboard extends BaseControls\Control {
         $boards = [];
         $recentAnalyses = [];
 
-        if (!empty($this->member->ceobot_db)) {
-            try {
-                UserDatabaseService::connect($this->member->id);
-                $userStats = UserDatabaseService::getStats();
-                $boards = UserDatabaseService::getBoards();
-                $recentAnalyses = UserDatabaseService::getAllRecentAnalyses(5);
-                UserDatabaseService::restore();
-            } catch (Exception $e) {
-                $this->logger->error('Failed to load user data: ' . $e->getMessage());
-            }
+        try {
+            UserDatabaseService::connect($this->member->id);
+            $userStats = UserDatabaseService::getStats();
+            $boards = UserDatabaseService::getBoards();
+            $recentAnalyses = UserDatabaseService::getAllRecentAnalyses(5);
+            UserDatabaseService::restore();
+        } catch (Exception $e) {
+            $this->logger->error('Failed to load user data: ' . $e->getMessage());
         }
 
         // Get basic stats

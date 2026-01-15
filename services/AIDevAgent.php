@@ -99,41 +99,23 @@ class AIDevAgent {
      * Load repository configuration from user's database
      */
     private function loadRepoConfig(): void {
-        $db = $this->getUserDb();
-        $result = $db->querySingle(
-            "SELECT * FROM repoconnections WHERE id = " . (int)$this->repoConnectionId,
-            true
-        );
+        $repo = \app\Bean::load('repoconnections', $this->repoConnectionId);
 
-        if (!$result) {
+        if (!$repo || !$repo->id) {
             throw new \Exception("Repository connection not found: {$this->repoConnectionId}");
         }
 
-        $this->repoConfig = $result;
+        // Export bean to array for compatibility with existing code
+        $this->repoConfig = $repo->export();
 
         // Initialize Git client based on provider
-        if ($result['provider'] === 'github') {
+        if ($repo->provider === 'github') {
             // Decrypt access token
-            $accessToken = EncryptionService::decrypt($result['access_token']);
+            $accessToken = EncryptionService::decrypt($repo->access_token);
             $this->github = new GitHubClient($accessToken);
         }
 
         $this->git = new GitOperations();
-    }
-
-    /**
-     * Get user's SQLite database
-     */
-    private function getUserDb(): \SQLite3 {
-        $member = \app\Bean::load('member', $this->memberId);
-        if (!$member || empty($member->ceobot_db)) {
-            throw new \Exception("Member database not configured");
-        }
-
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-
-        return new \SQLite3($dbFile);
     }
 
     // ========================================

@@ -50,8 +50,8 @@ class Api extends BaseControls\Control {
             return null;
         }
 
-        // Store tenant slug from ceobot_db field
-        $this->tenantSlug = $member->ceobot_db ?: null;
+        // Store tenant slug from member's tenant_slug field
+        $this->tenantSlug = $member->tenant_slug ?: null;
 
         return (int) $member->id;
     }

@@ -1474,14 +1474,7 @@ class Webhook extends BaseControls\Control {
         // Switch back to default database
         Bean::selectDatabase('default');
 
-        // Look up member by their database name pattern
-        $dbName = "myctobot_{$tenant}";
-        $member = Bean::findOne('member', 'ceobot_db LIKE ?', ["%{$dbName}%"]);
-        if ($member) {
-            return (int)$member->id;
-        }
-
-        // Try matching by tenant slug in workspace
+        // Look up member by workspace slug
         $member = Bean::findOne('member', 'workspace = ?', [$tenant]);
         if ($member) {
             return (int)$member->id;
@@ -2079,25 +2072,6 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Get member's SQLite database
-     */
-    private function getMemberDb(int $memberId): ?\SQLite3 {
-        $member = Bean::load('member', $memberId);
-        if (!$member || empty($member->ceobot_db)) {
-            return null;
-        }
-
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-
-        if (!file_exists($dbFile)) {
-            return null;
-        }
-
-        return new \SQLite3($dbFile);
-    }
-
-    /**
      * Handle shard digest callback
      * Endpoint: POST /webhook/digest
      *
@@ -2602,23 +2576,16 @@ class Webhook extends BaseControls\Control {
      */
     private function storeCreditBalanceError(int $memberId, string $errorMsg): void {
         try {
-            $member = Bean::load('member', $memberId);
-            if (!$member || empty($member->ceobot_db)) {
-                return;
+            // Store in enterprisesettings table (tenant database should already be selected)
+            $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['credit_balance_error']);
+            if (!$setting) {
+                $setting = Bean::dispense('enterprisesettings');
+                $setting->setting_key = 'credit_balance_error';
+                $setting->is_encrypted = 0;
             }
-
-            $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-            $dbFile = $dbPath . $member->ceobot_db . '.sqlite';
-
-            if (!file_exists($dbFile)) {
-                return;
-            }
-
-            $db = new \SQLite3($dbFile);
-            $db->exec("INSERT OR REPLACE INTO enterprisesettings
-                       (setting_key, setting_value, is_encrypted, updated_at)
-                       VALUES ('credit_balance_error', '" . $db->escapeString($errorMsg) . "', 0, datetime('now'))");
-            $db->close();
+            $setting->setting_value = $errorMsg;
+            $setting->updated_at = date('Y-m-d H:i:s');
+            Bean::store($setting);
 
             $this->logger->warning('Credit balance error recorded', [
                 'member_id' => $memberId,

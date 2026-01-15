@@ -251,9 +251,6 @@ class GoogleAuth {
             'email' => $email
         ]);
 
-        // Create user's unique SQLite database
-        self::createUserDatabase($member);
-
         return $member;
     }
 
@@ -289,112 +286,6 @@ class GoogleAuth {
         }
 
         return $username;
-    }
-
-    /**
-     * Create user's unique SQLite database for Jira data
-     *
-     * @param object $member Member bean
-     */
-    private static function createUserDatabase($member): void {
-        // Generate unique database name using SHA256 hash
-        $dbHash = hash('sha256', $member->id . $member->email . $member->created_at);
-        $dbPath = Flight::get('ceobot.user_db_path') ?? 'database/';
-        $dbFile = $dbPath . $dbHash . '.sqlite';
-
-        // Store the database reference on the member
-        $member->ceobot_db = $dbHash;
-        R::store($member);
-
-        // Create the SQLite database directory if needed
-        if (!is_dir($dbPath)) {
-            mkdir($dbPath, 0755, true);
-        }
-
-        // Initialize the user's database with MyCTOBot schema
-        $userDb = new \SQLite3($dbFile);
-
-        // Create jiraboards table
-        $userDb->exec("
-            CREATE TABLE IF NOT EXISTS jiraboards (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_id INTEGER NOT NULL,
-                board_name TEXT NOT NULL,
-                project_key TEXT NOT NULL,
-                cloud_uid TEXT NOT NULL,
-                board_type TEXT DEFAULT 'scrum',
-                enabled INTEGER DEFAULT 1,
-                digest_enabled INTEGER DEFAULT 0,
-                digest_time TEXT DEFAULT '08:00',
-                digest_cc TEXT DEFAULT '',
-                timezone TEXT DEFAULT 'UTC',
-                status_filter TEXT DEFAULT 'To Do',
-                last_analysis_at TEXT,
-                last_digest_at TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT,
-                UNIQUE(board_id, cloud_uid)
-            )
-        ");
-
-        // Create analysisresults table
-        $userDb->exec("
-            CREATE TABLE IF NOT EXISTS analysisresults (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_id INTEGER NOT NULL,
-                analysis_type TEXT NOT NULL,
-                content_json TEXT NOT NULL,
-                content_markdown TEXT,
-                issue_count INTEGER,
-                status_filter TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
-            )
-        ");
-
-        // Create digesthistory table
-        $userDb->exec("
-            CREATE TABLE IF NOT EXISTS digesthistory (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                board_id INTEGER NOT NULL,
-                sent_to TEXT NOT NULL,
-                subject TEXT,
-                content_preview TEXT,
-                status TEXT DEFAULT 'sent',
-                error_message TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (board_id) REFERENCES jiraboards(id) ON DELETE CASCADE
-            )
-        ");
-
-        // Create usersettings table
-        $userDb->exec("
-            CREATE TABLE IF NOT EXISTS usersettings (
-                key TEXT PRIMARY KEY,
-                value TEXT,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ");
-
-        // Create indexes
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_cloud ON jiraboards(cloud_uid)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_enabled ON jiraboards(enabled)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_boards_digest ON jiraboards(digest_enabled)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_board ON analysisresults(board_id)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_analysis_created ON analysisresults(created_at DESC)");
-        $userDb->exec("CREATE INDEX IF NOT EXISTS idx_digest_board ON digesthistory(board_id)");
-
-        // Insert default settings
-        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('digest_email', '')");
-        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_status_filter', 'To Do')");
-        $userDb->exec("INSERT OR IGNORE INTO usersettings (key, value) VALUES ('default_digest_time', '08:00')");
-
-        $userDb->close();
-
-        Flight::get('log')->info('Created user database', [
-            'member_id' => $member->id,
-            'db_hash' => $dbHash
-        ]);
     }
 
     /**

@@ -116,12 +116,15 @@
                             </div>
 
                             <?php if (isset($shard)): ?>
-                            <div class="d-flex gap-2">
+                            <div class="d-flex gap-2 flex-wrap">
                                 <button type="button" class="btn btn-outline-info" onclick="runDiagnostic()">
-                                    <i class="bi bi-clipboard-check"></i> Run Full Diagnostic
+                                    <i class="bi bi-clipboard-check"></i> Full Diagnostic
                                 </button>
                                 <button type="button" class="btn btn-outline-secondary" onclick="testSSH()">
                                     <i class="bi bi-plug"></i> Quick Test
+                                </button>
+                                <button type="button" class="btn btn-outline-success" onclick="runHelloWorld()">
+                                    <i class="bi bi-robot"></i> Test Claude
                                 </button>
                             </div>
                             <?php endif; ?>
@@ -336,6 +339,99 @@ async function testSSH() {
         btn.disabled = false;
         btn.innerHTML = original;
     }
+}
+
+async function runHelloWorld() {
+    const btn = event.target.closest('button');
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Running Claude...';
+
+    const card = document.getElementById('diagnosticCard');
+    const results = document.getElementById('diagnosticResults');
+
+    results.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-success"></div><p class="mt-2">Running Claude CLI test...</p><p class="text-muted small">This may take up to 60 seconds</p></div>';
+    card.style.display = 'block';
+    card.scrollIntoView({ behavior: 'smooth' });
+
+    try {
+        // Collect current form values for testing
+        const formData = new FormData();
+        formData.append('host', document.getElementById('host').value);
+        formData.append('ssh_user', document.getElementById('ssh_user').value);
+        formData.append('ssh_port', document.getElementById('ssh_port').value);
+        formData.append('sshkey_id', document.getElementById('sshkey_id').value);
+
+        const response = await fetch('/admin/testhelloworld/<?= $shard['id'] ?>', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        let html = '';
+
+        if (data.success) {
+            html += `
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Claude CLI Test Passed!</strong>
+                        <div class="small">Completed in ${data.duration_ms}ms</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="alert alert-danger d-flex align-items-center">
+                    <i class="bi bi-x-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Claude CLI Test Failed</strong>
+                        <div class="small">${data.error || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (data.warning) {
+            html += `
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> ${data.warning}
+                </div>
+            `;
+        }
+
+        if (data.output) {
+            html += `
+                <div class="card">
+                    <div class="card-header">
+                        <strong><i class="bi bi-chat-left-text"></i> Claude Response</strong>
+                    </div>
+                    <div class="card-body">
+                        <pre class="mb-0 bg-dark text-light p-3 rounded" style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(data.output)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+
+        results.innerHTML = html;
+
+    } catch (err) {
+        results.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> <strong>Error running test</strong>
+                <p class="mb-0 mt-2">${err.message}</p>
+            </div>
+        `;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = original;
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 async function runDiagnostic() {

@@ -371,6 +371,54 @@ class ShardDiagnosticService {
     }
 
     /**
+     * Run a "Hello World" test using Claude CLI
+     * This verifies the full pipeline works: SSH -> tmux -> Claude CLI
+     *
+     * @return array Test results with output
+     */
+    public function runHelloWorld(): array {
+        $startTime = microtime(true);
+        $testId = 'hello-' . uniqid();
+        $workDir = "/tmp/aidev-hello-{$testId}";
+
+        // Create work directory
+        $mkdirResult = $this->sshExec("mkdir -p {$workDir}", 10);
+        if ($mkdirResult['exit_code'] !== 0) {
+            return [
+                'success' => false,
+                'error' => 'Failed to create work directory: ' . $mkdirResult['output'],
+                'duration_ms' => round((microtime(true) - $startTime) * 1000)
+            ];
+        }
+
+        // Run Claude with a simple prompt (non-interactive, print mode)
+        // Using --print to get output directly without interactive session
+        $claudeCmd = 'source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null; '
+            . 'cd ' . escapeshellarg($workDir) . ' && '
+            . 'timeout 60 claude --print "Say exactly: Hello from Claude on this workstation! Then tell me what directory you are in."';
+
+        $claudeResult = $this->sshExec($claudeCmd, 65);
+
+        // Cleanup work directory
+        $this->sshExec("rm -rf {$workDir}", 5);
+
+        $success = $claudeResult['exit_code'] === 0 && !empty(trim($claudeResult['output']));
+
+        // Check if output looks like a valid Claude response
+        $output = trim($claudeResult['output']);
+        $hasHello = stripos($output, 'hello') !== false;
+
+        return [
+            'success' => $success && $hasHello,
+            'output' => $output,
+            'exit_code' => $claudeResult['exit_code'],
+            'duration_ms' => round((microtime(true) - $startTime) * 1000),
+            'error' => !$success ? 'Claude command failed: ' . $claudeResult['output'] : null,
+            'warning' => ($success && !$hasHello) ? 'Response received but may not contain expected greeting' : null
+        ];
+    }
+
+    /**
      * Get installation commands for missing dependencies
      */
     public function getInstallCommands(): array {

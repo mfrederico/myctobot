@@ -385,6 +385,7 @@ class Agents extends BaseControls\Control {
             return;
         }
 
+        $memberId = $this->member->id;
         $tab = $this->getParam('tab', 'general');
 
         switch ($tab) {

@@ -952,6 +952,49 @@ class Admin extends Control {
     }
 
     /**
+     * Run a "Hello World" test on a shard using Claude CLI
+     * This tests the full pipeline: SSH -> Claude CLI -> Response
+     */
+    public function testhelloworld($params = []) {
+        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
+
+        $shardId = (int)($this->opId() ?? 0);
+        if (!$shardId) {
+            $this->json(['success' => false, 'error' => 'Shard ID required']);
+            return;
+        }
+
+        $shard = \app\services\ShardService::getShard($shardId);
+        if (!$shard) {
+            $this->json(['success' => false, 'error' => 'Shard not found']);
+            return;
+        }
+
+        // Check if POST data provided - use form values instead of saved values
+        $request = Flight::request();
+        if ($request->method === 'POST') {
+            if (!empty($request->data->host)) {
+                $shard['host'] = $request->data->host;
+            }
+            if (!empty($request->data->ssh_user)) {
+                $shard['ssh_user'] = $request->data->ssh_user;
+            }
+            if (!empty($request->data->ssh_port)) {
+                $shard['ssh_port'] = (int)$request->data->ssh_port;
+            }
+            if (isset($request->data->sshkey_id)) {
+                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+            }
+        }
+
+        $diagnostic = new \app\services\ShardDiagnosticService($shard);
+        $result = $diagnostic->runHelloWorld();
+
+        $this->json($result);
+    }
+
+    /**
      * Health check all shards
      */
     public function shardhealth($params = []) {

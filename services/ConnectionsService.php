@@ -527,6 +527,7 @@ class ConnectionsService {
                 'provider' => $bean->provider,
                 'repo_owner' => $bean->repo_owner,
                 'repo_name' => $bean->repo_name,
+                'slug' => $bean->slug,
                 'default_branch' => $bean->default_branch,
                 'clone_url' => $bean->clone_url,
                 'access_token' => $bean->access_token,

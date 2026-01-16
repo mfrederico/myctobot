@@ -221,7 +221,7 @@ try {
         // Get cloud_uid if not in job data
         if (empty($cloudId)) {
             // Try to find it from board using RedBeanPHP
-            $boardBean = Bean::load('jiraboards', (int)$job['board_id']);
+            $boardBean = Bean::load('boards', (int)$job['board_id']);
             $cloudId = $boardBean->cloud_uid ?? '';
         }
 
@@ -261,7 +261,7 @@ try {
 
         // Get cloud_uid if not in job data using RedBeanPHP
         if (empty($cloudId)) {
-            $boardBean = Bean::load('jiraboards', (int)$job['board_id']);
+            $boardBean = Bean::load('boards', (int)$job['board_id']);
             $cloudId = $boardBean->cloud_uid ?? '';
         }
 

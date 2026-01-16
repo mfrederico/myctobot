@@ -313,6 +313,19 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
 
                 <hr>
 
+                <!-- Assigned Workstation -->
+                <div class="mb-3">
+                    <label class="form-label">Assigned Workstation</label>
+                    <select class="form-select" name="claudeshards_id" id="claudeshards_id">
+                        <option value="">-- Local Runner (this machine) --</option>
+                        <!-- Populated via JavaScript -->
+                    </select>
+                    <div class="form-text">
+                        Assign this agent to run on a specific workstation via SSH.
+                        Leave empty to use the local runner on this machine.
+                    </div>
+                </div>
+
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-check mb-3">
@@ -376,22 +389,39 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
     </div>
 
     <script>
-    // Load available workstations for testing
+    // Load available workstations for testing and assignment
     document.addEventListener('DOMContentLoaded', function() {
+        const currentWorkstationId = '<?= $agent['claudeshards_id'] ?? '' ?>';
+
         fetch('/agents/workstations')
             .then(r => r.json())
             .then(data => {
-                const select = document.getElementById('test_workstation');
+                // Populate test workstation dropdown
+                const testSelect = document.getElementById('test_workstation');
+                // Populate assignment workstation dropdown
+                const assignSelect = document.getElementById('claudeshards_id');
+
                 if (data.success && data.data.workstations && data.data.workstations.length > 0) {
-                    select.innerHTML = '<option value="">-- Select a workstation --</option>';
+                    testSelect.innerHTML = '<option value="">-- Select a workstation --</option>';
+
                     data.data.workstations.forEach(ws => {
-                        const opt = document.createElement('option');
-                        opt.value = ws.id;
-                        opt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
-                        select.appendChild(opt);
+                        // Test dropdown
+                        const testOpt = document.createElement('option');
+                        testOpt.value = ws.id;
+                        testOpt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        testSelect.appendChild(testOpt);
+
+                        // Assignment dropdown
+                        const assignOpt = document.createElement('option');
+                        assignOpt.value = ws.id;
+                        assignOpt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        if (ws.id == currentWorkstationId) {
+                            assignOpt.selected = true;
+                        }
+                        assignSelect.appendChild(assignOpt);
                     });
                 } else {
-                    select.innerHTML = '<option value="">No active workstations found</option>';
+                    testSelect.innerHTML = '<option value="">No active workstations found</option>';
                 }
             })
             .catch(e => {

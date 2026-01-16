@@ -439,7 +439,7 @@ class Jobs extends BaseControls\Control {
             // Get cloud_uid from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
-                $board = Bean::load('jiraboards', (int)$job->boards_id);
+                $board = Bean::load('boards', (int)$job->boards_id);
                 $cloudId = $board->cloud_uid ?? null;
             }
 

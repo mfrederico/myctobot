@@ -64,7 +64,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoards(): array {
-        return array_values(Bean::findAll('jiraboards', ' ORDER BY board_name ASC '));
+        return array_values(Bean::findAll('boards', ' ORDER BY board_name ASC '));
     }
 
     /**
@@ -73,7 +73,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoardsByCloudId(string $cloudId): array {
-        return array_values(Bean::find('jiraboards', ' cloud_uid = ? ORDER BY board_name ASC ', [$cloudId]));
+        return array_values(Bean::find('boards', ' cloud_uid = ? ORDER BY board_name ASC ', [$cloudId]));
     }
 
     /**
@@ -81,7 +81,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getEnabledBoards(): array {
-        return array_values(Bean::find('jiraboards', ' is_active = 1 ORDER BY board_name ASC '));
+        return array_values(Bean::find('boards', ' is_active = 1 ORDER BY board_name ASC '));
     }
 
     /**
@@ -89,7 +89,7 @@ class UserDatabaseService {
      * @return array
      */
     public static function getBoardsForDigest(): array {
-        return array_values(Bean::find('jiraboards', ' is_active = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
+        return array_values(Bean::find('boards', ' is_active = 1 AND digest_enabled = 1 ORDER BY digest_time ASC '));
     }
 
     /**
@@ -98,7 +98,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoard(int $id) {
-        $board = Bean::load('jiraboards', $id);
+        $board = Bean::load('boards', $id);
         return $board->id ? $board : null;
     }
 
@@ -109,7 +109,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoardByJiraId(int $boardId, string $cloudId) {
-        return Bean::findOne('jiraboards', ' board_uid = ? AND cloud_uid = ? ', [$boardId, $cloudId]);
+        return Bean::findOne('boards', ' board_uid = ? AND cloud_uid = ? ', [$boardId, $cloudId]);
     }
 
     /**
@@ -118,7 +118,7 @@ class UserDatabaseService {
      * @return \RedBeanPHP\OODBBean|null
      */
     public static function getBoardByProjectKey(string $projectKey) {
-        return Bean::findOne('jiraboards', ' project_key = ? ', [$projectKey]);
+        return Bean::findOne('boards', ' project_key = ? ', [$projectKey]);
     }
 
     /**
@@ -127,7 +127,7 @@ class UserDatabaseService {
      * @return int Board ID
      */
     public static function addBoard(array $data): int {
-        $board = Bean::dispense('jiraboards');
+        $board = Bean::dispense('boards');
         $board->board_uid = $data['board_uid'] ?? $data['board_id'] ?? null;
         $board->board_name = $data['board_name'];
         $board->project_key = $data['project_key'];
@@ -140,6 +140,7 @@ class UserDatabaseService {
         $board->status_filter = $data['status_filter'] ?? 'To Do';
         $board->member_id = $data['member_id'] ?? null;
         $board->is_shared = $data['is_shared'] ?? 0;
+        $board->is_active = $data['is_active'] ?? 1;  // Default to active
         $board->created_at = date('Y-m-d H:i:s');
         return Bean::store($board);
     }
@@ -151,13 +152,13 @@ class UserDatabaseService {
      * @return bool
      */
     public static function updateBoard(int $id, array $data): bool {
-        $board = Bean::load('jiraboards', $id);
+        $board = Bean::load('boards', $id);
         if (!$board->id) {
             return false;
         }
 
         $allowedFields = [
-            'board_name', 'project_key', 'board_type', 'enabled', 'is_shared',
+            'board_name', 'project_key', 'board_type', 'enabled', 'is_active', 'is_shared',
             'digest_enabled', 'digest_time', 'digest_cc', 'timezone', 'status_filter',
             'priority_weights', 'goals', 'last_analysis_at', 'last_digest_at',
             'aidev_status_working', 'aidev_status_pr_created',
@@ -182,7 +183,7 @@ class UserDatabaseService {
      * @return bool
      */
     public static function removeBoard(int $id): bool {
-        $board = Bean::load('jiraboards', $id);
+        $board = Bean::load('boards', $id);
         if (!$board->id) {
             return false;
         }
@@ -202,7 +203,7 @@ class UserDatabaseService {
      * @return bool|null New status or null if not found
      */
     public static function toggleBoard(int $id): ?bool {
-        $board = Bean::load('jiraboards', $id);
+        $board = Bean::load('boards', $id);
         if (!$board->id) {
             return null;
         }
@@ -409,9 +410,9 @@ class UserDatabaseService {
     public static function getStats(): array {
         try {
             return [
-                'total_boards' => Bean::count('jiraboards') ?? 0,
-                'enabled_boards' => Bean::count('jiraboards', ' is_active = 1 ') ?? 0,
-                'digest_enabled_boards' => Bean::count('jiraboards', ' digest_enabled = 1 ') ?? 0,
+                'total_boards' => Bean::count('boards') ?? 0,
+                'enabled_boards' => Bean::count('boards', ' is_active = 1 ') ?? 0,
+                'digest_enabled_boards' => Bean::count('boards', ' digest_enabled = 1 ') ?? 0,
                 'total_analyses' => Bean::count('analysisresults') ?? 0,
                 'total_digests' => Bean::count('digesthistory', ' status = ? ', ['sent']) ?? 0,
                 'recent_analyses' => self::getAllRecentAnalyses(5) ?? []

@@ -72,7 +72,7 @@ class AIDevJobService {
             if (!$boardId && $projectType === self::PROJECT_TYPE_JIRA) {
                 $projectKey = explode('-', $issueKey)[0];
                 // Allow shared workspace boards (is_shared = 1) or member-specific boards
-                $board = Bean::findOne('jiraboards', 'project_key = ? AND (member_id = ? OR is_shared = 1)', [$projectKey, $memberId]);
+                $board = Bean::findOne('boards', 'project_key = ? AND (member_id = ? OR is_shared = 1)', [$projectKey, $memberId]);
                 if (!$board) {
                     return ['success' => false, 'error' => "No board found for project: {$projectKey}"];
                 }
@@ -161,7 +161,7 @@ class AIDevJobService {
 
             if ($projectType === self::PROJECT_TYPE_JIRA && $boardId) {
                 // For Jira, check board's API key setting: NULL = local runner, ID = use that key
-                $boardBean = Bean::load('jiraboards', $boardId);
+                $boardBean = Bean::load('boards', $boardId);
                 $boardKeyId = $boardBean->aidev_anthropic_key_id;
                 $useLocalRunner = ($boardKeyId === null || $boardKeyId === '' || !$boardKeyId);
 
@@ -486,7 +486,11 @@ class AIDevJobService {
                 require_once $aoePath;
                 $tenant = Flight::get('tenant.slug') ?: 'default';
                 \Aoe\Tenant\TenantContext::set($tenant);
-                $aoeStorage = new \Aoe\Session\Storage($tenant);
+
+                // Use /tmp/.aoe-php (accessible by both CLI and web)
+                $aoeBasePath = '/tmp/.aoe-php';
+
+                $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
                 $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
 
                 // Count sessions where tmux is actually running
@@ -923,8 +927,30 @@ class AIDevJobService {
             return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
+        // Check if repo's agent has an assigned workstation
+        $workstation = null;
+        $repoBean = Bean::load('repoconnections', $repoId);
+        if ($repoBean && $repoBean->aiagents_id) {
+            $agent = Bean::load('aiagents', $repoBean->aiagents_id);
+            if ($agent && $agent->claudeshards_id) {
+                $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+                if ($shard) {
+                    $workstation = [
+                        'host' => $shard->host,
+                        'user' => $shard->ssh_user,
+                        'port' => $shard->ssh_port ?? 22
+                    ];
+                    $this->logger->info('Using agent workstation', [
+                        'agent_id' => $agent->id,
+                        'workstation' => $shard->name,
+                        'host' => $shard->host
+                    ]);
+                }
+            }
+        }
+
         // GitHub jobs use the standard spawner but with provider=github
-        if ($tmux->spawnWithScript($scriptPath, true, $jobId, $repoId, $tenant, 'github')) {
+        if ($tmux->spawnWithScript($scriptPath, true, $jobId, $repoId, $tenant, 'github', $workstation)) {
             $this->logger->info('Local GitHub AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
@@ -1005,7 +1031,31 @@ class AIDevJobService {
             return ['success' => false, 'error' => 'Local runner script not found'];
         }
 
-        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $tenant)) {
+        // Check if repo's agent has an assigned workstation
+        $workstation = null;
+        if ($repoId) {
+            $repoBean = Bean::load('repoconnections', $repoId);
+            if ($repoBean && $repoBean->aiagents_id) {
+                $agent = Bean::load('aiagents', $repoBean->aiagents_id);
+                if ($agent && $agent->claudeshards_id) {
+                    $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+                    if ($shard) {
+                        $workstation = [
+                            'host' => $shard->host,
+                            'user' => $shard->ssh_user,
+                            'port' => $shard->ssh_port ?? 22
+                        ];
+                        $this->logger->info('Using agent workstation', [
+                            'agent_id' => $agent->id,
+                            'workstation' => $shard->name,
+                            'host' => $shard->host
+                        ]);
+                    }
+                }
+            }
+        }
+
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $tenant, null, $workstation)) {
             $this->logger->info('Local AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
@@ -1053,7 +1103,10 @@ class AIDevJobService {
             $tenantSlug = $tenant ?: (\Aoe\Tmux\TmuxService::getDomainId() ?? 'default');
             \Aoe\Tenant\TenantContext::set($tenantSlug);
 
-            $storage = new \Aoe\Session\Storage($tenantSlug);
+            // Use /tmp/.aoe-php (accessible by both CLI and web)
+            $aoeBasePath = '/tmp/.aoe-php';
+
+            $storage = new \Aoe\Session\Storage($tenantSlug, $aoeBasePath);
             $tmux = new \Aoe\Tmux\TmuxService($tenantSlug);
 
             // Find session by reference (issue key)
@@ -1332,7 +1385,26 @@ class AIDevJobService {
 
                 $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
 
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant)) {
+                // Check if repo's agent has an assigned workstation
+                $workstation = null;
+                if ($job->repoconnections_id) {
+                    $repoBean = Bean::load('repoconnections', $job->repoconnections_id);
+                    if ($repoBean && $repoBean->aiagents_id) {
+                        $agent = Bean::load('aiagents', $repoBean->aiagents_id);
+                        if ($agent && $agent->claudeshards_id) {
+                            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+                            if ($shard) {
+                                $workstation = [
+                                    'host' => $shard->host,
+                                    'user' => $shard->ssh_user,
+                                    'port' => $shard->ssh_port ?? 22
+                                ];
+                            }
+                        }
+                    }
+                }
+
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant, null, $workstation)) {
                     $results['jobs_started']++;
 
                     AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [
@@ -1650,7 +1722,7 @@ class AIDevJobService {
      * @return array Status settings (working, pr_created, clarification, failed)
      */
     public function getBoardStatusSettings(int $memberId, int $boardId): array {
-        $board = Bean::load('jiraboards', $boardId);
+        $board = Bean::load('boards', $boardId);
         if (!$board || !$board->id) {
             return [];
         }

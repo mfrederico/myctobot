@@ -43,6 +43,7 @@ class Mcp extends Control {
 
     private ?int $memberId = null;
     private ?string $cloudId = null;
+    private ?string $tenant = null;
     private ?JiraClient $jiraClient = null;
 
     public function __construct() {
@@ -60,7 +61,8 @@ class Mcp extends Control {
      * @param string $tenant Domain ID from the URL
      */
     public function jirawithtenant(string $tenant) {
-        // Store tenant for logging purposes
+        // Store tenant for agent name lookup and logging
+        $this->tenant = $tenant;
         $this->logger->debug('MCP Jira request with tenant', ['tenant' => $tenant]);
 
         // Load tenant config and switch database context
@@ -97,6 +99,11 @@ class Mcp extends Control {
      * POST /mcp/jira
      */
     public function jira($params = []) {
+        // Store tenant if passed from jirawithtenant
+        if (!empty($params['tenant']) && !$this->tenant) {
+            $this->tenant = $params['tenant'];
+        }
+
         // Set CORS headers for MCP clients
         header('Access-Control-Allow-Origin: *');
         header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
@@ -429,6 +436,10 @@ class Mcp extends Control {
             return $this->toolErrorResponse($id, "Missing issue_key or message");
         }
 
+        // Append agent signature to prevent webhook echo and identify the agent
+        $agentName = $this->getAgentName();
+        $message .= "\n\n[agent:{$agentName}]";
+
         try {
             $client = $this->getJiraClient();
             $result = $client->addComment($issueKey, $message);
@@ -436,6 +447,13 @@ class Mcp extends Control {
         } catch (\Exception $e) {
             return $this->toolErrorResponse($id, "Failed to post comment: " . $e->getMessage());
         }
+    }
+
+    /**
+     * Get agent name from X-MCP-Agent-Name header for comment signatures
+     */
+    private function getAgentName(): string {
+        return $_SERVER['HTTP_X_MCP_AGENT_NAME'] ?? 'AI Assistant';
     }
 
     /**

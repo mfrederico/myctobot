@@ -62,8 +62,9 @@ use Aoe\Tmux\StatusDetector;
 // Set tenant context
 TenantContext::set($tenant);
 
-// Load storage
-$storage = new Storage($tenant);
+// Load storage (/tmp/.aoe-php for CLI/web consistency)
+$aoeBasePath = '/tmp/.aoe-php';
+$storage = new Storage($tenant, $aoeBasePath);
 
 // Find session
 $session = $storage->find($sessionId);

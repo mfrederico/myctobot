@@ -62,6 +62,21 @@
                                     </span>
                                     <?php endif; ?>
                                 </small>
+                                <div class="mt-2 p-2 bg-light rounded">
+                                    <small>
+                                        <i class="bi bi-tags"></i> <strong>To trigger AI Dev:</strong> Add these Jira labels:
+                                        <code id="repoLabel<?= $repo['id'] ?>" class="bg-secondary text-white px-1 rounded ms-1">repo-<?= htmlspecialchars($repo['slug'] ?? $repo['id']) ?></code>
+                                        <button type="button" class="btn btn-link btn-sm p-0" onclick="editSlug(<?= $repo['id'] ?>, '<?= htmlspecialchars($repo['slug'] ?? '', ENT_QUOTES) ?>')" title="Edit slug">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        +
+                                        <code class="bg-primary text-white px-1 rounded">ai-dev</code>
+                                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+                                                onclick="copyLabel('repo-<?= htmlspecialchars($repo['slug'] ?? $repo['id']) ?> ai-dev', this)" title="Copy both labels">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </small>
+                                </div>
                             </div>
                             <div>
                                 <a href="/github/disconnectrepo/<?= $repo['id'] ?>" class="btn btn-sm btn-outline-danger"
@@ -165,7 +180,7 @@
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-4">
-                        Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{id}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
+                        Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{slug}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
                     </p>
 
                     <?php foreach ($boards as $board):
@@ -205,7 +220,8 @@
                                                 }
                                             }
                                             if (!$repo) continue;
-                                            $repoLabel = 'repo-' . $repo['id'];
+                                            $repoSlug = $repo['slug'] ?? $repo['id'];
+                                            $repoLabel = 'repo-' . $repoSlug;
                                             $fullLabels = $repoLabel . ' ai-dev';
                                         ?>
                                         <tr>
@@ -272,10 +288,21 @@
                     </div>
                     <?php endforeach; ?>
 
+                    <?php
+                    // Get an example slug from connected repos for the help text
+                    $exampleSlug = 'myapp';
+                    if (!empty($repos)) {
+                        $firstRepo = reset($repos);
+                        $exampleSlug = $firstRepo['slug'] ?? $firstRepo['repo_name'] ?? 'myapp';
+                    }
+                    ?>
                     <div class="alert alert-info mt-3 mb-0">
                         <i class="bi bi-info-circle"></i>
-                        <strong>How it works:</strong> Add the Jira label (e.g., <code>ai-dev-42</code>) to a ticket to trigger
-                        AI Developer for that specific repository. The label tells the system exactly which repo to use.
+                        <strong>How it works:</strong> Add two labels to a Jira ticket to trigger AI Developer:
+                        <ol class="mb-0 mt-2">
+                            <li>Add <code>repo-<?= htmlspecialchars($exampleSlug) ?></code> to specify which repository to use</li>
+                            <li>Add <code>ai-dev</code> to trigger the job</li>
+                        </ol>
                     </div>
                 </div>
             </div>
@@ -301,12 +328,15 @@
                 <div class="card-body">
                     <h5 class="card-title">Using Labels</h5>
                     <p class="text-muted small">
-                        Each repository has a unique label like <code>repo-42</code>.
+                        Each repository has a unique label like <code>repo-myapp</code>.
                         Add this label first, then add <code>ai-dev</code> to trigger the job.
                     </p>
+                    <p class="text-muted small">
+                        <strong>Example:</strong> If your frontend repo has slug <code>frontend</code> (label: <code>repo-frontend</code>) and backend
+                        has slug <code>backend</code> (label: <code>repo-backend</code>), add the appropriate repo label first, then <code>ai-dev</code> to trigger.
+                    </p>
                     <p class="text-muted small mb-0">
-                        <strong>Example:</strong> If your frontend repo has label <code>repo-5</code> and backend
-                        has <code>repo-8</code>, add the appropriate repo label first, then <code>ai-dev</code> to trigger.
+                        <i class="bi bi-pencil"></i> Click the pencil icon next to any repo's label to customize its slug.
                     </p>
                 </div>
             </div>
@@ -355,6 +385,39 @@
                         </a>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slug Edit Modal -->
+<div class="modal fade" id="slugModal" tabindex="-1" aria-labelledby="slugModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="slugModalLabel">Edit Repository Slug</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    The slug is used in Jira labels (e.g., <code>repo-<span id="slugPreview">myapp</span></code>).
+                    Use lowercase letters, numbers, and hyphens only.
+                </p>
+                <div class="mb-3">
+                    <label for="slugInput" class="form-label">Slug</label>
+                    <input type="text" class="form-control" id="slugInput" placeholder="my-repo-name"
+                           pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]" maxlength="50"
+                           oninput="updateSlugPreview(this.value)">
+                    <div class="form-text">Lowercase letters, numbers, and hyphens. Cannot start or end with hyphen.</div>
+                </div>
+                <input type="hidden" id="slugRepoId">
+                <div id="slugError" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveSlug()">
+                    <i class="bi bi-check"></i> Save
+                </button>
             </div>
         </div>
     </div>
@@ -484,6 +547,85 @@ function connectRepository() {
     .catch(error => {
         btn.disabled = false;
         status.innerHTML = '<i class="bi bi-x-circle text-danger"></i> Error: ' + error.message;
+    });
+}
+
+function editSlug(repoId, currentSlug) {
+    document.getElementById('slugRepoId').value = repoId;
+    document.getElementById('slugInput').value = currentSlug || '';
+    document.getElementById('slugPreview').textContent = currentSlug || 'slug';
+    document.getElementById('slugError').classList.add('d-none');
+
+    const modal = new bootstrap.Modal(document.getElementById('slugModal'));
+    modal.show();
+}
+
+function updateSlugPreview(value) {
+    const preview = document.getElementById('slugPreview');
+    preview.textContent = value || 'slug';
+}
+
+function saveSlug() {
+    const repoId = document.getElementById('slugRepoId').value;
+    const slug = document.getElementById('slugInput').value.trim().toLowerCase();
+    const errorEl = document.getElementById('slugError');
+
+    // Basic validation
+    if (!slug) {
+        errorEl.textContent = 'Slug cannot be empty';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug)) {
+        errorEl.textContent = 'Invalid format. Use lowercase letters, numbers, and hyphens. Cannot start or end with hyphen.';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    if (slug.length > 50) {
+        errorEl.textContent = 'Slug must be 50 characters or less';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    errorEl.classList.add('d-none');
+
+    fetch('/github/updateslug', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            repo_id: parseInt(repoId),
+            slug: slug
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the label display
+            const labelEl = document.getElementById('repoLabel' + repoId);
+            if (labelEl) {
+                labelEl.textContent = data.data.tag;
+            }
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('slugModal'));
+            modal.hide();
+
+            // Show success message briefly (could use toast)
+            // Reload to ensure all labels are updated
+            window.location.reload();
+        } else {
+            errorEl.textContent = data.message || 'Failed to update slug';
+            errorEl.classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        errorEl.textContent = 'Error: ' + error.message;
+        errorEl.classList.remove('d-none');
     });
 }
 </script>

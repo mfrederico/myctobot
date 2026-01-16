@@ -189,6 +189,16 @@ class Agents extends BaseControls\Control {
             }
         }
 
+        // Save workstation assignment (optional - runs jobs on assigned workstation via SSH)
+        $workstationId = $this->getParam('claudeshards_id');
+        if ($workstationId) {
+            // Verify the workstation exists and is active
+            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            if ($shard) {
+                $agent->claudeshards_id = (int)$workstationId;
+            }
+        }
+
         // If setting as default, unset other defaults (workspace-level)
         if ($isDefault) {
             Bean::exec('UPDATE aiagents SET is_default = 0 WHERE 1');
@@ -337,7 +347,8 @@ class Agents extends BaseControls\Control {
             'mcp_tool_description' => $agent->mcp_tool_description,
             'is_active' => (bool) $agent->is_active,
             'is_default' => (bool) $agent->is_default,
-            'anthropickeys_id' => $agent->anthropickeys_id
+            'anthropickeys_id' => $agent->anthropickeys_id,
+            'claudeshards_id' => $agent->claudeshards_id
         ];
         $this->viewData['availableMcpServers'] = $availableServers;
 
@@ -441,6 +452,19 @@ class Agents extends BaseControls\Control {
             $agent->is_default = 1;
         } else {
             $agent->is_default = 0;
+        }
+
+        // Update workstation assignment
+        $workstationId = $this->getParam('claudeshards_id');
+        if ($workstationId === '' || $workstationId === '0') {
+            // Clear assignment (use local runner)
+            $agent->claudeshards_id = null;
+        } elseif ($workstationId) {
+            // Verify the workstation exists and is active
+            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            if ($shard) {
+                $agent->claudeshards_id = (int)$workstationId;
+            }
         }
     }
 

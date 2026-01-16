@@ -163,6 +163,7 @@ class Github extends BaseControls\Control {
             $repo->webhook_secret = $webhookSecret;
             $repo->enabled = 1;
             $repo->issues_enabled = 0; // Default: GitHub for code only, not issue tracking
+            $repo->slug = $this->generateUniqueSlug($repoName);
             $repo->created_at = date('Y-m-d H:i:s');
             Bean::store($repo);
 
@@ -372,6 +373,102 @@ class Github extends BaseControls\Control {
     }
 
     /**
+     * Generate a URL-safe slug from a string
+     * Converts to lowercase, replaces non-alphanumeric with hyphens, collapses multiple hyphens
+     */
+    private function generateSlug(string $input): string {
+        // Convert to lowercase
+        $slug = strtolower($input);
+        // Replace non-alphanumeric characters with hyphens
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+        // Remove leading/trailing hyphens
+        $slug = trim($slug, '-');
+        // Collapse multiple hyphens
+        $slug = preg_replace('/-+/', '-', $slug);
+        return $slug;
+    }
+
+    /**
+     * Generate a unique slug for a repository (appends number if needed)
+     */
+    private function generateUniqueSlug(string $repoName): string {
+        $baseSlug = $this->generateSlug($repoName);
+        $slug = $baseSlug;
+        $counter = 1;
+
+        // Check for uniqueness and append number if needed
+        while (Bean::findOne('repoconnections', 'slug = ?', [$slug])) {
+            $slug = $baseSlug . '-' . $counter;
+            $counter++;
+        }
+
+        return $slug;
+    }
+
+    /**
+     * Update repository slug (AJAX)
+     */
+    public function updateslug() {
+        if (!$this->requireLogin()) return;
+
+        $input = json_decode(file_get_contents('php://input'), true);
+        $repoId = (int)($input['repo_id'] ?? 0);
+        $newSlug = trim($input['slug'] ?? '');
+
+        if (empty($repoId)) {
+            Flight::jsonError('Repository ID is required', 400);
+            return;
+        }
+
+        if (empty($newSlug)) {
+            Flight::jsonError('Slug cannot be empty', 400);
+            return;
+        }
+
+        // Validate slug format (lowercase, alphanumeric, hyphens only)
+        if (!preg_match('/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/', $newSlug)) {
+            Flight::jsonError('Invalid slug format. Use lowercase letters, numbers, and hyphens only. Cannot start or end with hyphen.', 400);
+            return;
+        }
+
+        // Limit slug length
+        if (strlen($newSlug) > 50) {
+            Flight::jsonError('Slug must be 50 characters or less', 400);
+            return;
+        }
+
+        $repo = Bean::findOne('repoconnections', 'id = ?', [$repoId]);
+        if (!$repo) {
+            Flight::jsonError('Repository not found', 404);
+            return;
+        }
+
+        // Check uniqueness (exclude current repo)
+        $existing = Bean::findOne('repoconnections', 'slug = ? AND id != ?', [$newSlug, $repoId]);
+        if ($existing) {
+            Flight::jsonError('Slug is already in use by another repository', 400);
+            return;
+        }
+
+        $oldSlug = $repo->slug;
+        $repo->slug = $newSlug;
+        $repo->updated_at = date('Y-m-d H:i:s');
+        Bean::store($repo);
+
+        $this->logger->info('Repository slug updated', [
+            'member_id' => $this->member->id,
+            'repo_id' => $repoId,
+            'old_slug' => $oldSlug,
+            'new_slug' => $newSlug
+        ]);
+
+        Flight::jsonSuccess([
+            'slug' => $newSlug,
+            'tag' => 'repo-' . $newSlug
+        ], 'Slug updated successfully');
+    }
+
+    /**
      * List repository connections (main repos page)
      */
     public function repolist() {
@@ -381,7 +478,7 @@ class Github extends BaseControls\Control {
 
         // Get boards for mapping
         $boards = [];
-        $boardBeans = Bean::findAll('jiraboards', ' ORDER BY board_name ASC ');
+        $boardBeans = Bean::findAll('boards', ' ORDER BY board_name ASC ');
         foreach ($boardBeans as $bean) {
             $boards[] = [
                 'id' => $bean->id,
@@ -607,8 +704,14 @@ class Github extends BaseControls\Control {
 
         try {
             // Load parent beans for associations
-            $board = Bean::load('jiraboards', $boardId);
+            $board = Bean::load('boards', $boardId);
             $repo = Bean::load('repoconnections', $repoId);
+
+            if (!$board->id || !$repo->id) {
+                $this->flash('error', 'Board or repository not found.');
+                Flight::redirect('/github/repolist');
+                return;
+            }
 
             // If setting as default, clear other defaults for this board
             if ($isDefault) {

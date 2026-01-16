@@ -180,7 +180,7 @@ class Anthropic extends BaseControls\Control {
             Bean::trash($key);
 
             // Reset any boards using this key to NULL (local runner)
-            Bean::exec('UPDATE jiraboards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
+            Bean::exec('UPDATE boards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
 
             $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
             $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);

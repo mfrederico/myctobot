@@ -56,7 +56,6 @@ class TenantSchemaBuilder {
         $this->createAuthControlTable();
 
         // Create tables with member association
-        $this->createJiraBoardsTable();
         $this->board = $this->createBoardsTable(); // Generic boards - used for FK associations
         $this->boardIsTemp = true; // Mark for cleanup
         $this->repo = $this->createRepoConnectionsTable();
@@ -718,8 +717,8 @@ class TenantSchemaBuilder {
         $this->board = R::findOne('boards', ' LIMIT 1 ');
         $this->boardIsTemp = false;
         if (!$this->board) {
-            // Check jiraboards table as alternate source
-            $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
+            // Check boards table as alternate source
+            $this->board = R::findOne('boards', ' LIMIT 1 ');
         }
         if (!$this->board) {
             $this->board = $this->createDependencyBean('boards', $force, function() {
@@ -774,7 +773,7 @@ class TenantSchemaBuilder {
             'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
             'subscription', 'usersettings',
             // Parent tables last
-            'repoconnections', 'boards', 'jiraboards', 'member', 'authcontrol'
+            'repoconnections', 'boards', 'member', 'authcontrol'
         ];
 
         R::exec('SET FOREIGN_KEY_CHECKS = 0', []);
@@ -807,7 +806,7 @@ class TenantSchemaBuilder {
     private function dropTable(string $tableName): void {
         // Whitelist of allowed tables to drop
         $allowed = [
-            'member', 'boards', 'jiraboards', 'repoconnections', 'aiagents', 'aidevjobs',
+            'member', 'boards', 'repoconnections', 'aiagents', 'aidevjobs',
             'aidevjoblogs', 'analysisresults', 'anthropickeys', 'atlassiantoken',
             'authcontrol', 'boardrepomapping', 'ceodirectives', 'ctoepics',
             'ctoprojects', 'ctostories', 'digesthistory', 'directivelogs',
@@ -897,8 +896,8 @@ class TenantSchemaBuilder {
         R::exec('ALTER TABLE `atlassiantoken` ADD UNIQUE INDEX IF NOT EXISTS `uk_member_cloud` (`member_id`, `cloud_uid`)');
     }
 
-    private function createJiraBoardsTable() {
-        $bean = R::dispense('jiraboards');
+    private function createBoardsTable() {
+        $bean = R::dispense('boards');
         $bean->member = $this->member; // Creates member_id FK
         $bean->cloud_uid = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'; // _uid suffix - string not FK
         $bean->board_uid = 1; // External Jira board ID
@@ -927,6 +926,7 @@ class TenantSchemaBuilder {
         $bean->repo_owner = 'schema-owner';
         $bean->repo_name = 'schema-repo';
         $bean->repo_full_name = 'schema-owner/schema-repo';
+        $bean->slug = 'schema-repo'; // Unique identifier for repo tagging (e.g., repo-{slug})
         $bean->default_branch = 'main';
         $bean->clone_url = 'https://github.com/schema-owner/schema-repo.git';
         $bean->access_token = 'schema_access_token';
@@ -1126,6 +1126,7 @@ class TenantSchemaBuilder {
         $bean->mcp_servers = '[]';
         $bean->hooks_config = '{}';
         $bean->anthropickeys_id = null; // FK to anthropickeys table (1:1 key assignment)
+        $bean->claudeshards_id = null; // FK to claudeshards table (assigned workstation)
         $bean->is_active = true;
         $bean->is_default = false;
         $bean->created_at = date('Y-m-d H:i:s');

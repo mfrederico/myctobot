@@ -72,7 +72,7 @@ class Enterprise extends BaseControls\Control {
 
         // Get boards (shared boards available to all workspace members)
         $boards = [];
-        $boardBeans = Bean::findAll('jiraboards', '(member_id = ? OR is_shared = 1) ORDER BY board_name ASC', [$memberId]);
+        $boardBeans = Bean::findAll('boards', '(member_id = ? OR is_shared = 1) ORDER BY board_name ASC', [$memberId]);
         foreach ($boardBeans as $board) {
             $boards[] = [
                 'id' => $board->id,
@@ -341,7 +341,7 @@ class Enterprise extends BaseControls\Control {
 
         // Get boards for mapping using static method
         $boards = [];
-        $boardBeans = Bean::findAll('jiraboards', ' ORDER BY board_name ASC ');
+        $boardBeans = Bean::findAll('boards', ' ORDER BY board_name ASC ');
         foreach ($boardBeans as $bean) {
             $boards[] = [
                 'id' => $bean->id,
@@ -615,7 +615,7 @@ class Enterprise extends BaseControls\Control {
         try {
             
             // Load parent beans for associations
-            $board = Bean::load('jiraboards', $boardId);
+            $board = Bean::load('boards', $boardId);
             $repo = Bean::load('repoconnections', $repoId);
 
             // If setting as default, clear other defaults for this board via association
@@ -1217,7 +1217,7 @@ class Enterprise extends BaseControls\Control {
             // Get cloud_uid from the job or look up from board
             $cloudId = $job->cloudId;
             if (empty($cloudId)) {
-                $board = Bean::load('jiraboards', (int)$job->boards_id);
+                $board = Bean::load('boards', (int)$job->boards_id);
                 $cloudId = $board->cloud_uid ?? null;
             }
 

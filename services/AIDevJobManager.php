@@ -20,6 +20,7 @@ use \app\Bean;
 class AIDevJobManager {
 
     private int $memberId;
+    private ?string $tenant;
 
     // Job statuses
     const STATUS_PENDING = 'pending';
@@ -29,8 +30,9 @@ class AIDevJobManager {
     const STATUS_FAILED = 'failed';
     const STATUS_COMPLETE = 'complete';
 
-    public function __construct(int $memberId) {
+    public function __construct(int $memberId, ?string $tenant = null) {
         $this->memberId = $memberId;
+        $this->tenant = $tenant ?? ($_SESSION['tenant_slug'] ?? 'default');
     }
 
     /**
@@ -244,17 +246,61 @@ class AIDevJobManager {
 
     /**
      * Get active jobs for this member (running, pending, waiting)
+     * Excludes stale jobs that have been running for more than 30 minutes without updates
      *
      * @return array
      */
     public function getActive(): array {
-        $jobs = Bean::find('aidevjobs', 'member_id = ? AND status IN (?, ?, ?) ORDER BY started_at DESC', [
-            $this->memberId,
-            self::STATUS_PENDING,
-            self::STATUS_RUNNING,
-            self::STATUS_WAITING_CLARIFICATION
-        ]);
+        // Stale threshold: jobs running for more than 30 minutes are considered abandoned
+        $staleThreshold = date('Y-m-d H:i:s', strtotime('-30 minutes'));
+
+        $jobs = Bean::find('aidevjobs',
+            'member_id = ? AND status IN (?, ?, ?) AND (
+                status != ? OR updated_at > ? OR started_at > ?
+            ) ORDER BY started_at DESC',
+            [
+                $this->memberId,
+                self::STATUS_PENDING,
+                self::STATUS_RUNNING,
+                self::STATUS_WAITING_CLARIFICATION,
+                self::STATUS_RUNNING,  // Only apply staleness check to running jobs
+                $staleThreshold,
+                $staleThreshold
+            ]
+        );
         return array_map(fn($job) => $this->formatJob($job), array_values($jobs));
+    }
+
+    /**
+     * Mark stale running jobs as failed
+     * Jobs running for more than the threshold without updates are considered abandoned
+     *
+     * @param int $hoursThreshold Hours before a running job is considered stale (default: 2)
+     * @return int Number of jobs marked as failed
+     */
+    public function cleanupStaleJobs(int $hoursThreshold = 2): int {
+        $staleThreshold = date('Y-m-d H:i:s', strtotime("-{$hoursThreshold} hours"));
+
+        $staleJobs = Bean::find('aidevjobs',
+            'member_id = ? AND status = ? AND updated_at < ? AND started_at < ?',
+            [
+                $this->memberId,
+                self::STATUS_RUNNING,
+                $staleThreshold,
+                $staleThreshold
+            ]
+        );
+
+        $count = 0;
+        foreach ($staleJobs as $job) {
+            $job->status = self::STATUS_FAILED;
+            $job->error_message = 'Job timed out - marked as stale after ' . $hoursThreshold . ' hours';
+            $job->updated_at = date('Y-m-d H:i:s');
+            Bean::store($job);
+            $count++;
+        }
+
+        return $count;
     }
 
     /**
@@ -311,19 +357,109 @@ class AIDevJobManager {
     }
 
     /**
+     * Get the base path for aoe-php storage
+     * Uses a consistent path that works for both CLI and web contexts
+     *
+     * @return string
+     */
+    private function getAoeStoragePath(): string {
+        // Check config first
+        $configPath = \Flight::get('aoe.storage_path');
+        if ($configPath && is_dir($configPath)) {
+            return $configPath;
+        }
+
+        // Default to /tmp/.aoe-php (accessible by both CLI and web)
+        $defaultPath = '/tmp/.aoe-php';
+        if (is_dir($defaultPath)) {
+            return $defaultPath;
+        }
+
+        // Fallback to project-relative path
+        return dirname(__DIR__) . '/data/aoe';
+    }
+
+    /**
+     * Check if a session is actually running for an issue using aoe-php
+     *
+     * @param string $issueKey
+     * @return bool True if session is running, false otherwise
+     */
+    private function isSessionActuallyRunning(string $issueKey): bool {
+        try {
+            $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
+            if (!file_exists($aoePath)) {
+                return false;
+            }
+            require_once $aoePath;
+
+            $tenantSlug = $this->tenant ?: 'default';
+            \Aoe\Tenant\TenantContext::set($tenantSlug);
+
+            // Use consistent storage path that works for both CLI and web
+            $basePath = $this->getAoeStoragePath();
+            $storage = new \Aoe\Session\Storage($tenantSlug, $basePath);
+            $tmux = new \Aoe\Tmux\TmuxService($tenantSlug);
+
+            // Find session by reference (issue key)
+            foreach ($storage->loadAll() as $session) {
+                if ($session->reference === $issueKey || $session->title === $issueKey) {
+                    $tmuxName = $session->getTmuxName();
+                    if ($tmux->sessionExistsByName($tmuxName)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            // If we can't check, assume not running to be safe
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the real status of a job, checking aoe-php for running jobs
+     *
+     * @param \RedBeanPHP\OODBBean $job
+     * @return string The real status
+     */
+    private function getRealStatus($job): string {
+        // Only check running jobs
+        if ($job->status !== self::STATUS_RUNNING) {
+            return $job->status;
+        }
+
+        // Check if session is actually running
+        if ($this->isSessionActuallyRunning($job->issue_key)) {
+            return self::STATUS_RUNNING;
+        }
+
+        // Session not running - mark as failed in database
+        $job->status = self::STATUS_FAILED;
+        $job->error_message = 'Session ended unexpectedly';
+        $job->updated_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
+        return self::STATUS_FAILED;
+    }
+
+    /**
      * Format a job bean to array
      *
      * @param \RedBeanPHP\OODBBean $job
      * @return array
      */
     public function formatJob($job): array {
+        // Get real status (checks aoe-php for running jobs)
+        $realStatus = $this->getRealStatus($job);
+
         return [
             'id' => $job->id,
             'issue_key' => $job->issue_key,
             'board_id' => $job->boards_id,  // API compatibility
             'repo_connection_id' => $job->repoconnections_id,  // API compatibility
             'cloud_uid' => $job->cloud_uid,
-            'status' => $job->status,
+            'status' => $realStatus,
             'current_shard_job_uid' => $job->current_shard_job_uid,
             'branch_name' => $job->branch_name,
             'pr_url' => $job->pr_url,

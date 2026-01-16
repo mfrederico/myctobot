@@ -374,13 +374,20 @@ class Webhook extends BaseControls\Control {
 
                 if ($aiDevWasRemoved) {
                     $memberId = $this->findMemberByCloudId($cloudId);
+                    $this->logger->info('ai-dev label removed - attempting session close', [
+                        'issue_key' => $issueKey,
+                        'member_id' => $memberId,
+                        'removed_label' => $oldAiDevLabel,
+                        'old_labels' => $oldLabels,
+                        'new_labels' => $newLabels
+                    ]);
                     if ($memberId) {
-                        $this->logger->info('ai-dev label removed, closing local session if exists', [
+                        $this->closeLocalTmuxSession($issueKey, $memberId, $cloudId, 'label_removed');
+                    } else {
+                        $this->logger->warning('ai-dev label removed but no member found', [
                             'issue_key' => $issueKey,
-                            'member_id' => $memberId,
-                            'removed_label' => $oldAiDevLabel
+                            'cloud_id' => $cloudId
                         ]);
-                        $this->closeLocalTmuxSession($issueKey, $memberId);
                     }
                     return;
                 }
@@ -623,6 +630,13 @@ class Webhook extends BaseControls\Control {
     private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null, string $reason = 'closed'): void {
         $tenant = Flight::get('tenant.slug');
 
+        $this->logger->info('closeLocalTmuxSession called', [
+            'issue_key' => $issueKey,
+            'member_id' => $memberId,
+            'reason' => $reason,
+            'tenant' => $tenant
+        ]);
+
         // Clean up status file regardless of whether tmux session exists
         $this->cleanupJobStatus($memberId, $issueKey, $reason);
 
@@ -634,6 +648,15 @@ class Webhook extends BaseControls\Control {
         // Get work directory and signal the session to complete
         $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
         $workDir = $tmux->getWorkDir();
+        $claudeRunning = $tmux->isClaudeRunning();
+
+        $this->logger->info('closeLocalTmuxSession session check', [
+            'issue_key' => $issueKey,
+            'work_dir' => $workDir,
+            'work_dir_exists' => is_dir($workDir),
+            'claude_running' => $claudeRunning,
+            'session_name' => $tmux->getSessionName()
+        ]);
 
         if ($workDir && is_dir($workDir)) {
             // Create done file to signal the waiting script
@@ -833,6 +856,21 @@ class Webhook extends BaseControls\Control {
 
         // Check if the new status matches the configured complete status (case-insensitive)
         if (strcasecmp($newStatus, $completeStatus) === 0) {
+            // Don't kill if there's an active job running for this issue
+            $activeJob = Bean::findOne('aidevjobs',
+                'issue_key = ? AND status IN (?, ?) ORDER BY created_at DESC',
+                [$issueKey, 'running', 'queued']
+            );
+            if ($activeJob) {
+                $this->logger->info('Complete status reached but job still active, skipping kill', [
+                    'issue_key' => $issueKey,
+                    'member_id' => $memberId,
+                    'status' => $newStatus,
+                    'job_status' => $activeJob->status
+                ]);
+                return;
+            }
+
             $this->logger->info('Ticket transitioned to complete status, closing AI Developer session', [
                 'issue_key' => $issueKey,
                 'member_id' => $memberId,
@@ -1009,6 +1047,15 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
+        // Skip comments with agent signature (posted by MCP, prevents echo)
+        if (preg_match('/\[agent:[^\]]+\]/', $body)) {
+            $this->logger->debug('Skipping agent-signed comment', [
+                'issue_key' => $issueKey,
+                'author' => $author
+            ]);
+            return;
+        }
+
         // Build message for Claude
         $message = "[JIRA UPDATE] New comment from {$author}: {$body}";
 
@@ -1043,7 +1090,7 @@ class Webhook extends BaseControls\Control {
                 // Also check board's configured complete status
                 if (!$shouldClose) {
                     $projectKey = explode('-', $issueKey)[0] ?? '';
-                    $board = Bean::findOne('jiraboards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
+                    $board = Bean::findOne('boards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
                     if ($board) {
                         $boardCompleteStatus = $board->aidev_status_complete ?? null;
                         if ($boardCompleteStatus && strcasecmp($newStatus, $boardCompleteStatus) === 0) {
@@ -1058,14 +1105,28 @@ class Webhook extends BaseControls\Control {
                 }
 
                 if ($shouldClose) {
-                    $this->logger->info('Ticket closed, killing local Claude session', [
-                        'issue_key' => $issueKey,
-                        'member_id' => $memberId,
-                        'status' => $newStatus
-                    ]);
-                    // Use closeLocalTmuxSession to also clean up status file
-                    $this->closeLocalTmuxSession($issueKey, $memberId, null, 'complete');
-                    return;
+                    // Don't kill if there's an active job running for this issue
+                    $activeJob = Bean::findOne('aidevjobs',
+                        'issue_key = ? AND status IN (?, ?) ORDER BY created_at DESC',
+                        [$issueKey, 'running', 'queued']
+                    );
+                    if ($activeJob) {
+                        $this->logger->info('Status suggests close but job still active, skipping kill', [
+                            'issue_key' => $issueKey,
+                            'member_id' => $memberId,
+                            'status' => $newStatus,
+                            'job_status' => $activeJob->status
+                        ]);
+                    } else {
+                        $this->logger->info('Ticket closed, killing local Claude session', [
+                            'issue_key' => $issueKey,
+                            'member_id' => $memberId,
+                            'status' => $newStatus
+                        ]);
+                        // Use closeLocalTmuxSession to also clean up status file
+                        $this->closeLocalTmuxSession($issueKey, $memberId, null, 'complete');
+                        return;
+                    }
                 }
 
                 // Notify of status change
@@ -1933,21 +1994,34 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Find repo-{id} label in list to determine which repo to use
+     * Find repo from labels - supports both repo-{id} (numeric) and repo-{slug} (alphanumeric)
      * Returns the repo ID or null if not found
+     *
+     * Priority: First checks for numeric ID match, then slug match
      */
     private function findRepoIdFromLabels(array $labels): ?int {
         foreach ($labels as $label) {
             $labelName = is_string($label) ? $label : ($label['name'] ?? '');
+
+            // First try: numeric ID (legacy format: repo-123)
             if (preg_match('/^repo-(\d+)$/', $labelName, $matches)) {
                 return (int) $matches[1];
+            }
+
+            // Second try: slug (new format: repo-my-slug)
+            if (preg_match('/^repo-([a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9])$/', $labelName, $matches)) {
+                $slug = $matches[1];
+                $repo = Bean::findOne('repoconnections', 'slug = ?', [$slug]);
+                if ($repo && $repo->id) {
+                    return (int) $repo->id;
+                }
             }
         }
         return null;
     }
 
     /**
-     * Extract repo ID from labels via repo-{id} label
+     * Extract repo ID from labels via repo-{id} or repo-{slug} label
      */
     private function extractRepoIdFromLabels(array $labels): ?int {
         return $this->findRepoIdFromLabels($labels);
@@ -2034,7 +2108,7 @@ class Webhook extends BaseControls\Control {
         $projectKey = explode('-', $issueKey)[0] ?? '';
 
         // Find the board for this project to get the cloud_uid (shared boards available to all)
-        $board = Bean::findOne('jiraboards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
+        $board = Bean::findOne('boards', '(member_id = ? OR is_shared = 1) AND project_key = ?', [$memberId, $projectKey]);
         if ($board && !empty($board->cloud_uid)) {
             return $board->cloud_uid;
         }

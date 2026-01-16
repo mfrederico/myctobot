@@ -494,7 +494,7 @@ class Reviewboard extends BaseControls\Control {
      */
     private function getJiraConfig(): ?array {
         // Check for enabled Jira board (shared boards available to all workspace members)
-        $board = Bean::findOne('jiraboards', '(member_id = ? OR is_shared = 1) AND is_active = ?', [$this->member->id, 1]);
+        $board = Bean::findOne('boards', '(member_id = ? OR is_shared = 1) AND is_active = ?', [$this->member->id, 1]);
         if (!$board) {
             return null;
         }

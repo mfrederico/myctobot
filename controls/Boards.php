@@ -253,8 +253,10 @@ class Boards extends BaseControls\Control {
                 $statusFilter = implode(', ', array_filter($statusFilter));
             }
 
+            $enabledValue = $this->getParam('enabled') ? 1 : 0;
             $data = [
-                'enabled' => $this->getParam('enabled') ? 1 : 0,
+                'enabled' => $enabledValue,
+                'is_active' => $enabledValue,  // Keep in sync with enabled
                 'digest_enabled' => $this->getParam('digest_enabled') ? 1 : 0,
                 'digest_time' => $this->getParam('digest_time') ?? '08:00',
                 'digest_cc' => trim($this->getParam('digest_cc') ?? ''),

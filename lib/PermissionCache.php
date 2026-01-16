@@ -7,7 +7,6 @@
 
 namespace app;
 
-use \RedBeanPHP\R as R; // Keep for R::exec() low-level SQL
 use \app\Bean;
 use \Flight as Flight;
 
@@ -496,7 +495,7 @@ class PermissionCache {
 
         try {
             // Use a simple SQL UPDATE for better performance
-            R::exec(
+            Bean::exec(
                 'UPDATE authcontrol SET validcount = validcount + 1 WHERE LOWER(control) = ? AND LOWER(method) = ?',
                 [strtolower($control), strtolower($method)]
             );

@@ -14,6 +14,7 @@ use \app\services\EncryptionService;
 use \app\services\AIDevJobManager;
 use \app\services\ShardService;
 use \app\services\ShardRouter;
+use \app\services\AnthropicKeyService;
 use \app\TenantResolver;
 
 require_once __DIR__ . '/../services/EncryptionService.php';
@@ -106,15 +107,13 @@ class Jobs extends BaseControls\Control {
         }
 
         try {
-            // Get Anthropic API key
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
+            // Get Anthropic API key from anthropickeys table
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
 
-            if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
-                $this->json(['success' => false, 'error' => 'Anthropic API key not configured']);
+            if (!$apiKey) {
+                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
                 return;
             }
-
-            $apiKey = EncryptionService::decrypt($apiKeySetting->setting_value);
 
             // Find an available shard
             $shard = ShardRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
@@ -429,11 +428,11 @@ class Jobs extends BaseControls\Control {
         }
 
         try {
-            // Get API key
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
+            // Get API key from anthropickeys table
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
 
-            if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
-                $this->json(['success' => false, 'error' => 'Anthropic API key not configured']);
+            if (!$apiKey) {
+                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
                 return;
             }
 

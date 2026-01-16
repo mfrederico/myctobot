@@ -133,7 +133,7 @@ class GitHubClient {
      * Get GitHub configuration with hierarchy:
      * 1. Load base config from conf/github.ini (primary source - shared OAuth app)
      * 2. Fill in missing/blank values from tenant config [github] section
-     * 3. Fall back to Flight::get() for backwards compatibility
+     * 3. Fall back to Flight::get() for any missing values
      */
     private static function getConfig(): array {
         $config = [
@@ -175,7 +175,7 @@ class GitHubClient {
             }
         }
 
-        // 3. Fall back to Flight::get() for any still-missing values (backwards compatibility)
+        // 3. Fall back to Flight::get() for any still-missing values
         if (empty($config['client_id'])) {
             $config['client_id'] = Flight::get('github.client_id');
         }

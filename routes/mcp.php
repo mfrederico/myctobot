@@ -17,8 +17,7 @@ Flight::route('POST|GET|OPTIONS /mcp/@tenant/jira', function($tenant) {
     $controller->jirawithtenant($tenant);
 });
 
-// Legacy endpoint without tenant (still works with Basic Auth)
-// /mcp/jira - backwards compatible
+// MCP Jira endpoint without tenant (uses Basic Auth for tenant identification)
 Flight::route('POST|GET|OPTIONS /mcp/jira', function() {
     $controller = new \app\Mcp();
     $controller->jira();

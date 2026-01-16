@@ -234,9 +234,9 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
 <pre class="text-light mb-0" style="white-space: pre-wrap;"># Project Development Standards
 
 ## RedBeanPHP Rules (CRITICAL)
-- Use Bean:: wrapper for user database
+- Use Bean:: wrapper for all database operations
 - ALWAYS use associations over manual FKs
-- Bean operations for CRUD, never R::exec
+- Bean operations for CRUD, never raw SQL exec
 
 ## Security Requirements
 - Validate CSRF on all POST requests

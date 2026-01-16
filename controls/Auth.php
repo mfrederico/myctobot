@@ -47,6 +47,11 @@ class Auth extends BaseControls\Control {
             $workspace = Flight::request()->query->workspace ?? '';
         }
 
+        // Sanitize workspace name - only allow alphanumeric, hyphens, underscores
+        if (!empty($workspace)) {
+            $workspace = preg_replace('/[^a-zA-Z0-9_-]/', '', $workspace);
+        }
+
         // If still no workspace, try to extract from subdomain
         // e.g., clicksimple-inc.myctobot.ai -> clicksimple-inc
         if (empty($workspace)) {
@@ -69,6 +74,7 @@ class Auth extends BaseControls\Control {
 
         // Validate workspace if provided
         $workspaceError = null;
+        $requestedWorkspace = $workspace; // Save original before clearing
         if (!empty($workspace) && !TenantResolver::tenantExists($workspace)) {
             $workspaceError = "Workspace '{$workspace}' not found";
             $workspace = '';
@@ -78,6 +84,7 @@ class Auth extends BaseControls\Control {
             'title' => 'Login',
             'redirect' => $redirect,
             'workspace' => $workspace,
+            'requestedWorkspace' => $requestedWorkspace,
             'workspaceError' => $workspaceError,
             'googleEnabled' => GoogleAuth::isConfigured() && TenantResolver::isDefault()
         ]);
@@ -285,7 +292,7 @@ class Auth extends BaseControls\Control {
      */
     public function register() {
         // Non-tenant (main site) should use /signup for tenant registration
-        if (!Flight::get('tenant.active')) {
+        if (TenantResolver::isDefault()) {
             Flight::redirect('/signup');
             return;
         }
@@ -307,7 +314,7 @@ class Auth extends BaseControls\Control {
      */
     public function doregister() {
         // Non-tenant (main site) should use /signup for tenant registration
-        if (!Flight::get('tenant.active')) {
+        if (TenantResolver::isDefault()) {
             Flight::redirect('/signup');
             return;
         }
@@ -905,15 +912,14 @@ HTML;
 
     /**
      * Accept invitation - handles both GET (show form) and POST (process)
-     * URL: /auth/invite/{token}?tenant=xxx
+     * URL: /auth/invite/{token}?workspace=xxx
      */
     public function invite($params = []) {
         require_once __DIR__ . '/../services/InviteService.php';
 
         $request = Flight::request();
         $token = $this->opId() ?? '';
-        // Accept both 'tenant' and 'workspace' query params for backwards compatibility
-        $tenant = $request->query->tenant ?? $request->query->workspace ?? $request->data->tenant ?? '';
+        $tenant = $request->query->workspace ?? $request->data->workspace ?? '';
 
         if (empty($token)) {
             $this->render('auth/invite_error', [

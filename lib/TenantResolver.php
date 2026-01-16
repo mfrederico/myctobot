@@ -3,8 +3,8 @@
  * TenantResolver - Helper for multi-tenant routing
  *
  * Supports two modes:
- * 1. Session-based tenancy (preferred): User logs in with workspace code, stored in session
- * 2. Subdomain-based tenancy (legacy): gwt.myctobot.ai → conf/config.gwt.ini
+ * 1. Session-based tenancy (primary): User logs in with workspace code, stored in session
+ * 2. Subdomain-based tenancy: gwt.myctobot.ai → conf/config.gwt.ini
  *
  * Session-based flow:
  *   myctobot.ai/login/gwt → login with workspace "gwt" → session stores tenant
@@ -25,7 +25,7 @@ class TenantResolver {
     private static $initialized = false;
 
     /**
-     * Get tenant slug from session (primary) or subdomain (fallback)
+     * Get tenant slug from session or subdomain
      *
      * @return string Tenant slug (e.g., 'gwt', 'acme', 'default')
      */
@@ -35,7 +35,7 @@ class TenantResolver {
             return $_SESSION['tenant_slug'];
         }
 
-        // Fallback to subdomain (legacy support)
+        // Check subdomain
         return self::getSubdomain() ?? 'default';
     }
 
@@ -112,7 +112,7 @@ class TenantResolver {
     }
 
     /**
-     * Extract subdomain from current HTTP host (legacy support)
+     * Extract subdomain from current HTTP host
      *
      * Examples:
      *   gwt.myctobot.ai → gwt

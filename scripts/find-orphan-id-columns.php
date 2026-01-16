@@ -61,14 +61,14 @@ if ($tenantSlug) {
     $bootstrap = new \app\Bootstrap();
 }
 
-use \RedBeanPHP\R as R;
+use \app\Bean;
 
 echo "=== Finding Orphan _id Columns ===\n";
 echo "Tenant: " . ($tenantSlug ?? 'default') . "\n";
 echo "Database: {$dbType}\n\n";
 
-// Get PDO connection (Bean wraps R::, so both use same connection after bootstrap)
-$pdo = R::getDatabaseAdapter()->getDatabase()->getPDO();
+// Get PDO connection from Bean wrapper
+$pdo = Bean::getDatabaseAdapter()->getDatabase()->getPDO();
 
 // Get current database name for information_schema queries
 $dbNameResult = $pdo->query("SELECT DATABASE()")->fetch(\PDO::FETCH_NUM);

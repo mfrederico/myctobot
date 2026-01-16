@@ -619,7 +619,7 @@ class Knowledgebase extends BaseControls\Control {
      */
     private function getStorageUsage(): array {
         try {
-            // Use Bean::find to query user database (R:: queries default database)
+            // Use Bean::find to query user database
             $documents = Bean::find('ragdocuments');
             $totalBytes = 0;
             foreach ($documents as $doc) {

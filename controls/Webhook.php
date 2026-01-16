@@ -8,7 +8,6 @@ namespace app;
 
 use \Flight as Flight;
 use \app\Bean;
-use \RedBeanPHP\R as R; // Keep for R::close()
 use \app\services\AIDevJobService;
 use \app\services\AIDevJobManager;
 use \app\services\EncryptionService;
@@ -1454,7 +1453,7 @@ class Webhook extends BaseControls\Control {
                 }
 
                 // Clean up - remove this database connection
-                R::close();
+                Bean::close();
 
             } catch (\Exception $e) {
                 $this->logger->debug('Error checking tenant for repo', [
@@ -1913,13 +1912,13 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Find ai-dev label in list (for backward compatibility with ai-dev-{id} pattern)
-     * Returns 'ai-dev' or 'ai-dev-{id}' or null
+     * Find ai-dev label in list
+     * Returns 'ai-dev' or null
      */
     private function findAiDevLabel(array $labels): ?string {
         foreach ($labels as $label) {
             $labelName = is_string($label) ? $label : ($label['name'] ?? '');
-            if ($labelName === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $labelName)) {
+            if ($labelName === 'ai-dev') {
                 return $labelName;
             }
         }
@@ -1927,10 +1926,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Check if a label matches the ai-dev pattern (ai-dev or ai-dev-{id})
+     * Check if a label is ai-dev
      */
     private function isAiDevLabel(string $label): bool {
-        return $label === 'ai-dev' || preg_match('/^ai-dev-\d+$/', $label);
+        return $label === 'ai-dev';
     }
 
     /**
@@ -1948,24 +1947,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Extract repo ID from labels - checks both patterns:
-     * 1. repo-{id} label (preferred)
-     * 2. ai-dev-{id} label (legacy)
+     * Extract repo ID from labels via repo-{id} label
      */
     private function extractRepoIdFromLabels(array $labels): ?int {
-        // First check for repo-{id} label (new pattern)
-        $repoId = $this->findRepoIdFromLabels($labels);
-        if ($repoId !== null) {
-            return $repoId;
-        }
-
-        // Fall back to ai-dev-{id} pattern (legacy)
-        $aiDevLabel = $this->findAiDevLabel($labels);
-        if ($aiDevLabel && preg_match('/^ai-dev-(\d+)$/', $aiDevLabel, $matches)) {
-            return (int) $matches[1];
-        }
-
-        return null;
+        return $this->findRepoIdFromLabels($labels);
     }
 
     /**

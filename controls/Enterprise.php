@@ -19,6 +19,7 @@ use \app\services\ShardService;
 use \app\services\ShardRouter;
 use \app\services\LLMProviders\LLMProviderFactory;
 use \app\services\ConnectionsService;
+use \app\services\AnthropicKeyService;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/ConnectionsService.php';
@@ -42,20 +43,6 @@ class Enterprise extends BaseControls\Control {
         return $this->requireLogin();
     }
 
-    /**
-     * Connect to user database (legacy no-op - all data now in single MySQL DB)
-     */
-    private function connectUserDb(): void {
-        // No-op: All data is now in single MySQL database per tenant
-    }
-
-    /**
-     * Disconnect from user database (legacy no-op)
-     */
-    private function disconnectUserDb(): void {
-        // No-op: No database switching needed
-    }
-
     // ========================================
     // Dashboard & Settings
     // ========================================
@@ -69,9 +56,8 @@ class Enterprise extends BaseControls\Control {
         $memberId = $this->member->id;
 
         // Check setup status
-        // Check API key
-        $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $memberId]);
-        $apiKeySet = $apiKeySetting && !empty($apiKeySetting->setting_value);
+        // Check API key (from anthropickeys table)
+        $apiKeySet = AnthropicKeyService::hasApiKey($memberId);
 
         // Check GitHub connections (workspace-level - all members share repos)
         $githubCount = Bean::count('repoconnections', 'provider = ? AND enabled = ?', ['github', 1]);
@@ -107,10 +93,8 @@ class Enterprise extends BaseControls\Control {
         }
 
         // Get repo connections
-        $this->connectUserDb();
-        $repos = ConnectionsService::getRepositoryConnections();
-        $this->disconnectUserDb();
-
+                $repos = ConnectionsService::getRepositoryConnections();
+        
         // Get recent jobs using AIDevJobManager
         $jobManager = new AIDevJobManager($memberId);
         $jobs = $jobManager->getAll(10);
@@ -214,8 +198,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $this->connectUserDb();
-        try {
+                try {
             $encrypted = EncryptionService::encrypt($apiKey);
 
             $key = Bean::dispense('anthropickeys');
@@ -228,10 +211,8 @@ class Enterprise extends BaseControls\Control {
             $this->flash('success', 'API key added successfully.');
             $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name]);
 
-            $this->disconnectUserDb();
-        } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
+                    } catch (\Exception $e) {
+                        $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
         }
 
         Flight::redirect('/enterprise/settings');
@@ -250,8 +231,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $this->connectUserDb();
-        try {
+                try {
             $key = Bean::load('anthropickeys', $keyId);
             if ($key && $key->id) {
                 $keyName = $key->name;
@@ -265,10 +245,8 @@ class Enterprise extends BaseControls\Control {
             } else {
                 $this->flash('error', 'Key not found.');
             }
-            $this->disconnectUserDb();
-        } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
+                    } catch (\Exception $e) {
+                        $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
         }
 
         Flight::redirect('/enterprise/settings');
@@ -286,20 +264,17 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $this->connectUserDb();
-        try {
+                try {
             $key = Bean::load('anthropickeys', $keyId);
             if (!$key || !$key->id) {
-                $this->disconnectUserDb();
-                Flight::json(['success' => false, 'error' => 'Key not found']);
+                                Flight::json(['success' => false, 'error' => 'Key not found']);
                 return;
             }
 
             $apiKey = EncryptionService::decrypt($key->api_key);
             $model = $key->model ?? 'claude-sonnet-4-20250514';
 
-            $this->disconnectUserDb();
-
+            
             // Test the key
             $client = new \GuzzleHttp\Client([
                 'base_uri' => 'https://api.anthropic.com',
@@ -321,8 +296,7 @@ class Enterprise extends BaseControls\Control {
             Flight::json(['success' => true, 'message' => 'API key is valid!']);
 
         } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
+                        $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
             Flight::json(['success' => false, 'error' => $e->getMessage()]);
         }
     }
@@ -344,8 +318,7 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Legacy callback URL - redirect to consolidated endpoint
-     * Kept for any in-flight OAuth flows using old callback URL
+     * Alternate callback URL - redirects to consolidated endpoint
      */
     public function githubcallback() {
         // Forward query params to the consolidated callback
@@ -364,8 +337,7 @@ class Enterprise extends BaseControls\Control {
     public function repos() {
         if (!$this->requireEnterprise()) return;
 
-        $this->connectUserDb();
-        $repos = ConnectionsService::getRepositoryConnections();
+                $repos = ConnectionsService::getRepositoryConnections();
 
         // Get boards for mapping using static method
         $boards = [];
@@ -413,8 +385,7 @@ class Enterprise extends BaseControls\Control {
             $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
             $githubToken = $tokenSetting ? $tokenSetting->setting_value : null;
 
-            $this->disconnectUserDb();
-
+            
             // Get available repos from GitHub if connected
             $availableRepos = [];
             if (!empty($githubToken)) {
@@ -450,8 +421,7 @@ class Enterprise extends BaseControls\Control {
                 'agents' => $agents
             ]);
         } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            throw $e;
+                        throw $e;
         }
     }
 
@@ -478,14 +448,12 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
-
+            
             // Get the token
             $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
 
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
-                $this->disconnectUserDb();
-                $this->flash('error', 'GitHub is not connected.');
+                                $this->flash('error', 'GitHub is not connected.');
                 Flight::redirect('/enterprise/repos');
                 return;
             }
@@ -554,8 +522,7 @@ class Enterprise extends BaseControls\Control {
 
             Bean::store($repo);
 
-            $this->disconnectUserDb();
-
+            
             $message = "Repository {$repoFullName} connected successfully!";
             if (!$webhookCreated) {
                 $message .= " (Webhook setup failed - you may need to set it up manually)";
@@ -567,8 +534,7 @@ class Enterprise extends BaseControls\Control {
             ]);
 
         } catch (Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('Failed to connect repository', ['error' => $e->getMessage()]);
+                        $this->logger->error('Failed to connect repository', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to connect repository: ' . $e->getMessage());
         }
 
@@ -591,8 +557,7 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
-
+            
             // Load repo and use xownBoardrepomappingList for cascade delete
             $repo = Bean::load('repoconnections', (int)$repoId);
             if ($repo->id) {
@@ -602,8 +567,7 @@ class Enterprise extends BaseControls\Control {
                 Bean::trash($repo);
             }
 
-            $this->disconnectUserDb();
-
+            
             $this->flash('success', 'Repository disconnected.');
             $this->logger->info('Repository disconnected', [
                 'member_id' => $this->member->id,
@@ -611,8 +575,7 @@ class Enterprise extends BaseControls\Control {
             ]);
 
         } catch (Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('Failed to disconnect repository', ['error' => $e->getMessage()]);
+                        $this->logger->error('Failed to disconnect repository', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to disconnect repository.');
         }
 
@@ -650,8 +613,7 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
-
+            
             // Load parent beans for associations
             $board = Bean::load('jiraboards', $boardId);
             $repo = Bean::load('repoconnections', $repoId);
@@ -683,12 +645,10 @@ class Enterprise extends BaseControls\Control {
             $mapping->is_default = $isDefault;
             Bean::store($board);
 
-            $this->disconnectUserDb();
-            $this->flash('success', 'Board mapped to repository successfully.');
+                        $this->flash('success', 'Board mapped to repository successfully.');
 
         } catch (Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('Failed to map board', ['error' => $e->getMessage()]);
+                        $this->logger->error('Failed to map board', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to map board to repository.');
         }
 
@@ -711,8 +671,7 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
-
+            
             // Find and delete the mapping
             $mapping = Bean::findOne('boardrepomapping',
                 'boards_id = ? AND repoconnections_id = ?',
@@ -726,11 +685,9 @@ class Enterprise extends BaseControls\Control {
                 $this->flash('warning', 'Mapping not found.');
             }
 
-            $this->disconnectUserDb();
-
+            
         } catch (Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('Failed to unmap board', ['error' => $e->getMessage()]);
+                        $this->logger->error('Failed to unmap board', ['error' => $e->getMessage()]);
             $this->flash('error', 'Failed to remove mapping.');
         }
 
@@ -742,56 +699,18 @@ class Enterprise extends BaseControls\Control {
     // ========================================
 
     /**
-     * View a single AI Developer job detail
+     * View a single AI Developer job detail - redirects to Jobs controller
      */
     public function job($params = []) {
-        if (!$this->requireEnterprise()) return;
-
         $issueKey = $this->opId() ?? '';
-        if (empty($issueKey)) {
-            $this->flash('error', 'Issue key required');
-            Flight::redirect('/enterprise');
-            return;
-        }
-
-        $jobManager = new AIDevJobManager($this->member->id);
-        $job = $jobManager->get($issueKey);
-
-        if (!$job) {
-            $this->flash('error', 'Job not found');
-            Flight::redirect('/enterprise');
-            return;
-        }
-
-        // Format job data for the view
-        $jobData = $jobManager->formatJob($job);
-
-        // Get job logs
-        $logs = $jobManager->getLogs($issueKey);
-
-        $this->render('enterprise/job', [
-            'title' => 'Job: ' . $issueKey,
-            'job' => $jobData,
-            'logs' => $logs
-        ]);
+        Flight::redirect('/jobs/view/' . urlencode($issueKey));
     }
 
     /**
-     * List AI Developer jobs
+     * List AI Developer jobs - redirects to Jobs controller
      */
     public function jobs() {
-        if (!$this->requireEnterprise()) return;
-
-        // Use AIDevStatusService for JSON-based job tracking
-        require_once __DIR__ . '/../services/AIDevStatusService.php';
-        $jobs = \app\services\AIDevStatusService::getAllJobs($this->member->id, 50);
-        $activeJobs = \app\services\AIDevStatusService::getActiveJobs($this->member->id);
-
-        $this->render('enterprise/jobs', [
-            'title' => 'AI Developer Jobs',
-            'jobs' => $jobs,
-            'activeJobs' => $activeJobs
-        ]);
+        Flight::redirect('/jobs');
     }
 
     /**
@@ -825,25 +744,20 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
+            
+            // Get Anthropic API key from anthropickeys table
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
 
-            // Get Anthropic API key
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-
-            if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
-                $this->disconnectUserDb();
-                $this->json(['success' => false, 'error' => 'Anthropic API key not configured']);
+            if (!$apiKey) {
+                                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
                 return;
             }
-
-            $apiKey = EncryptionService::decrypt($apiKeySetting->setting_value);
 
             // Find an available shard
             $shard = ShardRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
 
             if (!$shard) {
-                $this->disconnectUserDb();
-                $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
+                                $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
                 return;
             }
 
@@ -851,8 +765,7 @@ class Enterprise extends BaseControls\Control {
             $repoBean = Bean::load('repoconnections', (int)$repoId);
 
             if (!$repoBean->id) {
-                $this->disconnectUserDb();
-                $this->json(['success' => false, 'error' => 'Repository not found']);
+                                $this->json(['success' => false, 'error' => 'Repository not found']);
                 return;
             }
 
@@ -866,8 +779,7 @@ class Enterprise extends BaseControls\Control {
                 'clone_url' => $repoBean->clone_url
             ];
 
-            $this->disconnectUserDb();
-
+            
             // Get issue details from Jira
             $jiraClient = new \app\services\JiraClient($this->member->id, $cloudId);
             $issue = $jiraClient->getIssue($issueKey);
@@ -1293,14 +1205,12 @@ class Enterprise extends BaseControls\Control {
         }
 
         try {
-            $this->connectUserDb();
+            
+            // Get API key from anthropickeys table
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
 
-            // Get API key
-            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['anthropic_api_key']);
-
-            if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
-                $this->disconnectUserDb();
-                $this->json(['success' => false, 'error' => 'Anthropic API key not configured']);
+            if (!$apiKey) {
+                                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
                 return;
             }
 
@@ -1311,8 +1221,7 @@ class Enterprise extends BaseControls\Control {
                 $cloudId = $board->cloud_uid ?? null;
             }
 
-            $this->disconnectUserDb();
-
+            
             if (empty($cloudId)) {
                 $this->json(['success' => false, 'error' => 'Could not determine Atlassian Cloud ID for this job']);
                 return;
@@ -1446,13 +1355,11 @@ class Enterprise extends BaseControls\Control {
         }
 
         // repoconnections is in user SQLite database
-        $this->connectUserDb();
-
+        
         // Verify repo exists (no member_id filter - database is already per-tenant)
         $repo = Bean::findOne('repoconnections', 'id = ?', [$repoId]);
         if (!$repo) {
-            $this->disconnectUserDb();
-            Flight::jsonError('Repository not found', 404);
+                        Flight::jsonError('Repository not found', 404);
             return;
         }
 
@@ -1460,8 +1367,7 @@ class Enterprise extends BaseControls\Control {
         if ($agentId) {
             $agent = Bean::findOne('aiagents', 'id = ?', [$agentId]);
             if (!$agent) {
-                $this->disconnectUserDb();
-                Flight::jsonError('Agent not found', 404);
+                                Flight::jsonError('Agent not found', 404);
                 return;
             }
         }
@@ -1475,7 +1381,6 @@ class Enterprise extends BaseControls\Control {
         $repo->updated_at = date('Y-m-d H:i:s');
         Bean::store($repo);
 
-        $this->disconnectUserDb();
-        Flight::jsonSuccess(['message' => 'Agent assigned successfully']);
+                Flight::jsonSuccess(['message' => 'Agent assigned successfully']);
     }
 }

@@ -26,6 +26,7 @@ require_once __DIR__ . '/ShardRouter.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
 require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
 require_once __DIR__ . '/EncryptionService.php';
+require_once __DIR__ . '/AnthropicKeyService.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
@@ -36,7 +37,6 @@ class AnalysisService {
     private $verbose;
     private $memberId;
     private $member;
-    private $userDbConnected = false;
 
     public function __construct(int $memberId, bool $verbose = false) {
         $this->logger = Flight::get('log');
@@ -48,22 +48,6 @@ class AnalysisService {
         if (!$this->member->id) {
             throw new \Exception("Member not found: {$memberId}");
         }
-    }
-
-    /**
-     * Connect to user database (legacy no-op - all data now in single MySQL DB)
-     */
-    private function connectUserDb(): void {
-        // No-op: All data is now in single MySQL database per tenant
-        $this->userDbConnected = true;
-    }
-
-    /**
-     * Restore to default database (legacy no-op)
-     */
-    private function restoreDb(): void {
-        // No-op: No database switching needed
-        $this->userDbConnected = false;
     }
 
     /**
@@ -88,8 +72,7 @@ class AnalysisService {
             $this->updateProgress($jobId, 'Initializing analysis...', 5);
 
             // Connect to user database and get board details
-            $this->connectUserDb();
-            $board = UserDatabaseService::getBoard($boardId);
+                        $board = UserDatabaseService::getBoard($boardId);
             if (!$board) {
                 $this->failJob($jobId, 'Board not found');
                 throw new \Exception("Board not found: {$boardId}");
@@ -410,8 +393,7 @@ class AnalysisService {
      * @deprecated Use UserDatabaseService static methods directly
      */
     public function ensureUserDbConnected(): int {
-        $this->connectUserDb();
-        return $this->memberId;
+                return $this->memberId;
     }
 
     /**
@@ -440,8 +422,7 @@ class AnalysisService {
         $useJiraMcp = $options['use_jira_mcp'] ?? true;
 
         // Connect to user database and get board details
-        $this->connectUserDb();
-        $board = UserDatabaseService::getBoard($boardId);
+                $board = UserDatabaseService::getBoard($boardId);
         if (!$board) {
             throw new \Exception("Board not found: {$boardId}");
         }
@@ -641,15 +622,10 @@ class AnalysisService {
      * Get member's Anthropic API key
      */
     private function getMemberAnthropicKey(): ?string {
-        // Check member's stored API key
-        if (!empty($this->member->anthropic_api_key)) {
-            return $this->member->anthropic_api_key;
-        }
-
-        // Check member's enterprise settings (key-value pattern, include shared)
-        $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND (member_id = ? OR is_shared = 1)', ['anthropic_api_key', $this->memberId]);
-        if ($setting && !empty($setting->setting_value)) {
-            return $setting->setting_value;
+        // Get from anthropickeys table (owned or shared)
+        $apiKey = AnthropicKeyService::getApiKey($this->memberId);
+        if ($apiKey) {
+            return $apiKey;
         }
 
         // Fall back to system key (if configured)

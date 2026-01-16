@@ -22,7 +22,6 @@
  *   }
  */
 
-use RedBeanPHP\R as R;
 use \app\Bean;
 
 class TenantHookHelper
@@ -142,7 +141,7 @@ class TenantHookHelper
                     $config['database']['host'] ?? 'localhost',
                     $config['database']['name'] ?? ''
                 );
-                R::setup($dsn, $config['database']['user'] ?? '', $config['database']['password'] ?? '');
+                Bean::setup($dsn, $config['database']['user'] ?? '', $config['database']['password'] ?? '');
             } else {
                 // SQLite
                 $dbPath = $config['database']['path'] ?? '';
@@ -153,10 +152,10 @@ class TenantHookHelper
                     $this->log('ERROR', "SQLite database not found: {$dbPath}");
                     return false;
                 }
-                R::setup('sqlite:' . $dbPath);
+                Bean::setup('sqlite:' . $dbPath);
             }
 
-            R::freeze(false); // Allow schema modifications if needed
+            Bean::freeze(false); // Allow schema modifications if needed
             $this->connected = true;
             $this->log('DEBUG', "Connected to tenant database: {$this->workspace}");
             return true;
@@ -330,7 +329,7 @@ class TenantHookHelper
     {
         if ($this->connected) {
             try {
-                R::close();
+                Bean::close();
             } catch (\Exception $e) {
                 // Ignore close errors
             }

@@ -36,20 +36,6 @@ class Admin extends Control {
     }
 
     /**
-     * Connect to user database (legacy no-op - all data now in single MySQL DB)
-     */
-    private function connectUserDb(): void {
-        // No-op: All data is now in single MySQL database per tenant
-    }
-
-    /**
-     * Disconnect from user database (legacy no-op)
-     */
-    private function disconnectUserDb(): void {
-        // No-op: No database switching needed
-    }
-
-    /**
      * Admin dashboard
      */
     public function index($params = []) {
@@ -577,14 +563,15 @@ class Admin extends Control {
         $this->viewData['cache_stats'] = \app\PermissionCache::getStats();
         $this->viewData['permissions'] = \app\PermissionCache::getAll();
 
-        // Get query cache statistics from CachedDatabaseAdapter
-        // Note: R::getDatabaseAdapter() may not return CachedDatabaseAdapter after R::selectDatabase() calls
-        // So we check Flight storage first, then fall back to checking the adapter directly
+        // Get query cache statistics from CachedDatabaseAdapter or Bean
+        // Note: getDatabaseAdapter() may not return CachedDatabaseAdapter after Bean::selectDatabase() calls
+        // So we check Flight storage first, then fall back to Bean's built-in caching
         $cachedAdapter = Flight::get('cachedDatabaseAdapter');
         if ($cachedAdapter instanceof \app\CachedDatabaseAdapter) {
             $this->viewData['query_cache_stats'] = $cachedAdapter->getCacheStats();
         } else {
-            $this->viewData['query_cache_stats'] = null;
+            // Fall back to Bean's built-in APCu caching stats
+            $this->viewData['query_cache_stats'] = Bean::getCacheStats();
         }
 
         // Get OPcache stats if available
@@ -829,6 +816,27 @@ class Admin extends Control {
             return;
         }
 
+        // Check if POST data provided - use form values instead of saved values
+        $request = Flight::request();
+        if ($request->method === 'POST') {
+            // Override shard values with form data for testing unsaved changes
+            if (!empty($request->data->host)) {
+                $shard['host'] = $request->data->host;
+            }
+            if (!empty($request->data->ssh_user)) {
+                $shard['ssh_user'] = $request->data->ssh_user;
+            }
+            if (!empty($request->data->ssh_port)) {
+                $shard['ssh_port'] = (int)$request->data->ssh_port;
+            }
+            if (isset($request->data->sshkey_id)) {
+                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+            }
+            if (!empty($request->data->execution_mode)) {
+                $shard['execution_mode'] = $request->data->execution_mode;
+            }
+        }
+
         // Route based on execution mode
         $executionMode = $shard['execution_mode'] ?? 'http_api';
 
@@ -837,12 +845,16 @@ class Admin extends Control {
             $diagnostic = new \app\services\ShardDiagnosticService($shard);
             $result = $diagnostic->quickCheck();
 
-            // Update health status in database
-            $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
-            $shardBean = Bean::load('claudeshards', $shardId);
-            $shardBean->health_status = $healthStatus;
-            $shardBean->last_health_check = date('Y-m-d H:i:s');
-            Bean::store($shardBean);
+            // Only update health status in database if testing saved values (GET request)
+            if ($request->method !== 'POST') {
+                $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
+                $shardBean = Bean::load('claudeshards', $shardId);
+                $shardBean->health_status = $healthStatus;
+                $shardBean->last_health_check = date('Y-m-d H:i:s');
+                Bean::store($shardBean);
+            } else {
+                $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
+            }
 
             $this->json([
                 'success' => $result['connected'],
@@ -895,16 +907,41 @@ class Admin extends Control {
             return;
         }
 
+        // Check if POST data provided - use form values instead of saved values
+        $request = Flight::request();
+        $testingUnsaved = false;
+        if ($request->method === 'POST') {
+            $testingUnsaved = true;
+            // Override shard values with form data for testing unsaved changes
+            if (!empty($request->data->host)) {
+                $shard['host'] = $request->data->host;
+            }
+            if (!empty($request->data->ssh_user)) {
+                $shard['ssh_user'] = $request->data->ssh_user;
+            }
+            if (!empty($request->data->ssh_port)) {
+                $shard['ssh_port'] = (int)$request->data->ssh_port;
+            }
+            if (isset($request->data->sshkey_id)) {
+                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+            }
+            if (!empty($request->data->execution_mode)) {
+                $shard['execution_mode'] = $request->data->execution_mode;
+            }
+        }
+
         $diagnostic = new \app\services\ShardDiagnosticService($shard);
         $result = $diagnostic->runDiagnostic();
 
-        // Save diagnostic result to database using bean (auto-creates columns if needed)
-        $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
-        $shardBean = Bean::load('claudeshards', $shardId);
-        $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
-        $shardBean->health_status = $healthStatus;
-        $shardBean->last_health_check = date('Y-m-d H:i:s');
-        Bean::store($shardBean);
+        // Only save diagnostic result to database if testing saved values (not POST)
+        if (!$testingUnsaved) {
+            $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
+            $shardBean = Bean::load('claudeshards', $shardId);
+            $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
+            $shardBean->health_status = $healthStatus;
+            $shardBean->last_health_check = date('Y-m-d H:i:s');
+            Bean::store($shardBean);
+        }
 
         // If ready, also get install commands for anything missing
         if (!$result['ready']) {
@@ -939,12 +976,10 @@ class Admin extends Control {
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
         // Connect to user database for tenant-specific keys
-        $this->connectUserDb();
-
+        
         $keys = \app\services\SSHKeyService::getKeys();
 
-        $this->disconnectUserDb();
-
+        
         $this->json([
             'success' => true,
             'keys' => $keys,
@@ -982,8 +1017,7 @@ class Admin extends Control {
         }
 
         // Connect to user database for tenant-specific keys
-        $this->connectUserDb();
-
+        
         try {
             $key = \app\services\SSHKeyService::createKey(
                 $this->member->id,
@@ -1000,8 +1034,7 @@ class Admin extends Control {
                 'fingerprint' => $key['fingerprint']
             ]);
 
-            $this->disconnectUserDb();
-
+            
             $this->json([
                 'success' => true,
                 'key' => $key,
@@ -1009,8 +1042,7 @@ class Admin extends Control {
             ]);
 
         } catch (\Exception $e) {
-            $this->disconnectUserDb();
-            $this->logger->error('SSH key generation failed', [
+                        $this->logger->error('SSH key generation failed', [
                 'error' => $e->getMessage()
             ]);
             $this->json(['success' => false, 'error' => $e->getMessage()]);
@@ -1031,10 +1063,8 @@ class Admin extends Control {
 
         $includePrivate = $this->getParam('include_private') === '1';
 
-        $this->connectUserDb();
-        $key = \app\services\SSHKeyService::getKey($keyId, $includePrivate);
-        $this->disconnectUserDb();
-
+                $key = \app\services\SSHKeyService::getKey($keyId, $includePrivate);
+        
         if (!$key) {
             $this->json(['success' => false, 'error' => 'Key not found']);
             return;
@@ -1058,13 +1088,11 @@ class Admin extends Control {
             return;
         }
 
-        $this->connectUserDb();
-
+        
         // Get key info for logging
         $key = \app\services\SSHKeyService::getKey($keyId);
         if (!$key) {
-            $this->disconnectUserDb();
-            $this->json(['success' => false, 'error' => 'Key not found']);
+                        $this->json(['success' => false, 'error' => 'Key not found']);
             return;
         }
 
@@ -1077,8 +1105,7 @@ class Admin extends Control {
             'fingerprint' => $key['fingerprint']
         ]);
 
-        $this->disconnectUserDb();
-
+        
         $this->json([
             'success' => $deleted,
             'message' => $deleted ? 'Key deleted successfully' : 'Failed to delete key'

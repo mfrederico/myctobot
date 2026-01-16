@@ -1,6 +1,6 @@
 <?php
 /**
- * Bean - RedBeanPHP Wrapper
+ * Bean - RedBeanPHP Wrapper with Query Caching
  *
  * Normalizes bean type names to work around RedBeanPHP's strict naming requirements.
  * R::dispense() requires all lowercase, no underscores. This wrapper accepts:
@@ -8,15 +8,26 @@
  * - snake_case: 'enterprise_settings' -> 'enterprisesettings'
  * - Already lowercase: 'enterprisesettings' -> 'enterprisesettings'
  *
+ * Also provides optional APCu-based query caching for high-performance reads.
+ *
  * Usage:
  *   use \app\Bean;
  *
+ *   // Standard operations
  *   $setting = Bean::findOne('enterpriseSettings', 'setting_key = ?', ['api_key']);
  *   if (!$setting) {
  *       $setting = Bean::dispense('enterpriseSettings');
  *       $setting->setting_key = 'api_key';
  *   }
  *   Bean::store($setting);
+ *
+ *   // Cached operations (when APCu is available)
+ *   $boards = Bean::findCached('jiraboards', 'is_active = 1', [], 300); // 5 min TTL
+ *   $count = Bean::countCached('aidevjobs', 'status = ?', ['pending'], 60);
+ *
+ *   // Cache management
+ *   Bean::invalidateTable('jiraboards'); // After modifications
+ *   Bean::clearCache(); // Clear all cached queries
  */
 
 namespace app;
@@ -24,6 +35,32 @@ namespace app;
 use \RedBeanPHP\R as R;
 
 class Bean {
+
+    // ========================================
+    // Cache Configuration
+    // ========================================
+
+    /** @var bool Cache enabled flag */
+    private static bool $cacheEnabled = true;
+
+    /** @var int Default cache TTL in seconds */
+    private static int $defaultTTL = 60;
+
+    /** @var string|null Cache key prefix (unique per installation) */
+    private static ?string $cachePrefix = null;
+
+    /** @var int Cache hits counter */
+    private static int $cacheHits = 0;
+
+    /** @var int Cache misses counter */
+    private static int $cacheMisses = 0;
+
+    /** @var array Track registered database keys */
+    private static array $registeredDatabases = [];
+
+    // ========================================
+    // Bean Type Normalization
+    // ========================================
 
     /**
      * Normalize bean type to lowercase, no underscores
@@ -35,6 +72,10 @@ class Bean {
     public static function normalize(string $type): string {
         return strtolower(str_replace('_', '', $type));
     }
+
+    // ========================================
+    // Standard Bean Operations
+    // ========================================
 
     /**
      * Create a new bean
@@ -152,6 +193,10 @@ class Bean {
      * @return int|string Bean ID
      */
     public static function store($bean) {
+        // Invalidate cache for this table after store
+        if ($bean && $bean->getMeta('type')) {
+            self::invalidateTable($bean->getMeta('type'));
+        }
         return R::store($bean);
     }
 
@@ -163,8 +208,14 @@ class Bean {
      * @return void
      */
     public static function trash($beanOrType, ?int $id = null) {
-        if (is_string($beanOrType) && $id !== null) {
-            return R::trash(self::normalize($beanOrType), $id);
+        // Invalidate cache for this table after trash
+        if (is_string($beanOrType)) {
+            self::invalidateTable(self::normalize($beanOrType));
+            if ($id !== null) {
+                return R::trash(self::normalize($beanOrType), $id);
+            }
+        } elseif ($beanOrType && $beanOrType->getMeta('type')) {
+            self::invalidateTable($beanOrType->getMeta('type'));
         }
         return R::trash($beanOrType);
     }
@@ -176,6 +227,16 @@ class Bean {
      * @return void
      */
     public static function trashAll(array $beans) {
+        // Invalidate cache for affected tables
+        $tables = [];
+        foreach ($beans as $bean) {
+            if ($bean && $bean->getMeta('type')) {
+                $tables[$bean->getMeta('type')] = true;
+            }
+        }
+        foreach (array_keys($tables) as $table) {
+            self::invalidateTable($table);
+        }
         return R::trashAll($beans);
     }
 
@@ -187,6 +248,13 @@ class Bean {
      * @return int Affected rows
      */
     public static function exec(string $sql, array $params = []) {
+        // Invalidate relevant tables for modifying queries
+        if (!self::isSelectQuery($sql)) {
+            $tables = self::extractTablesFromSql($sql);
+            foreach ($tables as $table) {
+                self::invalidateTable($table);
+            }
+        }
         return R::exec($sql, $params);
     }
 
@@ -224,8 +292,9 @@ class Bean {
         return R::convertToBeans($type, $rows);
     }
 
-    /** @var array Track registered database keys */
-    private static array $registeredDatabases = [];
+    // ========================================
+    // Database Management
+    // ========================================
 
     /**
      * Check if a database key is already registered
@@ -287,5 +356,496 @@ class Bean {
      */
     public static function freeze(bool $frozen = true) {
         return R::freeze($frozen);
+    }
+
+    /**
+     * Close database connection
+     */
+    public static function close() {
+        return R::close();
+    }
+
+    /**
+     * Get a single cell value from a query
+     *
+     * @param string $sql SQL statement
+     * @param array $params Bound parameters
+     * @return mixed Single cell value
+     */
+    public static function getCell(string $sql, array $params = []) {
+        return R::getCell($sql, $params);
+    }
+
+    /**
+     * Get a single column as array
+     *
+     * @param string $sql SQL statement
+     * @param array $params Bound parameters
+     * @return array Column values
+     */
+    public static function getCol(string $sql, array $params = []) {
+        return R::getCol($sql, $params);
+    }
+
+    /**
+     * Begin a transaction
+     */
+    public static function begin() {
+        return R::begin();
+    }
+
+    /**
+     * Commit a transaction
+     */
+    public static function commit() {
+        return R::commit();
+    }
+
+    /**
+     * Rollback a transaction
+     */
+    public static function rollback() {
+        return R::rollback();
+    }
+
+    /**
+     * Export all beans to arrays
+     *
+     * @param array $beans Array of beans
+     * @return array Array of arrays
+     */
+    public static function exportAll(array $beans) {
+        return R::exportAll($beans);
+    }
+
+    /**
+     * Setup database connection (for standalone scripts)
+     *
+     * @param string $dsn Database DSN
+     * @param string|null $user Username
+     * @param string|null $pass Password
+     * @param bool $frozen Freeze mode
+     */
+    public static function setup(string $dsn, ?string $user = null, ?string $pass = null, bool $frozen = false) {
+        return R::setup($dsn, $user, $pass, $frozen);
+    }
+
+    /**
+     * Get the database adapter
+     *
+     * @return \RedBeanPHP\Adapter\DBAdapter
+     */
+    public static function getDatabaseAdapter() {
+        return R::getDatabaseAdapter();
+    }
+
+    /**
+     * Nuke (destroy) the database - use with caution!
+     */
+    public static function nuke() {
+        return R::nuke();
+    }
+
+    // ========================================
+    // Cached Query Operations
+    // ========================================
+
+    /**
+     * Find beans with APCu caching
+     *
+     * @param string $type Bean type
+     * @param string|null $sql SQL where clause
+     * @param array $params Bound parameters
+     * @param int|null $ttl Cache TTL in seconds (default: 60)
+     * @return array Array of beans
+     */
+    public static function findCached(string $type, ?string $sql = null, array $params = [], ?int $ttl = null) {
+        $type = self::normalize($type);
+
+        if (!self::$cacheEnabled || !self::hasAPCu()) {
+            return R::find($type, $sql, $params);
+        }
+
+        // Build cache key
+        $fullSql = "SELECT * FROM `{$type}`" . ($sql ? " WHERE {$sql}" : '');
+        $cacheKey = self::getCacheKey($fullSql, $params);
+
+        // Check if table version invalidated the cache
+        if (!self::isTableVersionValid($type, $cacheKey)) {
+            self::removeFromCache($cacheKey);
+        }
+
+        // Try cache
+        $cached = self::getFromCache($cacheKey);
+        if ($cached !== false) {
+            self::$cacheHits++;
+            return R::convertToBeans($type, $cached['result']);
+        }
+
+        // Execute query
+        $beans = R::find($type, $sql, $params);
+
+        // Cache the exported result
+        $result = R::exportAll($beans);
+        self::storeInCache($cacheKey, $result, [$type], $ttl);
+        self::$cacheMisses++;
+
+        return $beans;
+    }
+
+    /**
+     * Find single bean with APCu caching
+     *
+     * @param string $type Bean type
+     * @param string|null $sql SQL where clause
+     * @param array $params Bound parameters
+     * @param int|null $ttl Cache TTL in seconds
+     * @return \RedBeanPHP\OODBBean|null
+     */
+    public static function findOneCached(string $type, ?string $sql = null, array $params = [], ?int $ttl = null) {
+        $beans = self::findCached($type, $sql . ' LIMIT 1', $params, $ttl);
+        return reset($beans) ?: null;
+    }
+
+    /**
+     * Count beans with APCu caching
+     *
+     * @param string $type Bean type
+     * @param string|null $sql SQL where clause
+     * @param array $params Bound parameters
+     * @param int|null $ttl Cache TTL in seconds
+     * @return int Count
+     */
+    public static function countCached(string $type, ?string $sql = null, array $params = [], ?int $ttl = null) {
+        $type = self::normalize($type);
+
+        if (!self::$cacheEnabled || !self::hasAPCu()) {
+            return R::count($type, $sql ?? '', $params);
+        }
+
+        // Build cache key
+        $fullSql = "COUNT(*) FROM `{$type}`" . ($sql ? " WHERE {$sql}" : '');
+        $cacheKey = self::getCacheKey($fullSql, $params);
+
+        // Check if table version invalidated the cache
+        if (!self::isTableVersionValid($type, $cacheKey)) {
+            self::removeFromCache($cacheKey);
+        }
+
+        // Try cache
+        $cached = self::getFromCache($cacheKey);
+        if ($cached !== false) {
+            self::$cacheHits++;
+            return $cached['result'];
+        }
+
+        // Execute query
+        $result = R::count($type, $sql ?? '', $params);
+
+        // Cache the result
+        self::storeInCache($cacheKey, $result, [$type], $ttl);
+        self::$cacheMisses++;
+
+        return $result;
+    }
+
+    /**
+     * Execute a cached raw query (SELECT only)
+     *
+     * @param string $sql SQL SELECT statement
+     * @param array $params Bound parameters
+     * @param int|null $ttl Cache TTL in seconds
+     * @return array Array of arrays
+     */
+    public static function getAllCached(string $sql, array $params = [], ?int $ttl = null) {
+        if (!self::$cacheEnabled || !self::hasAPCu() || !self::isSelectQuery($sql)) {
+            return R::getAll($sql, $params);
+        }
+
+        $cacheKey = self::getCacheKey($sql, $params);
+
+        // Try cache
+        $cached = self::getFromCache($cacheKey);
+        if ($cached !== false) {
+            self::$cacheHits++;
+            return $cached['result'];
+        }
+
+        // Execute query
+        $result = R::getAll($sql, $params);
+
+        // Cache the result with extracted table names
+        $tables = self::extractTablesFromSql($sql);
+        self::storeInCache($cacheKey, $result, $tables, $ttl);
+        self::$cacheMisses++;
+
+        return $result;
+    }
+
+    // ========================================
+    // Cache Management
+    // ========================================
+
+    /**
+     * Invalidate all cached queries for a table
+     * Call this after modifying data in a table
+     *
+     * @param string $table Table name
+     */
+    public static function invalidateTable(string $table): void {
+        if (!self::hasAPCu()) {
+            return;
+        }
+
+        $table = self::normalize($table);
+        $key = self::getCachePrefix() . 'tv_' . $table;
+        $newVersion = time() . '_' . mt_rand();
+        apcu_store($key, $newVersion, 86400); // 24 hours
+    }
+
+    /**
+     * Clear all cached queries
+     */
+    public static function clearCache(): void {
+        if (!self::hasAPCu()) {
+            return;
+        }
+
+        $prefix = self::getCachePrefix();
+        $iterator = new \APCUIterator('/^' . preg_quote($prefix, '/') . '/');
+        foreach ($iterator as $item) {
+            apcu_delete($item['key']);
+        }
+
+        self::$cacheHits = 0;
+        self::$cacheMisses = 0;
+    }
+
+    /**
+     * Get cache statistics
+     *
+     * @return array Cache statistics
+     */
+    public static function getCacheStats(): array {
+        $stats = [
+            'enabled' => self::$cacheEnabled,
+            'apcu_available' => self::hasAPCu(),
+            'hits' => self::$cacheHits,
+            'misses' => self::$cacheMisses,
+            'hit_rate' => (self::$cacheHits + self::$cacheMisses) > 0
+                ? round(self::$cacheHits / (self::$cacheHits + self::$cacheMisses) * 100, 2)
+                : 0,
+            'cached_queries' => 0,
+            'cache_size_kb' => 0
+        ];
+
+        if (self::hasAPCu()) {
+            try {
+                $prefix = self::getCachePrefix();
+                $pattern = '/^' . preg_quote($prefix, '/') . '/';
+                $iterator = new \APCUIterator($pattern);
+                $count = 0;
+                $size = 0;
+
+                foreach ($iterator as $item) {
+                    if (strpos($item['key'], '_tv_') === false) {
+                        $count++;
+                        $size += $item['mem_size'];
+                    }
+                }
+
+                $stats['cached_queries'] = $count;
+                $stats['cache_size_kb'] = round($size / 1024, 2);
+            } catch (\Exception $e) {
+                // Ignore iteration errors
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * Enable query caching
+     */
+    public static function enableCache(): void {
+        self::$cacheEnabled = true;
+    }
+
+    /**
+     * Disable query caching
+     */
+    public static function disableCache(): void {
+        self::$cacheEnabled = false;
+    }
+
+    /**
+     * Set default cache TTL
+     *
+     * @param int $ttl TTL in seconds
+     */
+    public static function setDefaultTTL(int $ttl): void {
+        self::$defaultTTL = $ttl;
+    }
+
+    // ========================================
+    // Cache Internal Methods
+    // ========================================
+
+    /**
+     * Check if APCu is available
+     */
+    private static function hasAPCu(): bool {
+        return function_exists('apcu_fetch')
+            && function_exists('apcu_store')
+            && ini_get('apc.enabled')
+            && (php_sapi_name() !== 'cli' || ini_get('apc.enable_cli'));
+    }
+
+    /**
+     * Get cache key prefix (unique per installation)
+     */
+    private static function getCachePrefix(): string {
+        if (self::$cachePrefix === null) {
+            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
+            self::$cachePrefix = "bean_{$siteId}_";
+        }
+        return self::$cachePrefix;
+    }
+
+    /**
+     * Generate cache key from SQL and bindings
+     */
+    private static function getCacheKey(string $sql, array $bindings = []): string {
+        $normalized = strtolower(trim(preg_replace('/\s+/', ' ', $sql)));
+        return self::getCachePrefix() . md5($normalized . serialize($bindings));
+    }
+
+    /**
+     * Store result in cache
+     */
+    private static function storeInCache(string $key, $result, array $tables = [], ?int $ttl = null): bool {
+        if (!self::hasAPCu()) {
+            return false;
+        }
+
+        // Get current table versions
+        $versions = [];
+        foreach ($tables as $table) {
+            $versions[$table] = self::getTableVersion($table);
+        }
+
+        $data = [
+            'result' => $result,
+            'tables' => $tables,
+            'versions' => $versions,
+            'cached_at' => time()
+        ];
+
+        return apcu_store($key, $data, $ttl ?? self::$defaultTTL);
+    }
+
+    /**
+     * Get result from cache
+     */
+    private static function getFromCache(string $key) {
+        if (!self::hasAPCu()) {
+            return false;
+        }
+
+        $data = apcu_fetch($key, $success);
+        if (!$success) {
+            return false;
+        }
+
+        // Validate table versions haven't changed
+        foreach ($data['versions'] as $table => $version) {
+            if (self::getTableVersion($table) !== $version) {
+                apcu_delete($key);
+                return false;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Remove from cache
+     */
+    private static function removeFromCache(string $key): void {
+        if (self::hasAPCu()) {
+            apcu_delete($key);
+        }
+    }
+
+    /**
+     * Get current version of a table
+     */
+    private static function getTableVersion(string $table): string {
+        if (!self::hasAPCu()) {
+            return (string) time();
+        }
+
+        $key = self::getCachePrefix() . 'tv_' . $table;
+        $version = apcu_fetch($key, $success);
+
+        if (!$success) {
+            $version = time() . '_' . mt_rand();
+            apcu_store($key, $version, 86400);
+        }
+
+        return $version;
+    }
+
+    /**
+     * Check if table version is still valid for cached entry
+     */
+    private static function isTableVersionValid(string $table, string $cacheKey): bool {
+        $cached = self::getFromCache($cacheKey);
+        if ($cached === false) {
+            return true; // Not cached yet
+        }
+
+        if (isset($cached['versions'][$table])) {
+            return $cached['versions'][$table] === self::getTableVersion($table);
+        }
+
+        return true;
+    }
+
+    /**
+     * Check if SQL is a SELECT query
+     */
+    private static function isSelectQuery(string $sql): bool {
+        return stripos(trim($sql), 'SELECT') === 0;
+    }
+
+    /**
+     * Extract table names from SQL
+     */
+    private static function extractTablesFromSql(string $sql): array {
+        $tables = [];
+        $sql = str_replace('`', '', $sql);
+
+        if (preg_match_all('/\bFROM\s+([a-z0-9_]+)/i', $sql, $matches)) {
+            $tables = array_merge($tables, $matches[1]);
+        }
+
+        if (preg_match_all('/\bJOIN\s+([a-z0-9_]+)/i', $sql, $matches)) {
+            $tables = array_merge($tables, $matches[1]);
+        }
+
+        if (preg_match_all('/\bUPDATE\s+([a-z0-9_]+)/i', $sql, $matches)) {
+            $tables = array_merge($tables, $matches[1]);
+        }
+
+        if (preg_match_all('/\bINSERT\s+INTO\s+([a-z0-9_]+)/i', $sql, $matches)) {
+            $tables = array_merge($tables, $matches[1]);
+        }
+
+        if (preg_match_all('/\bDELETE\s+FROM\s+([a-z0-9_]+)/i', $sql, $matches)) {
+            $tables = array_merge($tables, $matches[1]);
+        }
+
+        return array_unique(array_map([self::class, 'normalize'], $tables));
     }
 }

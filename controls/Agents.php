@@ -21,6 +21,8 @@ require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderFactory.php';
 require_once __DIR__ . '/../services/LLMProviders/OllamaProvider.php';
 require_once __DIR__ . '/../services/LLMProviders/OpenAIProvider.php';
+require_once __DIR__ . '/../services/AnthropicKeyService.php';
+use \app\services\AnthropicKeyService;
 
 class Agents extends BaseControls\Control {
 
@@ -60,8 +62,8 @@ class Agents extends BaseControls\Control {
             $hooksConfig = json_decode($bean->hooks_config ?: '{}', true);
             $capabilities = json_decode($bean->capabilities ?: '[]', true);
 
-            // Count repos using this agent via association
-            $repoCount = $bean->countOwn('repoconnections');
+            // Count repos using this agent
+            $repoCount = Bean::count('repoconnections', 'aiagents_id = ?', [$bean->id]);
 
             // Get provider info
             $provider = $bean->provider ?: 'claude_cli';
@@ -102,7 +104,7 @@ class Agents extends BaseControls\Control {
         $shardCount = 0;
         if (!$useLocalRunner) {
             // Check for active shards in default database
-            $shardCount = (int) Bean::getCell("SELECT COUNT(*) FROM claudeshards WHERE is_active = 1");
+            $shardCount = Bean::count('claudeshards', 'is_active = 1') ?? (int) 0;
         }
         $this->viewData['has_shards'] = $useLocalRunner || $shardCount > 0;
         $this->viewData['use_local_runner'] = $useLocalRunner;
@@ -122,6 +124,7 @@ class Agents extends BaseControls\Control {
         $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
         $this->viewData['capabilities'] = self::CAPABILITIES;
         $this->viewData['providerConfigs'] = $this->getAllProviderConfigs();
+        $this->viewData['anthropicKeys'] = AnthropicKeyService::getAllKeys($this->member->id);
         // csrf already set by parent constructor
         $this->viewData['activeTab'] = $this->getParam('tab', 'general');
 
@@ -175,6 +178,16 @@ class Agents extends BaseControls\Control {
         $agent->is_active = 1;
         $agent->is_default = $isDefault ? 1 : 0;
         $agent->created_at = date('Y-m-d H:i:s');
+
+        // Save Anthropic key assignment for claude_api provider
+        $anthropicKeyId = $this->getParam('anthropickeys_id');
+        if ($provider === 'claude_api' && $anthropicKeyId) {
+            // Verify the key exists and is accessible to this member
+            $key = Bean::load('anthropickeys', (int)$anthropicKeyId);
+            if ($key && $key->id && ($key->created_by_member_id == $this->member->id || $key->shared)) {
+                $agent->anthropickeys_id = (int)$anthropicKeyId;
+            }
+        }
 
         // If setting as default, unset other defaults (workspace-level)
         if ($isDefault) {
@@ -242,6 +255,15 @@ class Agents extends BaseControls\Control {
         $agent->is_active = $isActive ? 1 : 0;
         $agent->is_default = 0;
         $agent->created_at = date('Y-m-d H:i:s');
+
+        // Save Anthropic key assignment for claude_api provider
+        $anthropicKeyId = $input['anthropickeys_id'] ?? null;
+        if ($provider === 'claude_api' && $anthropicKeyId) {
+            $key = Bean::load('anthropickeys', (int)$anthropicKeyId);
+            if ($key && $key->id && ($key->created_by_member_id == $memberId || $key->shared)) {
+                $agent->anthropickeys_id = (int)$anthropicKeyId;
+            }
+        }
 
         $id = Bean::store($agent);
 
@@ -314,9 +336,13 @@ class Agents extends BaseControls\Control {
             'mcp_tool_name' => $agent->mcp_tool_name,
             'mcp_tool_description' => $agent->mcp_tool_description,
             'is_active' => (bool) $agent->is_active,
-            'is_default' => (bool) $agent->is_default
+            'is_default' => (bool) $agent->is_default,
+            'anthropickeys_id' => $agent->anthropickeys_id
         ];
         $this->viewData['availableMcpServers'] = $availableServers;
+
+        // Get available Anthropic keys for claude_api provider
+        $this->viewData['anthropicKeys'] = AnthropicKeyService::getAllKeys($this->member->id);
         $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
         $this->viewData['capabilities'] = self::CAPABILITIES;
         $this->viewData['providerConfigs'] = $this->getAllProviderConfigs();
@@ -599,6 +625,19 @@ class Agents extends BaseControls\Control {
         $agent->expose_as_mcp = $exposeAsMcp ? 1 : 0;
         $agent->mcp_tool_name = $mcpToolName;
         $agent->mcp_tool_description = $mcpToolDescription;
+
+        // Save Anthropic key assignment for claude_api provider
+        $anthropicKeyId = $this->getParam('anthropickeys_id');
+        if ($provider === 'claude_api' && $anthropicKeyId) {
+            // Verify the key exists and is accessible to this member
+            $key = Bean::load('anthropickeys', (int)$anthropicKeyId);
+            if ($key && $key->id && ($key->created_by_member_id == $this->member->id || $key->shared)) {
+                $agent->anthropickeys_id = (int)$anthropicKeyId;
+            }
+        } elseif ($provider !== 'claude_api') {
+            // Clear the key assignment if switching away from claude_api
+            $agent->anthropickeys_id = null;
+        }
     }
 
     /**

@@ -56,14 +56,17 @@ class TenantSchemaBuilder {
         $this->createAuthControlTable();
 
         // Create tables with member association
-        $this->createJiraBoardsTable(); // Legacy table - keep for backwards compatibility
+        $this->createJiraBoardsTable();
         $this->board = $this->createBoardsTable(); // Generic boards - used for FK associations
+        $this->boardIsTemp = true; // Mark for cleanup
         $this->repo = $this->createRepoConnectionsTable();
+        $this->repoIsTemp = true; // Mark for cleanup
         $this->createAtlassianTokenTable();
         $this->createGitHubTokensTable();
         $this->createEnterpriseSettingsTable();
         $this->createAnthropicKeysTable();
         $this->createAIAgentsTable();
+        $this->addAiagentsToRepoConnections(); // Add aiagents_id FK to repoconnections
         $this->createMcpServersTable();
         $this->createSSHKeysTable();
 
@@ -83,8 +86,6 @@ class TenantSchemaBuilder {
         $this->createProjectsTable();
         $this->createPluginTables();
 
-        // Apply JSON column types (MariaDB needs explicit JSON type)
-        $this->applyJsonColumnTypes();
 
         // Clean up temporary beans
         $this->cleanupTempBeans();
@@ -717,7 +718,7 @@ class TenantSchemaBuilder {
         $this->board = R::findOne('boards', ' LIMIT 1 ');
         $this->boardIsTemp = false;
         if (!$this->board) {
-            // Fall back to jiraboards for backwards compatibility
+            // Check jiraboards table as alternate source
             $this->board = R::findOne('jiraboards', ' LIMIT 1 ');
         }
         if (!$this->board) {
@@ -768,7 +769,7 @@ class TenantSchemaBuilder {
             'directives', 'enterprisesettings', 'githubtokens', 'projects',
             'sshkeys', 'ticketanalysiscache', 'aiagents', 'mcpservers',
             'aiagents_mcpservers', 'installedplugins', 'pluginscans', 'discoveredplugins',
-            // Legacy tables that may have bad FK refs
+            // Additional tables
             'agenttools', 'claudeshards', 'digestjobs', 'knowledgebases',
             'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
             'subscription', 'usersettings',
@@ -933,13 +934,24 @@ class TenantSchemaBuilder {
         $bean->issues_enabled = true;
         $bean->webhook_uid = 'schema_webhook_uid'; // _uid suffix - string not FK
         $bean->webhook_secret = 'schema_webhook_secret';
-        // aiagents association will be set later if needed (creates aiagents_id FK)
         $bean->is_active = true;
         $bean->last_webhook_at = date('Y-m-d H:i:s');
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);
         return $bean;
+    }
+
+    /**
+     * Add aiagents_id FK column to repoconnections table
+     * Called after aiagents table is created
+     */
+    private function addAiagentsToRepoConnections(): void {
+        // Update the repo bean to add aiagents_id column
+        if ($this->repo && $this->repo->id) {
+            $this->repo->aiagents_id = null; // Creates aiagents_id column (nullable FK)
+            R::store($this->repo);
+        }
     }
 
     private function createAIDevJobsTable(): void {
@@ -1113,6 +1125,7 @@ class TenantSchemaBuilder {
         $bean->runner_config = '{}';
         $bean->mcp_servers = '[]';
         $bean->hooks_config = '{}';
+        $bean->anthropickeys_id = null; // FK to anthropickeys table (1:1 key assignment)
         $bean->is_active = true;
         $bean->is_default = false;
         $bean->created_at = date('Y-m-d H:i:s');
@@ -1415,16 +1428,6 @@ class TenantSchemaBuilder {
         R::exec('ALTER TABLE `discoveredplugins` MODIFY COLUMN `plugin_json` JSON');
         R::exec('ALTER TABLE `pluginscans` MODIFY COLUMN `error_log` JSON');
         R::exec('ALTER TABLE `installedplugins` MODIFY COLUMN `config_json` JSON');
-    }
-
-    /**
-     * Apply additional schema constraints
-     * Note: Most JSON types and unique indexes are now in their respective create methods.
-     * This function is kept for backwards compatibility with migrations.
-     */
-    private function applyJsonColumnTypes(): void {
-        // Intentionally empty - all ALTER TABLE calls have been moved to create methods
-        // This function is kept for backwards compatibility with migration tracking
     }
 
     /**

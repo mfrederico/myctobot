@@ -2,14 +2,8 @@
 /**
  * User Database Service
  *
- * LEGACY COMPATIBILITY LAYER - All data is now in one MySQL database per tenant.
- * connect() and restore() are no-ops. All methods query the single MySQL database.
- *
- * Usage remains the same:
- *   UserDatabaseService::forMember($memberId, function() {
- *       $boards = Bean::findAll('jiraboards', ' ORDER BY board_name ');
- *       return $boards;
- *   });
+ * Provides database operations for tenant-specific data.
+ * All data is stored in a single MySQL database per tenant.
  */
 
 namespace app\services;
@@ -23,7 +17,7 @@ class UserDatabaseService {
     private static $currentMemberId = null;
 
     /**
-     * Execute a callback (legacy compatibility - no DB switching needed)
+     * Execute a callback with member context
      *
      * @param int $memberId Member ID
      * @param callable $callback Function to execute
@@ -39,7 +33,7 @@ class UserDatabaseService {
     }
 
     /**
-     * Connect to member's database (no-op - all data in single MySQL DB)
+     * Set the current member context
      *
      * @param int $memberId Member ID
      */
@@ -48,7 +42,7 @@ class UserDatabaseService {
     }
 
     /**
-     * Restore to default database (no-op)
+     * Clear the current member context
      */
     public static function restore(): void {
         self::$currentMemberId = null;

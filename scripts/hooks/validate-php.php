@@ -11,8 +11,8 @@
  * - Redirects to use the migration tool instead
  *
  * PHP Code Standards:
- * 1. Bean type names must be all lowercase (no underscores) for R::dispense
- * 2. R::exec should almost NEVER be used - only in extreme situations
+ * 1. Use Bean:: wrapper instead of R:: for all database operations
+ * 2. Bean::exec should almost NEVER be used - only in extreme situations
  * 3. Prefer RedBeanPHP associations (ownBeanList/sharedBeanList) over manual FK management
  * 4. Use with()/withCondition() for ordering and filtering associations
  * 5. Security scanning (OWASP Top 10 patterns)
@@ -232,16 +232,29 @@ function findSqlInjectionRisks(string $content): array
 {
     $issues = [];
 
+    // Check R::exec and R::getAll
     $patterns = [
         ['/R::exec\s*\(\s*["\'][^"\']*\$[a-zA-Z_]/', 'Direct variable in R::exec() - Use parameterized queries: R::exec($sql, [$param])'],
         ['/R::getAll\s*\(\s*["\'][^"\']*\$[a-zA-Z_]/', 'Direct variable in R::getAll() - Use parameterized queries'],
         ['/->query\s*\(\s*["\'][^"\']*\$/', 'Direct variable in query() - Use parameterized queries'],
-        ['/->exec\s*\(\s*["\'][^"\']*\$/', 'Direct variable in exec() - Use parameterized queries'],
     ];
 
     foreach ($patterns as [$pattern, $message]) {
         if (preg_match($pattern, $content)) {
             $issues[] = "SQL INJECTION RISK: {$message}";
+        }
+    }
+
+    // Check ->exec() separately - allow DDL statements (CREATE, ALTER, DROP)
+    // DDL statements cannot use parameterized queries for database/table names
+    if (preg_match_all('/->exec\s*\(\s*["\']([^"\']*)\$[a-zA-Z_][^"\']*["\']/', $content, $matches)) {
+        foreach ($matches[1] as $sqlPrefix) {
+            $sqlUpper = strtoupper(trim($sqlPrefix));
+            // Allow DDL statements - they can't use parameterized queries for identifiers
+            if (!preg_match('/^(CREATE|ALTER|DROP)\s/', $sqlUpper)) {
+                $issues[] = "SQL INJECTION RISK: Direct variable in exec() - Use parameterized queries";
+                break; // Only report once
+            }
         }
     }
 

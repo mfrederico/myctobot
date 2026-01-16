@@ -63,7 +63,6 @@ require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/lib/FlightMap.php';
 
 use \Flight as Flight;
-use \RedBeanPHP\R as R;
 use \app\Bean;
 
 // Load tenant config
@@ -95,16 +94,16 @@ try {
 
     if ($type === 'sqlite') {
         $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
-        R::setup("sqlite:{$dbPath}");
+        Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
         $name = $dbConfig['name'] ?? $tenant;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
-        R::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
+        Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
     }
-    R::freeze(true);
+    Bean::freeze(true);
 } catch (\Exception $e) {
     echo "Error: Database connection failed: " . $e->getMessage() . "\n";
     exit(1);

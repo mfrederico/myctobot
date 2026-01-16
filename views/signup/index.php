@@ -32,10 +32,18 @@
                                 endif;
                                 ?>
 
+                                <?php
+                                // Pre-fill from workspace query param (when redirected from non-existent workspace)
+                                $prefillWorkspace = $_GET['workspace'] ?? '';
+                                // Sanitize - only alphanumeric, hyphens, underscores
+                                $prefillWorkspace = preg_replace('/[^a-zA-Z0-9_-]/', '', $prefillWorkspace);
+                                // Use form data if available, otherwise use workspace param
+                                $businessNameValue = $data['business_name'] ?? $prefillWorkspace;
+                                ?>
                                 <div class="mb-3">
                                     <label for="business_name" class="form-label small fw-semibold">Business / Team Name</label>
                                     <input type="text" class="form-control" id="business_name" name="business_name"
-                                           value="<?= htmlspecialchars($data['business_name'] ?? '') ?>"
+                                           value="<?= htmlspecialchars($businessNameValue) ?>"
                                            required maxlength="100" placeholder="Acme Corp">
                                 </div>
 

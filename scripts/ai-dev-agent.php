@@ -37,12 +37,14 @@ require_once $baseDir . '/services/GitHubClient.php';
 require_once $baseDir . '/services/GitOperations.php';
 require_once $baseDir . '/services/AIDevAgent.php';
 require_once $baseDir . '/services/AIDevStatusService.php';
+require_once $baseDir . '/services/AnthropicKeyService.php';
 
 use \Flight as Flight;
 use \app\Bean;
 use \app\services\EncryptionService;
 use \app\services\AIDevAgent;
 use \app\services\AIDevStatusService;
+use \app\services\AnthropicKeyService;
 
 // Parse command line arguments BEFORE bootstrap (need tenant param for config)
 $options = getopt('', [
@@ -156,14 +158,19 @@ try {
         throw new \Exception("Member not found: {$memberId}");
     }
 
-    // Get API key using RedBeanPHP (single MySQL database)
-    $apiKeySetting = Bean::findOne('enterprisesettings', '(member_id = ? OR is_shared = 1) AND setting_key = ?', [$memberId, 'anthropic_api_key']);
-
-    if (!$apiKeySetting || empty($apiKeySetting->setting_value)) {
-        throw new \Exception("Anthropic API key not configured");
+    // Get API key using AnthropicKeyService
+    // First try to get the default agent profile and use its assigned key
+    $agentProfile = Bean::findOne('aiagents', 'is_default = 1');
+    if ($agentProfile) {
+        $apiKey = AnthropicKeyService::getApiKeyForAgent($agentProfile, $memberId);
+    } else {
+        // No default agent, fall back to member's available keys
+        $apiKey = AnthropicKeyService::getApiKey($memberId);
     }
 
-    $apiKey = EncryptionService::decrypt($apiKeySetting->setting_value);
+    if (!$apiKey) {
+        throw new \Exception("Anthropic API key not configured. Please add a key at /anthropic/keys");
+    }
 
     // Handle action
     if ($action === 'process') {

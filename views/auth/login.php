@@ -3,10 +3,37 @@
 // Pass workspace to Google OAuth so it can set the tenant after callback
 $showGoogleOAuth = !empty($googleEnabled);
 $hasWorkspace = !empty($workspace);
+// $requestedWorkspace is passed from controller (preserves original before clearing on error)
 ?>
 <div class="container py-5">
     <div class="row justify-content-center">
         <div class="col-md-4">
+            <?php if (!empty($workspaceError)): ?>
+                <!-- Workspace not found - show setup prompt -->
+                <div class="card">
+                    <div class="card-header bg-warning-subtle">
+                        <h4 class="mb-0">
+                            <i class="bi bi-exclamation-triangle"></i> Workspace Not Found
+                        </h4>
+                    </div>
+                    <div class="card-body text-center">
+                        <p class="mb-3">
+                            The workspace <strong>"<?= htmlspecialchars($requestedWorkspace) ?>"</strong> doesn't exist yet.
+                        </p>
+                        <p class="text-muted mb-4">
+                            Would you like to create a new workspace for your team?
+                        </p>
+                        <a href="/signup<?= !empty($requestedWorkspace) ? '?workspace=' . urlencode($requestedWorkspace) : '' ?>" class="btn btn-primary btn-lg mb-3">
+                            <i class="bi bi-plus-circle"></i> Create New Workspace
+                        </a>
+                        <hr>
+                        <p class="text-muted small mb-2">Already have a workspace?</p>
+                        <a href="/login" class="btn btn-outline-secondary">
+                            <i class="bi bi-box-arrow-in-right"></i> Login to Different Workspace
+                        </a>
+                    </div>
+                </div>
+            <?php else: ?>
             <div class="card">
                 <div class="card-header">
                     <h4>
@@ -21,13 +48,6 @@ $hasWorkspace = !empty($workspace);
                     <?php if (!empty($error)): ?>
                         <div class="alert alert-danger alert-dismissible fade show" role="alert">
                             <?= htmlspecialchars($error) ?>
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                        </div>
-                    <?php endif; ?>
-
-                    <?php if (!empty($workspaceError)): ?>
-                        <div class="alert alert-warning alert-dismissible fade show" role="alert">
-                            <?= htmlspecialchars($workspaceError) ?>
                             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                         </div>
                     <?php endif; ?>
@@ -120,6 +140,7 @@ $hasWorkspace = !empty($workspace);
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>

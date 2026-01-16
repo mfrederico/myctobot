@@ -93,15 +93,15 @@ class Api extends BaseControls\Control {
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
 
             // Check if already added
-            if (!R::hasDatabase($this->tenantSlug)) {
-                R::addDatabase($this->tenantSlug, $dsn, $user, $pass);
+            if (!Bean::hasDatabase($this->tenantSlug)) {
+                Bean::addDatabase($this->tenantSlug, $dsn, $user, $pass);
             }
-            R::selectDatabase($this->tenantSlug);
+            Bean::selectDatabase($this->tenantSlug);
 
             // Get member from tenant by email (main member has same email)
-            $mainMember = R::selectDatabase('default');
+            Bean::selectDatabase('default');
             $mainMember = Bean::load('member', $mainMemberId);
-            R::selectDatabase($this->tenantSlug);
+            Bean::selectDatabase($this->tenantSlug);
 
             $tenantMember = Bean::findOne('member', 'email = ?', [$mainMember->email]);
             if ($tenantMember) {

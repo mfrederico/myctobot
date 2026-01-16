@@ -214,12 +214,8 @@ class Bootstrap {
                     Flight::set('cachedDatabaseAdapter', $cachedAdapter);
                     $this->logger->info('CachedDatabaseAdapter initialized - all queries cached automatically');
                 }
-                // Fallback to old implementation if new one doesn't exist
-                elseif (file_exists(__DIR__ . '/lib/RedBeanQueryCache.php')) {
-                    require_once __DIR__ . '/lib/RedBeanQueryCache.php';
-                    \app\RedBeanQueryCache::init();
-                    $this->logger->info('Query cache initialized (legacy)');
-                }
+                // Note: Bean class also provides caching via Bean::findCached(), Bean::countCached()
+                // which uses APCu directly without requiring CachedDatabaseAdapter
             }
 
             $this->logger->info('Database connected');
@@ -325,6 +321,16 @@ class Bootstrap {
                 $name = $dbConfig['name'] ?? $tenantSlug;
                 $user = $dbConfig['user'] ?? 'root';
                 $pass = $dbConfig['pass'] ?? '';
+
+                // Check if database exists before connecting
+                if (!$this->databaseExists($host, $port, $user, $pass, $name)) {
+                    $this->logger->error("Tenant database '{$name}' does not exist");
+                    // Clear session and redirect to home
+                    unset($_SESSION['tenant_slug']);
+                    header('Location: /');
+                    exit;
+                }
+
                 $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
                 Bean::useDatabase($tenantSlug, $dsn, $user, $pass);
             }
@@ -334,6 +340,23 @@ class Bootstrap {
         } catch (\Exception $e) {
             $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
             unset($_SESSION['tenant_slug']);
+        }
+    }
+
+    /**
+     * Check if a MySQL database exists
+     */
+    private function databaseExists(string $host, int $port, string $user, string $pass, string $dbName): bool {
+        try {
+            $pdo = new \PDO("mysql:host={$host};port={$port}", $user, $pass, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION
+            ]);
+            $stmt = $pdo->prepare("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?");
+            $stmt->execute([$dbName]);
+            return $stmt->fetch() !== false;
+        } catch (\Exception $e) {
+            $this->logger->error("Database existence check failed: " . $e->getMessage());
+            return false;
         }
     }
 

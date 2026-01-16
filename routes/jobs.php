@@ -1,6 +1,6 @@
 <?php
 /**
- * Jobs routes - for internal API endpoints that use their own auth
+ * Jobs routes - special API endpoints + default routing
  */
 
 use \Flight as Flight;
@@ -10,3 +10,6 @@ Flight::route('POST /jobs/cleanup', function() {
     $controller = new \app\Jobs();
     $controller->cleanup();
 });
+
+// Include default routes for standard Jobs controller methods
+require_once __DIR__ . '/default.php';

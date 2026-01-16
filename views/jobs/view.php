@@ -2,8 +2,8 @@
     <!-- Header with Back Button -->
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <a href="/enterprise" class="btn btn-outline-secondary btn-sm mb-2">
-                <i class="bi bi-arrow-left"></i> Back to Dashboard
+            <a href="/jobs" class="btn btn-outline-secondary btn-sm mb-2">
+                <i class="bi bi-arrow-left"></i> Back to Jobs
             </a>
             <h1 class="h2 mb-0"><?= htmlspecialchars($job['issue_key']) ?></h1>
         </div>
@@ -217,10 +217,6 @@
         </div>
     </div>
 </div>
-
-<style>
-.cursor-pointer { cursor: pointer; }
-</style>
 
 <script>
 function toggleOutput() {

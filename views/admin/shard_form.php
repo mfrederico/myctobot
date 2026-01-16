@@ -311,7 +311,18 @@ async function testSSH() {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
 
     try {
-        const response = await fetch('/admin/testshard/<?= $shard['id'] ?>');
+        // Collect current form values for testing
+        const formData = new FormData();
+        formData.append('host', document.getElementById('host').value);
+        formData.append('ssh_user', document.getElementById('ssh_user').value);
+        formData.append('ssh_port', document.getElementById('ssh_port').value);
+        formData.append('sshkey_id', document.getElementById('sshkey_id').value);
+        formData.append('execution_mode', document.querySelector('input[name="execution_mode"]:checked').value);
+
+        const response = await fetch('/admin/testshard/<?= $shard['id'] ?>', {
+            method: 'POST',
+            body: formData
+        });
         const data = await response.json();
 
         if (data.success) {
@@ -341,7 +352,18 @@ async function runDiagnostic() {
     card.scrollIntoView({ behavior: 'smooth' });
 
     try {
-        const response = await fetch('/admin/diagnoseshard/<?= $shard['id'] ?>');
+        // Collect current form values for testing
+        const formData = new FormData();
+        formData.append('host', document.getElementById('host').value);
+        formData.append('ssh_user', document.getElementById('ssh_user').value);
+        formData.append('ssh_port', document.getElementById('ssh_port').value);
+        formData.append('sshkey_id', document.getElementById('sshkey_id').value);
+        formData.append('execution_mode', document.querySelector('input[name="execution_mode"]:checked').value);
+
+        const response = await fetch('/admin/diagnoseshard/<?= $shard['id'] ?>', {
+            method: 'POST',
+            body: formData
+        });
         const data = await response.json();
 
         let html = '';

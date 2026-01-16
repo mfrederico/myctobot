@@ -38,7 +38,7 @@ class AtlassianAuth {
      * Get Atlassian configuration with hierarchy:
      * 1. Load base config from conf/atlassian.ini (primary source - shared OAuth app)
      * 2. Fill in missing/blank values from conf/config.{tenant}.ini [atlassian] section
-     * 3. Fall back to Flight::get() for backwards compatibility
+     * 3. Fall back to Flight::get() for any missing values
      *
      * @return array Atlassian configuration
      */
@@ -85,7 +85,7 @@ class AtlassianAuth {
             }
         }
 
-        // 3. Fall back to Flight::get() for any still-missing values (backwards compatibility)
+        // 3. Fall back to Flight::get() for any still-missing values
         if (empty($config['client_id'])) {
             $config['client_id'] = Flight::get('atlassian.client_id');
         }

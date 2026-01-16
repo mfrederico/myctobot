@@ -195,14 +195,36 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         <div class="card bg-light">
                             <div class="card-body">
                                 <h6><i class="bi bi-cloud"></i> Claude API Settings</h6>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Anthropic API Key <span class="text-danger">*</span></label>
+                                    <select class="form-select" name="anthropickeys_id" id="create_anthropickeys_id">
+                                        <option value="">-- Select API Key --</option>
+                                        <?php if (!empty($anthropicKeys)): ?>
+                                            <?php foreach ($anthropicKeys as $key): ?>
+                                            <option value="<?= $key->id ?>"
+                                                    data-model="<?= htmlspecialchars($key->model ?? '') ?>">
+                                                <?= htmlspecialchars($key->name) ?>
+                                                <?php if ($key->shared): ?>(Shared)<?php endif; ?>
+                                                - <?= htmlspecialchars($key->model ?? 'default') ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </select>
+                                    <div class="form-text">
+                                        Select the API key this agent will use.
+                                        <a href="/anthropic/keys">Manage API Keys</a>
+                                    </div>
+                                </div>
+
                                 <div class="mb-2">
                                     <label class="form-label">Model</label>
                                     <select class="form-select" name="model">
-                                        <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                                        <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recommended)</option>
                                         <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fast)</option>
                                     </select>
                                 </div>
-                                <div class="form-text">API key is configured in Settings → Connections</div>
                             </div>
                         </div>
                     </div>
@@ -570,6 +592,11 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                                     <i class="bi bi-browser-chrome"></i> Puppeteer
                                 </button>
                             </div>
+                            <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('playwright')">
+                                    <i class="bi bi-display"></i> Playwright
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -704,6 +731,12 @@ const mcpPresets = {
         type: "stdio",
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-puppeteer"]
+    },
+    playwright: {
+        name: "playwright",
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "@anthropic/mcp-server-playwright"]
     }
 };
 
@@ -1500,6 +1533,47 @@ document.addEventListener('DOMContentLoaded', function() {
                                         <option value="gpt-4o" <?= ($providerConfig['model'] ?? '') === 'gpt-4o' ? 'selected' : '' ?>>GPT-4o</option>
                                         <option value="gpt-4o-mini" <?= ($providerConfig['model'] ?? '') === 'gpt-4o-mini' ? 'selected' : '' ?>>GPT-4o Mini</option>
                                         <option value="gpt-4" <?= ($providerConfig['model'] ?? '') === 'gpt-4' ? 'selected' : '' ?>>GPT-4</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Claude API -->
+                    <div class="provider-config" id="config-claude_api" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cloud"></i> Claude API Settings</h6>
+                                <p class="text-muted small">Uses Anthropic API directly (no CLI). Assign a specific API key to this agent.</p>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Anthropic API Key <span class="text-danger">*</span></label>
+                                    <select class="form-select provider-field" name="anthropickeys_id" id="anthropickeys_id">
+                                        <option value="">-- Select API Key --</option>
+                                        <?php if (!empty($anthropicKeys)): ?>
+                                            <?php foreach ($anthropicKeys as $key): ?>
+                                            <option value="<?= $key->id ?>"
+                                                    <?= ($agent['anthropickeys_id'] ?? null) == $key->id ? 'selected' : '' ?>
+                                                    data-model="<?= htmlspecialchars($key->model ?? '') ?>">
+                                                <?= htmlspecialchars($key->name) ?>
+                                                <?php if ($key->shared): ?>(Shared)<?php endif; ?>
+                                                - <?= htmlspecialchars($key->model ?? 'default') ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </select>
+                                    <div class="form-text">
+                                        Select the API key this agent will use.
+                                        <a href="/anthropic/keys">Manage API Keys</a>
+                                    </div>
+                                </div>
+
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select provider-field" name="config_model" id="claude-api-model">
+                                        <option value="claude-sonnet-4-20250514" <?= ($providerConfig['model'] ?? 'claude-sonnet-4-20250514') === 'claude-sonnet-4-20250514' ? 'selected' : '' ?>>Claude Sonnet 4 (Recommended)</option>
+                                        <option value="claude-opus-4-20250514" <?= ($providerConfig['model'] ?? '') === 'claude-opus-4-20250514' ? 'selected' : '' ?>>Claude Opus 4</option>
+                                        <option value="claude-3-5-haiku-20241022" <?= ($providerConfig['model'] ?? '') === 'claude-3-5-haiku-20241022' ? 'selected' : '' ?>>Claude 3.5 Haiku (Fast)</option>
                                     </select>
                                 </div>
                             </div>

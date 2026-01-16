@@ -86,7 +86,7 @@
                     <h5 class="mb-0">Query Cache</h5>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted">Query cache is not enabled. Using legacy RedBeanQueryCache or no query caching.</p>
+                    <p class="text-muted">Query cache is not available. APCu may not be installed or enabled.</p>
                 </div>
             </div>
         </div>

@@ -25,6 +25,7 @@ $options = getopt('', [
     'repo:',
     'provider:',  // jira or github
     'aoe-session:',  // AOE session ID (passed from TmuxService)
+    'workstation:',  // JSON workstation config: {"host":"...", "user":"...", "port":22}
     'attach',
     'repo-path:',
     'print',
@@ -41,7 +42,9 @@ if (isset($options['help']) || empty($options['issue'])) {
     echo "  --member        Member ID (default: 3)\n";
     echo "  --tenant        Tenant slug for multi-tenancy (e.g., gwt)\n";
     echo "  --job-id        Job ID for status tracking (auto-generated if not provided)\n";
-    echo "  --repo          Repository connection ID (from ai-dev-{id} label)\n";
+    echo "  --repo          Repository connection ID (from repo-{slug} label)\n";
+    echo "  --workstation   JSON workstation config to run Claude via SSH\n";
+    echo "                  e.g., '{\"host\":\"127.0.0.1\",\"user\":\"mfrederico\",\"port\":22}'\n";
     echo "  --attach        Attach to tmux session immediately\n";
     echo "  --print         Use --print mode (non-interactive, outputs to log)\n";
     echo "  --repo-path     Path to existing repo clone\n";
@@ -105,12 +108,25 @@ $dryRun = isset($options['dry-run']);
 $skipJira = isset($options['skip-jira']) || $provider === 'github';  // Skip Jira if using GitHub
 $repoPath = $options['repo-path'] ?? null;
 
+// Parse workstation config (for running Claude on remote workstation via SSH)
+$workstationConfig = null;
+if (!empty($options['workstation'])) {
+    $workstationConfig = json_decode($options['workstation'], true);
+    if (!$workstationConfig || empty($workstationConfig['host']) || empty($workstationConfig['user'])) {
+        echo "Error: Invalid workstation config. Expected JSON with host and user.\n";
+        exit(1);
+    }
+    $workstationConfig['port'] = $workstationConfig['port'] ?? 22;
+    echo "Running on workstation: {$workstationConfig['user']}@{$workstationConfig['host']}:{$workstationConfig['port']}\n";
+}
+
 // Get domain/tenant identifier using AOE (single source of truth)
 $tenantSlug = $tenant ?: AoeTmux::getDomainId();
 TenantContext::set($tenantSlug);
 
-// Initialize AOE storage for session tracking
-$aoeStorage = new AoeStorage($tenantSlug);
+// Initialize AOE storage for session tracking (/tmp/.aoe-php for CLI/web consistency)
+$aoeBasePath = '/tmp/.aoe-php';
+$aoeStorage = new AoeStorage($tenantSlug, $aoeBasePath);
 
 // Check if AOE session ID was passed (from TmuxService)
 $aoeSessionId = $options['aoe-session'] ?? null;
@@ -496,6 +512,31 @@ if (!empty($githubToken)) {
 } else {
     echo "  Warning: No GitHub token, cannot pre-clone\n";
 }
+
+// Add MyCTOBot generated files to .gitignore (prevents accidental commits)
+if (is_dir($repoDir)) {
+    $gitignorePath = "{$repoDir}/.gitignore";
+    $ignorePatterns = [
+        '# MyCTOBot generated files',
+        '.mcp.json',
+        '.claude/',
+        'finish_job.sh',
+        'ssh-claude.sh',
+        ''
+    ];
+    $existingIgnore = file_exists($gitignorePath) ? file_get_contents($gitignorePath) : '';
+    $newPatterns = [];
+    foreach ($ignorePatterns as $pattern) {
+        if (!empty($pattern) && strpos($existingIgnore, $pattern) === false) {
+            $newPatterns[] = $pattern;
+        }
+    }
+    if (!empty($newPatterns)) {
+        $appendContent = "\n" . implode("\n", $newPatterns) . "\n";
+        file_put_contents($gitignorePath, $appendContent, FILE_APPEND);
+        echo "  Added MyCTOBot patterns to .gitignore\n";
+    }
+}
 echo "\n";
 
 // ============================================
@@ -512,7 +553,7 @@ $statusSettings = [
 
 if (!empty($projectKey)) {
     // Query jiraboards using Bean (user SQLite database)
-    $boardBean = Bean::findOne('jiraboards', 'project_key = ?', [$projectKey]);
+    $boardBean = Bean::findOne('boards', 'project_key = ?', [$projectKey]);
     if ($boardBean) {
         $statusSettings = [
             'working' => $boardBean->aidev_status_working ?? null,
@@ -810,11 +851,13 @@ if ($provider === 'github') {
     $mcpTenant = $tenant ?? 'default';
     $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
     $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
+    $mcpAgentName = $agentConfig['name'] ?? 'AI Assistant';
     $mcpServers->jira = (object) [
         'type' => 'http',
         'url' => $mcpHttpUrl,
         'headers' => (object) [
-            'Authorization' => "Basic {$mcpCredentials}"
+            'Authorization' => "Basic {$mcpCredentials}",
+            'X-MCP-Agent-Name' => $mcpAgentName
         ]
     ];
     $enabledMcpServers[] = 'jira';
@@ -1068,6 +1111,12 @@ export JIRA_HOST="{$jiraHost}"
 export JIRA_EMAIL="{$jiraEmail}"
 export JIRA_API_TOKEN="{$jiraOAuthToken}"
 export MYCTOBOT_PROVIDER="jira"
+
+# Board-configured status settings for Jira transitions
+export AIDEV_STATUS_WORKING="{$statusSettings['working']}"
+export AIDEV_STATUS_PR_CREATED="{$statusSettings['pr_created']}"
+export AIDEV_STATUS_COMPLETE="{$statusSettings['complete']}"
+export AIDEV_STATUS_FAILED="{$statusSettings['failed']}"
 PROVIDER_ENV;
 
     $providerEchoSection = <<<PROVIDER_ECHO
@@ -1120,6 +1169,9 @@ $envScript = <<<BASH
 # Environment setup for AI Developer session
 # Generated for issue: {$issueKey}
 # Provider: {$provider}
+
+# Ensure PATH includes common binary locations (Claude CLI, npm global, etc.)
+export PATH="\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH"
 
 # AOE Session Tracking
 export AOE_TENANT="{$tenantSlug}"
@@ -1411,27 +1463,47 @@ COMMENT_EOF
         echo "  ✗ Failed to add comment (HTTP $http_code)"
     fi
 
-    # Transition ticket status
-    local transition_id
+    # Transition ticket status using board-configured status names
+    local target_status
     if [[ "$success" == "true" && "$verification_passed" == "true" ]]; then
-        transition_id="71"   # Push Request
-        echo "Transitioning to 'Push Request'..."
+        target_status="$AIDEV_STATUS_PR_CREATED"
     else
-        transition_id="41"   # Needs More Work
-        echo "Transitioning to 'Needs More Work'..."
+        target_status="$AIDEV_STATUS_FAILED"
     fi
 
-    local transition_response=$(curl -s -w "\n%{http_code}" -X POST \
-        "$JIRA_HOST/rest/api/3/issue/$issue_key/transitions" \
-        -H "Authorization: Bearer $JIRA_API_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{\"transition\": {\"id\": \"$transition_id\"}}" 2>/dev/null)
-
-    http_code=$(echo "$transition_response" | tail -1)
-    if [[ "$http_code" =~ ^2 ]]; then
-        echo "  ✓ Status updated"
+    # Skip transition if no status configured
+    if [[ -z "$target_status" ]]; then
+        echo "  ⚠ No status configured for this outcome, skipping transition"
     else
-        echo "  ✗ Failed to update status (HTTP $http_code)"
+        echo "Transitioning to '$target_status'..."
+
+        # Get available transitions and find ID for target status
+        local transitions_response=$(curl -s "$JIRA_HOST/rest/api/3/issue/$issue_key/transitions" \
+            -H "Authorization: Bearer $JIRA_API_TOKEN" \
+            -H "Content-Type: application/json" 2>/dev/null)
+
+        # Find the transition ID that matches our target status name (case-insensitive)
+        local transition_id=$(echo "$transitions_response" | jq -r --arg target "$target_status" \
+            '.transitions[] | select(.to.name | ascii_downcase == ($target | ascii_downcase)) | .id' | head -1)
+
+        if [[ -z "$transition_id" || "$transition_id" == "null" ]]; then
+            echo "  ⚠ No transition found to '$target_status'"
+            echo "  Available transitions:"
+            echo "$transitions_response" | jq -r '.transitions[] | "    - \(.to.name) (id: \(.id))"' 2>/dev/null || echo "    (could not parse transitions)"
+        else
+            local transition_response=$(curl -s -w "\n%{http_code}" -X POST \
+                "$JIRA_HOST/rest/api/3/issue/$issue_key/transitions" \
+                -H "Authorization: Bearer $JIRA_API_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"transition\": {\"id\": \"$transition_id\"}}" 2>/dev/null)
+
+            http_code=$(echo "$transition_response" | tail -1)
+            if [[ "$http_code" =~ ^2 ]]; then
+                echo "  ✓ Status updated to '$target_status'"
+            else
+                echo "  ✗ Failed to update status (HTTP $http_code)"
+            fi
+        fi
     fi
 
     echo "=== Jira Update Complete ==="
@@ -1528,15 +1600,47 @@ if (!empty($ollamaModel)) {
     $modelFlag = "--model {$ollamaModel}";
 }
 
+// Build SSH wrapper if workstation is configured
+// When SSH is used, Claude runs on the remote host but the work directory must be accessible
+// (via NFS, same path structure, or localhost)
+$sshPrefix = '';
+$sshSuffix = '';
+$sshScriptFile = '';
+if ($workstationConfig) {
+    // Sanitize host/user (alphanumeric, dots, dashes, underscores only)
+    $wsHost = preg_replace('/[^a-zA-Z0-9.\-_]/', '', $workstationConfig['host']);
+    $wsUser = preg_replace('/[^a-zA-Z0-9.\-_]/', '', $workstationConfig['user']);
+    $wsPort = (int)($workstationConfig['port'] ?? 22);
+
+    if (empty($wsHost) || empty($wsUser)) {
+        echo "Warning: Invalid workstation config, running locally\n";
+        $workstationConfig = null;
+    } else {
+        // Create a wrapper script for SSH to avoid quoting issues with 'script -c'
+        // This script will be executed inside 'script -c' command
+        $sshScriptFile = "{$workDir}/ssh-claude.sh";
+        echo "Workstation: {$wsUser}@{$wsHost}:{$wsPort}\n";
+    }
+}
+
 if ($usePrintMode) {
     // Non-interactive mode with logging
     $logFile = "{$workDir}/session.log";
+
+    // Build the claude command (with or without SSH wrapper)
+    if ($workstationConfig && $sshScriptFile) {
+        // Add common claude installation paths to PATH for SSH sessions
+        $claudeCmd = "ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
+    } else {
+        $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt";
+    }
+
     $envScript .= <<<BASH
 
 echo "Starting Claude in print mode..."
 echo "Log file: {$logFile}"
 echo ""
-claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt 2>&1 | tee {$logFile}
+{$claudeCmd} 2>&1 | tee {$logFile}
 
 # Update issue tracker after Claude completes
 {$updateFunction} "{$logFile}" "{$logFile}"
@@ -1554,6 +1658,23 @@ BASH;
 } else {
     // Interactive TUI mode - pass prompt as argument (not -p flag) to show TUI
     $logFile = "{$workDir}/session.log";
+
+    // Build the script command differently based on SSH config
+    if ($workstationConfig && $sshScriptFile) {
+        // Create a wrapper script to avoid quote-nesting issues with 'script -c'
+        // Add common claude installation paths to PATH for SSH sessions
+        $sshScriptContent = <<<SSHSCRIPT
+#!/bin/bash
+cd {$workDir}
+ssh -t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && cd {$workDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
+SSHSCRIPT;
+        file_put_contents($sshScriptFile, $sshScriptContent);
+        chmod($sshScriptFile, 0755);
+        $scriptCommand = "script -q session.log -c '{$sshScriptFile}'";
+    } else {
+        $scriptCommand = "script -q session.log -c 'claude --dangerously-skip-permissions {$modelFlag} \"\$(cat prompt.txt)\"'";
+    }
+
     $envScript .= <<<BASH
 
 echo "Starting Claude with TUI..."
@@ -1562,7 +1683,7 @@ echo ""
 
 # Use script to capture output while preserving TUI
 # Pass prompt content as argument (without -p) to start with message AND show TUI
-script -q session.log -c 'claude --dangerously-skip-permissions {$modelFlag} "\$(cat prompt.txt)"'
+{$scriptCommand}
 
 # === Post-Session Update (runs after Claude exits normally) ===
 echo ""
@@ -1572,43 +1693,14 @@ echo "=== Claude Session Ended ==="
 BASH;
     $envScript .= "\n{$updateFunction} \"{$workDir}/session.log\" \"{$workDir}/session.log\"\n";
 
-    // Wait for webhook to signal task complete
-    // Webhook creates done file when ticket transitions to "When Task Complete" status
-    $envScript .= <<<WAIT_BASH
-
-echo ""
-echo "=== Waiting for Task Complete ==="
-echo "Session will stay alive until ticket reaches 'Ready for QA' status."
-echo "Add comments to the Jira ticket to continue the conversation."
-echo "(Timeout: 2 hours)"
-
-DONE_FILE="{$workDir}/done"
-MAX_WAIT=7200  # 2 hours
-WAIT_INTERVAL=5
-WAITED=0
-
-while [[ ! -f "\$DONE_FILE" && \$WAITED -lt \$MAX_WAIT ]]; do
-    sleep \$WAIT_INTERVAL
-    WAITED=\$((WAITED + WAIT_INTERVAL))
-    if (( WAITED % 600 == 0 )); then
-        echo "  Still waiting... (\$((WAITED/60))m / \$((MAX_WAIT/60))m)"
-    fi
-done
-
-if [[ -f "\$DONE_FILE" ]]; then
-    echo ""
-    echo "✓ Task Complete signal received!"
-    rm -f "\$DONE_FILE"
-else
-    echo ""
-    echo "⚠ Timeout - cleaning up"
-fi
+    // Final cleanup - session ends immediately after Claude exits
+    $envScript .= <<<CLEANUP_BASH
 
 echo ""
 echo "=== Final Cleanup ==="
 cleanup_labels
 aoe_session_cleanup \$?
-WAIT_BASH;
+CLEANUP_BASH;
 }
 
 $envScriptPath = "{$workDir}/run-claude.sh";

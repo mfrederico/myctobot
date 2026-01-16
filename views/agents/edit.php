@@ -342,6 +342,277 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         </div>
     </div>
 
+    <?php if (!$isNew): ?>
+    <!-- Test Agent on Workstation -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <i class="bi bi-play-circle"></i> Test Agent on Workstation
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-3">
+                Test this agent's configuration by running a "Hello World" test on a workstation.
+                This verifies the full pipeline: SSH connection + agent config (model, Ollama) + Claude CLI.
+            </p>
+
+            <div class="row align-items-end">
+                <div class="col-md-8 mb-3">
+                    <label for="test_workstation" class="form-label">Select Workstation</label>
+                    <select class="form-select" id="test_workstation">
+                        <option value="">Loading workstations...</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <button type="button" class="btn btn-success w-100" onclick="runAgentTest()" id="runTestBtn">
+                        <i class="bi bi-robot"></i> Run Test
+                    </button>
+                </div>
+            </div>
+
+            <!-- Test Results -->
+            <div id="agentTestResults" style="display: none;">
+                <!-- Results populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Load available workstations for testing
+    document.addEventListener('DOMContentLoaded', function() {
+        fetch('/agents/workstations')
+            .then(r => r.json())
+            .then(data => {
+                const select = document.getElementById('test_workstation');
+                if (data.success && data.data.workstations && data.data.workstations.length > 0) {
+                    select.innerHTML = '<option value="">-- Select a workstation --</option>';
+                    data.data.workstations.forEach(ws => {
+                        const opt = document.createElement('option');
+                        opt.value = ws.id;
+                        opt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        select.appendChild(opt);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">No active workstations found</option>';
+                }
+            })
+            .catch(e => {
+                document.getElementById('test_workstation').innerHTML =
+                    '<option value="">Error loading workstations</option>';
+            });
+    });
+
+    let currentTestId = null;
+    let pollInterval = null;
+
+    async function runAgentTest() {
+        const workstationId = document.getElementById('test_workstation').value;
+        if (!workstationId) {
+            alert('Please select a workstation');
+            return;
+        }
+
+        const btn = document.getElementById('runTestBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+
+        const resultsDiv = document.getElementById('agentTestResults');
+        resultsDiv.style.display = 'block';
+        resultsDiv.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-success"></div><p class="mt-2">Starting agent test...</p></div>';
+
+        try {
+            // Start the test (async)
+            const formData = new FormData();
+            formData.append('workstation_id', workstationId);
+
+            const response = await fetch('/agents/testagent/<?= $agentId ?>', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || data.message || 'Failed to start test');
+            }
+
+            currentTestId = data.data?.test_id || data.test_id;
+
+            // Show initial status with agent/workstation info
+            const agentInfo = data.data?.agent || data.agent;
+            const wsInfo = data.data?.workstation || data.workstation;
+
+            resultsDiv.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-success"></div>
+                    <p class="mt-2">Running agent test...</p>
+                    <p class="text-muted small">Test ID: ${currentTestId}</p>
+                </div>
+                ${agentInfo && wsInfo ? `
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-robot"></i> Agent:</strong> ${escapeHtml(agentInfo.name)}<br>
+                                <small class="text-muted">
+                                    ${agentInfo.use_ollama
+                                        ? 'Ollama: ' + escapeHtml(agentInfo.ollama_model || '')
+                                        : 'Anthropic: ' + escapeHtml(agentInfo.anthropic_model || '')}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-hdd-network"></i> Workstation:</strong> ${escapeHtml(wsInfo.name)}<br>
+                                <small class="text-muted">${escapeHtml(wsInfo.ssh_user)}@${escapeHtml(wsInfo.host)}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+
+            // Start polling for status
+            pollInterval = setInterval(() => pollTestStatus(original), 2000);
+
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = original;
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <strong>Error starting test</strong>
+                    <p class="mb-0 mt-2">${err.message}</p>
+                </div>
+            `;
+        }
+    }
+
+    async function pollTestStatus(originalBtnHtml) {
+        if (!currentTestId) return;
+
+        try {
+            const response = await fetch('/agents/teststatus/' + currentTestId);
+            const data = await response.json();
+
+            if (!data.success && !data.status) {
+                return; // Keep polling
+            }
+
+            const status = data.data?.status || data.status;
+
+            if (status === 'running') {
+                // Still running, update message
+                const msg = data.data?.message || data.message || 'Running...';
+                const spinnerDiv = document.querySelector('#agentTestResults .spinner-border');
+                if (spinnerDiv) {
+                    spinnerDiv.parentElement.querySelector('p').textContent = msg;
+                }
+                return;
+            }
+
+            // Test completed (success or failed)
+            clearInterval(pollInterval);
+            pollInterval = null;
+
+            const btn = document.getElementById('runTestBtn');
+            btn.disabled = false;
+            btn.innerHTML = originalBtnHtml || '<i class="bi bi-robot"></i> Run Test';
+
+            displayTestResults(data.data || data);
+
+        } catch (err) {
+            // Network error, keep polling
+            console.error('Poll error:', err);
+        }
+    }
+
+    function displayTestResults(resultData) {
+        const resultsDiv = document.getElementById('agentTestResults');
+        let html = '';
+
+        const result = resultData.result || resultData;
+        const isSuccess = resultData.status === 'completed' || result.success;
+
+        if (isSuccess) {
+            html += `
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Agent Test Passed!</strong>
+                        <div class="small">Completed in ${result.duration_ms || 'N/A'}ms</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="alert alert-danger d-flex align-items-center">
+                    <i class="bi bi-x-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Agent Test Failed</strong>
+                        <div class="small">${result.error || resultData.error || resultData.message || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (result.warning) {
+            html += `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> ${result.warning}</div>`;
+        }
+
+        // Show agent and workstation info
+        const agentInfo = resultData.agent || result.agent;
+        const wsInfo = resultData.workstation || result.workstation;
+
+        if (agentInfo && wsInfo) {
+            html += `
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-robot"></i> Agent:</strong> ${escapeHtml(agentInfo.name)}<br>
+                                <small class="text-muted">
+                                    ${agentInfo.use_ollama
+                                        ? 'Ollama: ' + escapeHtml(agentInfo.ollama_model || '')
+                                        : 'Anthropic: ' + escapeHtml(agentInfo.anthropic_model || '')}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-hdd-network"></i> Workstation:</strong> ${escapeHtml(wsInfo.name)}<br>
+                                <small class="text-muted">${escapeHtml(wsInfo.ssh_user)}@${escapeHtml(wsInfo.host)}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (result.output) {
+            html += `
+                <div class="card">
+                    <div class="card-header"><strong><i class="bi bi-chat-left-text"></i> Claude Response</strong></div>
+                    <div class="card-body">
+                        <pre class="mb-0 bg-dark text-light p-3 rounded" style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(result.output)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+
+        resultsDiv.innerHTML = html;
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    </script>
+    <?php endif; ?>
+
     <?php if ($isNew): ?>
     <!-- JavaScript for Create Form -->
     <script>

@@ -995,6 +995,108 @@ class Admin extends Control {
     }
 
     /**
+     * Test a workstation with a specific agent configuration (async)
+     * POST /admin/testwithagent/{shard_id}
+     *
+     * Spawns a background job to test the workstation with an agent.
+     * Combines workstation SSH connection with agent config (model, Ollama settings)
+     * for a hello-world test.
+     */
+    public function testwithagent($params = []) {
+        require_once __DIR__ . '/../services/AgentTestService.php';
+
+        $shardId = (int)($this->opId() ?? 0);
+        $agentId = (int)($this->getParam('agent_id') ?? 0);
+
+        if (!$shardId || !$agentId) {
+            $this->json(['success' => false, 'error' => 'Workstation ID and Agent ID are required']);
+            return;
+        }
+
+        // Verify agent and workstation exist
+        $testService = \app\services\AgentTestService::fromIds($agentId, $shardId);
+
+        if (!$testService) {
+            $this->json(['success' => false, 'error' => 'Agent or workstation not found']);
+            return;
+        }
+
+        // Generate unique test ID
+        $testId = 'at-' . bin2hex(random_bytes(8));
+
+        // Get tenant slug
+        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+
+        // Spawn background script
+        $scriptPath = __DIR__ . '/../scripts/agent-test-runner.php';
+        $cmd = sprintf(
+            'php %s --tenant=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
+            escapeshellarg($scriptPath),
+            escapeshellarg($tenantSlug),
+            $agentId,
+            $shardId,
+            escapeshellarg($testId)
+        );
+
+        exec($cmd);
+
+        $this->json([
+            'success' => true,
+            'test_id' => $testId,
+            'status' => 'started',
+            'message' => 'Test started in background',
+            'agent' => $testService->getAgentInfo(),
+            'workstation' => $testService->getWorkstationInfo()
+        ]);
+    }
+
+    /**
+     * Get test status (for workstation tests)
+     * GET /admin/teststatus/{test_id}
+     *
+     * Polls the status of a background agent test.
+     */
+    public function teststatus($params = []) {
+        $testId = $this->opId() ?? $this->getParam('test_id') ?? '';
+
+        if (empty($testId)) {
+            $this->json(['success' => false, 'error' => 'Test ID is required']);
+            return;
+        }
+
+        // Read status file
+        $statusFile = "/tmp/agent-test-{$testId}.json";
+
+        if (!file_exists($statusFile)) {
+            $this->json(['success' => false, 'error' => 'Test not found']);
+            return;
+        }
+
+        $status = json_decode(file_get_contents($statusFile), true);
+
+        if (!$status) {
+            $this->json(['success' => false, 'error' => 'Failed to read test status']);
+            return;
+        }
+
+        $this->json(array_merge(['success' => true], $status));
+    }
+
+    /**
+     * Get available agents for workstation testing dropdown
+     * GET /admin/testagents
+     */
+    public function testagents($params = []) {
+        require_once __DIR__ . '/../services/AgentTestService.php';
+        $agents = \app\services\AgentTestService::getActiveAgents();
+
+        $this->json([
+            'success' => true,
+            'agents' => $agents
+        ]);
+    }
+
+    /**
      * Health check all shards
      */
     public function shardhealth($params = []) {

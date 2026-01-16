@@ -542,6 +542,109 @@ class Agents extends BaseControls\Control {
     }
 
     /**
+     * Test an agent on a specific workstation (async)
+     * POST /agents/testagent/{agent_id}
+     *
+     * Spawns a background job to test the agent, returns test ID for polling.
+     * Combines agent config (model, Ollama settings) with
+     * workstation SSH connection for a hello-world test.
+     */
+    public function testagent($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
+        $workstationId = (int) ($this->getParam('workstation_id') ?? 0);
+
+        if (!$agentId || !$workstationId) {
+            Flight::jsonError('Agent ID and Workstation ID are required', 400);
+            return;
+        }
+
+        // Verify agent and workstation exist
+        require_once __DIR__ . '/../services/AgentTestService.php';
+        $testService = \app\services\AgentTestService::fromIds($agentId, $workstationId);
+
+        if (!$testService) {
+            Flight::jsonError('Agent or workstation not found', 404);
+            return;
+        }
+
+        // Generate unique test ID
+        $testId = 'at-' . bin2hex(random_bytes(8));
+
+        // Get tenant slug
+        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+
+        // Spawn background script
+        $scriptPath = __DIR__ . '/../scripts/agent-test-runner.php';
+        $cmd = sprintf(
+            'php %s --tenant=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
+            escapeshellarg($scriptPath),
+            escapeshellarg($tenantSlug),
+            $agentId,
+            $workstationId,
+            escapeshellarg($testId)
+        );
+
+        exec($cmd);
+
+        Flight::jsonSuccess([
+            'test_id' => $testId,
+            'status' => 'started',
+            'message' => 'Test started in background',
+            'agent' => $testService->getAgentInfo(),
+            'workstation' => $testService->getWorkstationInfo()
+        ]);
+    }
+
+    /**
+     * Get test status
+     * GET /agents/teststatus/{test_id}
+     *
+     * Polls the status of a background agent test.
+     */
+    public function teststatus($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $testId = $this->opId() ?? $this->getParam('test_id') ?? '';
+
+        if (empty($testId)) {
+            Flight::jsonError('Test ID is required', 400);
+            return;
+        }
+
+        // Read status file
+        $statusFile = "/tmp/agent-test-{$testId}.json";
+
+        if (!file_exists($statusFile)) {
+            Flight::jsonError('Test not found', 404);
+            return;
+        }
+
+        $status = json_decode(file_get_contents($statusFile), true);
+
+        if (!$status) {
+            Flight::jsonError('Failed to read test status', 500);
+            return;
+        }
+
+        Flight::jsonSuccess($status);
+    }
+
+    /**
+     * Get available workstations for agent testing dropdown
+     * GET /agents/workstations
+     */
+    public function workstations($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        require_once __DIR__ . '/../services/AgentTestService.php';
+        $workstations = \app\services\AgentTestService::getActiveWorkstations();
+
+        Flight::jsonSuccess(['workstations' => $workstations]);
+    }
+
+    /**
      * Build runner config based on type
      */
     private function buildRunnerConfig(string $runnerType): array {

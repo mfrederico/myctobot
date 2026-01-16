@@ -112,3 +112,4 @@ Desktop.ini
 !.gitkeep
 sql/
 database/
+conf/github.ini

@@ -35,6 +35,31 @@ class TmuxService {
     private ?string $tenantSlug = null;
 
     /**
+     * Get the base path for aoe-php storage
+     * Uses a consistent path that works for both CLI and web contexts
+     *
+     * @return string
+     */
+    private static function getAoeStoragePath(): string {
+        // Check config first
+        if (class_exists('\Flight') && \Flight::has('aoe.storage_path')) {
+            $configPath = \Flight::get('aoe.storage_path');
+            if ($configPath && is_dir($configPath)) {
+                return $configPath;
+            }
+        }
+
+        // Default to /tmp/.aoe-php (accessible by both CLI and web)
+        $defaultPath = '/tmp/.aoe-php';
+        if (is_dir($defaultPath)) {
+            return $defaultPath;
+        }
+
+        // Fallback to project-relative path
+        return dirname(__DIR__) . '/data/aoe';
+    }
+
+    /**
      * Create a TmuxService for a specific member and issue
      *
      * @param int $memberId Member ID
@@ -49,7 +74,7 @@ class TmuxService {
         $this->tenantSlug = $tenant ?: AoeTmux::getDomainId();
 
         // Try to find existing AOE session for this issue first
-        $storage = new AoeStorage($this->tenantSlug);
+        $storage = new AoeStorage($this->tenantSlug, self::getAoeStoragePath());
         $existingSession = $this->findSessionByReference($storage, $issueKey);
 
         if ($existingSession) {
@@ -78,9 +103,11 @@ class TmuxService {
 
     /**
      * Find existing AOE session by issue reference
+     * Uses loadAllSynced() to query tmux first (source of truth)
      */
     private function findSessionByReference(AoeStorage $storage, string $reference): ?AoeInstance {
-        $sessions = $storage->loadAll();
+        // Use synced method - queries tmux first, then matches with storage
+        $sessions = $storage->loadAllSynced();
         foreach ($sessions as $session) {
             if ($session->reference === $reference) {
                 return $session;
@@ -225,9 +252,10 @@ class TmuxService {
      * @param int|null $repoId Repository connection ID
      * @param string|null $tenant Tenant slug for multi-tenancy
      * @param string|null $provider Issue provider (jira, github)
+     * @param array|null $workstation Workstation config: ['host'=>..., 'user'=>..., 'port'=>...]
      * @return bool Success
      */
-    public function spawnWithScript(string $scriptPath, bool $orchestrator = true, ?string $jobId = null, ?int $repoId = null, ?string $tenant = null, ?string $provider = null): bool {
+    public function spawnWithScript(string $scriptPath, bool $orchestrator = true, ?string $jobId = null, ?int $repoId = null, ?string $tenant = null, ?string $provider = null, ?array $workstation = null): bool {
         if ($this->exists()) {
             return false;
         }
@@ -238,7 +266,7 @@ class TmuxService {
         // This ensures the directive processor can detect if the session crashes
         if ($this->aoeSession) {
             $this->aoeSession->status = AoeStatus::Starting;
-            $storage = new AoeStorage($this->tenantSlug);
+            $storage = new AoeStorage($this->tenantSlug, self::getAoeStoragePath());
             $storage->save($this->aoeSession);
         }
 
@@ -252,11 +280,17 @@ class TmuxService {
         // Pass AOE session ID so local-aidev-full.php uses the same session
         $aoeSessionFlag = $this->aoeSession ? sprintf('--aoe-session=%s', escapeshellarg($this->aoeSession->id)) : '';
 
+        // Pass workstation config if provided (runs Claude on remote workstation via SSH)
+        $workstationFlag = '';
+        if ($workstation && !empty($workstation['host']) && !empty($workstation['user'])) {
+            $workstationFlag = sprintf('--workstation=%s', escapeshellarg(json_encode($workstation)));
+        }
+
         // Log file for capturing errors from local-aidev-full.php
         $logFile = $this->workDir . '/spawn.log';
 
         $command = sprintf(
-            'php %s --issue=%s --member=%d %s %s %s %s %s %s 2>&1 | tee %s',
+            'php %s --issue=%s --member=%d %s %s %s %s %s %s %s 2>&1 | tee %s',
             escapeshellarg($scriptPath),
             escapeshellarg($this->issueKey),
             $this->memberId,
@@ -266,6 +300,7 @@ class TmuxService {
             $tenantFlagStr,
             $providerFlag,
             $aoeSessionFlag,
+            $workstationFlag,
             escapeshellarg($logFile)
         );
 
@@ -301,6 +336,9 @@ class TmuxService {
 #
 # MyCTOBot AI Developer Session
 #
+
+# Ensure PATH includes common binary locations (Claude CLI, npm global, etc.)
+export PATH="\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH"
 
 # Export environment variables for hooks and child processes
 export MYCTOBOT_MEMBER_ID={$this->memberId}

@@ -57,6 +57,10 @@ use \app\services\CompletionDetector;
 use \app\services\UserDatabaseService;
 use \app\services\EncryptionService;
 use \app\services\AIDevJobService;
+use \app\services\JiraClient;
+
+require_once 'lib/plugins/AtlassianAuth.php';
+require_once 'services/JiraClient.php';
 
 // Load tenant config
 $configFile = "conf/config.{$tenant}.ini";
@@ -178,7 +182,7 @@ $cloudId = null;
 $projectKey = null;
 
 try {
-    $boards = Bean::findAll('jiraboards', ' is_active = 1 ORDER BY id ASC LIMIT 1 ');
+    $boards = Bean::findAll('boards', ' is_active = 1 ORDER BY id ASC LIMIT 1 ');
     if (!empty($boards)) {
         $board = reset($boards);
         $cloudId = $board->cloud_uid;
@@ -300,9 +304,12 @@ try {
     if (file_exists($aoePath)) {
         require_once $aoePath;
 
+        // Use /tmp/.aoe-php (accessible by both CLI and web)
+        $aoeBasePath = '/tmp/.aoe-php';
+
         try {
             \Aoe\Tenant\TenantContext::set($tenant);
-            $aoeStorage = new \Aoe\Session\Storage($tenant);
+            $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
             $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
             $statusDetector = new \Aoe\Tmux\StatusDetector();
 
@@ -331,24 +338,45 @@ try {
                         output("  Updated {$session->title}: {$newStatus->value}");
                     }
                 } else {
-                    // Tmux gone but status says active - mark as stopped
-                    $session->status = \Aoe\Session\Status::Stopped;
-                    $aoeStorage->save($session);
-                    $aoeStale++;
-                    output("  Marked stale: {$session->title}");
-
-                    // Cleanup job labels for this session's issue
+                    // Tmux gone but status says active - check if job is ACTUALLY still running
+                    // before marking as stopped and cleaning up labels
                     $issueKey = $session->reference ?? $session->title ?? null;
+                    $shouldCleanup = true;
+
                     if ($issueKey && preg_match('/^[A-Z]+-\d+$/', $issueKey)) {
-                        try {
-                            require_once __DIR__ . '/../services/AIDevJobService.php';
-                            $jobService = new \app\services\AIDevJobService();
-                            $cleanupResult = $jobService->cleanupJobLabels(null, $issueKey);
-                            if (!empty($cleanupResult['labels_removed'])) {
-                                output("    Cleaned up labels: " . implode(', ', $cleanupResult['labels_removed']));
+                        // Check aidevjobs table - if job is still "running" or "queued", don't mark stale
+                        $runningJob = Bean::findOne('aidevjobs',
+                            'issue_key = ? AND status IN (?, ?) ORDER BY created_at DESC',
+                            [$issueKey, 'running', 'queued']
+                        );
+
+                        if ($runningJob) {
+                            // Job is still active in DB - don't mark as stopped
+                            // The tmux might just be slow to start or has a different name
+                            $shouldCleanup = false;
+                            output("  Skipping {$session->title}: job still active in DB (status: {$runningJob->status})");
+                        }
+                    }
+
+                    if ($shouldCleanup) {
+                        // Tmux really is gone and job is not running - mark as stopped
+                        $session->status = \Aoe\Session\Status::Stopped;
+                        $aoeStorage->save($session);
+                        $aoeStale++;
+                        output("  Marked stale: {$session->title}");
+
+                        // Cleanup job labels for this session's issue
+                        if ($issueKey && preg_match('/^[A-Z]+-\d+$/', $issueKey)) {
+                            try {
+                                require_once __DIR__ . '/../services/AIDevJobService.php';
+                                $jobService = new \app\services\AIDevJobService();
+                                $cleanupResult = $jobService->cleanupJobLabels(null, $issueKey);
+                                if (!empty($cleanupResult['labels_removed'])) {
+                                    output("    Cleaned up labels: " . implode(', ', $cleanupResult['labels_removed']));
+                                }
+                            } catch (\Exception $e) {
+                                output("    Warning: Label cleanup failed: " . $e->getMessage());
                             }
-                        } catch (\Exception $e) {
-                            output("    Warning: Label cleanup failed: " . $e->getMessage());
                         }
                     }
                 }
@@ -367,6 +395,50 @@ try {
         }
     } else {
         output("AOE-PHP not found, skipping session sync");
+    }
+
+    // Check for orphaned sessions (ai-dev label removed but session still running)
+    output("=== Checking for Orphaned Sessions ===");
+
+    if (file_exists($aoePath)) {
+        try {
+            $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
+            $activeSessions = $aoeStorage->loadAllSynced();
+            $orphanedCount = 0;
+
+            foreach ($activeSessions as $session) {
+                $issueKey = $session->reference ?? null;
+
+                // Only check Jira issues
+                if (!$issueKey || !preg_match('/^[A-Z]+-\d+$/', $issueKey)) {
+                    continue;
+                }
+
+                // Get Jira issue and check labels
+                try {
+                    $jiraClient = new JiraClient($memberId, $cloudId);
+                    $issue = $jiraClient->getIssue($issueKey);
+                    $labels = $issue['fields']['labels'] ?? [];
+
+                    if (!in_array('ai-dev', $labels)) {
+                        $orphanedCount++;
+                        output("  WARNING: Session {$issueKey} running but ai-dev label missing!");
+                        output("    Current labels: " . (empty($labels) ? '(none)' : implode(', ', $labels)));
+                        output("    Session: {$session->getTmuxName()}");
+                    }
+                } catch (\Exception $e) {
+                    output("  Could not check {$issueKey}: " . $e->getMessage());
+                }
+            }
+
+            if ($orphanedCount === 0) {
+                output("No orphaned sessions found");
+            } else {
+                output("Found {$orphanedCount} orphaned session(s) - manual intervention may be needed");
+            }
+        } catch (\Exception $e) {
+            output("Warning: Orphan check failed: " . $e->getMessage());
+        }
     }
 
     // Process job queue - start queued jobs if capacity available

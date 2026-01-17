@@ -8,7 +8,7 @@
  *
  * This hook fires when Claude finishes responding (Stop event).
  *
- * Environment Variables (set by local-aidev-full.php):
+ * Environment Variables (set by job-dispatcher.php):
  *   MYCTOBOT_APP_ROOT     - Path to myctobot application
  *   MYCTOBOT_WORKSPACE    - Tenant workspace name
  *   MYCTOBOT_JOB_ID       - Current aidevjobs.id

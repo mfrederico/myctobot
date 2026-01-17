@@ -300,6 +300,125 @@ class Api extends BaseControls\Control {
     }
 
     /**
+     * Authenticate using tenant's config [api].api_key
+     * Returns member ID from config if valid, null otherwise
+     */
+    private function authenticateTenantApiKey(string $tenant): ?int {
+        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
+        if (empty($apiKey)) {
+            $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+            if (preg_match('/^Bearer\s+(.+)$/i', $auth, $matches)) {
+                $apiKey = $matches[1];
+            }
+        }
+
+        if (empty($apiKey)) {
+            return null;
+        }
+
+        // Load tenant config
+        $configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
+        if (!file_exists($configFile)) {
+            Flight::get('log')->error("Tenant config not found: {$configFile}");
+            return null;
+        }
+
+        $config = parse_ini_file($configFile, true);
+        $apiConfig = $config['api'] ?? [];
+
+        // Check if API is enabled
+        if (!($apiConfig['enabled'] ?? false)) {
+            return null;
+        }
+
+        // Validate API key
+        $configApiKey = $apiConfig['api_key'] ?? '';
+        if (empty($configApiKey) || $apiKey !== $configApiKey) {
+            return null;
+        }
+
+        // Return configured member ID
+        return (int) ($apiConfig['api_member_id'] ?? 1);
+    }
+
+    /**
+     * Switch to tenant database directly (without member lookup)
+     */
+    private function switchToTenantDatabase(string $tenant): bool {
+        try {
+            $configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
+            if (!file_exists($configFile)) {
+                return false;
+            }
+
+            $tenantConfig = parse_ini_file($configFile, true);
+            if (!$tenantConfig || empty($tenantConfig['database'])) {
+                return false;
+            }
+
+            $dbConfig = $tenantConfig['database'];
+            $type = $dbConfig['type'] ?? 'mysql';
+            $host = $dbConfig['host'] ?? 'localhost';
+            $port = $dbConfig['port'] ?? 3306;
+            $name = $dbConfig['name'] ?? $tenant;
+            $user = $dbConfig['user'] ?? 'root';
+            $pass = $dbConfig['pass'] ?? '';
+            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
+
+            if (!Bean::hasDatabase($tenant)) {
+                Bean::addDatabase($tenant, $dsn, $user, $pass);
+            }
+            Bean::selectDatabase($tenant);
+
+            $this->tenantSlug = $tenant;
+            return true;
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Failed to switch to tenant database: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * List active workstations/runners
+     * GET /api/workstations/@tenant
+     */
+    public function workstations($tenant = null) {
+        if (empty($tenant)) {
+            Flight::jsonError('Tenant required in URL', 400);
+            return;
+        }
+
+        $memberId = $this->authenticateTenantApiKey($tenant);
+        if (!$memberId) {
+            Flight::jsonError('Unauthorized - valid API key required', 401);
+            return;
+        }
+
+        if (!$this->switchToTenantDatabase($tenant)) {
+            Flight::jsonError('Failed to access tenant database', 500);
+            return;
+        }
+
+        // Query active runners
+        $runners = Bean::find('runners', 'is_active = 1 ORDER BY name ASC');
+
+        $workstations = [];
+        foreach ($runners as $runner) {
+            $workstations[] = [
+                'id' => (int) $runner->id,
+                'name' => $runner->name,
+                'host' => $runner->host,
+                'ssh_user' => $runner->ssh_user ?? 'claudeuser',
+                'ssh_port' => (int) ($runner->ssh_port ?? 22),
+                'execution_mode' => $runner->execution_mode ?? 'ssh_tmux',
+                'sshkey_id' => $runner->sshkey_id ? (int) $runner->sshkey_id : null,
+            ];
+        }
+
+        Flight::jsonSuccess(['workstations' => $workstations]);
+    }
+
+    /**
      * MCP JSON-RPC endpoint
      * POST /api/mcp/{tenant}
      *

@@ -1,7 +1,7 @@
 <?php
 /**
  * Health Controller
- * Provides health check endpoint for shard monitoring
+ * Provides health check endpoint for runner monitoring
  */
 
 namespace app;
@@ -25,7 +25,7 @@ class Health extends BaseControls\Control {
             $runningJobs = Bean::count('digestjobs', 'status = ?', ['running']);
             $queuedJobs = Bean::count('digestjobs', 'status = ?', ['queued']);
         } catch (\Exception $e) {
-            // Table might not exist on shard with SQLite
+            // Table might not exist on runner with SQLite
         }
 
         Flight::json([

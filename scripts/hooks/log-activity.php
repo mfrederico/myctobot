@@ -6,7 +6,7 @@
  * PostToolUse hook that logs file changes to the aidevjobs record.
  * This tracks which files were modified during a job for reporting.
  *
- * Environment Variables (set by local-aidev-full.php):
+ * Environment Variables (set by job-dispatcher.php):
  *   MYCTOBOT_APP_ROOT     - Path to myctobot application
  *   MYCTOBOT_WORKSPACE    - Tenant workspace name
  *   MYCTOBOT_JOB_ID       - Current aidevjobs.id

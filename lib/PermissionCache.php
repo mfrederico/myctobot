@@ -221,12 +221,12 @@ class PermissionCache {
             self::incrementStat('db_loads');
 
         } catch (\Exception $e) {
-            // Warning instead of error - this is expected on shards without DB access
-            // Shards use API key authentication, not session-based permissions
-            // TODO: If DB replication is added to shards, this can be removed
-            Flight::get('log')->warning('PermissionCache: No database connection (expected on shards)', [
+            // Warning instead of error - this is expected on runners without DB access
+            // Runners use API key authentication, not session-based permissions
+            // TODO: If DB replication is added to runners, this can be removed
+            Flight::get('log')->warning('PermissionCache: No database connection (expected on runners)', [
                 'error' => $e->getMessage(),
-                'note' => 'Shard endpoints use API key auth instead'
+                'note' => 'Runner endpoints use API key auth instead'
             ]);
             // Initialize empty cache to prevent repeated failures
             self::$localCache = [];

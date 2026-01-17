@@ -370,7 +370,10 @@ class Bootstrap {
         Flight::set('baseurl', $this->config['app']['baseurl'] ?? '/');
         Flight::set('debug', $this->config['app']['debug'] ?? false);
         Flight::set('build', $this->config['app']['build_mode'] ?? false);
-        
+
+        // AI Dev settings - use JobExecutorConfig for consistency
+        Flight::set('job_executor_url', \app\services\JobExecutorConfig::getUrl());
+
         // Load FlightMap extensions
         require_once __DIR__ . '/lib/FlightMap.php';
         

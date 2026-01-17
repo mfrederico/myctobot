@@ -5,7 +5,7 @@
  * Step-by-step wizard for creating AI agents with pre-configured profiles.
  * Designed for users who are new to AI development systems.
  */
-$hasShards = $wizardHasShards ?? false;
+$hasRunners = $wizardHasRunners ?? false;
 $useLocalRunner = $wizardUseLocalRunner ?? false;
 ?>
 
@@ -201,33 +201,33 @@ $useLocalRunner = $wizardUseLocalRunner ?? false;
                     <div class="row g-3">
                         <!-- Claude CLI (Recommended) -->
                         <div class="col-md-6">
-                            <div class="card provider-card h-100 <?= !$hasShards ? 'opacity-50' : '' ?>" data-provider="claude_cli" <?= !$hasShards ? 'data-disabled="true"' : '' ?>>
+                            <div class="card provider-card h-100 <?= !$hasRunners ? 'opacity-50' : '' ?>" data-provider="claude_cli" <?= !$hasRunners ? 'data-disabled="true"' : '' ?>>
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div class="d-flex align-items-center">
                                             <i class="bi bi-terminal text-primary fs-3 me-2"></i>
                                             <h5 class="mb-0">Claude Code CLI</h5>
                                         </div>
-                                        <?php if ($hasShards): ?>
+                                        <?php if ($hasRunners): ?>
                                         <span class="badge bg-success">Recommended</span>
                                         <?php else: ?>
-                                        <span class="badge bg-warning text-dark">No Shards</span>
+                                        <span class="badge bg-warning text-dark">No Runners</span>
                                         <?php endif; ?>
                                     </div>
                                     <p class="text-muted small mb-3">
                                         Anthropic's official CLI tool for coding. Best for complex multi-file changes,
-                                        supports MCP tools, and runs on remote workstation shards.
+                                        supports MCP tools, and runs on remote workstation runners.
                                     </p>
-                                    <?php if (!$hasShards): ?>
+                                    <?php if (!$hasRunners): ?>
                                     <div class="alert alert-warning small py-2 mb-2">
                                         <i class="bi bi-exclamation-triangle"></i>
-                                        Requires <a href="/admin/shards">workstation shards</a> to be configured.
+                                        Requires <a href="/admin/runners">workstation runners</a> to be configured.
                                     </div>
                                     <?php endif; ?>
                                     <ul class="list-unstyled small text-muted">
                                         <li><i class="bi bi-check-circle text-success me-1"></i> Most capable for code tasks</li>
                                         <li><i class="bi bi-check-circle text-success me-1"></i> Full MCP tool support</li>
-                                        <li><i class="bi bi-check-circle text-success me-1"></i> Runs on workstation shards</li>
+                                        <li><i class="bi bi-check-circle text-success me-1"></i> Runs on workstation runners</li>
                                     </ul>
                                 </div>
                             </div>
@@ -560,9 +560,9 @@ $useLocalRunner = $wizardUseLocalRunner ?? false;
 
 <script>
 (function() {
-    // Shard availability from server
-    const hasShards = <?= $hasShards ? 'true' : 'false' ?>;
-    const defaultProvider = hasShards ? 'claude_cli' : 'ollama';
+    // Runner availability from server
+    const hasRunners = <?= $hasRunners ? 'true' : 'false' ?>;
+    const defaultProvider = hasRunners ? 'claude_cli' : 'ollama';
 
     // Wizard state
     const wizardState = {
@@ -575,7 +575,7 @@ $useLocalRunner = $wizardUseLocalRunner ?? false;
         capabilities: ['code_implementation']
     };
 
-    // Profile configurations - use defaultProvider based on shard availability
+    // Profile configurations - use defaultProvider based on runner availability
     const profileConfigs = {
         developer: {
             name: 'Code Developer',
@@ -641,7 +641,7 @@ $useLocalRunner = $wizardUseLocalRunner ?? false;
             card.addEventListener('click', function() {
                 // Don't allow selecting disabled providers
                 if (this.dataset.disabled === 'true') {
-                    alert('This provider requires workstation shards to be configured. Please set up shards first or choose a different provider.');
+                    alert('This provider requires workstation runners to be configured. Please set up runners first or choose a different provider.');
                     return;
                 }
                 document.querySelectorAll('.provider-card').forEach(c => c.classList.remove('selected'));

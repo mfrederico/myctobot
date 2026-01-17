@@ -269,7 +269,7 @@ class StoryBuildOrchestrator {
 
         // Build the command
         $cmd = sprintf(
-            'php %s/scripts/local-aidev-full.php --issue=%s --tenant=%s --provider=%s --member=%d --print',
+            'php %s/scripts/job-dispatcher.php --issue=%s --tenant=%s --provider=%s --member=%d --print',
             escapeshellarg($this->baseDir),
             escapeshellarg($issueKey),
             escapeshellarg($this->tenant),

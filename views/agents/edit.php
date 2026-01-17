@@ -1498,7 +1498,7 @@ document.getElementById('addMcpModal').addEventListener('hidden.bs.modal', reset
 
 <script>
 // Available hooks configuration
-// Note: ${MYCTOBOT_APP_ROOT} is set by local-aidev-full.php at runtime
+// Note: ${MYCTOBOT_APP_ROOT} is set by job-dispatcher.php at runtime
 const availableHooks = {
     // Language validators (PreToolUse on Write|Edit)
     php: {

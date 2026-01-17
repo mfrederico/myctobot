@@ -201,7 +201,7 @@
                                                 <?php if (empty($anthropicKeys)): ?>
                                                     <a href="/settings/connections">Add API keys</a> to use remote execution with different models.
                                                 <?php else: ?>
-                                                    Choose Local Runner for no API charges, or select an API key for remote shard execution.
+                                                    Choose Local Runner for no API charges, or select an API key for remote runner execution.
                                                 <?php endif; ?>
                                             </div>
                                         </div>

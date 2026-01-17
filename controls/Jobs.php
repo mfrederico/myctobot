@@ -81,13 +81,13 @@ class Jobs extends BaseControls\Control {
      * Start a new AI Developer job
      */
     public function start($params = []) {
-        return $this->startsharded($params);
+        return $this->startrunner($params);
     }
 
     /**
-     * Start a new AI Developer job on a shard (Claude Code CLI)
+     * Start a new AI Developer job on a runner (Claude Code CLI)
      */
-    public function startsharded($params = []) {
+    public function startrunner($params = []) {
         if (!$this->requireLogin()) return;
 
         if (Flight::request()->method !== 'POST') {
@@ -115,11 +115,11 @@ class Jobs extends BaseControls\Control {
                 return;
             }
 
-            // Find an available shard
-            $shard = RunnerRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
+            // Find an available runner
+            $runner = RunnerRouter::findAvailableRunner($this->member->id, ['git', 'filesystem']);
 
-            if (!$shard) {
-                $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
+            if (!$runner) {
+                $this->json(['success' => false, 'error' => 'No available runners. Please try again later.']);
                 return;
             }
 
@@ -182,13 +182,13 @@ class Jobs extends BaseControls\Control {
             $jobManager = new AIDevJobManager($this->member->id);
             $job = $jobManager->getOrCreate($issueKey, $boardId, $repoId, $cloudId);
 
-            // Generate shard job ID
-            $shardJobId = md5(uniqid($issueKey . '_' . microtime(true), true));
+            // Generate runner job ID
+            $runnerJobId = md5(uniqid($issueKey . '_' . microtime(true), true));
 
-            // Build payload for shard
+            // Build payload for runner
             $payload = [
                 'anthropic_api_key' => $apiKey,
-                'job_uid' => $shardJobId,
+                'job_uid' => $runnerJobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
                     'summary' => $summary,
@@ -216,48 +216,48 @@ class Jobs extends BaseControls\Control {
                 'use_orchestrator' => $useOrchestrator
             ];
 
-            // Call shard endpoint
-            $shardPort = $shard['port'];
-            $shardProtocol = ($shardPort == 443 || !empty($shard['ssl'])) ? 'https' : 'http';
-            $shardUrl = "{$shardProtocol}://{$shard['host']}:{$shardPort}/analysis/shardaidev";
+            // Call runner endpoint
+            $runnerPort = $runner['port'];
+            $runnerProtocol = ($runnerPort == 443 || !empty($runner['ssl'])) ? 'https' : 'http';
+            $runnerUrl = "{$runnerProtocol}://{$runner['host']}:{$runnerPort}/analysis/runneraidev";
 
             $client = new \GuzzleHttp\Client([
                 'timeout' => 30,
                 'verify' => false
             ]);
 
-            $response = $client->post($shardUrl, [
+            $response = $client->post($runnerUrl, [
                 'json' => $payload
             ]);
 
             $result = json_decode($response->getBody()->getContents(), true);
 
             if ($response->getStatusCode() !== 202) {
-                throw new \Exception('Shard returned non-202 status: ' . $response->getStatusCode());
+                throw new \Exception('Runner returned non-202 status: ' . $response->getStatusCode());
             }
 
-            // Mark job as running with the shard job ID
-            $jobManager->startRun($issueKey, $shardJobId);
+            // Mark job as running with the runner job ID
+            $jobManager->startRun($issueKey, $runnerJobId);
 
-            $this->logger->info('AI Developer shard job started', [
+            $this->logger->info('AI Developer runner job started', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'shard_job_uid' => $shardJobId,
-                'shard_id' => $shard['id'],
+                'runner_job_uid' => $runnerJobId,
+                'runner_id' => $runner['id'],
                 'use_orchestrator' => $useOrchestrator
             ]);
 
             $this->json([
                 'success' => true,
                 'issue_key' => $issueKey,
-                'shard_job_uid' => $shardJobId,
-                'shard' => $shard['name'] ?? $shard['host'],
-                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on shard',
+                'runner_job_uid' => $runnerJobId,
+                'runner' => $runner['name'] ?? $runner['host'],
+                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on runner',
                 'use_orchestrator' => $useOrchestrator
             ]);
 
         } catch (\Exception $e) {
-            $this->logger->error('Failed to start shard job', ['error' => $e->getMessage()]);
+            $this->logger->error('Failed to start runner job', ['error' => $e->getMessage()]);
             $this->json(['success' => false, 'error' => $e->getMessage()]);
         }
     }
@@ -448,7 +448,7 @@ class Jobs extends BaseControls\Control {
                 return;
             }
 
-            $shardJobId = md5(uniqid($issueKey . '_retry_' . microtime(true), true));
+            $runnerJobId = md5(uniqid($issueKey . '_retry_' . microtime(true), true));
 
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
@@ -463,7 +463,7 @@ class Jobs extends BaseControls\Control {
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
-                escapeshellarg($shardJobId),
+                escapeshellarg($runnerJobId),
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
                 $job->prNumber ?? 0,

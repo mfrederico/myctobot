@@ -2,7 +2,7 @@
     <div class="row">
         <div class="col-md-8 offset-md-2">
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1><i class="bi bi-hdd-network"></i> Shard Analysis in Progress</h1>
+                <h1><i class="bi bi-hdd-network"></i> Runner Analysis in Progress</h1>
                 <a href="/analysis" class="btn btn-outline-secondary">
                     <i class="bi bi-arrow-left"></i> Back
                 </a>
@@ -20,12 +20,12 @@
                             <span class="visually-hidden">Loading...</span>
                         </div>
                         <div class="position-absolute top-50 start-50 translate-middle">
-                            <i class="bi bi-hdd-network h3 text-info mb-0" id="shardIcon"></i>
+                            <i class="bi bi-hdd-network h3 text-info mb-0" id="runnerIcon"></i>
                         </div>
                     </div>
 
                     <!-- Status -->
-                    <h4 id="statusMessage">Analysis running on shard...</h4>
+                    <h4 id="statusMessage">Analysis running on runner...</h4>
 
                     <!-- Status Badge -->
                     <p class="mb-3">
@@ -50,13 +50,13 @@
             <!-- What's Happening -->
             <div class="card mt-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-list-check"></i> Shard Processing Steps</span>
+                    <span><i class="bi bi-list-check"></i> Runner Processing Steps</span>
                     <span class="badge bg-secondary" id="elapsedTime">0:00</span>
                 </div>
                 <div class="card-body">
                     <div class="d-flex align-items-center mb-3" id="step-connecting">
                         <i class="bi bi-check-circle-fill text-success me-3 step-icon"></i>
-                        <span>Job queued on shard</span>
+                        <span>Job queued on runner</span>
                     </div>
                     <div class="d-flex align-items-center mb-3" id="step-fetching_jira">
                         <div class="spinner-border spinner-border-sm text-info me-3 step-icon" role="status">
@@ -82,16 +82,16 @@
             <!-- Error Message (hidden by default) -->
             <div class="alert alert-danger mt-4 d-none" id="errorAlert">
                 <i class="bi bi-exclamation-triangle"></i>
-                <strong>Shard Analysis Failed:</strong> <span id="errorMessage"></span>
+                <strong>Runner Analysis Failed:</strong> <span id="errorMessage"></span>
                 <div class="mt-2">
-                    <a href="/analysis/runshard/<?= $job['board_id'] ?? '' ?>" class="btn btn-outline-danger btn-sm">Try Again</a>
+                    <a href="/analysis/runrunner/<?= $job['board_id'] ?? '' ?>" class="btn btn-outline-danger btn-sm">Try Again</a>
                 </div>
             </div>
 
             <!-- Success Message (hidden by default) -->
             <div class="alert alert-success mt-4 d-none" id="successAlert">
                 <i class="bi bi-check-circle"></i>
-                <strong>Shard Analysis Complete!</strong> Redirecting to results...
+                <strong>Runner Analysis Complete!</strong> Redirecting to results...
             </div>
         </div>
     </div>
@@ -100,10 +100,10 @@
 <script>
 (function() {
     const jobId = '<?= htmlspecialchars($jobId) ?>';
-    const pollInterval = 3000; // 3 seconds (shard analysis is slower)
+    const pollInterval = 3000; // 3 seconds (runner analysis is slower)
     let pollTimer = null;
     let pollCount = 0;
-    const maxPolls = 400; // ~20 minutes max (matches shard timeout)
+    const maxPolls = 400; // ~20 minutes max (matches runner timeout)
 
     const phaseOrder = ['connecting', 'fetching_jira', 'analyzing', 'generating_report', 'sending'];
 
@@ -139,7 +139,7 @@
     function pollStatus() {
         pollCount++;
 
-        fetch('/analysis/shardstatus/' + encodeURIComponent(jobId), {
+        fetch('/analysis/runnerstatus/' + encodeURIComponent(jobId), {
             headers: {
                 'X-Requested-With': 'XMLHttpRequest'
             }
@@ -155,7 +155,7 @@
 
                 if (data.status === 'running') {
                     statusBadge.className = 'badge bg-primary';
-                    document.getElementById('statusMessage').textContent = 'Analysis running on shard...';
+                    document.getElementById('statusMessage').textContent = 'Analysis running on runner...';
                 }
 
                 // Update phase UI
@@ -186,8 +186,8 @@
                     statusBadge.className = 'badge bg-success';
                     document.getElementById('mainSpinner').className = '';
                     document.getElementById('mainSpinner').innerHTML = '<i class="bi bi-check-circle-fill text-success" style="font-size: 5rem;"></i>';
-                    const shardIcon = document.getElementById('shardIcon');
-                    if (shardIcon) shardIcon.remove();
+                    const runnerIcon = document.getElementById('runnerIcon');
+                    if (runnerIcon) runnerIcon.remove();
                     document.getElementById('statusMessage').textContent = 'Analysis complete!';
                     document.getElementById('successAlert').classList.remove('d-none');
 
@@ -212,8 +212,8 @@
                     statusBadge.className = 'badge bg-danger';
                     document.getElementById('mainSpinner').className = '';
                     document.getElementById('mainSpinner').innerHTML = '<i class="bi bi-x-circle-fill text-danger" style="font-size: 5rem;"></i>';
-                    const shardIcon = document.getElementById('shardIcon');
-                    if (shardIcon) shardIcon.remove();
+                    const runnerIcon = document.getElementById('runnerIcon');
+                    if (runnerIcon) runnerIcon.remove();
                     document.getElementById('statusMessage').textContent = 'Analysis failed';
                     document.getElementById('errorMessage').textContent = data.error || 'Unknown error';
                     document.getElementById('errorAlert').classList.remove('d-none');

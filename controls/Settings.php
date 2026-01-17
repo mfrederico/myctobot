@@ -153,15 +153,15 @@ class Settings extends BaseControls\Control {
         $tier = SubscriptionService::getTier($this->member->id);
         $tierInfo = SubscriptionService::getTierInfo($tier);
 
-        // Get agent and shard counts (workspace-level - shared by all members)
+        // Get agent and runner counts (workspace-level - shared by all members)
         $agentCount = Bean::count('aiagents', '1');
-        $shardCount = 0;
+        $runnerCount = 0;
 
-        // Shards are admin-level (not per-member)
+        // Runners are admin-level (not per-member)
         if ($this->member->level <= 50) {
             require_once __DIR__ . '/../services/RunnerService.php';
-            $allShards = \app\services\RunnerService::getAllRunners(false);
-            $shardCount = count($allShards);
+            $allRunners = \app\services\RunnerService::getAllRunners(false);
+            $runnerCount = count($allRunners);
         }
 
         // Check if we should show onboarding wizard (all tiers)
@@ -187,7 +187,7 @@ class Settings extends BaseControls\Control {
             'stats' => $stats,
             'tierInfo' => $tierInfo,
             'agentCount' => $agentCount,
-            'shardCount' => $shardCount,
+            'runnerCount' => $runnerCount,
             'showOnboarding' => $showOnboarding,
             'gitConnected' => $gitConnected,
             'jiraConnected' => $jiraConnected,

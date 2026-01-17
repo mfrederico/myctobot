@@ -4,8 +4,8 @@
             <i class="bi bi-robot"></i> AI Agent Profiles
         </h1>
         <div>
-            <a href="/admin/shards" class="btn btn-outline-secondary me-2">
-                <i class="bi bi-arrow-left"></i> Back to Shards
+            <a href="/admin/runners" class="btn btn-outline-secondary me-2">
+                <i class="bi bi-arrow-left"></i> Back to Runners
             </a>
             <button type="button" class="btn btn-success me-2" onclick="openAgentSetupWizard()">
                 <i class="bi bi-magic"></i> Setup Wizard
@@ -19,7 +19,7 @@
     <div class="alert alert-info">
         <i class="bi bi-info-circle"></i>
         <strong>Agent Profiles</strong> define <em>how</em> AI Developer jobs run: which runner to use, MCP servers, and hooks.
-        <strong><a href="/admin/shards">Workstation Shards</a></strong> define <em>where</em> jobs run (remote servers with Claude installed).
+        <strong><a href="/admin/runners">Workstation Runners</a></strong> define <em>where</em> jobs run (remote servers with Claude installed).
         Assign agents to repositories on the <a href="/github/repos">Repos page</a>.
     </div>
 
@@ -276,8 +276,8 @@ window.addEventListener('hashchange', highlightAgentFromHash);
 </style>
 
 <?php
-// Pass shard availability to wizard
-$wizardHasShards = $has_shards ?? false;
+// Pass runner availability to wizard
+$wizardHasRunners = $has_runners ?? false;
 $wizardUseLocalRunner = $use_local_runner ?? false;
 include __DIR__ . '/../partials/agentsetupwizard.php';
 ?>

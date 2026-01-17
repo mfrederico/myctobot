@@ -9,7 +9,7 @@
  * Sets up the environment similar to the shard (GITHUB_TOKEN, JIRA_*, etc.)
  * and builds the same comprehensive prompt with full Jira ticket content.
  *
- * Usage: php scripts/local-aidev-full.php --issue=SSI-1883 [--orchestrator] [--attach]
+ * Usage: php scripts/job-dispatcher.php --issue=SSI-1883 [--orchestrator] [--attach]
  */
 
 error_reporting(E_ALL);
@@ -36,7 +36,7 @@ $options = getopt('', [
 
 if (isset($options['help']) || empty($options['issue'])) {
     echo "Local AI Developer Runner - Uses YOUR Claude subscription\n\n";
-    echo "Usage: php scripts/local-aidev-full.php --issue=SSI-1883 [options]\n\n";
+    echo "Usage: php scripts/job-dispatcher.php --issue=SSI-1883 [options]\n\n";
     echo "Options:\n";
     echo "  --issue         Issue key (e.g., SSI-1883) [required]\n";
     echo "  --member        Member ID (default: 3)\n";
@@ -403,7 +403,8 @@ if ($agentBean && $agentBean->id) {
             'provider' => $agentBean->provider ?: 'claude_cli',
             'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
             'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
-            'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true)
+            'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true),
+            'runners_id' => $agentBean->runners_id ?? null
         ];
         $providerLabel = $agentConfig['provider'];
         if (!empty($agentConfig['provider_config']['use_ollama'])) {
@@ -423,9 +424,11 @@ if (!$agentConfig) {
             'provider' => $defaultAgent->provider ?: 'claude_cli',
             'provider_config' => json_decode($defaultAgent->provider_config ?: '{}', true),
             'mcp_servers' => json_decode($defaultAgent->mcp_servers ?: '[]', true),
-            'hooks_config' => json_decode($defaultAgent->hooks_config ?: '{}', true)
+            'hooks_config' => json_decode($defaultAgent->hooks_config ?: '{}', true),
+            'runners_id' => $defaultAgent->runners_id ?? null
         ];
         echo "  Agent: {$agentConfig['name']} (default)\n";
+        $agentBean = $defaultAgent;  // For later use
     } else {
         echo "  Agent: None (using built-in defaults)\n";
     }
@@ -520,7 +523,7 @@ if (is_dir($repoDir)) {
         '# MyCTOBot generated files',
         '.mcp.json',
         '.claude/',
-        'finish_job.sh',
+        'send-checkpoint.sh',
         'ssh-claude.sh',
         ''
     ];
@@ -1069,19 +1072,19 @@ export MYCTOBOT_WEBHOOK_URL="{$webhookUrl}"
 export MYCTOBOT_API_KEY="{$apiKey}"
 HOOK_ENV;
 
-// Copy finish_job.sh to work directory (saves checkpoint, keeps session alive)
-$finishJobSrc = "{$baseDir}/scripts/finish_job.sh";
-$finishJobDst = "{$workDir}/finish_job.sh";
+// Copy send-checkpoint.sh to work directory (saves checkpoint, keeps session alive)
+$finishJobSrc = "{$baseDir}/scripts/send-checkpoint.sh";
+$finishJobDst = "{$workDir}/send-checkpoint.sh";
 if (file_exists($finishJobSrc)) {
     copy($finishJobSrc, $finishJobDst);
     chmod($finishJobDst, 0755);
-    echo "  Copied finish_job.sh to work directory\n";
+    echo "  Copied send-checkpoint.sh to work directory\n";
 
     // Also copy to repo directory since Claude runs from there (after cd repo)
     if (is_dir($repoDir)) {
-        copy($finishJobSrc, "{$repoDir}/finish_job.sh");
-        chmod("{$repoDir}/finish_job.sh", 0755);
-        echo "  Copied finish_job.sh to repo directory\n";
+        copy($finishJobSrc, "{$repoDir}/send-checkpoint.sh");
+        chmod("{$repoDir}/send-checkpoint.sh", 0755);
+        echo "  Copied send-checkpoint.sh to repo directory\n";
     }
 }
 
@@ -1224,8 +1227,8 @@ mkdir -p "{$workDir}/attachments" 2>/dev/null
 
 # Copy support files to repo directory (Claude runs from there after cd repo)
 cp -f "{$workDir}/.mcp.json" "{$workDir}/repo/.mcp.json" 2>/dev/null || true
-cp -f "{$workDir}/finish_job.sh" "{$workDir}/repo/finish_job.sh" 2>/dev/null || true
-chmod +x "{$workDir}/repo/finish_job.sh" 2>/dev/null || true
+cp -f "{$workDir}/send-checkpoint.sh" "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
+chmod +x "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
 
 cd {$workDir}
 
@@ -1733,6 +1736,167 @@ if ($dryRun) {
     }
     echo "\nTo run for real, remove the --dry-run flag.\n";
     exit(0);
+}
+
+// ============================================
+// Job-Executor Integration
+// ============================================
+// When agent has a workstation (runner) configured, use job-executor
+// This runs the job ON the remote workstation instead of SSHing from local
+$useJobExecutor = false;
+$jobExecutorConfig = \app\services\JobExecutorConfig::getConfig($tenantSlug);
+$jobExecutorUrl = $jobExecutorConfig['url'];
+$runnersId = null;
+
+// Check if agent has a runner configured
+if ($agentConfig && !empty($agentConfig['runners_id'])) {
+    $runnersId = (int) $agentConfig['runners_id'];
+    $runnerBean = Bean::load('runners', $runnersId);
+    if ($runnerBean && $runnerBean->id && $runnerBean->is_active) {
+        $useJobExecutor = true;
+        echo "Agent has workstation '{$runnerBean->name}' - using job-executor\n";
+    }
+}
+
+// Also check if workstation config was passed via CLI
+if ($workstationConfig && !$useJobExecutor) {
+    // CLI workstation passed but no runners_id - find or skip job-executor
+    // For CLI mode, we still use the SSH wrapper approach for now
+    echo "Workstation config from CLI - using SSH wrapper mode\n";
+}
+
+if ($useJobExecutor) {
+    echo "\n";
+    echo "============================================\n";
+    echo "Submitting to Job-Executor\n";
+    echo "============================================\n";
+
+    // Generate job_uid if not provided
+    if (empty($jobId)) {
+        $jobId = 'aoe-' . $tenantSlug . '-' . bin2hex(random_bytes(8));
+    }
+
+    // Create/update aidevjobs record
+    $existingJob = Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
+    if ($existingJob) {
+        $job = $existingJob;
+        echo "  Using existing job record: {$jobId}\n";
+    } else {
+        $job = Bean::dispense('aidevjobs');
+        $job->job_uid = $jobId;
+        $job->created_at = date('Y-m-d H:i:s');
+        echo "  Created job record: {$jobId}\n";
+    }
+
+    $job->member_id = $memberId;
+    $job->boards_id = null;  // Could be linked if we have board context
+    $job->repoconnections_id = $repoBean->id ?? null;
+    $job->runners_id = $runnersId;
+    $job->aiagents_id = $agentConfig['id'] ?? null;
+    $job->issue_key = $issueKey;
+    $job->status = 'pending';
+    $job->phase = 'submitting';
+    $job->prompt = $prompt;
+    $job->branch_name = $defaultBranch;
+    $job->updated_at = date('Y-m-d H:i:s');
+    Bean::store($job);
+
+    // Store prepared files content in job for job-executor to retrieve
+    // (The validate endpoint will return these)
+    // Note: We DON'T pass env_script because it has hardcoded local paths
+    // Job-executor generates its own runner.sh with correct remote paths
+    $job->claude_md = file_get_contents("{$workDir}/CLAUDE.md");
+    $job->mcp_config_json = file_get_contents("{$workDir}/.mcp.json");
+    // $job->env_script is intentionally not set - let job-executor generate runner.sh
+    Bean::store($job);
+
+    // Submit to job-executor (PING)
+    $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
+    // Use main domain for callback since tenant is passed in body
+    // (subdomain URLs may redirect which breaks the callback)
+    $callbackUrl = 'https://myctobot.ai/api/jobexecutor';
+
+    echo "  Job-Executor URL: {$submitUrl}\n";
+    echo "  Callback URL: {$callbackUrl}\n";
+
+    $ch = curl_init($submitUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode([
+            'tenant' => $tenantSlug,
+            'job_uid' => $jobId,
+            'callback_url' => $callbackUrl,
+        ]),
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_CONNECTTIMEOUT => 10,
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlError) {
+        echo "\n";
+        echo "ERROR: Failed to connect to job-executor: {$curlError}\n";
+        echo "Falling back to local SSH wrapper mode...\n\n";
+        $useJobExecutor = false;
+        // Update job status
+        $job->status = 'failed';
+        $job->phase = 'connection_error';
+        $job->error_message = $curlError;
+        Bean::store($job);
+    } elseif ($httpCode !== 200) {
+        $result = json_decode($response, true);
+        $errorMsg = $result['error'] ?? "HTTP {$httpCode}";
+        echo "\n";
+        echo "ERROR: Job-executor returned error: {$errorMsg}\n";
+        echo "Falling back to local SSH wrapper mode...\n\n";
+        $useJobExecutor = false;
+        // Update job status
+        $job->status = 'failed';
+        $job->phase = 'submit_error';
+        $job->error_message = $errorMsg;
+        Bean::store($job);
+    } else {
+        $result = json_decode($response, true);
+        echo "\n";
+        echo "Job submitted successfully!\n";
+        echo "  Status: " . ($result['status'] ?? 'submitted') . "\n";
+        echo "  Workstation: " . ($result['workstation'] ?? 'unknown') . "\n";
+
+        // Update AOE session
+        $aoeSession->status = AoeStatus::Running;
+        $aoeSession->metadata = array_merge($aoeSession->metadata ?? [], [
+            'job_uid' => $jobId,
+            'job_executor' => true,
+            'workstation' => $result['workstation'] ?? null,
+        ]);
+        $aoeStorage->save($aoeSession);
+
+        echo "\n";
+        echo "============================================\n";
+        echo "Job is running on remote workstation\n";
+        echo "============================================\n";
+        echo "\n";
+        echo "Job UID: {$jobId}\n";
+        echo "AOE Session: {$aoeSession->id} (short: {$aoeSession->getShortId()})\n";
+        echo "\n";
+        echo "Monitor commands:\n";
+        echo "  Status:   bin/aoe --tenant={$tenantSlug} session:status {$aoeSession->getShortId()}\n";
+        echo "  Jobs:     bin/aoe --tenant={$tenantSlug} job:list\n";
+        echo "\n";
+        echo "The job will run on the remote workstation.\n";
+        echo "Use the MyCTOBot dashboard to monitor progress.\n";
+        echo "============================================\n";
+
+        exit(0);
+    }
 }
 
 // ============================================

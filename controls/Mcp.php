@@ -437,8 +437,11 @@ class Mcp extends Control {
         }
 
         // Append agent signature to prevent webhook echo and identify the agent
+        // Only add if not already present (Claude may have added it from context)
         $agentName = $this->getAgentName();
-        $message .= "\n\n[agent:{$agentName}]";
+        if (!preg_match('/\[agent:[^\]]+\]/', $message)) {
+            $message .= "\n\n[agent:{$agentName}]";
+        }
 
         try {
             $client = $this->getJiraClient();

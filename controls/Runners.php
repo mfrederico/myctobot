@@ -1,7 +1,7 @@
 <?php
 /**
- * Shards Controller
- * Handles shard management and job execution on shards
+ * Runners Controller
+ * Handles runner management and job execution on runners
  */
 
 namespace app;
@@ -16,35 +16,35 @@ use \app\services\RunnerRouter;
 require_once __DIR__ . '/../services/RunnerService.php';
 require_once __DIR__ . '/../services/RunnerRouter.php';
 
-class Shards extends BaseControls\Control {
+class Runners extends BaseControls\Control {
 
     /**
-     * List available shards for the current user
+     * List available runners for the current user
      */
     public function index($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Get shards available to this member
-        $memberShards = RunnerService::getMemberRunners($this->member->id);
+        // Get runners available to this member
+        $memberRunners = RunnerService::getMemberRunners($this->member->id);
 
-        if (empty($memberShards)) {
-            $memberShards = RunnerService::getDefaultRunners();
+        if (empty($memberRunners)) {
+            $memberRunners = RunnerService::getDefaultRunners();
         }
 
         // Add health status
-        foreach ($memberShards as &$shard) {
-            $shard['stats'] = RunnerService::getRunnerStats($shard['id']);
-            $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
+        foreach ($memberRunners as &$runner) {
+            $runner['stats'] = RunnerService::getRunnerStats($runner['id']);
+            $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
         }
 
         $this->json([
             'success' => true,
-            'shards' => $memberShards
+            'runners' => $memberRunners
         ]);
     }
 
     /**
-     * Callback endpoint for shard job completion
+     * Callback endpoint for runner job completion
      */
     public function callback($params = []) {
         $data = json_decode(file_get_contents('php://input'), true);
@@ -59,17 +59,17 @@ class Shards extends BaseControls\Control {
 
         if ($status === 'completed') {
             RunnerRouter::updateJobResult($jobId, $data['result'] ?? []);
-            $this->logger->info('Shard job completed', ['job_uid' => $jobId]);
+            $this->logger->info('Runner job completed', ['job_uid' => $jobId]);
         } elseif ($status === 'failed') {
             RunnerRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
-            $this->logger->error('Shard job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
+            $this->logger->error('Runner job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
         }
 
         $this->json(['success' => true]);
     }
 
     /**
-     * Get shard job status
+     * Get runner job status
      */
     public function jobstatus($params = []) {
         if (!$this->requireLogin()) return;
@@ -100,7 +100,7 @@ class Shards extends BaseControls\Control {
     }
 
     /**
-     * Get shard job output
+     * Get runner job output
      */
     public function joboutput($params = []) {
         if (!$this->requireLogin()) return;

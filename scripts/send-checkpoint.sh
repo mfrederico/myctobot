@@ -1,15 +1,15 @@
 #!/bin/bash
 #
-# finish_job.sh - Signal job completion to MyCTOBot orchestrator
+# send-checkpoint.sh - Signal checkpoint to MyCTOBot (session stays alive)
 #
-# Called by AI Dev runners (Claude or Ollama) when work is complete.
+# Called by AI Dev runners (Claude) after creating a PR.
 # This script:
 #   1. Writes result.json for local backup
-#   2. POSTs to the webhook to update the database
-#   3. Kills the tmux session to terminate cleanly
+#   2. POSTs to the webhook with status="checkpoint"
+#   3. Session stays alive to receive comments/updates
 #
 # Usage:
-#   ./finish_job.sh '{"success": true, "pr_url": "...", ...}'
+#   ./send-checkpoint.sh '{"success": true, "pr_url": "...", ...}'
 #
 # Required environment variables:
 #   MYCTOBOT_JOB_ID      - The job ID
@@ -25,7 +25,7 @@ RESULT_JSON="$1"
 
 if [[ -z "$RESULT_JSON" ]]; then
     echo "Error: Result JSON required as first argument"
-    echo "Usage: ./finish_job.sh '{\"success\": true, \"pr_url\": \"...\"}'"
+    echo "Usage: ./send-checkpoint.sh '{\"success\": true, \"pr_url\": \"...\"}'"
     exit 1
 fi
 
@@ -55,7 +55,7 @@ PAYLOAD=$(cat <<EOF
 EOF
 )
 
-echo "Posting completion to webhook..."
+echo "Posting checkpoint to webhook..."
 echo "  Job ID: $MYCTOBOT_JOB_ID"
 echo "  Webhook: $WEBHOOK_URL"
 

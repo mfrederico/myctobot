@@ -5,7 +5,7 @@
  * This helper class provides multi-tenant database connectivity for hooks
  * that need to update aidevjobs records or log activity.
  *
- * Environment Variables (set by local-aidev-full.php):
+ * Environment Variables (set by job-dispatcher.php):
  *   MYCTOBOT_APP_ROOT     - Path to myctobot application (for vendor, config)
  *   MYCTOBOT_WORKSPACE    - Tenant workspace name (e.g., "clicksimple-inc")
  *   MYCTOBOT_JOB_ID       - Current aidevjobs.id being worked on

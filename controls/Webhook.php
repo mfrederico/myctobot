@@ -478,7 +478,7 @@ class Webhook extends BaseControls\Control {
 
         $this->logger->info('Clarification response detected', [
             'issue_key' => $issueKey,
-            'shard_job_uid' => $job->currentShardJobId,
+            'runner_job_uid' => $job->currentRunnerJobId,
             'comment_id' => $commentId
         ]);
 
@@ -488,7 +488,7 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Trigger a new AI Developer job from webhook
-     * AIDevJobService handles both local runner and shard execution
+     * AIDevJobService handles both local runner and remote runner execution
      *
      * @param string $issueKey Jira issue key (e.g., SSI-1234)
      * @param string $cloudId Atlassian cloud ID
@@ -514,7 +514,7 @@ class Webhook extends BaseControls\Control {
         // Get tenant slug for multi-tenancy support
         $tenant = Flight::get('tenant.slug');
 
-        // AIDevJobService handles local vs shard execution based on config
+        // AIDevJobService handles local vs remote runner execution based on config
         // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId, tenant)
         $jobService = new AIDevJobService();
         $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
@@ -552,7 +552,7 @@ class Webhook extends BaseControls\Control {
                 'queued' => $isQueued,
                 'position' => $result['position'] ?? null,
                 'local' => $result['local'] ?? false,
-                'shard' => $result['shard'] ?? null
+                'runner' => $result['runner'] ?? null
             ]);
 
             // Log successful job trigger or queue
@@ -571,7 +571,7 @@ class Webhook extends BaseControls\Control {
                         'queued' => $isQueued,
                         'position' => $result['position'] ?? null,
                         'local' => $result['local'] ?? false,
-                        'shard' => $result['shard'] ?? null
+                        'runner' => $result['runner'] ?? null
                     ]
                 );
             }
@@ -648,13 +648,13 @@ class Webhook extends BaseControls\Control {
         // Get work directory and signal the session to complete
         $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
         $workDir = $tmux->getWorkDir();
-        $claudeRunning = $tmux->isClaudeRunning();
+        $sessionExists = $tmux->exists();
 
         $this->logger->info('closeLocalTmuxSession session check', [
             'issue_key' => $issueKey,
             'work_dir' => $workDir,
             'work_dir_exists' => is_dir($workDir),
-            'claude_running' => $claudeRunning,
+            'session_exists' => $sessionExists,
             'session_name' => $tmux->getSessionName()
         ]);
 
@@ -671,10 +671,10 @@ class Webhook extends BaseControls\Control {
                 'done_file' => $doneFile
             ]);
 
-            // If Claude is still running, also send /exit
-            if ($tmux->isClaudeRunning()) {
+            // If session exists, send /exit through SSH to remote Claude
+            if ($sessionExists) {
                 $tmux->sendExit();
-                $this->logger->info('Sent /exit to Claude', ['issue_key' => $issueKey]);
+                $this->logger->info('Sent /exit to Claude via tmux', ['issue_key' => $issueKey]);
 
                 // Remove ai-dev and myctobot-working labels only when /exit is sent
                 if ($cloudId) {
@@ -856,28 +856,15 @@ class Webhook extends BaseControls\Control {
 
         // Check if the new status matches the configured complete status (case-insensitive)
         if (strcasecmp($newStatus, $completeStatus) === 0) {
-            // Don't kill if there's an active job running for this issue
-            $activeJob = Bean::findOne('aidevjobs',
-                'issue_key = ? AND status IN (?, ?) ORDER BY created_at DESC',
-                [$issueKey, 'running', 'queued']
-            );
-            if ($activeJob) {
-                $this->logger->info('Complete status reached but job still active, skipping kill', [
-                    'issue_key' => $issueKey,
-                    'member_id' => $memberId,
-                    'status' => $newStatus,
-                    'job_status' => $activeJob->status
-                ]);
-                return;
-            }
-
             $this->logger->info('Ticket transitioned to complete status, closing AI Developer session', [
                 'issue_key' => $issueKey,
                 'member_id' => $memberId,
                 'status' => $newStatus,
                 'configured_complete_status' => $completeStatus
             ]);
-            $this->closeLocalTmuxSession($issueKey, $memberId, $cloudId);
+            // User moving ticket to complete status is the signal to close session
+            // /exit will be sent to Claude, which gracefully shuts down
+            $this->closeLocalTmuxSession($issueKey, $memberId, $cloudId, 'complete');
         }
     }
 
@@ -1000,11 +987,12 @@ class Webhook extends BaseControls\Control {
             'member_id' => $memberId,
             'tenant' => $tenant,
             'has_tmux_session' => $tmux->exists(),
-            'claude_running' => $tmux->isClaudeRunning()
         ]);
 
-        // Only process if there's a local session with Claude running
-        if (!$tmux->exists() || !$tmux->isClaudeRunning()) {
+        // Only process if there's a local tmux session
+        // Note: Claude may run remotely via SSH (job-executor architecture),
+        // so we just check if the session exists to send-keys through SSH
+        if (!$tmux->exists()) {
             return;
         }
 
@@ -2131,10 +2119,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Handle shard digest callback
+     * Handle runner digest callback
      * Endpoint: POST /webhook/digest
      *
-     * Called by shard when digest analysis is complete
+     * Called by runner when digest analysis is complete
      * Body: { job_uid, status, result: { analysis, markdown_report }, error }
      */
     public function digest() {
@@ -2300,7 +2288,7 @@ class Webhook extends BaseControls\Control {
         $analysisId = UserDatabaseService::storeAnalysis($boardId, 'digest', [
             'success' => true,
             'analysis' => $analysis,
-            'shard_job_uid' => $digestJob->job_uid
+            'runner_job_uid' => $digestJob->job_uid
         ], $markdown);
 
         // Update last_digest_at for the board
@@ -2320,10 +2308,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Handle shard AI Developer callback
+     * Handle runner AI Developer callback
      * Endpoint: POST /webhook/aidev
      *
-     * Called by shard when AI Developer work is complete
+     * Called by runner when AI Developer work is complete
      * Body: { job_uid, status, result: { success, pr_url, pr_number, ... }, error }
      */
     public function aidev() {
@@ -2543,10 +2531,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Find AI Dev job by shard job ID across all members
+     * Find AI Dev job by runner job ID across all members
      * Searches JSON status files first (primary source), then database as fallback
      */
-    private function findAIDevJob(string $shardJobId): ?array {
+    private function findAIDevJob(string $runnerJobId): ?array {
         // First, search JSON status files (primary source of truth for active jobs)
         $statusDir = __DIR__ . '/../storage/aidev_status';
         if (is_dir($statusDir)) {
@@ -2558,10 +2546,10 @@ class Webhook extends BaseControls\Control {
                     $content = @file_get_contents($file);
                     if ($content) {
                         $data = json_decode($content, true);
-                        if ($data && ($data['job_uid'] ?? '') === $shardJobId) {
+                        if ($data && ($data['job_uid'] ?? '') === $runnerJobId) {
                             return [
                                 'member_id' => $memberId,
-                                'job_uid' => $shardJobId,
+                                'job_uid' => $runnerJobId,
                                 'issue_key' => $data['issue_key'] ?? '',
                                 'cloud_uid' => $data['cloud_uid'] ?? '',
                                 'board_id' => (int) ($data['board_id'] ?? 0),
@@ -2574,13 +2562,13 @@ class Webhook extends BaseControls\Control {
             }
         }
 
-        // Fallback: search database for jobs with matching current_shard_job_uid
-        $job = Bean::findOne('aidevjobs', 'current_shard_job_uid = ?', [$shardJobId]);
+        // Fallback: search database for jobs with matching current_runner_job_uid
+        $job = Bean::findOne('aidevjobs', 'current_runner_job_uid = ?', [$runnerJobId]);
 
         if ($job) {
             return [
                 'member_id' => (int) $job->member_id,
-                'job_uid' => $shardJobId,
+                'job_uid' => $runnerJobId,
                 'issue_key' => $job->issue_key,
                 'cloud_uid' => $job->cloud_uid,
                 'board_id' => (int) $job->boards_id,

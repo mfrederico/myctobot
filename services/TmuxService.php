@@ -117,6 +117,33 @@ class TmuxService {
     }
 
     /**
+     * Find tmux session by pattern matching using aoe-php's TmuxService
+     *
+     * Job-executor creates sessions with pattern: aoe-{tenant}-{issue}-{shortUid}
+     * Uses aoe-php's listSessions() which returns all aoe-{tenant}-* sessions.
+     *
+     * @param string $issueKey Issue key to search for
+     * @return string|null Session name if found
+     */
+    private function findTmuxSessionByPattern(string $issueKey): ?string {
+        $sanitizedIssue = AoeTmux::sanitize($issueKey);
+
+        // Use aoe-php's TmuxService to list tenant sessions
+        $aoeTmux = new AoeTmux($this->tenantSlug);
+        $sessions = $aoeTmux->listSessions();
+
+        // Sessions are keyed by sessionId, value has 'name' (full tmux name)
+        foreach ($sessions as $sessionId => $info) {
+            // Check if session ID starts with the issue key
+            if (str_starts_with($sessionId, $sanitizedIssue . '-')) {
+                return $info['name'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Get the session name (aidev session, not local runner)
      */
     public function getSessionName(): string {
@@ -137,16 +164,15 @@ class TmuxService {
         if ($this->activeSessionName) {
             return $this->activeSessionName;
         }
-        // Check local runner first (more common for dev)
-        if (TmuxManager::exists($this->localSessionName)) {
-            $this->activeSessionName = $this->localSessionName;
+
+        // Search for session by pattern: aoe-{tenant}-{issue}-*
+        // This finds both aoe-php sessions and job-executor sessions
+        $found = $this->findTmuxSessionByPattern($this->issueKey);
+        if ($found) {
+            $this->activeSessionName = $found;
             return $this->activeSessionName;
         }
-        // Then check aidev session
-        if (TmuxManager::exists($this->sessionName)) {
-            $this->activeSessionName = $this->sessionName;
-            return $this->activeSessionName;
-        }
+
         return null;
     }
 
@@ -188,16 +214,12 @@ class TmuxService {
      * @return bool Success
      */
     public function sendExit(): bool {
-        if (!$this->isClaudeRunning()) {
-            return false;
-        }
-
         $activeSession = $this->getActiveSessionName();
         if (!$activeSession) {
             return false;
         }
 
-        // Send /exit command to Claude
+        // Send /exit command to Claude (goes through SSH for remote sessions)
         TmuxManager::sendKeys($activeSession, '/exit');
         TmuxManager::sendKeys($activeSession, 'Enter');
 
@@ -277,7 +299,7 @@ class TmuxService {
         $tenantFlagStr = $tenantFlag ? sprintf('--tenant=%s', escapeshellarg($tenantFlag)) : '';
         $providerFlag = $provider ? sprintf('--provider=%s', escapeshellarg($provider)) : '';
 
-        // Pass AOE session ID so local-aidev-full.php uses the same session
+        // Pass AOE session ID so job-dispatcher.php uses the same session
         $aoeSessionFlag = $this->aoeSession ? sprintf('--aoe-session=%s', escapeshellarg($this->aoeSession->id)) : '';
 
         // Pass workstation config if provided (runs Claude on remote workstation via SSH)
@@ -286,7 +308,7 @@ class TmuxService {
             $workstationFlag = sprintf('--workstation=%s', escapeshellarg(json_encode($workstation)));
         }
 
-        // Log file for capturing errors from local-aidev-full.php
+        // Log file for capturing errors from job-dispatcher.php
         $logFile = $this->workDir . '/spawn.log';
 
         $command = sprintf(

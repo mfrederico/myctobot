@@ -2,7 +2,7 @@
 /**
  * AI Developer Job Service
  *
- * Handles triggering and managing AI Developer jobs on shards.
+ * Handles triggering and managing AI Developer jobs on runners.
  * Used by both Enterprise UI and Webhook handlers.
  */
 
@@ -40,7 +40,7 @@ class AIDevJobService {
     public const PROJECT_TYPE_ZOHO = 'zoho';
 
     /**
-     * Trigger an AI Developer job on a shard
+     * Trigger an AI Developer job on a runner
      *
      * @param int $memberId Member ID
      * @param string $issueKey Issue key (e.g., "SSI-1871" for Jira, "owner/repo#123" for GitHub)
@@ -226,18 +226,18 @@ class AIDevJobService {
                 'model' => $model
             ]);
 
-            // === Shard execution path below ===
+            // === Runner execution path below ===
 
-            // Check shard concurrency limits
-            $concurrencyCheck = $this->checkShardConcurrency($memberId);
+            // Check runner concurrency limits
+            $concurrencyCheck = $this->checkRunnerConcurrency($memberId);
             if (!$concurrencyCheck['available']) {
                 return ['success' => false, 'error' => $concurrencyCheck['error']];
             }
 
-            // Find an available shard
-            $shard = RunnerRouter::findAvailableRunner($memberId, ['git', 'filesystem']);
-            if (!$shard) {
-                return ['success' => false, 'error' => 'No available shards. Please try again later.'];
+            // Find an available runner
+            $runner = RunnerRouter::findAvailableRunner($memberId, ['git', 'filesystem']);
+            if (!$runner) {
+                return ['success' => false, 'error' => 'No available runners. Please try again later.'];
             }
 
             // Get repository details
@@ -298,7 +298,7 @@ class AIDevJobService {
             // Get Shopify settings (uses repo-linked store if available)
             $shopifySettings = $this->getShopifySettingsForPayload($memberId, $repoId);
 
-            // Build payload for shard
+            // Build payload for runner
             $payload = [
                 'anthropic_api_key' => $apiKey,
                 'anthropic_model' => $model,
@@ -338,38 +338,38 @@ class AIDevJobService {
                 'use_orchestrator' => $useOrchestrator
             ];
 
-            // Call shard endpoint
-            $shardPort = $shard['port'];
-            $shardProtocol = ($shardPort == 443 || !empty($shard['ssl'])) ? 'https' : 'http';
-            $shardUrl = "{$shardProtocol}://{$shard['host']}:{$shardPort}/analysis/shardaidev";
+            // Call runner endpoint
+            $runnerPort = $runner['port'];
+            $runnerProtocol = ($runnerPort == 443 || !empty($runner['ssl'])) ? 'https' : 'http';
+            $runnerUrl = "{$runnerProtocol}://{$runner['host']}:{$runnerPort}/analysis/runneraidev";
 
             $client = new \GuzzleHttp\Client([
                 'timeout' => 30,
                 'verify' => false
             ]);
 
-            $response = $client->post($shardUrl, [
+            $response = $client->post($runnerUrl, [
                 'json' => $payload
             ]);
 
             if ($response->getStatusCode() !== 202) {
-                throw new \Exception('Shard returned non-202 status: ' . $response->getStatusCode());
+                throw new \Exception('Runner returned non-202 status: ' . $response->getStatusCode());
             }
 
             // Update job status to running
             AIDevStatusService::updateStatus(
                 $memberId,
                 $jobId,
-                'Running on shard',
+                'Running on runner',
                 5,
                 AIDevStatusService::STATUS_RUNNING
             );
 
-            $this->logger->info('AI Developer shard job started', [
+            $this->logger->info('AI Developer runner job started', [
                 'member_id' => $memberId,
                 'job_uid' => $jobId,
-                'shard_id' => $shard['id'],
-                'shard_name' => $shard['name'] ?? $shard['host'],
+                'runner_id' => $runner['id'],
+                'runner_name' => $runner['name'] ?? $runner['host'],
                 'issue_key' => $issueKey,
                 'trigger' => 'service'
             ]);
@@ -380,8 +380,8 @@ class AIDevJobService {
             return [
                 'success' => true,
                 'job_uid' => $jobId,
-                'shard' => $shard['name'] ?? $shard['host'],
-                'message' => 'Job started on shard',
+                'runner' => $runner['name'] ?? $runner['host'],
+                'message' => 'Job started on runner',
                 'board_id' => $boardId
             ];
 
@@ -401,12 +401,12 @@ class AIDevJobService {
      * @param int $memberId Member ID
      * @return array ['available' => bool, 'error' => string|null, 'running_count' => int]
      */
-    public function checkShardConcurrency(int $memberId): array {
+    public function checkRunnerConcurrency(int $memberId): array {
         return $this->checkConcurrency($memberId);
     }
 
     /**
-     * Check concurrency limits for AI dev jobs (works for both local and shard)
+     * Check concurrency limits for AI dev jobs (works for both local and runner)
      *
      * Priority: INI config > enterprisesettings > default (3)
      *
@@ -918,7 +918,7 @@ class AIDevJobService {
 
         // Fall back to generic script if GitHub-specific doesn't exist
         if (!file_exists($scriptPath)) {
-            $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+            $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
         }
 
         if (!file_exists($scriptPath)) {
@@ -933,17 +933,17 @@ class AIDevJobService {
         if ($repoBean && $repoBean->aiagents_id) {
             $agent = Bean::load('aiagents', $repoBean->aiagents_id);
             if ($agent && $agent->runners_id) {
-                $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
-                if ($shard) {
+                $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
+                if ($runner) {
                     $workstation = [
-                        'host' => $shard->host,
-                        'user' => $shard->ssh_user,
-                        'port' => $shard->ssh_port ?? 22
+                        'host' => $runner->host,
+                        'user' => $runner->ssh_user,
+                        'port' => $runner->ssh_port ?? 22
                     ];
                     $this->logger->info('Using agent workstation', [
                         'agent_id' => $agent->id,
-                        'workstation' => $shard->name,
-                        'host' => $shard->host
+                        'workstation' => $runner->name,
+                        'host' => $runner->host
                     ]);
                 }
             }
@@ -1024,7 +1024,7 @@ class AIDevJobService {
         );
 
         // Spawn the tmux session
-        $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+        $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
 
         if (!file_exists($scriptPath)) {
             $this->logger->error('Local runner script not found', ['path' => $scriptPath]);
@@ -1038,17 +1038,17 @@ class AIDevJobService {
             if ($repoBean && $repoBean->aiagents_id) {
                 $agent = Bean::load('aiagents', $repoBean->aiagents_id);
                 if ($agent && $agent->runners_id) {
-                    $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
-                    if ($shard) {
+                    $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
+                    if ($runner) {
                         $workstation = [
-                            'host' => $shard->host,
-                            'user' => $shard->ssh_user,
-                            'port' => $shard->ssh_port ?? 22
+                            'host' => $runner->host,
+                            'user' => $runner->ssh_user,
+                            'port' => $runner->ssh_port ?? 22
                         ];
                         $this->logger->info('Using agent workstation', [
                             'agent_id' => $agent->id,
-                            'workstation' => $shard->name,
-                            'host' => $shard->host
+                            'workstation' => $runner->name,
+                            'host' => $runner->host
                         ]);
                     }
                 }
@@ -1383,28 +1383,81 @@ class AIDevJobService {
                     sleep(1);
                 }
 
-                $scriptPath = dirname(__DIR__) . '/scripts/local-aidev-full.php';
+                $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
 
-                // Check if repo's agent has an assigned workstation
+                // Check if repo's agent has an assigned workstation (job-executor flow)
                 $workstation = null;
+                $runner = null;
                 if ($job->repoconnections_id) {
                     $repoBean = Bean::load('repoconnections', $job->repoconnections_id);
                     if ($repoBean && $repoBean->aiagents_id) {
                         $agent = Bean::load('aiagents', $repoBean->aiagents_id);
                         if ($agent && $agent->runners_id) {
-                            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
-                            if ($shard) {
+                            $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
+                            if ($runner) {
                                 $workstation = [
-                                    'host' => $shard->host,
-                                    'user' => $shard->ssh_user,
-                                    'port' => $shard->ssh_port ?? 22
+                                    'host' => $runner->host,
+                                    'user' => $runner->ssh_user,
+                                    'port' => $runner->ssh_port ?? 22
                                 ];
                             }
                         }
                     }
                 }
 
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant, null, $workstation)) {
+                // For job-executor jobs (workstation configured): run script directly via exec()
+                // The script builds the prompt, submits to job-executor, then exits
+                // Job-executor creates the tmux on the remote workstation - no local tmux needed
+                if ($workstation && $runner) {
+                    $this->logger->info('Queue processor: running job-dispatcher for job-executor submission', [
+                        'job_uid' => $job->job_uid,
+                        'issue_key' => $job->issue_key,
+                        'workstation' => $runner->name ?? $workstation['host']
+                    ]);
+
+                    $cmd = sprintf(
+                        'php %s --issue=%s --member=%d --job-id=%s --repo=%d --tenant=%s --orchestrator 2>&1',
+                        escapeshellarg($scriptPath),
+                        escapeshellarg($job->issue_key),
+                        $job->member_id,
+                        escapeshellarg($job->job_uid),
+                        $job->repoconnections_id ?? 0,
+                        escapeshellarg($jobTenant)
+                    );
+
+                    $output = [];
+                    $exitCode = 0;
+                    exec($cmd, $output, $exitCode);
+
+                    if ($exitCode === 0) {
+                        $results['jobs_started']++;
+                        AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job submitted to job-executor', [
+                            'workstation' => $runner->name ?? $workstation['host'],
+                            'wait_time' => $this->calculateWaitTime($job->created_at)
+                        ]);
+
+                        if (($job->project_type ?? 'jira') === self::PROJECT_TYPE_JIRA) {
+                            $this->onJobStarted($job->member_id, $job->cloud_uid, $job->issue_key, $job->boards_id);
+                        }
+                    } else {
+                        $outputStr = implode("\n", array_slice($output, -10));
+                        $job->status = 'error';
+                        $job->error_message = "job-dispatcher.php failed (exit {$exitCode}): {$outputStr}";
+                        $job->updated_at = date('Y-m-d H:i:s');
+                        Bean::store($job);
+
+                        $results['errors'][] = "Job {$job->job_uid}: Script failed with exit code {$exitCode}";
+                        $this->logger->error('Queue processor: job-dispatcher.php failed', [
+                            'job_uid' => $job->job_uid,
+                            'exit_code' => $exitCode,
+                            'output' => $outputStr
+                        ]);
+                    }
+                    continue;  // Move to next job
+                }
+
+                // For local jobs (no workstation): spawn tmux session
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant, null, null)) {
                     $results['jobs_started']++;
 
                     AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [

@@ -32,6 +32,16 @@ Flight::route('GET /api/health', function() {
     Flight::jsonSuccess(['status' => 'ok', 'timestamp' => date('c')]);
 });
 
+// Workstations/Runners endpoint - list active workstations for job execution
+// Requires tenant in URL and API key from tenant's config [api].api_key
+Flight::route('GET /api/workstations/@tenant', ['\app\Api', 'workstations']);
+
+// Job Executor integration endpoints (ping/pong validation)
+// PONG: Job-executor calls back to validate job and get details
+Flight::route('POST /api/jobexecutor/validate', ['\app\Jobexecutor', 'validate']);
+// Status updates (called by job-executor to report progress)
+Flight::route('POST /api/jobexecutor/status', ['\app\Jobexecutor', 'status']);
+
 // CEO Directive endpoints - secure message reception for CEO directives
 // Requires API key authentication via X-API-Key header or Authorization: Bearer token
 Flight::route('POST /api/ceo/directive', ['\app\Ceodirective', 'receive']);

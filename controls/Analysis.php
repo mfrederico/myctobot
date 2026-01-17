@@ -349,14 +349,14 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Run analysis on a shard (Enterprise feature)
+     * Run analysis on a runner (Enterprise feature)
      * GET: Show the run form
-     * POST: Trigger shard analysis
+     * POST: Trigger runner analysis
      */
-    public function runshard($params = []) {
+    public function runrunner($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Board ID comes from URL: /analysis/runshard/{board_id}
+        // Board ID comes from URL: /analysis/runrunner/{board_id}
         $boardId = $this->opId() ?? $this->getParam('board_id');
         if (!$boardId) {
             $this->flash('error', 'No board specified');
@@ -374,14 +374,14 @@ class Analysis extends BaseControls\Control {
         // Show run form on GET
         $request = Flight::request();
         if ($request->method === 'GET') {
-            // Check for any active shard jobs for this board
+            // Check for any active runner jobs for this board
             $activeJob = Bean::findOne('digestjobs',
                 'member_id = ? AND boards_id = ? AND status IN (?, ?)',
                 [$this->member->id, $boardId, 'queued', 'running']
             );
 
-            $this->render('analysis/runshard', [
-                'title' => 'Run Shard Analysis - ' . $board['board_name'],
+            $this->render('analysis/runrunner', [
+                'title' => 'Run Runner Analysis - ' . $board['board_name'],
                 'board' => $board,
                 'activeJob' => $activeJob ? [
                     'job_uid' => $activeJob->job_uid,
@@ -392,41 +392,41 @@ class Analysis extends BaseControls\Control {
             return;
         }
 
-        // Run shard analysis on POST
+        // Run runner analysis on POST
         try {
             $sendEmail = $this->getParam('send_email') === '1';
             $useJiraMcp = $this->getParam('use_jira_mcp') !== '0'; // Default true
 
             $analysisService = new AnalysisService($this->member->id);
-            $result = $analysisService->runShardAnalysis($boardId, [
+            $result = $analysisService->runRunnerAnalysis($boardId, [
                 'send_email' => $sendEmail,
                 'use_jira_mcp' => $useJiraMcp
             ]);
 
-            $this->logger->info('Shard analysis started', [
+            $this->logger->info('Runner analysis started', [
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
                 'job_uid' => $result['job_uid'],
-                'shard' => $result['shard_name']
+                'runner' => $result['runner_name']
             ]);
 
-            // Redirect to shard progress page
-            Flight::redirect('/analysis/shardprogress/' . urlencode($result['job_uid']));
+            // Redirect to runner progress page
+            Flight::redirect('/analysis/runnerprogress/' . urlencode($result['job_uid']));
 
         } catch (Exception $e) {
-            $this->logger->error('Failed to start shard analysis: ' . $e->getMessage());
-            $this->flash('error', 'Failed to start shard analysis: ' . $e->getMessage());
-            Flight::redirect('/analysis/runshard/' . $boardId);
+            $this->logger->error('Failed to start runner analysis: ' . $e->getMessage());
+            $this->flash('error', 'Failed to start runner analysis: ' . $e->getMessage());
+            Flight::redirect('/analysis/runrunner/' . $boardId);
         }
     }
 
     /**
-     * Show shard analysis progress page
+     * Show runner analysis progress page
      */
-    public function shardprogress($params = []) {
+    public function runnerprogress($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/shardprogress/{job_uid}
+        // Job ID comes from URL: /analysis/runnerprogress/{job_uid}
         $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->flash('error', 'No job specified');
@@ -447,7 +447,7 @@ class Analysis extends BaseControls\Control {
             // Find the most recent analysis for this board
             $analysis = UserDatabaseService::getRecentAnalyses($job->boards_id, 1);
             if (!empty($analysis)) {
-                $this->flash('success', 'Shard analysis completed successfully!');
+                $this->flash('success', 'Runner analysis completed successfully!');
                 Flight::redirect('/analysis/view/' . $analysis[0]['id']);
                 return;
             }
@@ -455,20 +455,20 @@ class Analysis extends BaseControls\Control {
 
         // If failed, show error
         if ($job->status === 'failed') {
-            $this->flash('error', 'Shard analysis failed: ' . ($job->error ?? 'Unknown error'));
+            $this->flash('error', 'Runner analysis failed: ' . ($job->error ?? 'Unknown error'));
             Flight::redirect('/analysis');
             return;
         }
 
-        $this->render('analysis/shardprogress', [
-            'title' => 'Shard Analysis in Progress',
+        $this->render('analysis/runnerprogress', [
+            'title' => 'Runner Analysis in Progress',
             'jobId' => $jobId,
             'job' => [
                 'job_uid' => $job->job_uid,
                 'status' => $job->status,
                 'board_name' => $job->board_name,
                 'project_key' => $job->project_key,
-                'shard_id' => $job->shard_id,
+                'runner_id' => $job->runner_id,
                 'created_at' => $job->created_at,
                 'started_at' => $job->started_at
             ]
@@ -476,12 +476,12 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Get shard job status (AJAX endpoint)
+     * Get runner job status (AJAX endpoint)
      */
-    public function shardstatus($params = []) {
+    public function runnerstatus($params = []) {
         if (!$this->requireLogin()) return;
 
-        // Job ID comes from URL: /analysis/shardstatus/{job_uid}
+        // Job ID comes from URL: /analysis/runnerstatus/{job_uid}
         $jobId = $this->opId() ?? $this->getParam('job_uid');
         if (!$jobId) {
             $this->jsonError('No job specified');
@@ -501,7 +501,7 @@ class Analysis extends BaseControls\Control {
             'board_id' => $job->boards_id,
             'board_name' => $job->board_name,
             'project_key' => $job->project_key,
-            'shard_id' => $job->shard_id,
+            'runner_id' => $job->runner_id,
             'items_count' => (int) ($job->items_count ?? 0),
             'phase' => $job->phase ?? 'connecting',
             'elapsed_seconds' => (int) ($job->elapsed_seconds ?? 0),
@@ -579,14 +579,14 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Shard digest analysis endpoint
-     * POST /analysis/sharddigest
+     * Runner digest analysis endpoint
+     * POST /analysis/runnerdigest
      *
      * Receives all data in the request payload (no database lookup).
-     * This is the unified endpoint that works on both main server and shards.
-     * When called on a shard, it spawns Claude Code locally and sends callback.
+     * This is the unified endpoint that works on both main server and runners.
+     * When called on a runner, it spawns Claude Code locally and sends callback.
      */
-    public function sharddigest() {
+    public function runnerdigest() {
         // Only accept POST
         if (Flight::request()->method !== 'POST') {
             Flight::json(['error' => 'POST required'], 405);
@@ -615,7 +615,7 @@ class Analysis extends BaseControls\Control {
         $jiraSiteUrl = $input['jira_site_url'] ?? '';
         $callbackUrl = $input['callback_url'] ?? '';
         $callbackApiKey = $input['callback_api_key'] ?? '';
-        $jobId = $input['job_uid'] ?? uniqid('shard_', true);
+        $jobId = $input['job_uid'] ?? uniqid('runner_', true);
         $options = $input['options'] ?? [];
 
         // Ensure options is an array
@@ -629,7 +629,7 @@ class Analysis extends BaseControls\Control {
         $statusFilter = $board['status_filter'] ?? 'To Do';
         $clarityThreshold = $options['clarity_threshold'] ?? 6;
 
-        $prompt = $this->buildShardPrompt(
+        $prompt = $this->buildRunnerPrompt(
             $jiraHost, $jiraSiteUrl, $projectKey, $boardName, $statusFilter, $clarityThreshold
         );
 
@@ -638,7 +638,7 @@ class Analysis extends BaseControls\Control {
             'success' => true,
             'job_uid' => $jobId,
             'status' => 'running',
-            'message' => 'Digest analysis started (PHP shard)'
+            'message' => 'Digest analysis started (PHP runner)'
         ]);
 
         Flight::response()->status(202);
@@ -656,8 +656,8 @@ class Analysis extends BaseControls\Control {
             flush();
         }
 
-        // Run Claude Code analysis
-        $this->runClaudeShardAnalysis(
+        // Run Claude Code analysis on runner
+        $this->runRunnerAnalysis(
             $jobId, $apiKey, $prompt,
             $jiraHost, $jiraEmail, $jiraToken,
             $callbackUrl, $callbackApiKey
@@ -669,9 +669,9 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Build the shard digest analysis prompt
+     * Build the runner digest analysis prompt
      */
-    private function buildShardPrompt($jiraHost, $jiraSiteUrl, $projectKey, $boardName, $statusFilter, $clarityThreshold) {
+    private function buildRunnerPrompt($jiraHost, $jiraSiteUrl, $projectKey, $boardName, $statusFilter, $clarityThreshold) {
         $statuses = array_map(function($s) { return '"' . trim($s) . '"'; }, explode(',', $statusFilter));
         $statusList = implode(', ', $statuses);
         $siteUrlNote = $jiraSiteUrl ? "- Site URL for ticket links: {$jiraSiteUrl}" : '';
@@ -742,9 +742,9 @@ PROMPT;
     }
 
     /**
-     * Run Claude Code analysis on the shard
+     * Run Claude Code analysis on the runner
      */
-    private function runClaudeShardAnalysis($jobId, $apiKey, $prompt, $jiraHost, $jiraEmail, $jiraToken, $callbackUrl, $callbackApiKey) {
+    private function runRunnerAnalysis($jobId, $apiKey, $prompt, $jiraHost, $jiraEmail, $jiraToken, $callbackUrl, $callbackApiKey) {
         $homeDir = "/tmp/claude-job-{$jobId}";
         @mkdir($homeDir, 0755, true);
 
@@ -820,10 +820,10 @@ PROMPT;
     }
 
     /**
-     * Shard-side AI Developer endpoint
+     * Runner-side AI Developer endpoint
      * Receives full context and runs Claude Code CLI for implementation
      */
-    public function shardaidev() {
+    public function runneraidev() {
         // Only accept POST
         if (Flight::request()->method !== 'POST') {
             Flight::json(['error' => 'POST required'], 405);
@@ -1483,7 +1483,7 @@ PROMPT;
 
         fwrite($logHandle, "Detected Shopify theme repository\n");
 
-        // Get credentials from payload (shard doesn't have access to user databases)
+        // Get credentials from payload (runner doesn't have access to user databases)
         $shopDomain = $shopifySettings['shop_domain'] ?? null;
         $accessToken = $shopifySettings['access_token'] ?? null;
 

@@ -1,8 +1,8 @@
 <?php
 /**
- * Shard Diagnostic Service
+ * Runner Diagnostic Service
  *
- * Runs diagnostic checks on shards to validate SSH connectivity
+ * Runs diagnostic checks on runners to validate SSH connectivity
  * and required dependencies for running Claude Code sessions.
  */
 
@@ -10,18 +10,18 @@ namespace app\services;
 
 require_once __DIR__ . '/SSHKeyService.php';
 
-class ShardDiagnosticService {
+class RunnerDiagnosticService {
 
-    private array $shard;
+    private array $runner;
     private array $results = [];
     private float $startTime;
     private ?string $tempKeyFile = null;
 
     /**
-     * Create diagnostic service for a shard
+     * Create diagnostic service for a runner
      */
-    public function __construct(array $shard) {
-        $this->shard = $shard;
+    public function __construct(array $runner) {
+        $this->runner = $runner;
     }
 
     /**
@@ -38,7 +38,7 @@ class ShardDiagnosticService {
      * @return string|null Path to temp key file, or null if no key configured
      */
     private function prepareSSHKey(): ?string {
-        $sshKeyId = $this->shard['sshkey_id'] ?? null;
+        $sshKeyId = $this->runner['sshkey_id'] ?? null;
 
         if (!$sshKeyId) {
             return null;
@@ -52,7 +52,7 @@ class ShardDiagnosticService {
 
         // Create temp file with secure permissions
         $tempDir = sys_get_temp_dir();
-        $this->tempKeyFile = $tempDir . '/shard_ssh_' . uniqid() . '_' . time();
+        $this->tempKeyFile = $tempDir . '/runner_ssh_' . uniqid() . '_' . time();
 
         // Write private key
         file_put_contents($this->tempKeyFile, $key['private_key']);
@@ -87,9 +87,9 @@ class ShardDiagnosticService {
     public function runDiagnostic(): array {
         $this->startTime = microtime(true);
         $this->results = [
-            'shard_id' => $this->shard['id'],
-            'shard_name' => $this->shard['name'],
-            'execution_mode' => $this->shard['execution_mode'] ?? 'ssh_tmux',
+            'runner_id' => $this->runner['id'],
+            'runner_name' => $this->runner['name'],
+            'execution_mode' => $this->runner['execution_mode'] ?? 'ssh_tmux',
             'started_at' => date('Y-m-d H:i:s'),
             'checks' => [],
             'summary' => '',
@@ -129,9 +129,9 @@ class ShardDiagnosticService {
      * Build SSH command prefix
      */
     private function sshPrefix(): string {
-        $user = $this->shard['ssh_user'] ?? 'claudeuser';
-        $host = $this->shard['host'];
-        $port = $this->shard['ssh_port'] ?? 22;
+        $user = $this->runner['ssh_user'] ?? 'claudeuser';
+        $host = $this->runner['host'];
+        $port = $this->runner['ssh_port'] ?? 22;
 
         $cmd = "ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes";
 
@@ -180,7 +180,7 @@ class ShardDiagnosticService {
             'output' => $result['output'],
             'time_ms' => $result['time_ms'],
             'details' => $result['exit_code'] === 0
-                ? 'Connected to ' . ($this->shard['ssh_user'] ?? 'claudeuser') . '@' . $this->shard['host']
+                ? 'Connected to ' . ($this->runner['ssh_user'] ?? 'claudeuser') . '@' . $this->runner['host']
                 : 'Failed to connect: ' . $result['output']
         ];
     }
@@ -328,7 +328,7 @@ class ShardDiagnosticService {
         // Check multiple possible paths for the MCP server script
         $paths = [
             '/var/www/myctobot/scripts/mcp-jira-server.php',           // Production
-            '/var/www/html/default/myctobot/scripts/mcp-jira-server.php', // Shard servers
+            '/var/www/html/default/myctobot/scripts/mcp-jira-server.php', // Runner servers
             '/home/mfrederico/development/myctobot/scripts/mcp-jira-server.php', // Local dev
         ];
 
@@ -353,7 +353,7 @@ class ShardDiagnosticService {
             'time_ms' => $result['time_ms'],
             'details' => $passed
                 ? 'MCP server found at ' . $foundPath
-                : 'MCP server not found. Run sync-to-shards.sh to deploy.'
+                : 'MCP server not found. Run sync-to-runners.sh to deploy.'
         ];
     }
 
@@ -441,7 +441,7 @@ class ShardDiagnosticService {
                     $commands[] = 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs';
                     break;
                 case 'mcp_server':
-                    $commands[] = '# Run sync-to-shards.sh from control interface';
+                    $commands[] = '# Run sync-to-runners.sh from control interface';
                     break;
             }
         }

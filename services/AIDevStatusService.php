@@ -187,7 +187,7 @@ class AIDevStatusService {
         $allowedFields = [
             'branch_name', 'pr_url', 'pr_number', 'commit_sha',
             'shopify_themeid', 'shopify_preview_url', 'playwright_results',
-            'files_changed', 'preserve_branch', 'current_shard_job_uid'
+            'files_changed', 'preserve_branch', 'current_runner_job_uid'
         ];
 
         foreach ($details as $key => $value) {

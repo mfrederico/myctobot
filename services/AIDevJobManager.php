@@ -8,7 +8,7 @@
  * Usage:
  *   $manager = new AIDevJobManager($memberId);
  *   $job = $manager->getOrCreate($issueKey, $boardId);
- *   $manager->startRun($issueKey, $shardJobId);
+ *   $manager->startRun($issueKey, $runnerJobId);
  *   $manager->complete($issueKey, $prUrl, $prNumber);
  */
 
@@ -79,17 +79,17 @@ class AIDevJobManager {
      * Start a new run on a job
      *
      * @param string $issueKey
-     * @param string $shardJobId The shard job ID for tracking
+     * @param string $runnerJobId The runner job ID for tracking
      * @return bool
      */
-    public function startRun(string $issueKey, string $shardJobId): bool {
+    public function startRun(string $issueKey, string $runnerJobId): bool {
         $job = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
         if (!$job) {
             return false;
         }
 
         $job->status = self::STATUS_RUNNING;
-        $job->current_shard_job_uid = $shardJobId;
+        $job->current_runner_job_uid = $runnerJobId;
         $job->started_at = date('Y-m-d H:i:s');
         $job->error_message = null;
         $job->completed_at = null;
@@ -97,7 +97,7 @@ class AIDevJobManager {
         $job->updated_at = date('Y-m-d H:i:s');
         Bean::store($job);
 
-        $this->log($issueKey, 'info', 'Job run started', ['shard_job_uid' => $shardJobId, 'run_count' => $job->run_count]);
+        $this->log($issueKey, 'info', 'Job run started', ['runner_job_uid' => $runnerJobId, 'run_count' => $job->run_count]);
         return true;
     }
 
@@ -460,7 +460,7 @@ class AIDevJobManager {
             'repo_connection_id' => $job->repoconnections_id,  // API compatibility
             'cloud_uid' => $job->cloud_uid,
             'status' => $realStatus,
-            'current_shard_job_uid' => $job->current_shard_job_uid,
+            'current_runner_job_uid' => $job->current_runner_job_uid,
             'branch_name' => $job->branch_name,
             'pr_url' => $job->pr_url,
             'pr_number' => $job->pr_number,

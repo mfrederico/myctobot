@@ -116,7 +116,7 @@ FILE MAP (LOCAL): /tmp/aoe-gwt-SSI-1234-ab12cd34/
 ├── CLAUDE.md               # Project instructions + context
 ├── .mcp.json               # MCP server config (Jira tools)
 ├── run-claude.sh           # Main execution script (sets env, runs claude)
-├── finish_job.sh           # Called by Claude to signal completion
+├── send-checkpoint.sh           # Called by Claude to signal completion
 ├── spawn.log               # PHP setup/spawn output
 ├── session.log             # Claude session output (via script -c)
 ├── attachments/            # Downloaded Jira attachments

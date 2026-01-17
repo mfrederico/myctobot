@@ -99,14 +99,14 @@ class Agents extends BaseControls\Control {
         $this->viewData['agents'] = $agents;
         $this->viewData['providers'] = LLMProviderFactory::getAllProvidersInfo();
 
-        // Check shard availability for Claude CLI
+        // Check runner availability for Claude CLI
         $useLocalRunner = Flight::get('aidev.use_local_runner') ?? false;
-        $shardCount = 0;
+        $runnerCount = 0;
         if (!$useLocalRunner) {
-            // Check for active shards in default database
-            $shardCount = Bean::count('runners', 'is_active = 1') ?? (int) 0;
+            // Check for active runners in default database
+            $runnerCount = Bean::count('runners', 'is_active = 1') ?? (int) 0;
         }
-        $this->viewData['has_shards'] = $useLocalRunner || $shardCount > 0;
+        $this->viewData['has_runners'] = $useLocalRunner || $runnerCount > 0;
         $this->viewData['use_local_runner'] = $useLocalRunner;
         // csrf already set by parent constructor
 
@@ -193,8 +193,8 @@ class Agents extends BaseControls\Control {
         $workstationId = $this->getParam('runners_id');
         if ($workstationId) {
             // Verify the workstation exists and is active
-            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
-            if ($shard) {
+            $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            if ($runner) {
                 $agent->runners_id = (int)$workstationId;
             }
         }
@@ -461,8 +461,8 @@ class Agents extends BaseControls\Control {
             $agent->runners_id = null;
         } elseif ($workstationId) {
             // Verify the workstation exists and is active
-            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
-            if ($shard) {
+            $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            if ($runner) {
                 $agent->runners_id = (int)$workstationId;
             }
         }

@@ -960,6 +960,7 @@ class TenantSchemaBuilder {
         $bean->member = $this->member; // Creates member_id FK
         $bean->boards = $this->board; // Creates boards_id FK
         $bean->repoconnections = $this->repo; // Creates repoconnections_id FK
+        $bean->runners_id = null; // Optional FK to runners (for direct workstation assignment)
         $bean->issue_key = 'SCHEMA-1';
         $bean->cloud_uid = 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'; // _uid suffix
         $bean->status = 'pending';
@@ -1133,7 +1134,7 @@ class TenantSchemaBuilder {
         $bean->mcp_servers = '[]';
         $bean->hooks_config = '{}';
         $bean->anthropickeys_id = null; // FK to anthropickeys table (1:1 key assignment)
-        $bean->claudeshards_id = null; // FK to claudeshards table (assigned workstation)
+        $bean->runners_id = null; // FK to runners table (assigned workstation)
         $bean->is_active = true;
         $bean->is_default = false;
         $bean->created_at = date('Y-m-d H:i:s');

@@ -117,19 +117,16 @@ mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issue
 
 ## Job Checkpoint (After PR Created)
 
-When you've created the PR and completed initial work, run `finish_job.sh` to save progress:
+When you've created the PR and completed initial work, run `send-checkpoint.sh` from the job directory:
 
 ```bash
-./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+../send-checkpoint.sh '{"success": true, "pr_url": "...", "summary": "..."}'
 ```
 
 **IMPORTANT: This does NOT terminate your session.** After running checkpoint:
 - Your session stays alive to receive updates from the issue tracker
 - If someone adds a comment, you'll see it as a [GITHUB UPDATE] message
 - You can continue iterating on the implementation based on feedback
-- The session will close automatically when the issue transitions to "Ready for QA"
-
-Do NOT call `/exit` after checkpoint - wait for more updates or manual closure.
 
 SECTION;
         } else {
@@ -162,19 +159,16 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 
 ## Job Checkpoint (After PR Created)
 
-When you've created the PR and completed initial work, run `finish_job.sh` to save progress:
+When you've created the PR and completed initial work, run `send-checkpoint.sh` from the job directory:
 
 ```bash
-./finish_job.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+../send-checkpoint.sh '{"success": true, "pr_url": "...", "summary": "..."}'
 ```
 
 **IMPORTANT: This does NOT terminate your session.** After running checkpoint:
 - Your session stays alive to receive updates from Jira
 - If someone adds a comment, you'll see it as a [JIRA UPDATE] message
 - You can continue iterating on the implementation based on feedback
-- The session will close automatically when the ticket transitions to "Ready for QA"
-
-Do NOT call `/exit` after checkpoint - wait for more updates or manual closure.
 
 SECTION;
         }
@@ -278,18 +272,13 @@ You are orchestrating the implementation and verification of {$ticketLabel} **{$
 **Acceptance Criteria**:
 {$acceptanceCriteria}
 
-## Repository
+## Repository (Pre-cloned)
 
-- **Owner**: {$this->repo['owner']}
-- **Name**: {$this->repo['name']}
-- **Clone URL**: {$this->repo['clone_url']}
+- **Path**: `{$repoPath}/`
 - **Default Branch**: {$defaultBranch}
-- **Working Path**: {$repoPath}
 {$previewSection}
 
-## Repository (ALREADY CLONED)
-
-The repository has been pre-cloned to `{$repoPath}/` and checked out to `{$defaultBranch}`.
+The repository is already cloned and ready to use.
 
 **IMPORTANT: Do NOT `cd {$repoPath}`** - stay in the current directory and reference all files as `{$repoPath}/path/to/file`. This ensures MCP tools ({$providerName}, Playwright) work correctly.
 
@@ -356,34 +345,13 @@ Repeat verify → fix until:
 
 When done:
 
-1. **Write result to file** - Save your final result to `result.json`:
-```bash
-cat > result.json << 'RESULT_EOF'
-{
-  "success": true,
-  "issue_key": "{$issueKey}",
-  "branch_name": "feature/SSI-123-description",
-  "files_changed": ["path/to/file1.js"],
-  "pr_url": "https://github.com/...",
-  "verification_passed": true,
-  "iterations": 2,
-  "summary": "Brief description of what was done"
-}
-RESULT_EOF
-```
-
 {$this->buildFinalSummaryInstructions()}
 
-3. **Save checkpoint** - IMPORTANT: Run finish_job.sh to save your results:
+1. **Save checkpoint** - Run send-checkpoint.sh:
 ```bash
-./finish_job.sh '{"success": true, "issue_key": "{$issueKey}", "pr_url": "https://github.com/owner/repo/pull/123", "pr_number": 123, "branch_name": "feature/issue-description", "files_changed": ["file1.js", "file2.js"], "summary": "Brief description of what was done", "verification_passed": true}'
+../send-checkpoint.sh '{"success": true, "issue_key": "{$issueKey}", "pr_url": "https://github.com/owner/repo/pull/123", "pr_number": 123, "branch_name": "feature/issue-description", "files_changed": ["file1.js", "file2.js"], "summary": "Brief description of what was done", "verification_passed": true}'
 ```
-This script:
-- Saves result.json locally
-- Posts checkpoint to the orchestrator webhook
-- Keeps your session ALIVE to receive further updates
-
-**DO NOT call /exit** - Your session stays open to receive comments and updates from the issue tracker. The session will be closed automatically when the ticket transitions to "Ready for QA".
+This script automatically saves result.json and posts checkpoint to MyCTOBot. Your session stays ALIVE to receive further updates.
 
 {$this->buildMcpToolsSection()}
 
@@ -397,7 +365,7 @@ This script:
 4. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 5. **Output JSON** - Final output must be valid JSON for parsing.
 6. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
-7. **Save checkpoint via finish_job.sh** - After posting to the issue tracker, run `./finish_job.sh '{...}'` with your results JSON. This saves your progress but keeps the session ALIVE to receive more updates.
+7. **Save checkpoint via send-checkpoint.sh** - After posting to the issue tracker, run `../send-checkpoint.sh '{...}'` with your results JSON. This saves your progress but keeps the session ALIVE to receive more updates.
 
 ## Start Now
 
@@ -853,19 +821,14 @@ Implement the requirements from Jira ticket **{$issueKey}** and create a Pull Re
 {$urlSection}
 {$shopifySection}
 
-## Repository
-- Owner: {$this->repo['owner']}
-- Repo: {$this->repo['name']}
+## Repository (Pre-cloned)
+- Path: `./repo/`
 - Default Branch: {$defaultBranch}
-- Clone URL: {$this->repo['clone_url']}
+
+The repository is already cloned to `./repo/` and ready to use.
 
 ## Environment Variables Available
-The following environment variables are set and ready to use:
-
-- **GITHUB_TOKEN** / **GH_TOKEN**: GitHub access token for git operations
-  ```bash
-  git clone https://\$GITHUB_TOKEN@github.com/{$this->repo['owner']}/{$this->repo['name']}.git repo
-  ```
+- **GITHUB_TOKEN** / **GH_TOKEN**: GitHub access token for git operations (already configured)
 
 ## Jira MCP Tools
 

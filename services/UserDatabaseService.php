@@ -563,7 +563,7 @@ class UserDatabaseService {
         }
 
         $allowedFields = [
-            'status', 'current_shard_job_uid', 'branch_name', 'pr_url', 'pr_number',
+            'status', 'current_runner_job_uid', 'branch_name', 'pr_url', 'pr_number',
             'clarification_comment_uid', 'clarification_questions', 'error_message',
             'run_count', 'last_output', 'last_result_json', 'files_changed',
             'commit_sha', 'started_at', 'completed_at', 'boards_id', 'repoconnections_id', 'cloud_uid'
@@ -587,17 +587,17 @@ class UserDatabaseService {
     /**
      * Start a new run on a job
      * @param string $issueKey Jira issue key
-     * @param string $shardJobId The shard job ID for this run
+     * @param string $runnerJobId The runner job ID for this run
      * @return bool
      */
-    public static function startAiDevJobRun(string $issueKey, string $shardJobId): bool {
+    public static function startAiDevJobRun(string $issueKey, string $runnerJobId): bool {
         $job = Bean::findOne('aidevjobs', ' issue_key = ? ', [$issueKey]);
         if (!$job) {
             return false;
         }
 
         $job->status = 'running';
-        $job->current_shard_job_uid = $shardJobId;
+        $job->current_runner_job_uid = $runnerJobId;
         $job->started_at = date('Y-m-d H:i:s');
         $job->error_message = null;
         $job->completed_at = null;
@@ -718,7 +718,7 @@ class UserDatabaseService {
      */
     public static function addAiDevJobLog(string $issueKey, string $level, string $message, ?array $context = null): bool {
         $job = self::getAiDevJob($issueKey);
-        $jobId = $job ? ($job->current_shard_job_uid ?? $issueKey) : $issueKey;
+        $jobId = $job ? ($job->current_runner_job_uid ?? $issueKey) : $issueKey;
 
         $log = Bean::dispense('aidevjoblogs');
         $log->job_uid = $jobId;
@@ -743,7 +743,7 @@ class UserDatabaseService {
             return [];
         }
 
-        $jobId = $job->current_shard_job_uid ?? $issueKey;
+        $jobId = $job->current_runner_job_uid ?? $issueKey;
         return array_values(Bean::find('aidevjoblogs',
             ' job_uid = ? ORDER BY created_at ASC LIMIT ? ',
             [$jobId, $limit]

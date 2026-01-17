@@ -195,7 +195,7 @@
                 </div>
                 <?php if ($member->level <= 50): ?>
                 <div class="col-md-3">
-                    <a href="/admin/shards" class="text-decoration-none">
+                    <a href="/admin/runners" class="text-decoration-none">
                         <div class="d-flex align-items-center">
                             <i class="bi bi-pc-display-horizontal fs-4 text-secondary me-3"></i>
                             <div>
@@ -268,12 +268,12 @@
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
-                            <h3 class="mb-1"><?= $shardCount ?? 0 ?></h3>
+                            <h3 class="mb-1"><?= $runnerCount ?? 0 ?></h3>
                             <p class="text-muted mb-0 small">
                                 Workstations define <em>where</em> AI Developer jobs run: servers with Claude CLI installed.
                             </p>
                         </div>
-                        <a href="/admin/shards" class="btn btn-outline-secondary">
+                        <a href="/admin/runners" class="btn btn-outline-secondary">
                             <i class="bi bi-gear"></i> Manage
                         </a>
                     </div>

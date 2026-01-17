@@ -102,7 +102,7 @@
                 <a href="/agents" class="btn btn-outline-primary">
                     <i class="bi bi-robot"></i> Agent Profiles
                 </a>
-                <a href="/admin/shards" class="btn btn-outline-primary">
+                <a href="/admin/runners" class="btn btn-outline-primary">
                     <i class="bi bi-pc-display-horizontal"></i> Workstations
                 </a>
                 <a href="/settings/connections" class="btn btn-outline-primary">

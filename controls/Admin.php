@@ -598,34 +598,34 @@ class Admin extends Control {
     }
 
     // ========================================
-    // Shard Management (Account Executive)
+    // Runner Management (Account Executive)
     // ========================================
 
     /**
-     * List all Claude Code shards
+     * List all Claude Code runners
      */
-    public function shards($params = []) {
+    public function runners($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
 
-        $this->viewData['title'] = 'Claude Code Shards';
+        $this->viewData['title'] = 'Claude Code Runners';
 
-        // Get all shards with stats
-        $shards = \app\services\RunnerService::getAllRunners(false);
+        // Get all runners with stats
+        $runners = \app\services\RunnerService::getAllRunners(false);
 
-        foreach ($shards as &$shard) {
-            $shard['stats'] = \app\services\RunnerService::getRunnerStats($shard['id']);
-            $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
+        foreach ($runners as &$runner) {
+            $runner['stats'] = \app\services\RunnerService::getRunnerStats($runner['id']);
+            $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
         }
 
-        $this->viewData['shards'] = $shards;
+        $this->viewData['runners'] = $runners;
 
-        $this->render('admin/shards', $this->viewData);
+        $this->render('admin/runners', $this->viewData);
     }
 
     /**
-     * Create a new shard
+     * Create a new runner
      */
-    public function createshard($params = []) {
+    public function createrunner($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
@@ -634,7 +634,7 @@ class Admin extends Control {
         if ($request->method === 'POST') {
             if (!Flight::csrf()->validateRequest()) {
                 $this->flash('error', 'Invalid CSRF token');
-                Flight::redirect('/admin/shards');
+                Flight::redirect('/admin/runners');
                 return;
             }
 
@@ -647,7 +647,7 @@ class Admin extends Control {
                 'host' => $request->data->host ?? '',
                 'port' => (int)($request->data->port ?? 3500),
                 'api_key' => $request->data->api_key ?? '',
-                'shard_type' => $request->data->shard_type ?? 'general',
+                'runner_type' => $request->data->runner_type ?? 'general',
                 'capabilities' => is_array($request->data->capabilities) ? $request->data->capabilities : [],
                 'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
                 'is_active' => isset($request->data->is_active) ? 1 : 0,
@@ -664,51 +664,51 @@ class Admin extends Control {
             if ($executionMode === 'ssh_tmux') {
                 if (empty($data['name']) || empty($data['host']) || empty($data['ssh_user'])) {
                     $this->flash('error', 'Name, host, and SSH user are required for SSH mode');
-                    Flight::redirect('/admin/createshard');
+                    Flight::redirect('/admin/createrunner');
                     return;
                 }
             } else {
                 if (empty($data['name']) || empty($data['host']) || empty($data['api_key'])) {
                     $this->flash('error', 'Name, host, and API key are required for HTTP mode');
-                    Flight::redirect('/admin/createshard');
+                    Flight::redirect('/admin/createrunner');
                     return;
                 }
             }
 
             try {
-                $shardId = \app\services\RunnerService::createRunner($data);
-                $this->logger->info('Shard created', ['shard_id' => $shardId, 'name' => $data['name']]);
-                $this->flash('success', 'Shard created successfully');
-                Flight::redirect('/admin/shards');
+                $runnerId = \app\services\RunnerService::createRunner($data);
+                $this->logger->info('Runner created', ['runner_id' => $runnerId, 'name' => $data['name']]);
+                $this->flash('success', 'Runner created successfully');
+                Flight::redirect('/admin/runners');
             } catch (\Exception $e) {
-                $this->flash('error', 'Failed to create shard: ' . $e->getMessage());
-                Flight::redirect('/admin/createshard');
+                $this->flash('error', 'Failed to create runner: ' . $e->getMessage());
+                Flight::redirect('/admin/createrunner');
             }
             return;
         }
 
-        $this->viewData['title'] = 'Create Shard';
+        $this->viewData['title'] = 'Create Runner';
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
-        $this->render('admin/shard_form', $this->viewData);
+        $this->render('admin/runner_form', $this->viewData);
     }
 
     /**
-     * Edit a shard
+     * Edit a runner
      */
-    public function editshard($params = []) {
+    public function editrunner($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
-        if (!$shardId) {
-            Flight::redirect('/admin/shards');
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            Flight::redirect('/admin/runners');
             return;
         }
 
-        $shard = \app\services\RunnerService::getRunner($shardId);
-        if (!$shard) {
-            $this->flash('error', 'Shard not found');
-            Flight::redirect('/admin/shards');
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->flash('error', 'Runner not found');
+            Flight::redirect('/admin/runners');
             return;
         }
 
@@ -717,19 +717,19 @@ class Admin extends Control {
         if ($request->method === 'POST') {
             if (!Flight::csrf()->validateRequest()) {
                 $this->flash('error', 'Invalid CSRF token');
-                Flight::redirect('/admin/editshard/' . $shardId);
+                Flight::redirect('/admin/editrunner/' . $runnerId);
                 return;
             }
 
             // Get execution mode
-            $executionMode = $request->data->execution_mode ?? ($shard['execution_mode'] ?? 'ssh_tmux');
+            $executionMode = $request->data->execution_mode ?? ($runner['execution_mode'] ?? 'ssh_tmux');
 
             $data = [
                 'name' => $request->data->name ?? '',
                 'description' => $request->data->description ?? '',
                 'host' => $request->data->host ?? '',
                 'port' => (int)($request->data->port ?? 3500),
-                'shard_type' => $request->data->shard_type ?? 'general',
+                'runner_type' => $request->data->runner_type ?? 'general',
                 'capabilities' => is_array($request->data->capabilities) ? $request->data->capabilities : [],
                 'max_concurrent_jobs' => (int)($request->data->max_concurrent_jobs ?? 2),
                 'is_active' => isset($request->data->is_active) ? 1 : 0,
@@ -747,111 +747,111 @@ class Admin extends Control {
             }
 
             // Reset validation if SSH settings changed
-            $sshChanged = ($data['host'] !== $shard['host'] ||
-                          $data['ssh_user'] !== ($shard['ssh_user'] ?? 'claudeuser') ||
-                          $data['ssh_port'] !== ($shard['ssh_port'] ?? 22));
+            $sshChanged = ($data['host'] !== $runner['host'] ||
+                          $data['ssh_user'] !== ($runner['ssh_user'] ?? 'claudeuser') ||
+                          $data['ssh_port'] !== ($runner['ssh_port'] ?? 22));
             if ($sshChanged) {
                 $data['ssh_validated'] = 0;
             }
 
             try {
-                $this->logger->info('Updating shard', ['shard_id' => $shardId, 'data' => $data]);
-                \app\services\RunnerService::updateRunner($shardId, $data);
-                $this->logger->info('Shard updated', ['shard_id' => $shardId]);
-                $this->flash('success', 'Shard updated successfully');
-                Flight::redirect('/admin/shards');
+                $this->logger->info('Updating runner', ['runner_id' => $runnerId, 'data' => $data]);
+                \app\services\RunnerService::updateRunner($runnerId, $data);
+                $this->logger->info('Runner updated', ['runner_id' => $runnerId]);
+                $this->flash('success', 'Runner updated successfully');
+                Flight::redirect('/admin/runners');
             } catch (\Exception $e) {
-                $this->flash('error', 'Failed to update shard: ' . $e->getMessage());
-                Flight::redirect('/admin/editshard/' . $shardId);
+                $this->flash('error', 'Failed to update runner: ' . $e->getMessage());
+                Flight::redirect('/admin/editrunner/' . $runnerId);
             }
             return;
         }
 
-        $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
-        $this->viewData['title'] = 'Edit Shard';
-        $this->viewData['shard'] = $shard;
+        $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
+        $this->viewData['title'] = 'Edit Runner';
+        $this->viewData['runner'] = $runner;
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
-        $this->render('admin/shard_form', $this->viewData);
+        $this->render('admin/runner_form', $this->viewData);
     }
 
     /**
-     * Delete a shard
+     * Delete a runner
      */
-    public function deleteshard($params = []) {
+    public function deleterunner($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
-        if (!$shardId) {
-            Flight::redirect('/admin/shards');
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            Flight::redirect('/admin/runners');
             return;
         }
 
         try {
-            \app\services\RunnerService::deleteRunner($shardId);
-            $this->logger->info('Shard deleted', ['shard_id' => $shardId]);
-            $this->flash('success', 'Shard deleted');
+            \app\services\RunnerService::deleteRunner($runnerId);
+            $this->logger->info('Runner deleted', ['runner_id' => $runnerId]);
+            $this->flash('success', 'Runner deleted');
         } catch (\Exception $e) {
-            $this->flash('error', 'Failed to delete shard: ' . $e->getMessage());
+            $this->flash('error', 'Failed to delete runner: ' . $e->getMessage());
         }
 
-        Flight::redirect('/admin/shards');
+        Flight::redirect('/admin/runners');
     }
 
     /**
-     * Test shard connectivity (routes to HTTP or SSH based on execution_mode)
+     * Test runner connectivity (routes to HTTP or SSH based on execution_mode)
      */
-    public function testshard($params = []) {
+    public function testrunner($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
-        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
+        require_once __DIR__ . '/../services/RunnerDiagnosticService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
-        if (!$shardId) {
-            $this->json(['success' => false, 'error' => 'Shard ID required']);
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            $this->json(['success' => false, 'error' => 'Runner ID required']);
             return;
         }
 
-        $shard = \app\services\RunnerService::getRunner($shardId);
-        if (!$shard) {
-            $this->json(['success' => false, 'error' => 'Shard not found']);
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->json(['success' => false, 'error' => 'Runner not found']);
             return;
         }
 
         // Check if POST data provided - use form values instead of saved values
         $request = Flight::request();
         if ($request->method === 'POST') {
-            // Override shard values with form data for testing unsaved changes
+            // Override runner values with form data for testing unsaved changes
             if (!empty($request->data->host)) {
-                $shard['host'] = $request->data->host;
+                $runner['host'] = $request->data->host;
             }
             if (!empty($request->data->ssh_user)) {
-                $shard['ssh_user'] = $request->data->ssh_user;
+                $runner['ssh_user'] = $request->data->ssh_user;
             }
             if (!empty($request->data->ssh_port)) {
-                $shard['ssh_port'] = (int)$request->data->ssh_port;
+                $runner['ssh_port'] = (int)$request->data->ssh_port;
             }
             if (isset($request->data->sshkey_id)) {
-                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+                $runner['sshkey_id'] = $request->data->sshkey_id ?: null;
             }
             if (!empty($request->data->execution_mode)) {
-                $shard['execution_mode'] = $request->data->execution_mode;
+                $runner['execution_mode'] = $request->data->execution_mode;
             }
         }
 
         // Route based on execution mode
-        $executionMode = $shard['execution_mode'] ?? 'http_api';
+        $executionMode = $runner['execution_mode'] ?? 'http_api';
 
         if ($executionMode === 'ssh_tmux') {
             // Use SSH diagnostic for quick check
-            $diagnostic = new \app\services\ShardDiagnosticService($shard);
+            $diagnostic = new \app\services\RunnerDiagnosticService($runner);
             $result = $diagnostic->quickCheck();
 
             // Only update health status in database if testing saved values (GET request)
             if ($request->method !== 'POST') {
                 $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
-                $shardBean = Bean::load('runners', $shardId);
-                $shardBean->health_status = $healthStatus;
-                $shardBean->last_health_check = date('Y-m-d H:i:s');
-                Bean::store($shardBean);
+                $runnerBean = Bean::load('runners', $runnerId);
+                $runnerBean->health_status = $healthStatus;
+                $runnerBean->last_health_check = date('Y-m-d H:i:s');
+                Bean::store($runnerBean);
             } else {
                 $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
             }
@@ -860,8 +860,8 @@ class Admin extends Control {
                 'success' => $result['connected'],
                 'data' => [
                     'execution_mode' => 'ssh_tmux',
-                    'ssh_user' => $shard['ssh_user'] ?? 'claudeuser',
-                    'host' => $shard['host'],
+                    'ssh_user' => $runner['ssh_user'] ?? 'claudeuser',
+                    'host' => $runner['host'],
                     'time_ms' => $result['time_ms'],
                     'health_status' => $healthStatus
                 ],
@@ -869,18 +869,18 @@ class Admin extends Control {
             ]);
         } else {
             // Use HTTP health check
-            $result = \app\services\RunnerService::healthCheck($shardId);
+            $result = \app\services\RunnerService::healthCheck($runnerId);
 
-            // Include shard info from DB alongside remote health data
+            // Include runner info from DB alongside remote health data
             $this->json([
                 'success' => $result['healthy'],
                 'data' => [
                     'execution_mode' => 'http_api',
-                    'host' => $shard['host'],
-                    'port' => $shard['port'],
-                    'shard_type' => $shard['shard_type'] ?? 'general',
-                    'max_concurrent_jobs' => $shard['max_concurrent_jobs'] ?? 2,
-                    'capabilities' => json_decode($shard['capabilities'] ?? '[]', true),
+                    'host' => $runner['host'],
+                    'port' => $runner['port'],
+                    'runner_type' => $runner['runner_type'] ?? 'general',
+                    'max_concurrent_jobs' => $runner['max_concurrent_jobs'] ?? 2,
+                    'capabilities' => json_decode($runner['capabilities'] ?? '[]', true),
                     'remote_health' => $result['data'] ?? null
                 ],
                 'error' => $result['error'] ?? null
@@ -889,21 +889,21 @@ class Admin extends Control {
     }
 
     /**
-     * Run full SSH diagnostic on a shard
+     * Run full SSH diagnostic on a runner
      */
-    public function diagnoseshard($params = []) {
+    public function diagnoserunner($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
-        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
+        require_once __DIR__ . '/../services/RunnerDiagnosticService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
-        if (!$shardId) {
-            $this->json(['success' => false, 'error' => 'Shard ID required']);
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            $this->json(['success' => false, 'error' => 'Runner ID required']);
             return;
         }
 
-        $shard = \app\services\RunnerService::getRunner($shardId);
-        if (!$shard) {
-            $this->json(['success' => false, 'error' => 'Shard not found']);
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->json(['success' => false, 'error' => 'Runner not found']);
             return;
         }
 
@@ -912,35 +912,35 @@ class Admin extends Control {
         $testingUnsaved = false;
         if ($request->method === 'POST') {
             $testingUnsaved = true;
-            // Override shard values with form data for testing unsaved changes
+            // Override runner values with form data for testing unsaved changes
             if (!empty($request->data->host)) {
-                $shard['host'] = $request->data->host;
+                $runner['host'] = $request->data->host;
             }
             if (!empty($request->data->ssh_user)) {
-                $shard['ssh_user'] = $request->data->ssh_user;
+                $runner['ssh_user'] = $request->data->ssh_user;
             }
             if (!empty($request->data->ssh_port)) {
-                $shard['ssh_port'] = (int)$request->data->ssh_port;
+                $runner['ssh_port'] = (int)$request->data->ssh_port;
             }
             if (isset($request->data->sshkey_id)) {
-                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+                $runner['sshkey_id'] = $request->data->sshkey_id ?: null;
             }
             if (!empty($request->data->execution_mode)) {
-                $shard['execution_mode'] = $request->data->execution_mode;
+                $runner['execution_mode'] = $request->data->execution_mode;
             }
         }
 
-        $diagnostic = new \app\services\ShardDiagnosticService($shard);
+        $diagnostic = new \app\services\RunnerDiagnosticService($runner);
         $result = $diagnostic->runDiagnostic();
 
         // Only save diagnostic result to database if testing saved values (not POST)
         if (!$testingUnsaved) {
             $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
-            $shardBean = Bean::load('runners', $shardId);
-            $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
-            $shardBean->health_status = $healthStatus;
-            $shardBean->last_health_check = date('Y-m-d H:i:s');
-            Bean::store($shardBean);
+            $runnerBean = Bean::load('runners', $runnerId);
+            $runnerBean->ssh_validated = $result['ready'] ? 1 : 0;
+            $runnerBean->health_status = $healthStatus;
+            $runnerBean->last_health_check = date('Y-m-d H:i:s');
+            Bean::store($runnerBean);
         }
 
         // If ready, also get install commands for anything missing
@@ -952,22 +952,22 @@ class Admin extends Control {
     }
 
     /**
-     * Run a "Hello World" test on a shard using Claude CLI
+     * Run a "Hello World" test on a runner using Claude CLI
      * This tests the full pipeline: SSH -> Claude CLI -> Response
      */
     public function testhelloworld($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
-        require_once __DIR__ . '/../services/ShardDiagnosticService.php';
+        require_once __DIR__ . '/../services/RunnerDiagnosticService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
-        if (!$shardId) {
-            $this->json(['success' => false, 'error' => 'Shard ID required']);
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            $this->json(['success' => false, 'error' => 'Runner ID required']);
             return;
         }
 
-        $shard = \app\services\RunnerService::getRunner($shardId);
-        if (!$shard) {
-            $this->json(['success' => false, 'error' => 'Shard not found']);
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->json(['success' => false, 'error' => 'Runner not found']);
             return;
         }
 
@@ -975,79 +975,154 @@ class Admin extends Control {
         $request = Flight::request();
         if ($request->method === 'POST') {
             if (!empty($request->data->host)) {
-                $shard['host'] = $request->data->host;
+                $runner['host'] = $request->data->host;
             }
             if (!empty($request->data->ssh_user)) {
-                $shard['ssh_user'] = $request->data->ssh_user;
+                $runner['ssh_user'] = $request->data->ssh_user;
             }
             if (!empty($request->data->ssh_port)) {
-                $shard['ssh_port'] = (int)$request->data->ssh_port;
+                $runner['ssh_port'] = (int)$request->data->ssh_port;
             }
             if (isset($request->data->sshkey_id)) {
-                $shard['sshkey_id'] = $request->data->sshkey_id ?: null;
+                $runner['sshkey_id'] = $request->data->sshkey_id ?: null;
             }
         }
 
-        $diagnostic = new \app\services\ShardDiagnosticService($shard);
+        $diagnostic = new \app\services\RunnerDiagnosticService($runner);
         $result = $diagnostic->runHelloWorld();
 
         $this->json($result);
     }
 
     /**
-     * Test a workstation with a specific agent configuration (async)
-     * POST /admin/testwithagent/{shard_id}
+     * Test a workstation with a specific agent configuration (via job-executor)
+     * POST /admin/testwithagent/{runner_id}
      *
-     * Spawns a background job to test the workstation with an agent.
-     * Combines workstation SSH connection with agent config (model, Ollama settings)
-     * for a hello-world test.
+     * Creates a test job and submits to job-executor for full pipeline testing.
+     * Combines workstation SSH connection with agent config (model, Ollama settings).
      */
     public function testwithagent($params = []) {
-        require_once __DIR__ . '/../services/AgentTestService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
 
-        $shardId = (int)($this->opId() ?? 0);
+        $runnerId = (int)($this->opId() ?? 0);
         $agentId = (int)($this->getParam('agent_id') ?? 0);
+        $jobExecutorUrl = $this->getParam('job_executor_url') ?: \app\services\JobExecutorConfig::getUrl();
+        $delay = (int)($this->getParam('delay') ?? 0);  // Optional delay in seconds for testing
 
-        if (!$shardId || !$agentId) {
+        if (!$runnerId || !$agentId) {
             $this->json(['success' => false, 'error' => 'Workstation ID and Agent ID are required']);
             return;
         }
 
-        // Verify agent and workstation exist
-        $testService = \app\services\AgentTestService::fromIds($agentId, $shardId);
-
-        if (!$testService) {
-            $this->json(['success' => false, 'error' => 'Agent or workstation not found']);
+        // Load agent and workstation
+        $agent = Bean::load('aiagents', $agentId);
+        if (!$agent || !$agent->id || !$agent->is_active) {
+            $this->json(['success' => false, 'error' => 'Agent not found or inactive']);
             return;
         }
 
-        // Generate unique test ID
-        $testId = 'at-' . bin2hex(random_bytes(8));
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->json(['success' => false, 'error' => 'Workstation not found']);
+            return;
+        }
 
-        // Get tenant slug
         $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        $testId = 'at-' . bin2hex(random_bytes(8));
+        $jobUid = 'test-' . $tenantSlug . '-' . $testId;
 
-        // Spawn background script
-        $scriptPath = __DIR__ . '/../scripts/agent-test-runner.php';
-        $cmd = sprintf(
-            'php %s --tenant=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
-            escapeshellarg($scriptPath),
-            escapeshellarg($tenantSlug),
-            $agentId,
-            $shardId,
-            escapeshellarg($testId)
-        );
+        try {
+            // Create test job in aidevjobs
+            $job = Bean::dispense('aidevjobs');
+            $job->job_uid = $jobUid;
+            $job->member_id = $this->member->id ?? 1;
+            $job->boards_id = null;
+            $job->repoconnections_id = null;
+            $job->runners_id = $runnerId;
+            $job->aiagents_id = $agentId; // Link to agent for config
+            $job->issue_key = 'TEST-AGENT-001';
+            $job->status = 'pending';
+            $job->phase = 'agent-test';
+            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response.';
+            $job->delay = $delay;  // Optional delay for testing
+            $job->created_at = date('Y-m-d H:i:s');
+            Bean::store($job);
 
-        exec($cmd);
+            Flight::get('log')->info('Created agent test job for job-executor', [
+                'job_uid' => $jobUid,
+                'agent_id' => $agentId,
+                'runner_id' => $runnerId,
+                'tenant' => $tenantSlug,
+            ]);
 
-        $this->json([
-            'success' => true,
-            'test_id' => $testId,
-            'status' => 'started',
-            'message' => 'Test started in background',
-            'agent' => $testService->getAgentInfo(),
-            'workstation' => $testService->getWorkstationInfo()
-        ]);
+            // Submit to job-executor (PING)
+            $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
+            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+
+            $ch = curl_init($submitUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                ],
+                CURLOPT_POSTFIELDS => json_encode([
+                    'tenant' => $tenantSlug,
+                    'job_uid' => $jobUid,
+                    'callback_url' => $callbackUrl,
+                ]),
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => 10,
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            if ($curlError) {
+                Bean::trash($job);
+                $this->json(['success' => false, 'error' => "Connection failed: {$curlError}"]);
+                return;
+            }
+
+            if ($httpCode !== 200) {
+                Bean::trash($job);
+                $result = json_decode($response, true);
+                $this->json([
+                    'success' => false,
+                    'error' => $result['error'] ?? "Job-executor returned HTTP {$httpCode}",
+                ]);
+                return;
+            }
+
+            // Parse provider config for display
+            $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+
+            $this->json([
+                'success' => true,
+                'test_id' => $testId,
+                'job_uid' => $jobUid,
+                'status' => 'started',
+                'message' => 'Agent test submitted to job-executor',
+                'agent' => [
+                    'name' => $agent->name,
+                    'use_ollama' => !empty($providerConfig['use_ollama']),
+                    'ollama_model' => $providerConfig['ollama_model'] ?? '',
+                    'anthropic_model' => $providerConfig['model'] ?? 'sonnet',
+                ],
+                'workstation' => [
+                    'name' => $runner['name'],
+                    'host' => $runner['host'],
+                    'ssh_user' => $runner['ssh_user'] ?? 'claudeuser',
+                ],
+            ]);
+
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Agent test failed', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -1064,7 +1139,71 @@ class Admin extends Control {
             return;
         }
 
-        // Read status file
+        // First check database for job-executor jobs (job_uid contains test_id)
+        $job = Bean::findOne('aidevjobs', 'job_uid LIKE ?', ['%' . $testId]);
+
+        if ($job) {
+            $status = $job->status ?? 'pending';
+            $phase = $job->phase ?? '';
+
+            // Calculate duration if we have timing info
+            $durationMs = null;
+            if ($job->started_at && ($job->completed_at || $job->updated_at)) {
+                $startTime = strtotime($job->started_at);
+                $endTime = strtotime($job->completed_at ?? $job->updated_at);
+                if ($startTime && $endTime) {
+                    $durationMs = ($endTime - $startTime) * 1000;
+                }
+            }
+
+            // Load workstation info if available
+            $workstationInfo = null;
+            if ($job->runners_id) {
+                $runner = Bean::load('runners', $job->runners_id);
+                if ($runner && $runner->id) {
+                    $workstationInfo = [
+                        'name' => $runner->name,
+                        'host' => $runner->host,
+                        'ssh_user' => $runner->ssh_user ?? 'claudeuser',
+                    ];
+                }
+            }
+
+            // Determine work directory path
+            $sshUser = $workstationInfo['ssh_user'] ?? 'claudeuser';
+            $workDir = "/home/{$sshUser}/jobs/" . $job->job_uid;
+
+            $response = [
+                'success' => true,
+                'status' => $status,
+                'phase' => $phase,
+                'job_uid' => $job->job_uid,
+                'duration_ms' => $durationMs,
+                'work_dir' => $workDir,
+                'started_at' => $job->started_at,
+                'completed_at' => $job->completed_at,
+                'workstation' => $workstationInfo,
+            ];
+
+            // Map status to old format for UI compatibility
+            if ($status === 'completed') {
+                $response['success'] = true;
+                $response['status'] = 'completed';
+                $response['message'] = $job->summary ?? 'Test completed successfully';
+            } elseif ($status === 'failed') {
+                $response['success'] = false;
+                $response['status'] = 'failed';
+                $response['error'] = $job->error_message ?? 'Test failed';
+            } elseif (in_array($status, ['running', 'validated'])) {
+                $response['status'] = 'running';
+                $response['phase'] = $phase;
+            }
+
+            $this->json($response);
+            return;
+        }
+
+        // Fall back to status file (legacy method)
         $statusFile = "/tmp/agent-test-{$testId}.json";
 
         if (!file_exists($statusFile)) {
@@ -1097,9 +1236,172 @@ class Admin extends Control {
     }
 
     /**
-     * Health check all shards
+     * Test job-executor ping/pong flow
+     * POST /admin/testjobexecutor/{runner_id}
+     *
+     * Creates a test job, submits to job-executor, and verifies the ping/pong validation.
+     * This tests the full job-executor integration without actually running Claude.
      */
-    public function shardhealth($params = []) {
+    public function testjobexecutor($params = []) {
+        require_once __DIR__ . '/../services/RunnerService.php';
+
+        $runnerId = (int)($this->opId() ?? 0);
+        if (!$runnerId) {
+            $this->json(['success' => false, 'error' => 'Runner ID required']);
+            return;
+        }
+
+        $runner = \app\services\RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            $this->json(['success' => false, 'error' => 'Runner not found']);
+            return;
+        }
+
+        // Get job-executor URL from POST or use config default
+        $jobExecutorUrl = $this->getParam('job_executor_url') ?: \app\services\JobExecutorConfig::getUrl();
+
+        // Get tenant slug
+        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+
+        $startTime = microtime(true);
+
+        try {
+            // Step 1: Create a test job in aidevjobs
+            $jobUid = 'test-' . $tenantSlug . '-' . bin2hex(random_bytes(8));
+
+            // Find a repo that has this runner's agent assigned (or any repo for testing)
+            $repo = null;
+            $agent = Bean::findOne('aiagents', 'runners_id = ? AND is_active = 1', [$runnerId]);
+            if ($agent) {
+                $repo = Bean::findOne('repoconnections', 'aiagents_id = ?', [$agent->id]);
+            }
+
+            // Create test job
+            $job = Bean::dispense('aidevjobs');
+            $job->job_uid = $jobUid;
+            $job->member_id = $this->member->id ?? 1;
+            $job->boards_id = null;
+            $job->repoconnections_id = $repo ? $repo->id : null;
+            $job->runners_id = $runnerId; // Direct runner assignment for testing
+            $job->issue_key = 'TEST-JE-001';
+            $job->status = 'pending';
+            $job->phase = 'test';
+            $job->prompt = 'This is a test job for job-executor ping/pong validation. Please respond with "Hello from job-executor test!"';
+            $job->created_at = date('Y-m-d H:i:s');
+            Bean::store($job);
+
+            Flight::get('log')->info('Created test job for job-executor', [
+                'job_uid' => $jobUid,
+                'runner_id' => $runnerId,
+                'tenant' => $tenantSlug,
+            ]);
+
+            // Step 2: Submit to job-executor (PING)
+            $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
+            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+
+            $ch = curl_init($submitUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                ],
+                CURLOPT_POSTFIELDS => json_encode([
+                    'tenant' => $tenantSlug,
+                    'job_uid' => $jobUid,
+                    'callback_url' => $callbackUrl,
+                ]),
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => 10,
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            $duration = round((microtime(true) - $startTime) * 1000);
+
+            // Check result
+            if ($curlError) {
+                // Cleanup test job
+                Bean::trash($job);
+
+                $this->json([
+                    'success' => false,
+                    'error' => "Connection failed: {$curlError}",
+                    'duration_ms' => $duration,
+                    'job_executor_url' => $jobExecutorUrl,
+                ]);
+                return;
+            }
+
+            if ($httpCode !== 200) {
+                // Cleanup test job
+                Bean::trash($job);
+
+                $this->json([
+                    'success' => false,
+                    'error' => "Job-executor returned HTTP {$httpCode}",
+                    'response' => $response,
+                    'duration_ms' => $duration,
+                    'job_executor_url' => $jobExecutorUrl,
+                ]);
+                return;
+            }
+
+            $result = json_decode($response, true);
+
+            if (!$result || !($result['success'] ?? false)) {
+                // Cleanup test job
+                Bean::trash($job);
+
+                $this->json([
+                    'success' => false,
+                    'error' => $result['error'] ?? 'Job-executor rejected submission',
+                    'response' => $result,
+                    'duration_ms' => $duration,
+                ]);
+                return;
+            }
+
+            // Step 3: Verify job was validated (check status in DB)
+            $job = Bean::load('aidevjobs', $job->id);
+            $wasValidated = ($job->status === 'validated');
+
+            // Cleanup test job
+            Bean::trash($job);
+
+            $this->json([
+                'success' => true,
+                'message' => 'Job-executor ping/pong test passed!',
+                'details' => [
+                    'ping' => 'Job submitted to job-executor',
+                    'pong' => $wasValidated ? 'Job-executor validated with MyCTOBot' : 'Validation pending',
+                    'job_uid' => $jobUid,
+                    'workstation' => $result['data']['workstation'] ?? $runner['name'],
+                ],
+                'duration_ms' => $duration,
+                'job_executor_url' => $jobExecutorUrl,
+            ]);
+
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Job-executor test failed', ['error' => $e->getMessage()]);
+
+            $this->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+                'duration_ms' => round((microtime(true) - $startTime) * 1000),
+            ]);
+        }
+    }
+
+    /**
+     * Health check all runners
+     */
+    public function runnerhealth($params = []) {
         require_once __DIR__ . '/../services/RunnerService.php';
 
         $results = \app\services\RunnerService::healthCheckAll();

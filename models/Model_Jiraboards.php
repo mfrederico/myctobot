@@ -20,7 +20,7 @@ class Model_Jiraboards extends \RedBeanPHP\SimpleModel {
     }
 
     /**
-     * Check if board uses local runner (vs shard/API)
+     * Check if board uses local runner (vs remote runner/API)
      *
      * @return bool
      */

@@ -404,20 +404,20 @@ class AnalysisService {
     }
 
     /**
-     * Run analysis on a shard (Enterprise tier)
+     * Run analysis on a runner (Enterprise tier)
      *
-     * Delegates digest analysis to a remote Claude Code shard.
-     * The shard uses MCP servers to fetch Jira data and generate the digest.
+     * Delegates digest analysis to a remote Claude Code runner.
+     * The runner uses MCP servers to fetch Jira data and generate the digest.
      *
      * @param int $boardId Board ID to analyze
      * @param array $options Options:
      *   - send_email: Send email after analysis (default: false)
      *   - anthropic_api_key: Override Anthropic API key (optional)
-     *   - use_jira_mcp: Let shard fetch from Jira via MCP (default: true)
+     *   - use_jira_mcp: Let runner fetch from Jira via MCP (default: true)
      *   - issues: Pre-fetched issues if not using Jira MCP
-     * @return array Result with job_uid, shard info, etc.
+     * @return array Result with job_uid, runner info, etc.
      */
-    public function runShardAnalysis(int $boardId, array $options = []): array {
+    public function runRunnerAnalysis(int $boardId, array $options = []): array {
         $sendEmail = $options['send_email'] ?? false;
         $useJiraMcp = $options['use_jira_mcp'] ?? true;
 
@@ -438,12 +438,12 @@ class AnalysisService {
         // Get MCP credentials (Jira/GitHub)
         $credentials = RunnerRouter::getMemberMcpCredentials($this->memberId, $board['cloud_uid']);
 
-        // Find an available shard with 'jira' capability if using Jira MCP
+        // Find an available runner with 'jira' capability if using Jira MCP
         $requiredCapabilities = $useJiraMcp ? ['jira'] : [];
-        $shard = RunnerRouter::findAvailableShard($this->memberId, $requiredCapabilities);
+        $runner = RunnerRouter::findAvailableRunner($this->memberId, $requiredCapabilities);
 
-        if (!$shard) {
-            throw new \Exception("No available shards found");
+        if (!$runner) {
+            throw new \Exception("No available runners found");
         }
 
         // Generate unique job ID
@@ -454,7 +454,7 @@ class AnalysisService {
         $digestJob = Bean::dispense('digestjobs');
         $digestJob->job_uid = $jobId;
         $digestJob->boards_id = $boardId;
-        $digestJob->shard_id = $shard['id'];  // External shard ID
+        $digestJob->runner_id = $runner['id'];  // External runner ID
         $digestJob->status = 'queued';
         $digestJob->send_email = $sendEmail ? 1 : 0;
         $digestJob->board_name = $board['board_name'];
@@ -473,7 +473,7 @@ class AnalysisService {
         $callbackUrl = rtrim($baseUrl, '/') . '/webhook/digest';
         $webhookApiKey = Flight::get('cron.api_key');
 
-        // Prepare board info for shard
+        // Prepare board info for runner
         $boardInfo = [
             'board_id' => $boardId,
             'board_name' => $board['board_name'],
@@ -525,23 +525,23 @@ class AnalysisService {
             }
         }
 
-        // Call shard /analysis/sharddigest endpoint (unified PHP codebase)
-        $shardPort = $shard['port'];
-        // Use HTTPS only for port 443 (or if shard has ssl flag set)
+        // Call runner /analysis/runnerdigest endpoint (unified PHP codebase)
+        $runnerPort = $runner['port'];
+        // Use HTTPS only for port 443 (or if runner has ssl flag set)
         // Port 8443 uses HTTP until SSL certificate is configured
-        $shardProtocol = ($shardPort == 443 || !empty($shard['ssl'])) ? 'https' : 'http';
+        $runnerProtocol = ($runnerPort == 443 || !empty($runner['ssl'])) ? 'https' : 'http';
         try {
             $client = new Client([
-                'base_uri' => "{$shardProtocol}://{$shard['host']}:{$shardPort}",
+                'base_uri' => "{$runnerProtocol}://{$runner['host']}:{$runnerPort}",
                 'verify' => false, // Allow self-signed certs for now
                 'timeout' => 30,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . ($shard['api_key'] ?? ''),
+                    'Authorization' => 'Bearer ' . ($runner['api_key'] ?? ''),
                     'Content-Type' => 'application/json'
                 ]
             ]);
 
-            $response = $client->post('/analysis/sharddigest', [
+            $response = $client->post('/analysis/runnerdigest', [
                 'json' => $payload
             ]);
 
@@ -552,24 +552,24 @@ class AnalysisService {
             $digestJob->started_at = date('Y-m-d H:i:s');
             Bean::store($digestJob);
 
-            $this->log("Shard analysis started on {$shard['name']}");
+            $this->log("Runner analysis started on {$runner['name']}");
 
-            $this->logger->info('Shard digest analysis started', [
+            $this->logger->info('Runner digest analysis started', [
                 'member_id' => $this->memberId,
                 'board_id' => $boardId,
                 'job_uid' => $jobId,
-                'shard_id' => $shard['id'],
-                'shard_name' => $shard['name']
+                'runner_id' => $runner['id'],
+                'runner_name' => $runner['name']
             ]);
 
             return [
                 'success' => true,
                 'job_uid' => $jobId,
-                'shard_id' => $shard['id'],
-                'shard_name' => $shard['name'],
+                'runner_id' => $runner['id'],
+                'runner_name' => $runner['name'],
                 'board' => $board,
                 'status' => 'running',
-                'message' => "Digest analysis started on shard '{$shard['name']}'"
+                'message' => "Digest analysis started on runner '{$runner['name']}'"
             ];
 
         } catch (GuzzleException $e) {
@@ -579,14 +579,14 @@ class AnalysisService {
             $digestJob->completed_at = date('Y-m-d H:i:s');
             Bean::store($digestJob);
 
-            $this->logger->error('Failed to start shard analysis', [
+            $this->logger->error('Failed to start runner analysis', [
                 'member_id' => $this->memberId,
                 'board_id' => $boardId,
-                'shard_id' => $shard['id'],
+                'runner_id' => $runner['id'],
                 'error' => $e->getMessage()
             ]);
 
-            throw new \Exception("Failed to start shard analysis: " . $e->getMessage());
+            throw new \Exception("Failed to start runner analysis: " . $e->getMessage());
         }
     }
 
@@ -609,7 +609,7 @@ class AnalysisService {
             'board_id' => $job->boards_id,  // Return as board_id for API compatibility
             'board_name' => $job->board_name,
             'project_key' => $job->project_key,
-            'shard_id' => $job->shard_id,
+            'runner_id' => $job->runner_id,
             'created_at' => $job->created_at,
             'started_at' => $job->started_at,
             'completed_at' => $job->completed_at,

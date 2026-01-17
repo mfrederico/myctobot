@@ -11,7 +11,7 @@
     </div>
 
     <!-- Tabs -->
-    <ul class="nav nav-tabs mb-4" id="shardTabs" role="tablist">
+    <ul class="nav nav-tabs mb-4" id="runnerTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="workstations-tab" data-bs-toggle="tab" data-bs-target="#workstations" type="button" role="tab">
                 <i class="bi bi-pc-display-horizontal"></i> Workstations
@@ -24,7 +24,7 @@
         </li>
     </ul>
 
-    <div class="tab-content" id="shardTabsContent">
+    <div class="tab-content" id="runnerTabsContent">
         <!-- Workstations Tab -->
         <div class="tab-pane fade show active" id="workstations" role="tabpanel">
             <div class="d-flex justify-content-between align-items-center mb-3">
@@ -33,7 +33,7 @@
                     <button class="btn btn-outline-secondary me-2" onclick="healthCheckAll()">
                         <i class="bi bi-heart-pulse"></i> Health Check All
                     </button>
-                    <a href="/admin/createshard" class="btn btn-primary">
+                    <a href="/admin/createrunner" class="btn btn-primary">
                         <i class="bi bi-plus-lg"></i> Add Workstation
                     </a>
                 </div>
@@ -81,7 +81,7 @@
                 </div>
             </div>
 
-            <?php if (empty($shards)): ?>
+            <?php if (empty($runners)): ?>
             <div class="card">
                 <div class="card-body text-center py-5">
                     <i class="bi bi-pc-display-horizontal display-4 text-muted"></i>
@@ -89,33 +89,33 @@
                     <p class="text-muted mb-4" style="max-width: 500px; margin: 0 auto;">
                         To use AI agents with Claude Code CLI, you'll need at least one workstation.
                     </p>
-                    <a href="/admin/createshard" class="btn btn-primary btn-lg">
+                    <a href="/admin/createrunner" class="btn btn-primary btn-lg">
                         <i class="bi bi-plus-lg"></i> Add Your First Workstation
                     </a>
                 </div>
             </div>
             <?php else: ?>
             <div class="row">
-                <?php foreach ($shards as $shard): ?>
+                <?php foreach ($runners as $runner): ?>
                 <div class="col-md-6 col-lg-4 mb-4">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <span>
-                                <i class="bi bi-<?= $shard['health_status'] === 'healthy' ? 'check-circle text-success' : ($shard['health_status'] === 'unhealthy' ? 'x-circle text-danger' : 'question-circle text-muted') ?>"></i>
-                                <strong><?= htmlspecialchars($shard['name']) ?></strong>
+                                <i class="bi bi-<?= $runner['health_status'] === 'healthy' ? 'check-circle text-success' : ($runner['health_status'] === 'unhealthy' ? 'x-circle text-danger' : 'question-circle text-muted') ?>"></i>
+                                <strong><?= htmlspecialchars($runner['name']) ?></strong>
                             </span>
-                            <span class="badge <?= $shard['is_active'] ? 'bg-success' : 'bg-secondary' ?>">
-                                <?= $shard['is_active'] ? 'Active' : 'Inactive' ?>
+                            <span class="badge <?= $runner['is_active'] ? 'bg-success' : 'bg-secondary' ?>">
+                                <?= $runner['is_active'] ? 'Active' : 'Inactive' ?>
                             </span>
                         </div>
                         <div class="card-body">
-                            <p class="text-muted small mb-2"><?= htmlspecialchars($shard['description'] ?: 'No description') ?></p>
+                            <p class="text-muted small mb-2"><?= htmlspecialchars($runner['description'] ?: 'No description') ?></p>
 
                             <table class="table table-sm table-borderless mb-3">
                                 <tr>
                                     <td class="text-muted" style="width: 40%">Mode:</td>
                                     <td>
-                                        <?php $mode = $shard['execution_mode'] ?? 'http_api'; ?>
+                                        <?php $mode = $runner['execution_mode'] ?? 'http_api'; ?>
                                         <?php if ($mode === 'ssh_tmux'): ?>
                                         <span class="badge bg-primary"><i class="bi bi-terminal"></i> SSH+Tmux</span>
                                         <?php else: ?>
@@ -127,15 +127,15 @@
                                     <td class="text-muted">Host:</td>
                                     <td>
                                         <?php if ($mode === 'ssh_tmux'): ?>
-                                        <code><?= htmlspecialchars($shard['ssh_user'] ?? 'claudeuser') ?>@<?= htmlspecialchars($shard['host']) ?></code>
+                                        <code><?= htmlspecialchars($runner['ssh_user'] ?? 'claudeuser') ?>@<?= htmlspecialchars($runner['host']) ?></code>
                                         <?php else: ?>
-                                        <code><?= htmlspecialchars($shard['host']) ?>:<?= $shard['port'] ?></code>
+                                        <code><?= htmlspecialchars($runner['host']) ?>:<?= $runner['port'] ?></code>
                                         <?php endif; ?>
                                     </td>
                                 </tr>
                                 <tr>
                                     <td class="text-muted">Max Jobs:</td>
-                                    <td><?= $shard['max_concurrent_jobs'] ?></td>
+                                    <td><?= $runner['max_concurrent_jobs'] ?></td>
                                 </tr>
                             </table>
 
@@ -143,31 +143,31 @@
                             <div class="row text-center border-top pt-2">
                                 <div class="col-3">
                                     <div class="small text-muted">Total</div>
-                                    <div class="fw-bold"><?= $shard['stats']['total_jobs'] ?? 0 ?></div>
+                                    <div class="fw-bold"><?= $runner['stats']['total_jobs'] ?? 0 ?></div>
                                 </div>
                                 <div class="col-3">
                                     <div class="small text-muted">Running</div>
-                                    <div class="fw-bold text-info"><?= $shard['stats']['running_jobs'] ?? 0 ?></div>
+                                    <div class="fw-bold text-info"><?= $runner['stats']['running_jobs'] ?? 0 ?></div>
                                 </div>
                                 <div class="col-3">
                                     <div class="small text-muted">Done</div>
-                                    <div class="fw-bold text-success"><?= $shard['stats']['completed_jobs'] ?? 0 ?></div>
+                                    <div class="fw-bold text-success"><?= $runner['stats']['completed_jobs'] ?? 0 ?></div>
                                 </div>
                                 <div class="col-3">
                                     <div class="small text-muted">Failed</div>
-                                    <div class="fw-bold text-danger"><?= $shard['stats']['failed_jobs'] ?? 0 ?></div>
+                                    <div class="fw-bold text-danger"><?= $runner['stats']['failed_jobs'] ?? 0 ?></div>
                                 </div>
                             </div>
                         </div>
                         <div class="card-footer bg-transparent">
                             <div class="btn-group w-100">
-                                <button class="btn btn-outline-secondary btn-sm" onclick="testShard(<?= $shard['id'] ?>)" title="Test Connection">
+                                <button class="btn btn-outline-secondary btn-sm" onclick="testRunner(<?= $runner['id'] ?>)" title="Test Connection">
                                     <i class="bi bi-plug"></i> Test
                                 </button>
-                                <a href="/admin/editshard/<?= $shard['id'] ?>" class="btn btn-outline-primary btn-sm" title="Edit">
+                                <a href="/admin/editrunner/<?= $runner['id'] ?>" class="btn btn-outline-primary btn-sm" title="Edit">
                                     <i class="bi bi-pencil"></i> Edit
                                 </a>
-                                <button class="btn btn-outline-danger btn-sm" onclick="deleteShard(<?= $shard['id'] ?>, '<?= htmlspecialchars(addslashes($shard['name'])) ?>')" title="Delete">
+                                <button class="btn btn-outline-danger btn-sm" onclick="deleteRunner(<?= $runner['id'] ?>, '<?= htmlspecialchars(addslashes($runner['name'])) ?>')" title="Delete">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -221,7 +221,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Shard Health Check</h5>
+                <h5 class="modal-title">Runner Health Check</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -565,7 +565,7 @@ function formatDate(dateStr) {
 }
 
 // Workstation functions
-async function testShard(shardId) {
+async function testRunner(runnerId) {
     const modal = new bootstrap.Modal(document.getElementById('testResultModal'));
     const content = document.getElementById('testResultContent');
 
@@ -573,7 +573,7 @@ async function testShard(shardId) {
     modal.show();
 
     try {
-        const response = await fetch('/admin/testshard/' + shardId);
+        const response = await fetch('/admin/testrunner/' + runnerId);
         const data = await response.json();
 
         if (data.success) {
@@ -612,7 +612,7 @@ async function healthCheckAll() {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking...';
 
     try {
-        await fetch('/admin/shardhealth');
+        await fetch('/admin/runnerhealth');
         location.reload();
     } catch (err) {
         alert('Error: ' + err.message);
@@ -621,10 +621,10 @@ async function healthCheckAll() {
     }
 }
 
-function deleteShard(shardId, shardName) {
-    if (!confirm(`Are you sure you want to delete shard "${shardName}"?\n\nThis action cannot be undone.`)) {
+function deleteRunner(runnerId, runnerName) {
+    if (!confirm(`Are you sure you want to delete runner "${runnerName}"?\n\nThis action cannot be undone.`)) {
         return;
     }
-    window.location.href = '/admin/deleteshard/' + shardId;
+    window.location.href = '/admin/deleterunner/' + runnerId;
 }
 </script>

@@ -717,14 +717,14 @@ class Enterprise extends BaseControls\Control {
      * Start a new AI Developer job
      */
     public function startjob($params = []) {
-        // Redirect to sharded implementation which uses Claude Code CLI
-        return $this->startsharded($params);
+        // Redirect to runner implementation which uses Claude Code CLI
+        return $this->startrunner($params);
     }
 
     /**
-     * Start a new AI Developer job on a shard (Claude Code CLI)
+     * Start a new AI Developer job on a runner (Claude Code CLI)
      */
-    public function startsharded($params = []) {
+    public function startrunner($params = []) {
         if (!$this->requireEnterprise()) return;
 
         if (Flight::request()->method !== 'POST') {
@@ -753,11 +753,11 @@ class Enterprise extends BaseControls\Control {
                 return;
             }
 
-            // Find an available shard
-            $shard = RunnerRouter::findAvailableRunner($this->member->id, ['git', 'filesystem']);
+            // Find an available runner
+            $runner = RunnerRouter::findAvailableRunner($this->member->id, ['git', 'filesystem']);
 
-            if (!$shard) {
-                                $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
+            if (!$runner) {
+                                $this->json(['success' => false, 'error' => 'No available runners. Please try again later.']);
                 return;
             }
 
@@ -821,13 +821,13 @@ class Enterprise extends BaseControls\Control {
             $jobManager = new AIDevJobManager($this->member->id);
             $job = $jobManager->getOrCreate($issueKey, $boardId, $repoId, $cloudId);
 
-            // Generate shard job ID (this will be stored when job starts running)
-            $shardJobId = md5(uniqid($issueKey . '_' . microtime(true), true));
+            // Generate runner job ID (this will be stored when job starts running)
+            $runnerJobId = md5(uniqid($issueKey . '_' . microtime(true), true));
 
-            // Build payload for shard
+            // Build payload for runner
             $payload = [
                 'anthropic_api_key' => $apiKey,
-                'job_uid' => $shardJobId,
+                'job_uid' => $runnerJobId,
                 'issue_key' => $issueKey,
                 'issue_data' => [
                     'summary' => $summary,
@@ -855,49 +855,49 @@ class Enterprise extends BaseControls\Control {
                 'use_orchestrator' => $useOrchestrator
             ];
 
-            // Call shard endpoint
-            $shardPort = $shard['port'];
-            $shardProtocol = ($shardPort == 443 || !empty($shard['ssl'])) ? 'https' : 'http';
-            $shardUrl = "{$shardProtocol}://{$shard['host']}:{$shardPort}/analysis/shardaidev";
+            // Call runner endpoint
+            $runnerPort = $runner['port'];
+            $runnerProtocol = ($runnerPort == 443 || !empty($runner['ssl'])) ? 'https' : 'http';
+            $runnerUrl = "{$runnerProtocol}://{$runner['host']}:{$runnerPort}/analysis/runneraidev";
 
             $client = new \GuzzleHttp\Client([
                 'timeout' => 30,
                 'verify' => false
             ]);
 
-            $response = $client->post($shardUrl, [
+            $response = $client->post($runnerUrl, [
                 'json' => $payload
             ]);
 
             $result = json_decode($response->getBody()->getContents(), true);
 
             if ($response->getStatusCode() !== 202) {
-                throw new \Exception('Shard returned non-202 status: ' . $response->getStatusCode());
+                throw new \Exception('Runner returned non-202 status: ' . $response->getStatusCode());
             }
 
-            // Mark job as running with the shard job ID
-            $jobManager->startRun($issueKey, $shardJobId);
+            // Mark job as running with the runner job ID
+            $jobManager->startRun($issueKey, $runnerJobId);
 
-            $this->logger->info('AI Developer shard job started (Claude Code CLI)', [
+            $this->logger->info('AI Developer runner job started (Claude Code CLI)', [
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
-                'shard_job_uid' => $shardJobId,
-                'shard_id' => $shard['id'],
-                'shard_name' => $shard['name'] ?? $shard['host'],
+                'runner_job_uid' => $runnerJobId,
+                'runner_id' => $runner['id'],
+                'runner_name' => $runner['name'] ?? $runner['host'],
                 'use_orchestrator' => $useOrchestrator
             ]);
 
             $this->json([
                 'success' => true,
                 'issue_key' => $issueKey,
-                'shard_job_uid' => $shardJobId,
-                'shard' => $shard['name'] ?? $shard['host'],
-                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on shard with Claude Code CLI',
+                'runner_job_uid' => $runnerJobId,
+                'runner' => $runner['name'] ?? $runner['host'],
+                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on runner with Claude Code CLI',
                 'use_orchestrator' => $useOrchestrator
             ]);
 
         } catch (\Exception $e) {
-            $this->logger->error('Failed to start shard job', ['error' => $e->getMessage()]);
+            $this->logger->error('Failed to start runner job', ['error' => $e->getMessage()]);
             $this->json(['success' => false, 'error' => $e->getMessage()]);
         }
     }
@@ -919,10 +919,10 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Callback endpoint for shard job completion
+     * Callback endpoint for runner job completion
      */
-    public function shardcallback($params = []) {
-        // This endpoint receives callbacks from shards when jobs complete
+    public function runnercallback($params = []) {
+        // This endpoint receives callbacks from runners when jobs complete
         $data = json_decode(file_get_contents('php://input'), true);
 
         if (!$data || empty($data['job_uid'])) {
@@ -935,19 +935,19 @@ class Enterprise extends BaseControls\Control {
 
         if ($status === 'completed') {
             RunnerRouter::updateJobResult($jobId, $data['result'] ?? []);
-            $this->logger->info('Shard job completed', ['job_uid' => $jobId]);
+            $this->logger->info('Runner job completed', ['job_uid' => $jobId]);
         } elseif ($status === 'failed') {
             RunnerRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
-            $this->logger->error('Shard job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
+            $this->logger->error('Runner job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
         }
 
         $this->json(['success' => true]);
     }
 
     /**
-     * Get shard job status
+     * Get runner job status
      */
-    public function shardjobstatus($params = []) {
+    public function runnerjobstatus($params = []) {
         if (!$this->requireLogin()) return;
 
         $jobId = $this->opId() ?? '';
@@ -976,9 +976,9 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Get shard job output
+     * Get runner job output
      */
-    public function shardjoboutput($params = []) {
+    public function runnerjoboutput($params = []) {
         if (!$this->requireLogin()) return;
 
         $jobId = $this->opId() ?? '';
@@ -1003,27 +1003,27 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * List available shards for the current user
+     * List available runners for the current user
      */
-    public function shards($params = []) {
+    public function runners($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        // Get shards available to this member
-        $memberShards = RunnerService::getMemberRunners($this->member->id);
+        // Get runners available to this member
+        $memberRunners = RunnerService::getMemberRunners($this->member->id);
 
-        if (empty($memberShards)) {
-            $memberShards = RunnerService::getDefaultRunners();
+        if (empty($memberRunners)) {
+            $memberRunners = RunnerService::getDefaultRunners();
         }
 
         // Add health status
-        foreach ($memberShards as &$shard) {
-            $shard['stats'] = RunnerService::getRunnerStats($shard['id']);
-            $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
+        foreach ($memberRunners as &$runner) {
+            $runner['stats'] = RunnerService::getRunnerStats($runner['id']);
+            $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
         }
 
         $this->json([
             'success' => true,
-            'shards' => $memberShards
+            'runners' => $memberRunners
         ]);
     }
 
@@ -1227,8 +1227,8 @@ class Enterprise extends BaseControls\Control {
                 return;
             }
 
-            // Generate a new shard job ID for the retry run
-            $shardJobId = md5(uniqid($issueKey . '_retry_' . microtime(true), true));
+            // Generate a new runner job ID for the retry run
+            $runnerJobId = md5(uniqid($issueKey . '_retry_' . microtime(true), true));
 
             // Start background process
             $cronSecret = Flight::get('cron.api_key');
@@ -1245,7 +1245,7 @@ class Enterprise extends BaseControls\Control {
                 escapeshellarg($scriptPath),
                 escapeshellarg($cronSecret),
                 $this->member->id,
-                escapeshellarg($shardJobId),
+                escapeshellarg($runnerJobId),
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
                 $job->prNumber ?? 0,

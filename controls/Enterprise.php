@@ -754,7 +754,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Find an available shard
-            $shard = RunnerRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
+            $shard = RunnerRouter::findAvailableRunner($this->member->id, ['git', 'filesystem']);
 
             if (!$shard) {
                                 $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
@@ -1009,15 +1009,15 @@ class Enterprise extends BaseControls\Control {
         if (!$this->requireEnterprise()) return;
 
         // Get shards available to this member
-        $memberShards = RunnerService::getMemberShards($this->member->id);
+        $memberShards = RunnerService::getMemberRunners($this->member->id);
 
         if (empty($memberShards)) {
-            $memberShards = RunnerService::getDefaultShards();
+            $memberShards = RunnerService::getDefaultRunners();
         }
 
         // Add health status
         foreach ($memberShards as &$shard) {
-            $shard['stats'] = RunnerService::getShardStats($shard['id']);
+            $shard['stats'] = RunnerService::getRunnerStats($shard['id']);
             $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         }
 

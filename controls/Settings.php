@@ -160,7 +160,7 @@ class Settings extends BaseControls\Control {
         // Shards are admin-level (not per-member)
         if ($this->member->level <= 50) {
             require_once __DIR__ . '/../services/RunnerService.php';
-            $allShards = \app\services\RunnerService::getAllShards(false);
+            $allShards = \app\services\RunnerService::getAllRunners(false);
             $shardCount = count($allShards);
         }
 

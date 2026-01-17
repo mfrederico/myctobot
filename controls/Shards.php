@@ -25,15 +25,15 @@ class Shards extends BaseControls\Control {
         if (!$this->requireLogin()) return;
 
         // Get shards available to this member
-        $memberShards = RunnerService::getMemberShards($this->member->id);
+        $memberShards = RunnerService::getMemberRunners($this->member->id);
 
         if (empty($memberShards)) {
-            $memberShards = RunnerService::getDefaultShards();
+            $memberShards = RunnerService::getDefaultRunners();
         }
 
         // Add health status
         foreach ($memberShards as &$shard) {
-            $shard['stats'] = RunnerService::getShardStats($shard['id']);
+            $shard['stats'] = RunnerService::getRunnerStats($shard['id']);
             $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         }
 

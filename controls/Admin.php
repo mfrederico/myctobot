@@ -610,10 +610,10 @@ class Admin extends Control {
         $this->viewData['title'] = 'Claude Code Shards';
 
         // Get all shards with stats
-        $shards = \app\services\RunnerService::getAllShards(false);
+        $shards = \app\services\RunnerService::getAllRunners(false);
 
         foreach ($shards as &$shard) {
-            $shard['stats'] = \app\services\RunnerService::getShardStats($shard['id']);
+            $shard['stats'] = \app\services\RunnerService::getRunnerStats($shard['id']);
             $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         }
 
@@ -676,7 +676,7 @@ class Admin extends Control {
             }
 
             try {
-                $shardId = \app\services\RunnerService::createShard($data);
+                $shardId = \app\services\RunnerService::createRunner($data);
                 $this->logger->info('Shard created', ['shard_id' => $shardId, 'name' => $data['name']]);
                 $this->flash('success', 'Shard created successfully');
                 Flight::redirect('/admin/shards');
@@ -705,7 +705,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\RunnerService::getShard($shardId);
+        $shard = \app\services\RunnerService::getRunner($shardId);
         if (!$shard) {
             $this->flash('error', 'Shard not found');
             Flight::redirect('/admin/shards');
@@ -756,7 +756,7 @@ class Admin extends Control {
 
             try {
                 $this->logger->info('Updating shard', ['shard_id' => $shardId, 'data' => $data]);
-                \app\services\RunnerService::updateShard($shardId, $data);
+                \app\services\RunnerService::updateRunner($shardId, $data);
                 $this->logger->info('Shard updated', ['shard_id' => $shardId]);
                 $this->flash('success', 'Shard updated successfully');
                 Flight::redirect('/admin/shards');
@@ -787,7 +787,7 @@ class Admin extends Control {
         }
 
         try {
-            \app\services\RunnerService::deleteShard($shardId);
+            \app\services\RunnerService::deleteRunner($shardId);
             $this->logger->info('Shard deleted', ['shard_id' => $shardId]);
             $this->flash('success', 'Shard deleted');
         } catch (\Exception $e) {
@@ -810,7 +810,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\RunnerService::getShard($shardId);
+        $shard = \app\services\RunnerService::getRunner($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;
@@ -901,7 +901,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\RunnerService::getShard($shardId);
+        $shard = \app\services\RunnerService::getRunner($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;
@@ -965,7 +965,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\RunnerService::getShard($shardId);
+        $shard = \app\services\RunnerService::getRunner($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;

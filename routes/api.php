@@ -40,3 +40,15 @@ Flight::route('GET /api/ceo/directive/@id', ['\app\Ceodirective', 'get']);
 // PM Assistant context endpoint - returns project/epic/story data for PM chatbot
 // Used by RAG service to fetch live data instead of duplicating queries
 Flight::route('GET /api/pm/context/@tenant', ['\app\Api', 'pmcontext']);
+
+// Runner API endpoints - remote runner job execution
+// GET /api/runner/boot - Bootstrap script (no auth)
+Flight::route('GET /api/runner/boot', ['\app\Runnerapi', 'boot']);
+
+// Job-specific endpoints (require X-Job-Token header)
+Flight::route('GET /api/runner/jobs/@jobId/manifest', ['\app\Runnerapi', 'manifest']);
+Flight::route('GET /api/runner/jobs/@jobId/runner', ['\app\Runnerapi', 'runner']);
+Flight::route('GET /api/runner/jobs/@jobId/files/@filename', ['\app\Runnerapi', 'files']);
+Flight::route('POST /api/runner/jobs/@jobId/status', ['\app\Runnerapi', 'status']);
+Flight::route('POST /api/runner/jobs/@jobId/log', ['\app\Runnerapi', 'log']);
+Flight::route('POST /api/runner/jobs/@jobId/complete', ['\app\Runnerapi', 'complete']);

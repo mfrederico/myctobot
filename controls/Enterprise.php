@@ -15,8 +15,8 @@ use \app\services\EncryptionService;
 use \app\services\GitHubClient;
 use \app\services\AIDevAgent;
 use \app\services\AIDevJobManager;
-use \app\services\ShardService;
-use \app\services\ShardRouter;
+use \app\services\RunnerService;
+use \app\services\RunnerRouter;
 use \app\services\LLMProviders\LLMProviderFactory;
 use \app\services\ConnectionsService;
 use \app\services\AnthropicKeyService;
@@ -29,8 +29,8 @@ require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/GitHubClient.php';
 require_once __DIR__ . '/../services/AIDevAgent.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
-require_once __DIR__ . '/../services/ShardService.php';
-require_once __DIR__ . '/../services/ShardRouter.php';
+require_once __DIR__ . '/../services/RunnerService.php';
+require_once __DIR__ . '/../services/RunnerRouter.php';
 use \app\Bean;
 
 class Enterprise extends BaseControls\Control {
@@ -754,7 +754,7 @@ class Enterprise extends BaseControls\Control {
             }
 
             // Find an available shard
-            $shard = ShardRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
+            $shard = RunnerRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
 
             if (!$shard) {
                                 $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
@@ -811,7 +811,7 @@ class Enterprise extends BaseControls\Control {
             $urlsToCheck = $this->extractUrls($description . ' ' . $commentText);
 
             // Get Jira credentials
-            $jiraCreds = ShardRouter::getMemberMcpCredentials($this->member->id);
+            $jiraCreds = RunnerRouter::getMemberMcpCredentials($this->member->id);
             $jiraHost = $jiraCreds['jira_host'] ?? '';
             $jiraEmail = $jiraCreds['jira_email'] ?? '';
             $jiraToken = $jiraCreds['jira_api_token'] ?? '';
@@ -934,10 +934,10 @@ class Enterprise extends BaseControls\Control {
         $status = $data['status'] ?? 'unknown';
 
         if ($status === 'completed') {
-            ShardRouter::updateJobResult($jobId, $data['result'] ?? []);
+            RunnerRouter::updateJobResult($jobId, $data['result'] ?? []);
             $this->logger->info('Shard job completed', ['job_uid' => $jobId]);
         } elseif ($status === 'failed') {
-            ShardRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
+            RunnerRouter::updateJobStatus($jobId, 'failed', $data['error'] ?? 'Unknown error');
             $this->logger->error('Shard job failed', ['job_uid' => $jobId, 'error' => $data['error'] ?? '']);
         }
 
@@ -956,7 +956,7 @@ class Enterprise extends BaseControls\Control {
             return;
         }
 
-        $status = ShardRouter::getJobStatus($jobId);
+        $status = RunnerRouter::getJobStatus($jobId);
 
         if (!$status) {
             $this->json(['success' => false, 'error' => 'Job not found']);
@@ -988,13 +988,13 @@ class Enterprise extends BaseControls\Control {
         }
 
         // Verify ownership first
-        $job = ShardRouter::getJobStatus($jobId);
+        $job = RunnerRouter::getJobStatus($jobId);
         if (!$job || $job['member_id'] != $this->member->id) {
             $this->json(['success' => false, 'error' => 'Job not found']);
             return;
         }
 
-        $output = ShardRouter::getJobOutput($jobId);
+        $output = RunnerRouter::getJobOutput($jobId);
 
         $this->json([
             'success' => true,
@@ -1009,15 +1009,15 @@ class Enterprise extends BaseControls\Control {
         if (!$this->requireEnterprise()) return;
 
         // Get shards available to this member
-        $memberShards = ShardService::getMemberShards($this->member->id);
+        $memberShards = RunnerService::getMemberShards($this->member->id);
 
         if (empty($memberShards)) {
-            $memberShards = ShardService::getDefaultShards();
+            $memberShards = RunnerService::getDefaultShards();
         }
 
         // Add health status
         foreach ($memberShards as &$shard) {
-            $shard['stats'] = ShardService::getShardStats($shard['id']);
+            $shard['stats'] = RunnerService::getShardStats($shard['id']);
             $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         }
 

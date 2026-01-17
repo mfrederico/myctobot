@@ -1,13 +1,55 @@
 # Claude Execution via AOE+TMUX Flow
 
-This document describes how Claude Code CLI is executed via AOE-PHP and tmux, including remote workstation execution via SSH.
+This document describes how Claude Code CLI is executed via AOE-PHP and tmux, including remote workstation execution.
+
+## Architecture Overview
+
+MyCTOBot supports two execution modes:
+
+1. **Local Execution** - Claude runs on the same server as MyCTOBot
+2. **Remote Execution** - Claude runs on a remote workstation via SSH push + API pull
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    CLAUDE EXECUTION VIA AOE+TMUX FLOW                           │
-│                    (Remote Workstation: claudeuser@1.1.1.1)                      │
-└─────────────────────────────────────────────────────────────────────────────────┘
+═══════════════════════════════════════════════════════════════════════════════════
+HIGH-LEVEL ARCHITECTURE
+═══════════════════════════════════════════════════════════════════════════════════
 
+                           ┌─────────────────────────────────────┐
+                           │         MYCTOBOT (Control Plane)    │
+                           │         {tenant}.myctobot.ai        │
+                           ├─────────────────────────────────────┤
+                           │                                     │
+                           │  Database:                          │
+                           │  ├── runners (workstations)         │
+                           │  ├── aiagents (agent configs)       │
+                           │  ├── aidevjobs (job queue)          │
+                           │  └── member credentials             │
+                           │                                     │
+                           │  APIs:                              │
+                           │  ├── /api/runner/* (runner API)     │
+                           │  └── /mcp/* (MCP tools)             │
+                           │                                     │
+                           └──────────────┬──────────────────────┘
+                                          │
+                    ┌─────────────────────┼─────────────────────┐
+                    │ SSH Push            │ SSH Push            │ SSH Push
+                    ▼                     ▼                     ▼
+         ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+         │ RUNNER (local)   │  │ RUNNER (onsite)  │  │ RUNNER (offsite) │
+         │ clauderunner1    │  │ clauderunner2    │  │ clauderunner1    │
+         │ localhost        │  │ 10.0.0.50        │  │ cloud VM         │
+         └──────────────────┘  └──────────────────┘  └──────────────────┘
+
+         Each runner pulls job config via HTTPS from MyCTOBot API
+```
+
+---
+
+## PART 1: LOCAL EXECUTION FLOW
+
+For jobs running on the MyCTOBot server itself (no remote workstation assigned).
+
+```
 ═══════════════════════════════════════════════════════════════════════════════════
 PHASE 1: JOB TRIGGER
 ═══════════════════════════════════════════════════════════════════════════════════
@@ -26,7 +68,7 @@ PHASE 1: JOB TRIGGER
                                          │   record (status:     │
                                          │   'queued')           │
                                          │ - Gets agent config   │
-                                         │ - Gets workstation    │
+                                         │ - Gets runner config  │
                                          └───────────┬───────────┘
                                                      │
 ═══════════════════════════════════════════════════════════════════════════════════
@@ -47,7 +89,7 @@ PHASE 2: SESSION CREATION
 │     └── Sets: $sessionName = "aoe-gwt-SSI-1234-ab12cd34"                        │
 │               $workDir = "/tmp/aoe-gwt-SSI-1234-ab12cd34"                        │
 │                                                                                  │
-│  spawnWithScript($scriptPath, ..., $workstation)                                │
+│  spawnWithScript($scriptPath, ...)                                              │
 │     │                                                                            │
 │     ├── mkdir($workDir)                                                          │
 │     ├── AoeStorage::save($aoeSession)                                            │
@@ -61,49 +103,12 @@ PHASE 2: SESSION CREATION
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │  tmux new-session -d -s "aoe-gwt-SSI-1234-ab12cd34" \                            │
 │       -c "/tmp/aoe-gwt-SSI-1234-ab12cd34" \                                      │
-│       "php scripts/local-aidev-full.php --issue=SSI-1234 --member=1 \            │
-│        --tenant=gwt --workstation='{\"host\":\"1.1.1.1\",\"user\":\"claudeuser\"}'"│
+│       "php scripts/local-aidev-full.php --issue=SSI-1234 --member=1 --tenant=gwt"│
 └─────────────────────────────────────────────────────────────────────────────────┘
-                                                     │
+
+
 ═══════════════════════════════════════════════════════════════════════════════════
-PHASE 3: ENVIRONMENT SETUP (inside tmux)
-═══════════════════════════════════════════════════════════════════════════════════
-                                                     │
-                                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                     scripts/local-aidev-full.php                                 │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  1. Parse CLI args (--issue, --tenant, --workstation, etc.)                     │
-│                                                                                  │
-│  2. Load/Create AOE Session                                                      │
-│     - $aoeSession = AoeInstance::create(tenantId, title, projectPath, tool)     │
-│     - $sessionName = $aoeSession->getTmuxName()                                  │
-│     - $workDir = "/tmp/{$sessionName}"                                           │
-│                                                                                  │
-│  3. Create directory structure:                                                  │
-│     mkdir -p /tmp/aoe-gwt-SSI-1234-ab12cd34/                                    │
-│     mkdir -p /tmp/aoe-gwt-SSI-1234-ab12cd34/attachments/                        │
-│                                                                                  │
-│  4. Fetch Jira issue details (JiraClient)                                       │
-│     - Summary, description, comments, attachments                                │
-│     - Download attachments to attachments/                                       │
-│                                                                                  │
-│  5. Clone repository                                                             │
-│     git clone <repo_url> /tmp/aoe-gwt-SSI-1234-ab12cd34/repo                    │
-│                                                                                  │
-│  6. Generate files (see FILE MAP below)                                          │
-│                                                                                  │
-│  7. Create run-claude.sh with SSH wrapper                                        │
-│                                                                                  │
-│  8. Create tmux session and send commands                                        │
-│     - aoeTmux->createSessionWithName()                                           │
-│     - aoeTmux->sendTextByName($sessionName, $envScriptPath)                     │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                                     │
-═══════════════════════════════════════════════════════════════════════════════════
-FILE MAP: /tmp/aoe-gwt-SSI-1234-ab12cd34/
+FILE MAP (LOCAL): /tmp/aoe-gwt-SSI-1234-ab12cd34/
 ═══════════════════════════════════════════════════════════════════════════════════
 
 /tmp/aoe-gwt-SSI-1234-ab12cd34/
@@ -111,11 +116,9 @@ FILE MAP: /tmp/aoe-gwt-SSI-1234-ab12cd34/
 ├── CLAUDE.md               # Project instructions + context
 ├── .mcp.json               # MCP server config (Jira tools)
 ├── run-claude.sh           # Main execution script (sets env, runs claude)
-├── ssh-claude.sh           # SSH wrapper for remote execution
 ├── finish_job.sh           # Called by Claude to signal completion
 ├── spawn.log               # PHP setup/spawn output
 ├── session.log             # Claude session output (via script -c)
-├── output.log              # Captured output
 ├── attachments/            # Downloaded Jira attachments
 │   └── screenshot.png
 └── repo/                   # Cloned git repository
@@ -123,127 +126,248 @@ FILE MAP: /tmp/aoe-gwt-SSI-1234-ab12cd34/
     ├── .mcp.json           # Copied from parent
     ├── .claude/
     │   └── settings.json   # Claude settings (allowed tools)
-    ├── finish_job.sh       # Copied from parent
     ├── .gitignore          # Updated with MyCTOBot patterns
     └── <project files>
+```
 
-═══════════════════════════════════════════════════════════════════════════════════
-PHASE 4: CLAUDE EXECUTION (SSH to Remote Workstation)
-═══════════════════════════════════════════════════════════════════════════════════
+---
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         run-claude.sh (executed in tmux)                         │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  #!/bin/bash                                                                     │
-│  export GITHUB_TOKEN="..."                                                       │
-│  export JIRA_BASE_URL="..."                                                      │
-│  export MCP_HTTP_URL="..."                                                       │
-│  export AIDEV_STATUS_WORKING="In Progress"                                       │
-│  export AIDEV_STATUS_COMPLETE="Ready for QA"                                     │
-│  ...                                                                             │
-│                                                                                  │
-│  cd /tmp/aoe-gwt-SSI-1234-ab12cd34/repo                                         │
-│                                                                                  │
-│  # Execute ssh-claude.sh (which runs Claude on remote)                           │
-│  script -c "./ssh-claude.sh" ../session.log                                      │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                                     │
-                                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              ssh-claude.sh                                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  #!/bin/bash                                                                     │
-│  cd /tmp/aoe-gwt-SSI-1234-ab12cd34                                              │
-│  ssh -t -p 22 claudeuser@1.1.1.1 \                                              │
-│      "export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && \│
-│       cd /tmp/aoe-gwt-SSI-1234-ab12cd34 && \                                    │
-│       claude --dangerously-skip-permissions \"\$(cat prompt.txt)\""              │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                                     │
-                                                     │ SSH connection
-                                                     ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    REMOTE WORKSTATION (claudeuser@1.1.1.1)                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  REQUIREMENT: Work directory must be accessible on remote host                   │
-│               (NFS mount, rsync, or shared filesystem)                           │
-│                                                                                  │
-│  /tmp/aoe-gwt-SSI-1234-ab12cd34/   ◄── Same path as myctobot server             │
-│  │                                                                               │
-│  └── Claude Code CLI runs here                                                   │
-│      - Reads prompt.txt                                                          │
-│      - Reads CLAUDE.md for project context                                       │
-│      - Uses .mcp.json for MCP tools (Jira comments)                             │
-│      - Makes changes to repo/                                                    │
-│      - Commits and pushes to git                                                 │
-│                                                                                  │
-│  MCP Server Connection:                                                          │
-│  ┌─────────────────────────────────────────────────────────────────────────┐    │
-│  │  .mcp.json:                                                              │    │
-│  │  {                                                                       │    │
-│  │    "mcpServers": {                                                       │    │
-│  │      "jira": {                                                           │    │
-│  │        "type": "http",                                                   │    │
-│  │        "url": "https://myctobot.ai/mcp/jira/gwt",                       │    │
-│  │        "headers": {                                                      │    │
-│  │          "Authorization": "Basic <base64>",                              │    │
-│  │          "X-MCP-Agent-Name": "Agent Smith"  ◄── For comment attribution │    │
-│  │        }                                                                 │    │
-│  │      }                                                                   │    │
-│  │    }                                                                     │    │
-│  │  }                                                                       │    │
-│  └─────────────────────────────────────────────────────────────────────────┘    │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                                     │
-                                                     │ MCP HTTP calls
-                                                     ▼
-                                         ┌───────────────────────┐
-                                         │ controls/Mcp.php      │
-                                         │                       │
-                                         │ - toolJiraComment()   │
-                                         │ - toolJiraTransition()│
-                                         │ - Appends [agent:X]   │
-                                         │   signature           │
-                                         └───────────────────────┘
+## PART 2: REMOTE EXECUTION FLOW (SSH Push + API Pull)
 
+For jobs running on remote workstations. This is the preferred architecture for:
+- Isolating Claude execution from the control plane
+- Scaling with multiple runners
+- Running on dedicated hardware with GPU/resources
+
+### Security Model
+
+- **User Isolation**: Each runner is a separate Linux user (chmod 700 home directories)
+- **SSH Push**: MyCTOBot initiates jobs via SSH (no polling, always fresh bootstrap)
+- **API Pull**: Runner fetches all config/files via authenticated HTTPS
+- **No Persistent State**: Runner is stateless, everything fetched per-job
+
+```
 ═══════════════════════════════════════════════════════════════════════════════════
-PHASE 5: POST-SESSION CLEANUP
+REMOTE EXECUTION ARCHITECTURE
 ═══════════════════════════════════════════════════════════════════════════════════
 
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    run-claude.sh (after Claude exits)                            │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  echo "=== Claude Session Ended ==="                                             │
-│                                                                                  │
-│  # update_issue_tracker() function:                                              │
-│  # - Posts summary comment to Jira                                               │
-│  # - Transitions ticket to configured status                                     │
-│                                                                                  │
-│  # cleanup_labels() function:                                                    │
-│  # - Removes ai-dev label                                                        │
-│  # - Removes myctobot-working label                                              │
-│                                                                                  │
-│  # aoe_session_cleanup() function:                                               │
-│  # - Updates aidevjobs status to 'completed'                                     │
-│  # - Updates AOE session status                                                  │
-│  # - Notifies queue processor                                                    │
-│                                                                                  │
-│  echo "=== Final Cleanup ==="                                                    │
-│  # Session ends immediately (no more 2-hour wait)                                │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
+  MYCTOBOT                                    WORKSTATION
+  ────────                                    ───────────
+
+  1. SSH triggers bootstrap (always fresh, no polling)
+     ┌─────────────────────────────────────────────────────────────────────┐
+     │ ssh clauderunner1@workstation \                                     │
+     │   "curl -sfL https://myctobot.ai/api/runner/boot | \               │
+     │    bash -s -- --tenant=gwt --job=abc123 --token=XXXXX"             │
+     └─────────────────────────────────────────────────────────────────────┘
+                         │
+                         │ (that's ALL that goes over SSH)
+                         ▼
+
+  2. Bootstrap creates job directory and fetches runner
+     ┌─────────────────────────────────────────────────────────────────────┐
+     │ #!/bin/bash                                                         │
+     │ # boot.sh (fetched fresh every time via curl)                      │
+     │                                                                     │
+     │ TENANT=$1; JOB=$2; TOKEN=$3                                        │
+     │ API="https://${TENANT}.myctobot.ai/api/runner"                     │
+     │ WORK="$HOME/jobs/${TENANT}/${JOB}"                                 │
+     │                                                                     │
+     │ mkdir -p "$WORK" && cd "$WORK"                                     │
+     │                                                                     │
+     │ # Fetch job manifest                                                │
+     │ curl -sf -H "X-Job-Token: ${TOKEN}" \                              │
+     │   "${API}/jobs/${JOB}/manifest" -o manifest.json                   │
+     │                                                                     │
+     │ # Fetch runner script                                               │
+     │ curl -sf -H "X-Job-Token: ${TOKEN}" \                              │
+     │   "${API}/jobs/${JOB}/runner" -o runner.sh                         │
+     │ chmod +x runner.sh                                                  │
+     │                                                                     │
+     │ # Hand off to runner                                                │
+     │ exec ./runner.sh                                                    │
+     └─────────────────────────────────────────────────────────────────────┘
+                         │
+                         ▼
+
+  3. Runner fetches all job files and plugins
+     ┌─────────────────────────────────────────────────────────────────────┐
+     │ #!/bin/bash                                                         │
+     │ # runner.sh (fetched fresh every time)                             │
+     │                                                                     │
+     │ # Parse manifest                                                    │
+     │ REPO_URL=$(jq -r '.repo.url' manifest.json)                        │
+     │ BRANCH=$(jq -r '.repo.branch' manifest.json)                       │
+     │ PLUGINS=$(jq -r '.plugins[]' manifest.json)                        │
+     │                                                                     │
+     │ # Fetch workspace files                                             │
+     │ curl ... "${API}/jobs/${JOB}/files/prompt.txt" -o prompt.txt       │
+     │ curl ... "${API}/jobs/${JOB}/files/claude.md" -o CLAUDE.md         │
+     │ curl ... "${API}/jobs/${JOB}/files/mcp.json" -o .mcp.json          │
+     │ curl ... "${API}/jobs/${JOB}/files/env.sh" -o env.sh               │
+     │                                                                     │
+     │ # Fetch and setup plugins                                           │
+     │ for plugin in $PLUGINS; do                                         │
+     │   mkdir -p "plugins/${plugin}"                                     │
+     │   curl ... "${API}/plugins/${plugin}" | tar -xz -C "plugins/${plugin}"│
+     │   [[ -x "plugins/${plugin}/pre_run.sh" ]] && \                     │
+     │     source "plugins/${plugin}/pre_run.sh"                          │
+     │ done                                                                │
+     │                                                                     │
+     │ # Clone repository                                                  │
+     │ source env.sh  # Sets GITHUB_TOKEN, etc.                           │
+     │ git clone --depth 1 -b "$BRANCH" "$REPO_URL" repo/                 │
+     │                                                                     │
+     │ # Run Claude                                                        │
+     │ cd repo/                                                            │
+     │ claude --dangerously-skip-permissions "$(cat ../prompt.txt)"       │
+     │                                                                     │
+     │ # Post-run hooks                                                    │
+     │ for plugin in $PLUGINS; do                                         │
+     │   [[ -x "../plugins/${plugin}/post_run.sh" ]] && \                 │
+     │     source "../plugins/${plugin}/post_run.sh"                      │
+     │ done                                                                │
+     │                                                                     │
+     │ # Callback to MyCTOBot                                              │
+     │ curl -X POST "${API}/jobs/${JOB}/complete" \                       │
+     │   -H "X-Job-Token: ${TOKEN}" \                                     │
+     │   -d '{"status":"complete"}'                                       │
+     │                                                                     │
+     │ # Cleanup                                                           │
+     │ cd ~ && rm -rf "$WORK"                                             │
+     └─────────────────────────────────────────────────────────────────────┘
+
 
 ═══════════════════════════════════════════════════════════════════════════════════
-AOE-PHP STORAGE
+WORKSTATION DIRECTORY STRUCTURE (per user)
 ═══════════════════════════════════════════════════════════════════════════════════
 
+/home/clauderunner1/                    # chmod 700 - fully isolated
+├── .ssh/
+│   └── authorized_keys                 # MyCTOBot's SSH public key
+├── .claude/                            # Claude CLI config for this runner
+│   └── settings.json
+├── .gitconfig                          # Git config for this runner
+│
+├── jobs/                               # Active job workspaces
+│   └── {tenant}/
+│       └── {job-uuid}/                 # e.g., gwt/abc123-def456/
+│           ├── manifest.json           # Job configuration (from API)
+│           ├── runner.sh               # Runner script (from API)
+│           ├── prompt.txt              # Task prompt (from API)
+│           ├── CLAUDE.md               # Project context (from API)
+│           ├── .mcp.json               # MCP config (from API)
+│           ├── env.sh                  # Environment variables (from API)
+│           ├── plugins/
+│           │   ├── stripe/
+│           │   │   ├── pre_run.sh
+│           │   │   └── post_run.sh
+│           │   └── mcp-jira/
+│           ├── repo/                   # Git clone (done on runner)
+│           │   └── <project files>
+│           └── logs/
+│               └── claude.log
+│
+└── cache/                              # Optional: cached plugin binaries
+    └── plugins/
+        └── stripe-v1.19.0/
+
+
+═══════════════════════════════════════════════════════════════════════════════════
+MULTIPLE RUNNERS = MULTIPLE LINUX USERS (security isolation)
+═══════════════════════════════════════════════════════════════════════════════════
+
+/home/clauderunner1/    # chmod 700 - Runner 1 (can't see runner 2's files)
+/home/clauderunner2/    # chmod 700 - Runner 2 (can't see runner 1's files)
+/home/clauderunner3/    # chmod 700 - Runner 3 (dedicated to specific tenant)
+
+Benefits:
+- Complete file isolation between runners
+- Each runner can have different credentials
+- Compromise of one runner doesn't affect others
+- Can scale by adding more users on same host
+```
+
+---
+
+## MyCTOBot API Endpoints (Runner API)
+
+```
+═══════════════════════════════════════════════════════════════════════════════════
+RUNNER API: /api/runner/*
+═══════════════════════════════════════════════════════════════════════════════════
+
+# Bootstrap (no auth - minimal script)
+GET  /api/runner/boot
+     Returns: boot.sh script content
+
+# Job Files (requires X-Job-Token header)
+GET  /api/runner/jobs/{job_id}/manifest
+     Returns: JSON job configuration
+
+GET  /api/runner/jobs/{job_id}/runner
+     Returns: runner.sh script content
+
+GET  /api/runner/jobs/{job_id}/files/{filename}
+     Returns: prompt.txt, claude.md, mcp.json, env.sh
+
+# Plugins (requires X-Job-Token header)
+GET  /api/runner/plugins/{plugin_name}
+     Returns: plugin archive (tar.gz)
+
+# Callbacks (requires X-Job-Token header)
+POST /api/runner/jobs/{job_id}/status
+     Body: {"status": "running", "phase": "cloning"}
+
+POST /api/runner/jobs/{job_id}/log
+     Body: {"lines": ["...", "..."]}
+
+POST /api/runner/jobs/{job_id}/complete
+     Body: {"status": "success", "summary": "..."}
+```
+
+---
+
+## Database Tables
+
+### runners (formerly claudeshards)
+Remote workstation/runner configuration:
+- `id` - Primary key
+- `name` - Display name
+- `host` - SSH host
+- `user` - SSH username
+- `port` - SSH port (default 22)
+- `is_active` - Whether runner is available
+- `is_local` - True if runner is localhost
+- `max_concurrent` - Max simultaneous jobs
+- `capabilities` - JSON array of capabilities (e.g., ["claude", "nodejs"])
+- `runner_token` - API authentication token
+- `last_heartbeat` - Last seen timestamp
+- `tenant_id` - Restrict to specific tenant (null = any)
+
+### aiagents
+Agent configuration:
+- `id` - Primary key
+- `name` - Agent display name (used in MCP signatures)
+- `runners_id` - Assigned runner (nullable for local execution)
+- `plugins` - JSON array of required plugins
+- `hooks_config` - JSON pre/post hooks
+
+### aidevjobs
+Job queue and history:
+- `id` - Primary key
+- `issue_key` - Jira/GitHub issue reference
+- `status` - queued, running, completed, failed
+- `runner_id` - Which runner is executing (null = local)
+- `job_token` - Per-job API token (expires after job)
+- `member_id` - Owner
+- `created_at`, `updated_at` - Timestamps
+
+---
+
+## AOE-PHP Session Storage
+
+```
 /tmp/.aoe-php/
 └── tenants/
     └── gwt/
@@ -263,42 +387,60 @@ AOE-PHP STORAGE
               ]
             }
 
-═══════════════════════════════════════════════════════════════════════════════════
-KEY COMMANDS
-═══════════════════════════════════════════════════════════════════════════════════
+Note: AOE storage is synced with tmux (source of truth).
+      loadAllSynced() queries tmux first, then updates storage.
+```
 
+---
+
+## Key Commands
+
+```bash
 # List active sessions (queries tmux first)
 php ../aoe-php/bin/aoe --tenant=gwt sessions
 
-# Attach to session
+# Attach to local session
 tmux attach -t aoe-gwt-SSI-1234-ab12cd34
 
-# Watch session log
+# Watch session log (local)
 tail -f /tmp/aoe-gwt-SSI-1234-ab12cd34/session.log
 
-# Kill session
+# Kill local session
 tmux kill-session -t aoe-gwt-SSI-1234-ab12cd34
+
+# SSH to remote runner to debug
+ssh clauderunner1@workstation
+ls ~/jobs/gwt/          # See active jobs
+tail -f ~/jobs/gwt/abc123/logs/claude.log
 ```
 
-## Database Tables
+---
 
-### aidevjobs
-Tracks job status and history:
-- `id` - Primary key
-- `issue_key` - Jira/GitHub issue reference
-- `status` - queued, running, completed, failed
-- `member_id` - Owner
-- `created_at`, `updated_at` - Timestamps
+## Plugin System
 
-### aiagents
-Agent configuration:
-- `id` - Primary key
-- `name` - Agent display name (used in MCP signatures)
-- `claudeshards_id` - Assigned workstation (nullable for local execution)
+Plugins are fetched per-job and provide extensible tooling:
 
-### claudeshards
-Workstation configuration:
-- `id` - Primary key
-- `host` - SSH host
-- `user` - SSH user
-- `port` - SSH port (default 22)
+```
+plugins/
+├── stripe/
+│   ├── plugin.json         # Plugin manifest
+│   ├── pre_run.sh          # Setup (install CLI, login, etc.)
+│   ├── post_run.sh         # Cleanup (logout, remove creds)
+│   └── bin/                # Optional binaries
+│       └── stripe-mcp
+├── shopify/
+│   └── ...
+├── nodejs/
+│   └── ...
+└── template/               # Example for creating new plugins
+    └── ...
+
+plugin.json example:
+{
+  "name": "stripe",
+  "version": "1.0.0",
+  "description": "Stripe CLI integration",
+  "env_required": ["STRIPE_API_KEY"],
+  "files": ["pre_run.sh", "post_run.sh"]
+}
+```

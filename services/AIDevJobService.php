@@ -15,7 +15,7 @@ require_once __DIR__ . '/EncryptionService.php';
 require_once __DIR__ . '/JiraClient.php';
 require_once __DIR__ . '/GitHubClient.php';
 require_once __DIR__ . '/AIDevStatusService.php';
-require_once __DIR__ . '/ShardRouter.php';
+require_once __DIR__ . '/RunnerRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/TmuxService.php';
 require_once __DIR__ . '/CeoDirectiveLogger.php';
@@ -235,7 +235,7 @@ class AIDevJobService {
             }
 
             // Find an available shard
-            $shard = ShardRouter::findAvailableShard($memberId, ['git', 'filesystem']);
+            $shard = RunnerRouter::findAvailableRunner($memberId, ['git', 'filesystem']);
             if (!$shard) {
                 return ['success' => false, 'error' => 'No available shards. Please try again later.'];
             }
@@ -280,7 +280,7 @@ class AIDevJobService {
             $urlsToCheck = $this->extractUrls($description . ' ' . $commentText);
 
             // Get Jira credentials
-            $jiraCreds = ShardRouter::getMemberMcpCredentials($memberId);
+            $jiraCreds = RunnerRouter::getMemberMcpCredentials($memberId);
             $jiraHost = $jiraCreds['jira_host'] ?? '';
             $jiraEmail = $jiraCreds['jira_email'] ?? '';
             $jiraToken = $jiraCreds['jira_api_token'] ?? '';
@@ -932,8 +932,8 @@ class AIDevJobService {
         $repoBean = Bean::load('repoconnections', $repoId);
         if ($repoBean && $repoBean->aiagents_id) {
             $agent = Bean::load('aiagents', $repoBean->aiagents_id);
-            if ($agent && $agent->claudeshards_id) {
-                $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+            if ($agent && $agent->runners_id) {
+                $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
                 if ($shard) {
                     $workstation = [
                         'host' => $shard->host,
@@ -1037,8 +1037,8 @@ class AIDevJobService {
             $repoBean = Bean::load('repoconnections', $repoId);
             if ($repoBean && $repoBean->aiagents_id) {
                 $agent = Bean::load('aiagents', $repoBean->aiagents_id);
-                if ($agent && $agent->claudeshards_id) {
-                    $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+                if ($agent && $agent->runners_id) {
+                    $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
                     if ($shard) {
                         $workstation = [
                             'host' => $shard->host,
@@ -1391,8 +1391,8 @@ class AIDevJobService {
                     $repoBean = Bean::load('repoconnections', $job->repoconnections_id);
                     if ($repoBean && $repoBean->aiagents_id) {
                         $agent = Bean::load('aiagents', $repoBean->aiagents_id);
-                        if ($agent && $agent->claudeshards_id) {
-                            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [$agent->claudeshards_id]);
+                        if ($agent && $agent->runners_id) {
+                            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
                             if ($shard) {
                                 $workstation = [
                                     'host' => $shard->host,

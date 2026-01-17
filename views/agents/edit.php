@@ -316,7 +316,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                 <!-- Assigned Workstation -->
                 <div class="mb-3">
                     <label class="form-label">Assigned Workstation</label>
-                    <select class="form-select" name="claudeshards_id" id="claudeshards_id">
+                    <select class="form-select" name="runners_id" id="runners_id">
                         <option value="">-- Local Runner (this machine) --</option>
                         <!-- Populated via JavaScript -->
                     </select>
@@ -391,7 +391,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
     <script>
     // Load available workstations for testing and assignment
     document.addEventListener('DOMContentLoaded', function() {
-        const currentWorkstationId = '<?= $agent['claudeshards_id'] ?? '' ?>';
+        const currentWorkstationId = '<?= $agent['runners_id'] ?? '' ?>';
 
         fetch('/agents/workstations')
             .then(r => r.json())
@@ -399,7 +399,7 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                 // Populate test workstation dropdown
                 const testSelect = document.getElementById('test_workstation');
                 // Populate assignment workstation dropdown
-                const assignSelect = document.getElementById('claudeshards_id');
+                const assignSelect = document.getElementById('runners_id');
 
                 if (data.success && data.data.workstations && data.data.workstations.length > 0) {
                     testSelect.innerHTML = '<option value="">-- Select a workstation --</option>';

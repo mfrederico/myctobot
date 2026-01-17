@@ -272,7 +272,7 @@ class AgentTestService {
             return null;
         }
 
-        $workstationBean = Bean::load('claudeshards', $workstationId);
+        $workstationBean = Bean::load('runners', $workstationId);
         if (!$workstationBean || !$workstationBean->id) {
             return null;
         }
@@ -301,7 +301,7 @@ class AgentTestService {
      * Get all active workstations for dropdown
      */
     public static function getActiveWorkstations(): array {
-        $beans = Bean::find('claudeshards', 'is_active = 1 ORDER BY name ASC');
+        $beans = Bean::find('runners', 'is_active = 1 ORDER BY name ASC');
         $workstations = [];
 
         foreach ($beans as $bean) {

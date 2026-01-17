@@ -769,7 +769,7 @@ class TenantSchemaBuilder {
             'sshkeys', 'ticketanalysiscache', 'aiagents', 'mcpservers',
             'aiagents_mcpservers', 'installedplugins', 'pluginscans', 'discoveredplugins',
             // Additional tables
-            'agenttools', 'claudeshards', 'digestjobs', 'knowledgebases',
+            'agenttools', 'runners', 'digestjobs', 'knowledgebases',
             'ragdocuments', 'settings', 'shardjobs', 'shopifyconnections',
             'subscription', 'usersettings',
             // Parent tables last
@@ -989,6 +989,13 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         $bean->project_type = 'jira';
         $bean->queue_metadata = '{}';
+        $bean->tenant_slug = 'schema_tenant';
+        $bean->work_dir = '/tmp/schema-work-dir';
+        $bean->job_token = 'schema_job_token_placeholder';
+        $bean->token_expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
+        $bean->phase = 'setup';
+        $bean->summary = 'Schema placeholder summary';
+        $bean->prompt = 'Schema placeholder prompt';
         R::store($bean);
         R::trash($bean);
 
@@ -1911,5 +1918,77 @@ class TenantSchemaBuilder {
             $agent->mcp_servers = '[]';
             R::store($agent);
         }
+    }
+
+    /**
+     * Migration: Rename claudeshards table to runners
+     * Also renames FK columns: claudeshards_id -> runners_id
+     */
+    private function renameClaudeshardsToRunners(): void {
+        // Check if claudeshards table exists
+        try {
+            R::inspect('claudeshards');
+        } catch (\Exception $e) {
+            // claudeshards doesn't exist, check if runners already exists
+            try {
+                R::inspect('runners');
+                return; // Already migrated
+            } catch (\Exception $e2) {
+                // Neither exists, create runners table fresh
+                $this->createRunnersTable();
+                return;
+            }
+        }
+
+        // Check if runners table already exists (partial migration)
+        try {
+            R::inspect('runners');
+            // Both exist - data may have been migrated, just drop old table
+            R::exec('DROP TABLE IF EXISTS `claudeshards`');
+            return;
+        } catch (\Exception $e) {
+            // runners doesn't exist, proceed with rename
+        }
+
+        // Rename the table
+        R::exec('RENAME TABLE `claudeshards` TO `runners`');
+
+        // Rename FK column in aiagents if it exists
+        try {
+            $columns = R::inspect('aiagents');
+            if (isset($columns['claudeshards_id'])) {
+                R::exec('ALTER TABLE `aiagents` CHANGE COLUMN `claudeshards_id` `runners_id` INT(11) UNSIGNED NULL');
+            }
+        } catch (\Exception $e) {
+            // aiagents table doesn't exist or column doesn't exist
+        }
+    }
+
+    /**
+     * Create the runners table (formerly claudeshards)
+     * Stores remote workstation configurations for running Claude jobs
+     */
+    private function createRunnersTable(): void {
+        $bean = R::dispense('runners');
+        $bean->name = '_schema_init_';
+        $bean->host = 'localhost';
+        $bean->user = 'claudeuser';
+        $bean->port = 22;
+        $bean->is_active = true;
+        $bean->is_local = false;
+        $bean->max_concurrent = 1;
+        $bean->capabilities = '["claude"]'; // JSON array of capabilities
+        $bean->runner_token = null; // For API auth
+        $bean->last_heartbeat = null;
+        $bean->tenant_id = null; // Null = any tenant
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+
+        // Apply JSON column types
+        R::exec('ALTER TABLE `runners` MODIFY COLUMN `capabilities` JSON');
+
+        // Remove init row
+        R::trash($bean);
     }
 }

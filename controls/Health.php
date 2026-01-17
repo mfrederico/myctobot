@@ -14,7 +14,7 @@ class Health extends BaseControls\Control {
 
     /**
      * Health check endpoint
-     * Returns shard status and job counts for ShardRouter
+     * Returns runner status and job counts for RunnerRouter
      */
     public function index() {
         // Count running digest jobs (if table exists)

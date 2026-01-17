@@ -605,15 +605,15 @@ class Admin extends Control {
      * List all Claude Code shards
      */
     public function shards($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
 
         $this->viewData['title'] = 'Claude Code Shards';
 
         // Get all shards with stats
-        $shards = \app\services\ShardService::getAllShards(false);
+        $shards = \app\services\RunnerService::getAllShards(false);
 
         foreach ($shards as &$shard) {
-            $shard['stats'] = \app\services\ShardService::getShardStats($shard['id']);
+            $shard['stats'] = \app\services\RunnerService::getShardStats($shard['id']);
             $shard['capabilities'] = json_decode($shard['capabilities'] ?? '[]', true);
         }
 
@@ -626,7 +626,7 @@ class Admin extends Control {
      * Create a new shard
      */
     public function createshard($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
         $request = Flight::request();
@@ -676,7 +676,7 @@ class Admin extends Control {
             }
 
             try {
-                $shardId = \app\services\ShardService::createShard($data);
+                $shardId = \app\services\RunnerService::createShard($data);
                 $this->logger->info('Shard created', ['shard_id' => $shardId, 'name' => $data['name']]);
                 $this->flash('success', 'Shard created successfully');
                 Flight::redirect('/admin/shards');
@@ -696,7 +696,7 @@ class Admin extends Control {
      * Edit a shard
      */
     public function editshard($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
         $shardId = (int)($this->opId() ?? 0);
@@ -705,7 +705,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\ShardService::getShard($shardId);
+        $shard = \app\services\RunnerService::getShard($shardId);
         if (!$shard) {
             $this->flash('error', 'Shard not found');
             Flight::redirect('/admin/shards');
@@ -756,7 +756,7 @@ class Admin extends Control {
 
             try {
                 $this->logger->info('Updating shard', ['shard_id' => $shardId, 'data' => $data]);
-                \app\services\ShardService::updateShard($shardId, $data);
+                \app\services\RunnerService::updateShard($shardId, $data);
                 $this->logger->info('Shard updated', ['shard_id' => $shardId]);
                 $this->flash('success', 'Shard updated successfully');
                 Flight::redirect('/admin/shards');
@@ -778,7 +778,7 @@ class Admin extends Control {
      * Delete a shard
      */
     public function deleteshard($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
 
         $shardId = (int)($this->opId() ?? 0);
         if (!$shardId) {
@@ -787,7 +787,7 @@ class Admin extends Control {
         }
 
         try {
-            \app\services\ShardService::deleteShard($shardId);
+            \app\services\RunnerService::deleteShard($shardId);
             $this->logger->info('Shard deleted', ['shard_id' => $shardId]);
             $this->flash('success', 'Shard deleted');
         } catch (\Exception $e) {
@@ -801,7 +801,7 @@ class Admin extends Control {
      * Test shard connectivity (routes to HTTP or SSH based on execution_mode)
      */
     public function testshard($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
         $shardId = (int)($this->opId() ?? 0);
@@ -810,7 +810,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\ShardService::getShard($shardId);
+        $shard = \app\services\RunnerService::getShard($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;
@@ -848,7 +848,7 @@ class Admin extends Control {
             // Only update health status in database if testing saved values (GET request)
             if ($request->method !== 'POST') {
                 $healthStatus = $result['connected'] ? 'healthy' : 'unhealthy';
-                $shardBean = Bean::load('claudeshards', $shardId);
+                $shardBean = Bean::load('runners', $shardId);
                 $shardBean->health_status = $healthStatus;
                 $shardBean->last_health_check = date('Y-m-d H:i:s');
                 Bean::store($shardBean);
@@ -869,7 +869,7 @@ class Admin extends Control {
             ]);
         } else {
             // Use HTTP health check
-            $result = \app\services\ShardService::healthCheck($shardId);
+            $result = \app\services\RunnerService::healthCheck($shardId);
 
             // Include shard info from DB alongside remote health data
             $this->json([
@@ -892,7 +892,7 @@ class Admin extends Control {
      * Run full SSH diagnostic on a shard
      */
     public function diagnoseshard($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
         $shardId = (int)($this->opId() ?? 0);
@@ -901,7 +901,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\ShardService::getShard($shardId);
+        $shard = \app\services\RunnerService::getShard($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;
@@ -936,7 +936,7 @@ class Admin extends Control {
         // Only save diagnostic result to database if testing saved values (not POST)
         if (!$testingUnsaved) {
             $healthStatus = $result['ready'] ? 'healthy' : 'unhealthy';
-            $shardBean = Bean::load('claudeshards', $shardId);
+            $shardBean = Bean::load('runners', $shardId);
             $shardBean->ssh_validated = $result['ready'] ? 1 : 0;
             $shardBean->health_status = $healthStatus;
             $shardBean->last_health_check = date('Y-m-d H:i:s');
@@ -956,7 +956,7 @@ class Admin extends Control {
      * This tests the full pipeline: SSH -> Claude CLI -> Response
      */
     public function testhelloworld($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
         require_once __DIR__ . '/../services/ShardDiagnosticService.php';
 
         $shardId = (int)($this->opId() ?? 0);
@@ -965,7 +965,7 @@ class Admin extends Control {
             return;
         }
 
-        $shard = \app\services\ShardService::getShard($shardId);
+        $shard = \app\services\RunnerService::getShard($shardId);
         if (!$shard) {
             $this->json(['success' => false, 'error' => 'Shard not found']);
             return;
@@ -1100,9 +1100,9 @@ class Admin extends Control {
      * Health check all shards
      */
     public function shardhealth($params = []) {
-        require_once __DIR__ . '/../services/ShardService.php';
+        require_once __DIR__ . '/../services/RunnerService.php';
 
-        $results = \app\services\ShardService::healthCheckAll();
+        $results = \app\services\RunnerService::healthCheckAll();
 
         $this->json([
             'success' => true,

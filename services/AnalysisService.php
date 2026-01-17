@@ -21,8 +21,8 @@ require_once __DIR__ . '/AnalysisStatusService.php';
 require_once __DIR__ . '/SubscriptionService.php';
 require_once __DIR__ . '/TierFeatures.php';
 require_once __DIR__ . '/MailgunService.php';
-require_once __DIR__ . '/ShardService.php';
-require_once __DIR__ . '/ShardRouter.php';
+require_once __DIR__ . '/RunnerService.php';
+require_once __DIR__ . '/RunnerRouter.php';
 require_once __DIR__ . '/../analyzers/PriorityAnalyzer.php';
 require_once __DIR__ . '/../analyzers/ClarityAnalyzer.php';
 require_once __DIR__ . '/EncryptionService.php';
@@ -436,11 +436,11 @@ class AnalysisService {
         }
 
         // Get MCP credentials (Jira/GitHub)
-        $credentials = ShardRouter::getMemberMcpCredentials($this->memberId, $board['cloud_uid']);
+        $credentials = RunnerRouter::getMemberMcpCredentials($this->memberId, $board['cloud_uid']);
 
         // Find an available shard with 'jira' capability if using Jira MCP
         $requiredCapabilities = $useJiraMcp ? ['jira'] : [];
-        $shard = ShardRouter::findAvailableShard($this->memberId, $requiredCapabilities);
+        $shard = RunnerRouter::findAvailableShard($this->memberId, $requiredCapabilities);
 
         if (!$shard) {
             throw new \Exception("No available shards found");

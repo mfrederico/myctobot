@@ -104,7 +104,7 @@ class Agents extends BaseControls\Control {
         $shardCount = 0;
         if (!$useLocalRunner) {
             // Check for active shards in default database
-            $shardCount = Bean::count('claudeshards', 'is_active = 1') ?? (int) 0;
+            $shardCount = Bean::count('runners', 'is_active = 1') ?? (int) 0;
         }
         $this->viewData['has_shards'] = $useLocalRunner || $shardCount > 0;
         $this->viewData['use_local_runner'] = $useLocalRunner;
@@ -190,12 +190,12 @@ class Agents extends BaseControls\Control {
         }
 
         // Save workstation assignment (optional - runs jobs on assigned workstation via SSH)
-        $workstationId = $this->getParam('claudeshards_id');
+        $workstationId = $this->getParam('runners_id');
         if ($workstationId) {
             // Verify the workstation exists and is active
-            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
             if ($shard) {
-                $agent->claudeshards_id = (int)$workstationId;
+                $agent->runners_id = (int)$workstationId;
             }
         }
 
@@ -348,7 +348,7 @@ class Agents extends BaseControls\Control {
             'is_active' => (bool) $agent->is_active,
             'is_default' => (bool) $agent->is_default,
             'anthropickeys_id' => $agent->anthropickeys_id,
-            'claudeshards_id' => $agent->claudeshards_id
+            'runners_id' => $agent->runners_id
         ];
         $this->viewData['availableMcpServers'] = $availableServers;
 
@@ -455,15 +455,15 @@ class Agents extends BaseControls\Control {
         }
 
         // Update workstation assignment
-        $workstationId = $this->getParam('claudeshards_id');
+        $workstationId = $this->getParam('runners_id');
         if ($workstationId === '' || $workstationId === '0') {
             // Clear assignment (use local runner)
-            $agent->claudeshards_id = null;
+            $agent->runners_id = null;
         } elseif ($workstationId) {
             // Verify the workstation exists and is active
-            $shard = Bean::findOne('claudeshards', 'id = ? AND is_active = 1', [(int)$workstationId]);
+            $shard = Bean::findOne('runners', 'id = ? AND is_active = 1', [(int)$workstationId]);
             if ($shard) {
-                $agent->claudeshards_id = (int)$workstationId;
+                $agent->runners_id = (int)$workstationId;
             }
         }
     }

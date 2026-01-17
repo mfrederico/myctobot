@@ -1,7 +1,7 @@
 <?php
 /**
- * Shard Router Service
- * Routes jobs to available shards and manages execution
+ * Runner Router Service
+ * Routes jobs to available runners and manages execution
  */
 
 namespace app\services;
@@ -14,45 +14,45 @@ use \app\plugins\AtlassianAuth;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 
-class ShardRouter {
+class RunnerRouter {
 
     /**
-     * Find the best available shard for a job (least-loaded routing)
+     * Find the best available runner for a job (least-loaded routing)
      *
      * @param int $memberId Member ID
      * @param array $requiredCapabilities Required MCP capabilities
-     * @return array|null Shard data or null if none available
+     * @return array|null Runner data or null if none available
      */
-    public static function findAvailableShard(int $memberId, array $requiredCapabilities = []): ?array {
-        // First, check member-specific shard assignments
-        $memberShards = ShardService::getMemberShards($memberId);
+    public static function findAvailableRunner(int $memberId, array $requiredCapabilities = []): ?array {
+        // First, check member-specific runner assignments
+        $memberRunners = RunnerService::getMemberRunners($memberId);
 
-        // If no specific assignments, use default (public) shards
-        if (empty($memberShards)) {
-            $memberShards = ShardService::getDefaultShards();
+        // If no specific assignments, use default (public) runners
+        if (empty($memberRunners)) {
+            $memberRunners = RunnerService::getDefaultRunners();
         }
 
-        // Collect all eligible shards with their load info
+        // Collect all eligible runners with their load info
         $candidates = [];
 
-        foreach ($memberShards as $shard) {
+        foreach ($memberRunners as $runner) {
             // Check capabilities
             if (!empty($requiredCapabilities)) {
-                $shardCapabilities = json_decode($shard['capabilities'] ?? '[]', true);
-                $hasAllCapabilities = empty(array_diff($requiredCapabilities, $shardCapabilities));
+                $runnerCapabilities = json_decode($runner['capabilities'] ?? '[]', true);
+                $hasAllCapabilities = empty(array_diff($requiredCapabilities, $runnerCapabilities));
                 if (!$hasAllCapabilities) {
                     continue;
                 }
             }
 
             // Check health status
-            if ($shard['health_status'] === 'unhealthy') {
+            if ($runner['health_status'] === 'unhealthy') {
                 continue;
             }
 
             // Get running job count
-            $runningJobs = ShardService::getRunningJobCount($shard['id']);
-            $maxJobs = (int)$shard['max_concurrent_jobs'];
+            $runningJobs = RunnerService::getRunningJobCount($runner['id']);
+            $maxJobs = (int)$runner['max_concurrent_jobs'];
 
             // Skip if at capacity
             if ($runningJobs >= $maxJobs) {
@@ -61,24 +61,24 @@ class ShardRouter {
 
             // For SSH mode, we trust local job tracking
             // For HTTP mode, optionally verify with live health check
-            $executionMode = $shard['execution_mode'] ?? 'http_api';
+            $executionMode = $runner['execution_mode'] ?? 'http_api';
 
             if ($executionMode === 'ssh_tmux') {
                 // SSH mode - trust local tracking, add to candidates
                 $candidates[] = [
-                    'shard' => $shard,
+                    'runner' => $runner,
                     'running' => $runningJobs,
                     'max' => $maxJobs,
                     'load' => $maxJobs > 0 ? ($runningJobs / $maxJobs) : 1
                 ];
             } else {
                 // HTTP mode - verify with live health check
-                $health = self::quickHealthCheck($shard);
+                $health = self::quickHealthCheck($runner);
                 if ($health && isset($health['jobs']['running'])) {
                     $liveRunning = $health['jobs']['running'];
                     if ($liveRunning < $maxJobs) {
                         $candidates[] = [
-                            'shard' => $shard,
+                            'runner' => $runner,
                             'running' => $liveRunning,
                             'max' => $maxJobs,
                             'load' => $maxJobs > 0 ? ($liveRunning / $maxJobs) : 1
@@ -98,17 +98,17 @@ class ShardRouter {
             return $a['load'] <=> $b['load'];
         });
 
-        // Return the least-loaded shard
-        return $candidates[0]['shard'];
+        // Return the least-loaded runner
+        return $candidates[0]['runner'];
     }
 
     /**
-     * Quick health check (just checks if shard is responding)
+     * Quick health check (just checks if runner is responding)
      */
-    private static function quickHealthCheck(array $shard): ?array {
+    private static function quickHealthCheck(array $runner): ?array {
         try {
             $client = new Client([
-                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'base_uri' => "http://{$runner['host']}:{$runner['port']}",
                 'timeout' => 5
             ]);
 
@@ -121,16 +121,16 @@ class ShardRouter {
     }
 
     /**
-     * Execute a job on a specific shard
+     * Execute a job on a specific runner
      *
-     * @param int $shardId Shard ID
+     * @param int $runnerId Runner ID
      * @param array $jobPayload Job configuration
      * @return array Result with job_uid and status
      */
-    public static function executeJob(int $shardId, array $jobPayload): array {
-        $shard = ShardService::getShard($shardId);
-        if (!$shard) {
-            throw new \Exception("Shard not found: {$shardId}");
+    public static function executeJob(int $runnerId, array $jobPayload): array {
+        $runner = RunnerService::getRunner($runnerId);
+        if (!$runner) {
+            throw new \Exception("Runner not found: {$runnerId}");
         }
 
         // Generate job ID if not provided
@@ -139,14 +139,14 @@ class ShardRouter {
 
         // Record job in local database
         $memberId = $jobPayload['member_id'] ?? 0;
-        self::recordJob($jobId, $memberId, $shardId, $jobPayload);
+        self::recordJob($jobId, $memberId, $runnerId, $jobPayload);
 
         try {
             $client = new Client([
-                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'base_uri' => "http://{$runner['host']}:{$runner['port']}",
                 'timeout' => 30,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $shard['api_key'],
+                    'Authorization' => 'Bearer ' . $runner['api_key'],
                     'Content-Type' => 'application/json'
                 ]
             ]);
@@ -163,8 +163,8 @@ class ShardRouter {
             return [
                 'success' => true,
                 'job_uid' => $jobId,
-                'shard_id' => $shardId,
-                'shard_name' => $shard['name'],
+                'runner_id' => $runnerId,
+                'runner_name' => $runner['name'],
                 'result' => $result
             ];
 
@@ -172,17 +172,17 @@ class ShardRouter {
             // Update job as failed
             self::updateJobStatus($jobId, 'failed', $e->getMessage());
 
-            throw new \Exception("Failed to execute job on shard: " . $e->getMessage());
+            throw new \Exception("Failed to execute job on runner: " . $e->getMessage());
         }
     }
 
     /**
-     * Get job status from shard
+     * Get job status from runner
      */
     public static function getJobStatus(string $jobId): ?array {
 
         // Get job record using bean operations
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
@@ -190,58 +190,58 @@ class ShardRouter {
         // Convert bean to array for return value
         $jobData = $job->export();
 
-        // Get shard
-        $shard = ShardService::getShard($job->shard_id);
-        if (!$shard) {
-            return $jobData; // Return local record if shard unavailable
+        // Get runner
+        $runner = RunnerService::getRunner($job->runner_id);
+        if (!$runner) {
+            return $jobData; // Return local record if runner unavailable
         }
 
         try {
             $client = new Client([
-                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'base_uri' => "http://{$runner['host']}:{$runner['port']}",
                 'timeout' => 10,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $shard['api_key']
+                    'Authorization' => 'Bearer ' . $runner['api_key']
                 ]
             ]);
 
             $response = $client->get("/job/{$jobId}/status");
-            $shardStatus = json_decode($response->getBody()->getContents(), true);
+            $runnerStatus = json_decode($response->getBody()->getContents(), true);
 
             // Sync status to local DB
-            if (!empty($shardStatus['status'])) {
-                self::updateJobStatus($jobId, $shardStatus['status']);
+            if (!empty($runnerStatus['status'])) {
+                self::updateJobStatus($jobId, $runnerStatus['status']);
             }
 
-            return array_merge($jobData, ['shard_status' => $shardStatus]);
+            return array_merge($jobData, ['runner_status' => $runnerStatus]);
 
         } catch (GuzzleException $e) {
-            // Return local record if shard unavailable
+            // Return local record if runner unavailable
             return $jobData;
         }
     }
 
     /**
-     * Get job output from shard
+     * Get job output from runner
      */
     public static function getJobOutput(string $jobId): ?array {
 
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
 
-        $shard = ShardService::getShard($job->shard_id);
-        if (!$shard) {
+        $runner = RunnerService::getRunner($job->runner_id);
+        if (!$runner) {
             return null;
         }
 
         try {
             $client = new Client([
-                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'base_uri' => "http://{$runner['host']}:{$runner['port']}",
                 'timeout' => 30,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $shard['api_key']
+                    'Authorization' => 'Bearer ' . $runner['api_key']
                 ]
             ]);
 
@@ -254,26 +254,26 @@ class ShardRouter {
     }
 
     /**
-     * Cancel a job on shard
+     * Cancel a job on runner
      */
     public static function cancelJob(string $jobId): bool {
 
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return false;
         }
 
-        $shard = ShardService::getShard($job->shard_id);
-        if (!$shard) {
+        $runner = RunnerService::getRunner($job->runner_id);
+        if (!$runner) {
             return false;
         }
 
         try {
             $client = new Client([
-                'base_uri' => "http://{$shard['host']}:{$shard['port']}",
+                'base_uri' => "http://{$runner['host']}:{$runner['port']}",
                 'timeout' => 10,
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $shard['api_key']
+                    'Authorization' => 'Bearer ' . $runner['api_key']
                 ]
             ]);
 
@@ -290,12 +290,12 @@ class ShardRouter {
     /**
      * Record a job in local database
      */
-    private static function recordJob(string $jobId, int $memberId, int $shardId, array $payload): void {
+    private static function recordJob(string $jobId, int $memberId, int $runnerId, array $payload): void {
 
-        $job = Bean::dispense('shardjobs');
+        $job = Bean::dispense('runnerjobs');
         $job->job_uid = $jobId;
         $job->member_id = $memberId;
-        $job->shard_id = $shardId;
+        $job->runner_id = $runnerId;
         $job->issue_key = $payload['task']['issue_key'] ?? null;
         $job->status = 'queued';
         $job->request_payload = json_encode($payload);
@@ -308,7 +308,7 @@ class ShardRouter {
      */
     public static function updateJobStatus(string $jobId, string $status, ?string $error = null): void {
 
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->status = $status;
@@ -334,7 +334,7 @@ class ShardRouter {
      */
     public static function updateJobResult(string $jobId, array $result): void {
 
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) return;
 
         $job->result_payload = json_encode($result);
@@ -349,11 +349,11 @@ class ShardRouter {
     public static function getMemberJobs(int $memberId, int $limit = 50): array {
 
         return Bean::getAll("
-            SELECT sj.*, cs.name as shard_name
-            FROM shardjobs sj
-            JOIN claudeshards cs ON sj.shard_id = cs.id
-            WHERE sj.member_id = ?
-            ORDER BY sj.created_at DESC
+            SELECT rj.*, r.name as runner_name
+            FROM runnerjobs rj
+            JOIN runners r ON rj.runner_id = r.id
+            WHERE rj.member_id = ?
+            ORDER BY rj.created_at DESC
             LIMIT ?
         ", [$memberId, $limit]);
     }
@@ -364,11 +364,11 @@ class ShardRouter {
     public static function getMemberActiveJobs(int $memberId): array {
 
         return Bean::getAll("
-            SELECT sj.*, cs.name as shard_name
-            FROM shardjobs sj
-            JOIN claudeshards cs ON sj.shard_id = cs.id
-            WHERE sj.member_id = ? AND sj.status IN ('queued', 'running')
-            ORDER BY sj.created_at DESC
+            SELECT rj.*, r.name as runner_name
+            FROM runnerjobs rj
+            JOIN runners r ON rj.runner_id = r.id
+            WHERE rj.member_id = ? AND rj.status IN ('queued', 'running')
+            ORDER BY rj.created_at DESC
         ", [$memberId]);
     }
 
@@ -470,16 +470,17 @@ class ShardRouter {
      */
     public static function getStreamUrl(string $jobId): ?string {
 
-        $job = Bean::findOne('shardjobs', 'job_uid = ?', [$jobId]);
+        $job = Bean::findOne('runnerjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return null;
         }
 
-        $shard = ShardService::getShard($job->shard_id);
-        if (!$shard) {
+        $runner = RunnerService::getRunner($job->runner_id);
+        if (!$runner) {
             return null;
         }
 
-        return "http://{$shard['host']}:{$shard['port']}/job/{$jobId}/stream";
+        return "http://{$runner['host']}:{$runner['port']}/job/{$jobId}/stream";
     }
+
 }

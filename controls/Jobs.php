@@ -12,15 +12,15 @@ use \Exception as Exception;
 use \app\Bean;
 use \app\services\EncryptionService;
 use \app\services\AIDevJobManager;
-use \app\services\ShardService;
-use \app\services\ShardRouter;
+use \app\services\RunnerService;
+use \app\services\RunnerRouter;
 use \app\services\AnthropicKeyService;
 use \app\TenantResolver;
 
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
-require_once __DIR__ . '/../services/ShardService.php';
-require_once __DIR__ . '/../services/ShardRouter.php';
+require_once __DIR__ . '/../services/RunnerService.php';
+require_once __DIR__ . '/../services/RunnerRouter.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
 
 class Jobs extends BaseControls\Control {
@@ -116,7 +116,7 @@ class Jobs extends BaseControls\Control {
             }
 
             // Find an available shard
-            $shard = ShardRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
+            $shard = RunnerRouter::findAvailableShard($this->member->id, ['git', 'filesystem']);
 
             if (!$shard) {
                 $this->json(['success' => false, 'error' => 'No available shards. Please try again later.']);
@@ -172,7 +172,7 @@ class Jobs extends BaseControls\Control {
             $urlsToCheck = $this->extractUrls($description . ' ' . $commentText);
 
             // Get Jira credentials
-            $jiraCreds = ShardRouter::getMemberMcpCredentials($this->member->id);
+            $jiraCreds = RunnerRouter::getMemberMcpCredentials($this->member->id);
             $jiraHost = $jiraCreds['jira_host'] ?? '';
             $jiraEmail = $jiraCreds['jira_email'] ?? '';
             $jiraToken = $jiraCreds['jira_api_token'] ?? '';

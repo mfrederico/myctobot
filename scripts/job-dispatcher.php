@@ -1414,10 +1414,8 @@ BASH;
     // Final cleanup - session ends immediately after Claude exits
     $envScript .= <<<CLEANUP_BASH
 
-echo ""
-echo "=== Final Cleanup ==="
-cleanup_labels
-aoe_session_cleanup \$?
+# Trigger cleanup (trap will handle it, but call explicitly for immediate feedback)
+do_cleanup
 CLEANUP_BASH;
 }
 

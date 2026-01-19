@@ -1528,6 +1528,25 @@ class TenantSchemaBuilder {
             ['plugins', 'view', 100, 'View plugin details'],
             ['pluginregistry', 'index', 100, 'List discovered plugins'],
 
+            // Pipelines (level 100 - member access)
+            ['pipelines', 'index', 100, 'List pipelines'],
+            ['pipelines', 'create', 100, 'Create pipeline form'],
+            ['pipelines', 'store', 100, 'Store new pipeline'],
+            ['pipelines', 'edit', 100, 'Edit pipeline'],
+            ['pipelines', 'update', 100, 'Update pipeline'],
+            ['pipelines', 'delete', 100, 'Delete pipeline'],
+            ['pipelines', 'savestep', 100, 'Save pipeline step'],
+            ['pipelines', 'deletestep', 100, 'Delete pipeline step'],
+            ['pipelines', 'getstep', 100, 'Get pipeline step'],
+            ['pipelines', 'runs', 100, 'View pipeline runs'],
+            ['pipelines', 'viewrun', 100, 'View run details'],
+            ['pipelines', 'trigger', 100, 'Trigger pipeline run'],
+            ['pipelines', 'cancelrun', 100, 'Cancel pipeline run'],
+            ['pipelines', 'runstatus', 100, 'Get run status'],
+
+            // Pipein webhook (level 101 - public for webhooks)
+            ['pipein', 'index', 101, 'Pipeline webhook endpoint'],
+
             // Admin pages (level 50)
             ['admin', 'index', 50, 'Admin dashboard'],
             ['admin', 'members', 50, 'Manage members'],
@@ -1991,5 +2010,263 @@ class TenantSchemaBuilder {
 
         // Remove init row
         R::trash($bean);
+    }
+
+    // ========================================
+    // Pipeline Tables
+    // ========================================
+
+    /**
+     * Create the pipelines table
+     * Stores pipeline definitions (templates)
+     */
+    private function createPipelinesTable(): void {
+        $bean = R::dispense('pipelines');
+        $bean->member = $this->member; // Creates member_id FK (created_by)
+        $bean->slug = 'schema-pipeline-slug'; // Unique slug for CLI: --pipeline=my-deploy-pipe
+        $bean->name = 'Schema Pipeline';
+        $bean->description = 'Schema pipeline description';
+        $bean->columns_json = '["Start", "Execute", "Validate", "Complete"]'; // Fixed column names
+        $bean->trigger_type = 'manual'; // manual, webhook, cron, http_poll
+        $bean->trigger_config_json = '{}'; // Type-specific: cron expr, poll URL, webhook secret
+        $bean->default_context_json = '{}'; // Default ENV/context vars for runs
+        $bean->is_active = true;
+        $bean->is_template = false; // Can be used as starting point for new pipelines
+        $bean->run_count = 0;
+        $bean->last_run_at = null;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+
+        // Apply JSON column types
+        R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `columns_json` JSON');
+        R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `trigger_config_json` JSON');
+        R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `default_context_json` JSON');
+
+        // Add unique slug constraint
+        R::exec('ALTER TABLE `pipelines` ADD UNIQUE INDEX IF NOT EXISTS `uk_slug` (`slug`)');
+
+        R::trash($bean);
+    }
+
+    /**
+     * Create the pipelinesteps table
+     * Stores steps within a pipeline (the cells in the grid)
+     */
+    private function createPipelinestepsTable(): void {
+        // Need a pipeline first
+        $pipeline = R::findOne('pipelines', ' LIMIT 1 ');
+        $pipelineIsTemp = false;
+        if (!$pipeline) {
+            $pipeline = R::dispense('pipelines');
+            $pipeline->member = $this->member;
+            $pipeline->slug = '_temp_for_steps';
+            $pipeline->name = 'Temp Pipeline';
+            $pipeline->columns_json = '[]';
+            $pipeline->trigger_type = 'manual';
+            $pipeline->trigger_config_json = '{}';
+            $pipeline->default_context_json = '{}';
+            $pipeline->is_active = false;
+            $pipeline->created_at = date('Y-m-d H:i:s');
+            R::store($pipeline);
+            $pipelineIsTemp = true;
+        }
+
+        $bean = R::dispense('pipelinesteps');
+        $bean->pipelines = $pipeline; // Creates pipelines_id FK
+        $bean->step_name = 'checkout'; // Unique within pipeline, used for refs: checkout.output
+        $bean->row = 0; // 0-indexed row
+        $bean->col = 0; // 0-indexed column
+        $bean->label = 'Checkout Code'; // Display label
+        $bean->step_type = 'ai_agent'; // ai_agent, script, direct_exec, parser, webhook_out, wait
+        $bean->config_json = '{}'; // Type-specific config (agent_id, command, url, etc.)
+        $bean->input_source = 'context'; // context, stdin, file, http, getfrom:step_name
+        $bean->input_config_json = '{}'; // Input source configuration
+        $bean->condition_json = '{}'; // IF logic: {"check": "prev.success", "on_false": "skip"}
+        $bean->on_success = 'next_col'; // next_col, next_row, goto:step_name, exit
+        $bean->on_failure = 'exit'; // retry:3, goto:step_name, exit, handler:pipeline_slug
+        $bean->timeout_seconds = 300; // 5 minute default
+        $bean->retry_count = 0; // Max retries on failure
+        $bean->retry_delay_seconds = 10; // Delay between retries
+        $bean->is_active = true;
+        $bean->sequence = 0; // Execution order (row * 100 + col)
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+
+        // Apply JSON column types
+        R::exec('ALTER TABLE `pipelinesteps` MODIFY COLUMN `config_json` JSON');
+        R::exec('ALTER TABLE `pipelinesteps` MODIFY COLUMN `input_config_json` JSON');
+        R::exec('ALTER TABLE `pipelinesteps` MODIFY COLUMN `condition_json` JSON');
+
+        // Add unique constraint on pipeline + step_name
+        R::exec('ALTER TABLE `pipelinesteps` ADD UNIQUE INDEX IF NOT EXISTS `uk_pipeline_step` (`pipelines_id`, `step_name`)');
+
+        R::trash($bean);
+        if ($pipelineIsTemp) {
+            R::trash($pipeline);
+        }
+    }
+
+    /**
+     * Create the pipelineruns table
+     * Stores execution instances of pipelines
+     */
+    private function createPipelinerunsTable(): void {
+        // Need a pipeline first
+        $pipeline = R::findOne('pipelines', ' LIMIT 1 ');
+        $pipelineIsTemp = false;
+        if (!$pipeline) {
+            $pipeline = R::dispense('pipelines');
+            $pipeline->member = $this->member;
+            $pipeline->slug = '_temp_for_runs';
+            $pipeline->name = 'Temp Pipeline';
+            $pipeline->columns_json = '[]';
+            $pipeline->trigger_type = 'manual';
+            $pipeline->trigger_config_json = '{}';
+            $pipeline->default_context_json = '{}';
+            $pipeline->is_active = false;
+            $pipeline->created_at = date('Y-m-d H:i:s');
+            R::store($pipeline);
+            $pipelineIsTemp = true;
+        }
+
+        $bean = R::dispense('pipelineruns');
+        $bean->run_uid = 'schema-run-uid-placeholder'; // Unique run identifier
+        $bean->pipelines = $pipeline; // Creates pipelines_id FK
+        $bean->member = $this->member; // Creates member_id FK (triggered_by)
+        $bean->trigger_source = 'manual'; // manual, webhook:jira, cron, http_poll
+        $bean->trigger_data_json = '{}'; // Incoming payload/form data
+        $bean->status = 'pending'; // pending, running, completed, failed, paused, cancelled
+        $bean->current_step_name = null; // Currently executing step
+        $bean->context_json = '{}'; // Accumulated context/ENV across steps
+        $bean->error_message = null;
+        $bean->progress_percent = 0;
+        $bean->steps_total = 0;
+        $bean->steps_completed = 0;
+        $bean->scheduled_at = null; // For delayed/scheduled runs
+        $bean->started_at = null;
+        $bean->completed_at = null;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+
+        // Apply JSON column types
+        R::exec('ALTER TABLE `pipelineruns` MODIFY COLUMN `trigger_data_json` JSON');
+        R::exec('ALTER TABLE `pipelineruns` MODIFY COLUMN `context_json` JSON');
+
+        // Add unique constraint on run_uid
+        R::exec('ALTER TABLE `pipelineruns` ADD UNIQUE INDEX IF NOT EXISTS `uk_run_uid` (`run_uid`)');
+
+        R::trash($bean);
+        if ($pipelineIsTemp) {
+            R::trash($pipeline);
+        }
+    }
+
+    /**
+     * Create the pipelinestepruns table
+     * Stores individual step execution results within a run
+     */
+    private function createPipelinesteprunsTable(): void {
+        // Need a pipeline run first
+        $run = R::findOne('pipelineruns', ' LIMIT 1 ');
+        $runIsTemp = false;
+        $pipelineIsTemp = false;
+        $stepIsTemp = false;
+
+        if (!$run) {
+            // Create temp pipeline
+            $pipeline = R::dispense('pipelines');
+            $pipeline->member = $this->member;
+            $pipeline->slug = '_temp_for_stepruns';
+            $pipeline->name = 'Temp Pipeline';
+            $pipeline->columns_json = '[]';
+            $pipeline->trigger_type = 'manual';
+            $pipeline->trigger_config_json = '{}';
+            $pipeline->default_context_json = '{}';
+            $pipeline->is_active = false;
+            $pipeline->created_at = date('Y-m-d H:i:s');
+            R::store($pipeline);
+            $pipelineIsTemp = true;
+
+            // Create temp run
+            $run = R::dispense('pipelineruns');
+            $run->run_uid = '_temp_for_stepruns';
+            $run->pipelines = $pipeline;
+            $run->member = $this->member;
+            $run->trigger_source = 'manual';
+            $run->trigger_data_json = '{}';
+            $run->status = 'pending';
+            $run->context_json = '{}';
+            $run->created_at = date('Y-m-d H:i:s');
+            R::store($run);
+            $runIsTemp = true;
+        }
+
+        // Need a step
+        $step = R::findOne('pipelinesteps', ' LIMIT 1 ');
+        if (!$step) {
+            $step = R::dispense('pipelinesteps');
+            $step->pipelines_id = $run->pipelines_id;
+            $step->step_name = '_temp_step';
+            $step->row = 0;
+            $step->col = 0;
+            $step->label = 'Temp Step';
+            $step->step_type = 'direct_exec';
+            $step->config_json = '{}';
+            $step->input_source = 'context';
+            $step->input_config_json = '{}';
+            $step->condition_json = '{}';
+            $step->on_success = 'exit';
+            $step->on_failure = 'exit';
+            $step->timeout_seconds = 60;
+            $step->is_active = true;
+            $step->sequence = 0;
+            $step->created_at = date('Y-m-d H:i:s');
+            R::store($step);
+            $stepIsTemp = true;
+        }
+
+        $bean = R::dispense('pipelinestepruns');
+        $bean->pipelineruns = $run; // Creates pipelineruns_id FK
+        $bean->pipelinesteps = $step; // Creates pipelinesteps_id FK
+        $bean->step_name = 'checkout'; // Denormalized for easy lookup
+        $bean->row = 0; // Denormalized
+        $bean->col = 0; // Denormalized
+        $bean->status = 'pending'; // pending, running, success, failure, fault, skipped, cancelled
+        $bean->attempt_number = 1; // Current attempt (for retries)
+        $bean->fault_count = 0; // Number of faults (for retry logic)
+        $bean->input_json = '{}'; // What went into this step
+        $bean->output_json = '{}'; // What came out (result data)
+        $bean->stdout = null; // For direct_exec
+        $bean->stderr = null; // For direct_exec
+        $bean->exit_code = null; // For direct_exec
+        $bean->error_message = null;
+        $bean->duration_ms = 0;
+        $bean->started_at = null;
+        $bean->completed_at = null;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+
+        // Apply JSON column types
+        R::exec('ALTER TABLE `pipelinestepruns` MODIFY COLUMN `input_json` JSON');
+        R::exec('ALTER TABLE `pipelinestepruns` MODIFY COLUMN `output_json` JSON');
+
+        // Add LONGTEXT for stdout/stderr (can be large)
+        R::exec('ALTER TABLE `pipelinestepruns` MODIFY COLUMN `stdout` LONGTEXT');
+        R::exec('ALTER TABLE `pipelinestepruns` MODIFY COLUMN `stderr` LONGTEXT');
+
+        R::trash($bean);
+        if ($stepIsTemp) {
+            R::trash($step);
+        }
+        if ($runIsTemp) {
+            R::trash($run);
+        }
+        if ($pipelineIsTemp) {
+            R::trash($pipeline);
+        }
     }
 }

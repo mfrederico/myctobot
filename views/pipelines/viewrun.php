@@ -99,15 +99,30 @@
                     </div>
 
                     <?php if (!empty($run['handoff_run_id'])): ?>
-                    <div class="alert alert-info mt-3 mb-0 d-flex justify-content-between align-items-center">
+                    <div class="alert alert-info mt-3 mb-0 d-flex justify-content-between align-items-center" id="handoffAlert">
                         <div>
                             <i class="bi bi-arrow-right-square"></i>
                             <strong>Handed Off:</strong> <?= htmlspecialchars($run['error_message'] ?? 'Pipeline handoff') ?>
+                            <span id="redirectNotice" class="ms-2 text-primary small" style="display: none;">
+                                <i class="bi bi-hourglass-split"></i> Redirecting...
+                            </span>
                         </div>
-                        <a href="/pipelines/viewrun/<?= (int) $run['handoff_run_id'] ?>" class="btn btn-primary btn-sm">
+                        <a href="/pipelines/viewrun/<?= (int) $run['handoff_run_id'] ?>" class="btn btn-primary btn-sm" id="handoffLink">
                             <i class="bi bi-arrow-right"></i> View Handoff Run
                         </a>
                     </div>
+                    <script>
+                    // Auto-redirect if "Follow Handoffs" is enabled
+                    (function() {
+                        const followHandoffs = localStorage.getItem('pipeline_follow_handoffs') === 'true';
+                        if (followHandoffs) {
+                            document.getElementById('redirectNotice').style.display = 'inline';
+                            setTimeout(function() {
+                                window.location.href = '/pipelines/viewrun/<?= (int) $run['handoff_run_id'] ?>';
+                            }, 800);
+                        }
+                    })();
+                    </script>
                     <?php elseif ($run['error_message']): ?>
                     <div class="alert alert-danger mt-3 mb-0">
                         <i class="bi bi-exclamation-triangle"></i>

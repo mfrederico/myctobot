@@ -6,10 +6,29 @@
             </h1>
             <p class="text-muted mb-0">Automate workflows with spreadsheet-like execution grids</p>
         </div>
-        <a href="/pipelines/create" class="btn btn-primary">
-            <i class="bi bi-plus-lg"></i> New Pipeline
-        </a>
+        <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch" title="Auto-redirect to handoff target when viewing completed runs">
+                <input class="form-check-input" type="checkbox" id="followHandoffs" onchange="toggleFollowHandoffs()">
+                <label class="form-check-label small text-muted" for="followHandoffs">Follow Handoffs</label>
+            </div>
+            <a href="/pipelines/create" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> New Pipeline
+            </a>
+        </div>
     </div>
+
+    <script>
+    // Initialize follow handoffs toggle from localStorage
+    document.addEventListener('DOMContentLoaded', function() {
+        const followHandoffs = localStorage.getItem('pipeline_follow_handoffs') === 'true';
+        document.getElementById('followHandoffs').checked = followHandoffs;
+    });
+
+    function toggleFollowHandoffs() {
+        const checked = document.getElementById('followHandoffs').checked;
+        localStorage.setItem('pipeline_follow_handoffs', checked ? 'true' : 'false');
+    }
+    </script>
 
     <!-- Explanation Section -->
     <div class="card bg-light border-0 mb-4">

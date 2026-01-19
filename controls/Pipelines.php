@@ -785,6 +785,7 @@ class Pipelines extends BaseControls\Control {
             'steps_completed' => $run->steps_completed,
             'steps_total' => $run->steps_total,
             'error_message' => $run->error_message,
+            'handoff_run_id' => $run->handoff_run_id,
             'started_at' => $run->started_at,
             'completed_at' => $run->completed_at,
             'created_at' => $run->created_at

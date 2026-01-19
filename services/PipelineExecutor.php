@@ -1285,9 +1285,10 @@ class PipelineExecutor {
 
         $this->log('info', "Created handoff run: {$runUid} (ID: {$newRunId})");
 
-        // Mark current run as handed off
+        // Mark current run as handed off (store the target run ID for UI navigation)
         $this->run->status = 'completed';
         $this->run->error_message = "Handed off to pipeline: {$pipelineSlug}";
+        $this->run->handoff_run_id = $newRunId;  // Store target run for UI link
         $this->run->completed_at = date('Y-m-d H:i:s');
         $this->run->context_json = json_encode($this->context);
         $this->run->updated_at = date('Y-m-d H:i:s');

@@ -137,26 +137,23 @@ class PipelineExecutor {
     }
 
     /**
-     * Execute steps in sequence
-     */
-    /**
-     * Execute steps with goto flow control
+     * Execute steps with parallel row support and goto flow control
      *
      * Supported flow actions for on_success/on_failure:
      *   - next_col: Move to next column in same row (default for success)
-     *   - next_row: Move to first column of next row
-     *   - exit: Complete/fail the pipeline
+     *   - next_row: Move to first column of next row (triggers parallel if target is parallel)
+     *   - exit: Complete/fail the pipeline (or just the current parallel row if in parallel mode)
      *   - skip: Skip this failure and continue (only for on_failure)
+     *   - ignore: Do nothing on this outcome, continue to next step
      *   - goto:ROW.COLUMN: Jump to specific row and column (e.g., goto:2.execute)
      *   - goto:STEP_NAME: Jump to specific step by name (e.g., goto:validate_output)
+     *   - handoff:pipeline.step: Hand off to another pipeline and exit
      */
     private function executeSteps(): void {
         $completedCount = 0;
-        $executedSteps = [];  // Track which steps have been executed
-        $maxIterations = count($this->steps) * 3;  // Safety limit to prevent infinite loops
+        $maxIterations = count($this->steps) * 3;  // Safety limit
         $iterations = 0;
 
-        // Start with first step
         $stepsArray = array_values($this->steps);
         $currentIndex = 0;
 
@@ -171,7 +168,139 @@ class PipelineExecutor {
                 return;
             }
 
-            // Get step run record
+            // Check if this step's row is parallel - if so, run all parallel rows
+            if ($step->run_parallel) {
+                $this->log('info', "Entering parallel execution at row {$step->row}");
+                $completedCount = $this->executeParallelRows($stepsArray, $currentIndex, $completedCount);
+
+                // Find the highest parallel row number that was executed
+                $highestParallelRow = (int) $step->row;
+                foreach ($stepsArray as $checkStep) {
+                    if ($checkStep->run_parallel && (int) $checkStep->row >= (int) $step->row) {
+                        $highestParallelRow = max($highestParallelRow, (int) $checkStep->row);
+                    }
+                }
+
+                // Find next non-parallel step AFTER the highest parallel row
+                $foundNonParallel = false;
+                for ($i = 0; $i < count($stepsArray); $i++) {
+                    $checkStep = $stepsArray[$i];
+                    $checkRow = (int) $checkStep->row;
+
+                    // Must be after all parallel rows AND must not be parallel itself
+                    if ($checkRow > $highestParallelRow && !$checkStep->run_parallel) {
+                        $currentIndex = $i;
+                        $foundNonParallel = true;
+                        $this->log('info', "Continuing from non-parallel row {$checkRow} (after parallel rows up to {$highestParallelRow})");
+                        break;
+                    }
+                }
+
+                if (!$foundNonParallel) {
+                    // No more non-parallel rows, we're done
+                    $this->completeRun('completed');
+                    return;
+                }
+                continue;
+            }
+
+            // Normal (non-parallel) step execution
+            $result = $this->executeSingleStep($step, $stepsArray, $currentIndex, $completedCount);
+
+            if ($result['action'] === 'exit') {
+                $this->completeRun($result['status'], $result['message'] ?? null);
+                return;
+            } elseif ($result['action'] === 'continue') {
+                $currentIndex = $result['nextIndex'];
+                $completedCount = $result['completedCount'];
+            }
+        }
+
+        if ($iterations >= $maxIterations) {
+            $this->completeRun('failed', 'Maximum iterations exceeded (possible infinite loop)');
+            return;
+        }
+
+        $this->completeRun('completed');
+    }
+
+    /**
+     * Execute all consecutive parallel rows starting from the given index
+     *
+     * A row is considered parallel if ANY step in that row has run_parallel=1.
+     * All steps in a parallel row are executed together.
+     *
+     * @return int Updated completed count
+     */
+    private function executeParallelRows(array $stepsArray, int $startIndex, int $completedCount): int {
+        $startRow = (int) $stepsArray[$startIndex]->row;
+
+        // First pass: identify which rows are parallel (any step with run_parallel=1)
+        $parallelRowNumbers = [];
+        $stepsByRow = [];
+
+        // Group all steps by row number
+        foreach ($stepsArray as $step) {
+            $row = (int) $step->row;
+            if (!isset($stepsByRow[$row])) {
+                $stepsByRow[$row] = [];
+            }
+            $stepsByRow[$row][] = $step;
+
+            // Mark row as parallel if any step has the flag
+            if ($step->run_parallel && $row >= $startRow) {
+                $parallelRowNumbers[$row] = true;
+            }
+        }
+
+        // Collect consecutive parallel rows starting from startRow
+        $parallelRows = [];
+        $currentRow = $startRow;
+
+        while (isset($parallelRowNumbers[$currentRow])) {
+            if (isset($stepsByRow[$currentRow])) {
+                $parallelRows[$currentRow] = $stepsByRow[$currentRow];
+            }
+            $currentRow++;
+        }
+
+        $this->log('info', "Found " . count($parallelRows) . " parallel rows to execute");
+
+        // Execute each parallel row sequentially (true parallelism would need pcntl_fork)
+        foreach ($parallelRows as $rowNum => $rowSteps) {
+            $this->log('info', "Executing parallel row {$rowNum} with " . count($rowSteps) . " steps");
+            $completedCount = $this->executeRowSteps($rowSteps, $completedCount);
+        }
+
+        return $completedCount;
+    }
+
+    /**
+     * Execute steps within a single row until exit or end of row
+     *
+     * @return int Updated completed count
+     */
+    private function executeRowSteps(array $rowSteps, int $completedCount): int {
+        // Sort by column
+        usort($rowSteps, function($a, $b) {
+            return (int) $a->col - (int) $b->col;
+        });
+
+        $rowStepsArray = array_values($rowSteps);
+        $colIndex = 0;
+        $maxIterations = count($rowStepsArray) * 2;
+        $iterations = 0;
+
+        while ($colIndex < count($rowStepsArray) && $iterations < $maxIterations) {
+            $iterations++;
+            $step = $rowStepsArray[$colIndex];
+
+            // Check if run was cancelled
+            $this->run = Bean::load('pipelineruns', $this->runId);
+            if ($this->run->status === 'cancelled') {
+                return $completedCount;
+            }
+
             $stepRun = Bean::findOne('pipelinestepruns',
                 ' pipelineruns_id = ? AND pipelinesteps_id = ? ',
                 [$this->run->id, $step->id]
@@ -179,7 +308,7 @@ class PipelineExecutor {
 
             if (!$stepRun) {
                 $this->log('error', "Step run not found for step: {$step->step_name}");
-                $currentIndex++;
+                $colIndex++;
                 continue;
             }
 
@@ -191,7 +320,7 @@ class PipelineExecutor {
                 $stepRun->updated_at = date('Y-m-d H:i:s');
                 Bean::store($stepRun);
                 $completedCount++;
-                $currentIndex++;
+                $colIndex++;
                 continue;
             }
 
@@ -200,61 +329,142 @@ class PipelineExecutor {
             $this->run->updated_at = date('Y-m-d H:i:s');
             Bean::store($this->run);
 
-            // Execute step with retries
-            $executedSteps[$step->step_name] = true;
+            // Execute step
             $success = $this->executeStepWithRetries($step, $stepRun);
 
             if ($success) {
                 $completedCount++;
                 $this->updateProgress($completedCount);
 
-                // Handle on_success
                 $nextAction = $step->on_success ?: 'next_col';
-                $nextIndex = $this->resolveNextStep($step, $nextAction, $stepsArray, $currentIndex);
 
-                if ($nextIndex === -1) {
-                    // exit
-                    $this->completeRun('completed');
-                    return;
+                if ($nextAction === 'exit') {
+                    // Exit just this row, not the entire pipeline
+                    $this->log('info', "Row {$step->row} completed via exit");
+                    return $completedCount;
+                } elseif ($nextAction === 'next_col' || $nextAction === 'ignore') {
+                    $colIndex++;
+                } elseif (strpos($nextAction, 'goto:') === 0) {
+                    // Find target step within this row
+                    $target = substr($nextAction, 5);
+                    $found = false;
+                    foreach ($rowStepsArray as $idx => $s) {
+                        if ($s->step_name === $target) {
+                            $colIndex = $idx;
+                            $found = true;
+                            break;
+                        }
+                    }
+                    if (!$found) {
+                        $colIndex++;  // Target not in this row, continue
+                    }
+                } else {
+                    // next_row or handoff within parallel row - treat as exit for this row
+                    return $completedCount;
                 }
-                $currentIndex = $nextIndex;
             } else {
-                // Handle on_failure
+                // Handle failure
                 $failAction = $step->on_failure ?: 'exit';
 
                 if ($failAction === 'exit') {
-                    $this->completeRun('failed', "Step failed: {$step->step_name}");
-                    return;
-                } elseif ($failAction === 'skip') {
+                    // Exit just this row on failure
+                    $this->log('info', "Row {$step->row} failed at step {$step->step_name}");
+                    return $completedCount;
+                } elseif ($failAction === 'skip' || $failAction === 'ignore') {
                     $completedCount++;
                     $this->updateProgress($completedCount);
-                    $currentIndex++;
-                    continue;
+                    $colIndex++;
                 } else {
-                    // Handle goto on failure
-                    $nextIndex = $this->resolveNextStep($step, $failAction, $stepsArray, $currentIndex);
-                    if ($nextIndex === -1) {
-                        $this->completeRun('failed', "Step failed: {$step->step_name}");
-                        return;
+                    // goto on failure within row
+                    if (strpos($failAction, 'goto:') === 0) {
+                        $target = substr($failAction, 5);
+                        $found = false;
+                        foreach ($rowStepsArray as $idx => $s) {
+                            if ($s->step_name === $target) {
+                                $colIndex = $idx;
+                                $found = true;
+                                break;
+                            }
+                        }
+                        if (!$found) {
+                            return $completedCount;  // Target not found, exit row
+                        }
+                    } else {
+                        return $completedCount;  // Unknown action, exit row
                     }
-                    $currentIndex = $nextIndex;
                 }
             }
         }
 
-        if ($iterations >= $maxIterations) {
-            $this->completeRun('failed', 'Maximum iterations exceeded (possible infinite loop)');
-            return;
+        return $completedCount;
+    }
+
+    /**
+     * Execute a single non-parallel step
+     *
+     * @return array ['action' => 'exit'|'continue', 'status' => ..., 'nextIndex' => ..., 'completedCount' => ...]
+     */
+    private function executeSingleStep($step, array $stepsArray, int $currentIndex, int $completedCount): array {
+        $stepRun = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND pipelinesteps_id = ? ',
+            [$this->run->id, $step->id]
+        );
+
+        if (!$stepRun) {
+            $this->log('error', "Step run not found for step: {$step->step_name}");
+            return ['action' => 'continue', 'nextIndex' => $currentIndex + 1, 'completedCount' => $completedCount];
         }
 
-        // All steps completed
-        $this->completeRun('completed');
+        // Check condition
+        if (!$this->evaluateCondition($step)) {
+            $this->log('info', "Step skipped due to condition: {$step->step_name}");
+            $stepRun->status = 'skipped';
+            $stepRun->completed_at = date('Y-m-d H:i:s');
+            $stepRun->updated_at = date('Y-m-d H:i:s');
+            Bean::store($stepRun);
+            return ['action' => 'continue', 'nextIndex' => $currentIndex + 1, 'completedCount' => $completedCount + 1];
+        }
+
+        // Update current step
+        $this->run->current_step_name = $step->step_name;
+        $this->run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($this->run);
+
+        // Execute step
+        $success = $this->executeStepWithRetries($step, $stepRun);
+
+        if ($success) {
+            $completedCount++;
+            $this->updateProgress($completedCount);
+
+            $nextAction = $step->on_success ?: 'next_col';
+            $nextIndex = $this->resolveNextStep($step, $nextAction, $stepsArray, $currentIndex);
+
+            if ($nextIndex === -1) {
+                return ['action' => 'exit', 'status' => 'completed'];
+            }
+            return ['action' => 'continue', 'nextIndex' => $nextIndex, 'completedCount' => $completedCount];
+        } else {
+            $failAction = $step->on_failure ?: 'exit';
+
+            if ($failAction === 'exit') {
+                return ['action' => 'exit', 'status' => 'failed', 'message' => "Step failed: {$step->step_name}"];
+            } elseif ($failAction === 'skip' || $failAction === 'ignore') {
+                return ['action' => 'continue', 'nextIndex' => $currentIndex + 1, 'completedCount' => $completedCount + 1];
+            } else {
+                $nextIndex = $this->resolveNextStep($step, $failAction, $stepsArray, $currentIndex);
+                if ($nextIndex === -1) {
+                    return ['action' => 'exit', 'status' => 'failed', 'message' => "Step failed: {$step->step_name}"];
+                }
+                return ['action' => 'continue', 'nextIndex' => $nextIndex, 'completedCount' => $completedCount];
+            }
+        }
     }
 
     /**
      * Resolve next step based on flow action
      *
-     * @return int Next step index, or -1 for exit
+     * @return int Next step index, -1 for exit, or -2 for handoff (handled separately)
      */
     private function resolveNextStep($currentStep, string $action, array $stepsArray, int $currentIndex): int {
         $currentRow = (int) $currentStep->row;
@@ -263,6 +473,10 @@ class PipelineExecutor {
         switch ($action) {
             case 'exit':
                 return -1;
+
+            case 'ignore':
+                // No action - just continue to next step
+                return $currentIndex + 1;
 
             case 'next_col':
                 // Find next step in sequence (default behavior)
@@ -290,6 +504,13 @@ class PipelineExecutor {
                 if (strpos($action, 'goto:') === 0) {
                     $target = substr($action, 5);
                     return $this->resolveGotoTarget($target, $stepsArray);
+                }
+
+                // Check for handoff: prefix
+                if (strpos($action, 'handoff:') === 0) {
+                    $target = substr($action, 8);
+                    $this->executeHandoff($target);
+                    return -1;  // Exit this pipeline after handoff
                 }
 
                 // Unknown action, continue to next
@@ -447,6 +668,9 @@ class PipelineExecutor {
 
             case 'wait':
                 return $this->executeWait($config, $input);
+
+            case 'harvest':
+                return $this->executeHarvest($config, $input);
 
             default:
                 return [
@@ -964,5 +1188,244 @@ class PipelineExecutor {
         } else {
             error_log("[Pipeline:{$this->runId}] [{$level}] {$message}");
         }
+    }
+
+    /**
+     * Execute a handoff to another pipeline
+     *
+     * Handoff ends the current pipeline and starts another pipeline
+     * at a specific entry point. The context is passed to the new pipeline.
+     *
+     * @param string $target Format: "pipeline-slug.entry_point" or "pipeline-slug"
+     */
+    private function executeHandoff(string $target): void {
+        $parts = explode('.', $target, 2);
+        $pipelineSlug = $parts[0];
+        $entryPoint = $parts[1] ?? null;
+
+        $this->log('info', "Executing handoff to pipeline: {$pipelineSlug}" . ($entryPoint ? " at entry: {$entryPoint}" : ""));
+
+        // Find target pipeline
+        $targetPipeline = Bean::findOne('pipelines', 'slug = ?', [$pipelineSlug]);
+        if (!$targetPipeline || !$targetPipeline->id) {
+            $this->log('error', "Handoff target pipeline not found: {$pipelineSlug}");
+            $this->completeRun('failed', "Handoff failed: pipeline '{$pipelineSlug}' not found");
+            return;
+        }
+
+        if (!$targetPipeline->is_active) {
+            $this->log('error', "Handoff target pipeline not active: {$pipelineSlug}");
+            $this->completeRun('failed', "Handoff failed: pipeline '{$pipelineSlug}' is not active");
+            return;
+        }
+
+        // Determine starting step if entry point specified
+        $startingStepId = null;
+        if ($entryPoint) {
+            // Try to find step by name
+            $startingStep = Bean::findOne('pipelinesteps',
+                ' pipelines_id = ? AND step_name = ? AND is_active = 1 ',
+                [$targetPipeline->id, $entryPoint]
+            );
+
+            // If not found by name, try row name from pipeline's row_names_json
+            if (!$startingStep) {
+                $rowNames = json_decode($targetPipeline->row_names_json ?: '{}', true);
+                $rowIndex = array_search($entryPoint, $rowNames);
+                if ($rowIndex !== false) {
+                    // Find first step in that row
+                    $startingStep = Bean::findOne('pipelinesteps',
+                        ' pipelines_id = ? AND row = ? AND is_active = 1 ORDER BY col ASC ',
+                        [$targetPipeline->id, $rowIndex]
+                    );
+                }
+            }
+
+            if ($startingStep) {
+                $startingStepId = $startingStep->id;
+            } else {
+                $this->log('warning', "Entry point not found: {$entryPoint}, starting from beginning");
+            }
+        }
+
+        // Count active steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$targetPipeline->id]);
+
+        // Create new run for target pipeline
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $newRun = Bean::dispense('pipelineruns');
+        $newRun->run_uid = $runUid;
+        $newRun->pipelines = $targetPipeline;
+        $newRun->member_id = $this->run->member_id;
+        $newRun->trigger_source = 'handoff:' . $this->pipeline->slug;
+        $newRun->trigger_data_json = json_encode([
+            'handoff_from' => [
+                'pipeline' => $this->pipeline->slug,
+                'run_id' => $this->run->id,
+                'run_uid' => $this->run->run_uid
+            ],
+            'entry_point' => $entryPoint,
+            'starting_step_id' => $startingStepId
+        ]);
+        $newRun->status = 'pending';
+        $newRun->context_json = json_encode($this->context); // Pass current context
+        $newRun->steps_total = $stepCount;
+        $newRun->steps_completed = 0;
+        $newRun->progress_percent = 0;
+        $newRun->created_at = date('Y-m-d H:i:s');
+        $newRun->updated_at = date('Y-m-d H:i:s');
+
+        $newRunId = Bean::store($newRun);
+
+        // Update target pipeline stats
+        $targetPipeline->run_count = ($targetPipeline->run_count ?? 0) + 1;
+        $targetPipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($targetPipeline);
+
+        $this->log('info', "Created handoff run: {$runUid} (ID: {$newRunId})");
+
+        // Mark current run as handed off
+        $this->run->status = 'completed';
+        $this->run->error_message = "Handed off to pipeline: {$pipelineSlug}";
+        $this->run->completed_at = date('Y-m-d H:i:s');
+        $this->run->context_json = json_encode($this->context);
+        $this->run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($this->run);
+
+        // Execute the new pipeline (fire and forget style - in same process for now)
+        // In production, this could spawn a background job
+        $executor = new PipelineExecutor($newRunId, $this->logger);
+        $executor->execute();
+    }
+
+    /**
+     * Execute a harvest step - gather results from parallel rows
+     */
+    private function executeHarvest(array $config, array $input): array {
+        $policy = $config['policy'] ?? 'all_required';
+        $onIncomplete = $config['on_incomplete'] ?? 'fail';
+        $template = $config['template'] ?? '';
+
+        $this->log('info', "Executing harvest with policy: {$policy}");
+
+        // Collect all step outputs from parallel rows
+        // In a full parallel implementation, we'd wait for spawned processes here
+        // For now, collect what we have in stepOutputs
+        $harvested = [];
+        $succeeded = 0;
+        $failed = 0;
+        $total = 0;
+
+        foreach ($this->stepOutputs as $stepName => $output) {
+            $total++;
+            $status = isset($output['error']) ? 'failed' : 'success';
+            if ($status === 'success') {
+                $succeeded++;
+            } else {
+                $failed++;
+            }
+            $harvested[$stepName] = [
+                'status' => $status,
+                'output' => $output
+            ];
+        }
+
+        // Determine if harvest passed based on policy
+        $passed = false;
+        switch ($policy) {
+            case 'all_required':
+                $passed = ($failed === 0);
+                break;
+            case 'any_success':
+                $passed = ($succeeded > 0);
+                break;
+            case 'best_effort':
+                $passed = true;
+                break;
+        }
+
+        // Build harvest metadata
+        $harvestMeta = [
+            'policy' => $policy,
+            'passed' => $passed,
+            'total' => $total,
+            'succeeded' => $succeeded,
+            'failed' => $failed
+        ];
+
+        // Build output
+        $output = array_merge(['_harvest' => $harvestMeta], $harvested);
+
+        // Apply template if provided (must be valid jq expression)
+        if (!empty($template)) {
+            // Skip invalid templates (jq syntax, not Jinja/Twig)
+            if (strpos($template, '{{') !== false || strpos($template, '}}') !== false) {
+                $this->log('warning', "Harvest template appears to be Jinja/Twig syntax, not jq. Skipping template.");
+            } else {
+                // Use jq to transform the output with timeout
+                $tempInput = json_encode($output);
+                $descriptors = [
+                    0 => ['pipe', 'r'],
+                    1 => ['pipe', 'w'],
+                    2 => ['pipe', 'w'],
+                ];
+
+                // Use timeout command to prevent hanging (5 second timeout)
+                $process = proc_open(['timeout', '5', 'jq', $template], $descriptors, $pipes, '/tmp', null);
+                if (is_resource($process)) {
+                    // Set non-blocking on output pipes to prevent deadlock
+                    stream_set_blocking($pipes[1], false);
+                    stream_set_blocking($pipes[2], false);
+
+                    fwrite($pipes[0], $tempInput);
+                    fclose($pipes[0]);
+
+                    // Read with timeout
+                    $stdout = '';
+                    $stderr = '';
+                    $startTime = time();
+                    while (time() - $startTime < 6) {
+                        $stdout .= stream_get_contents($pipes[1]);
+                        $stderr .= stream_get_contents($pipes[2]);
+
+                        $status = proc_get_status($process);
+                        if (!$status['running']) {
+                            break;
+                        }
+                        usleep(10000); // 10ms
+                    }
+
+                    fclose($pipes[1]);
+                    fclose($pipes[2]);
+                    $exitCode = proc_close($process);
+
+                    if ($exitCode === 0) {
+                        $templated = json_decode(trim($stdout), true);
+                        if ($templated !== null) {
+                            $output = array_merge(['_harvest' => $harvestMeta], $templated);
+                        }
+                    } elseif ($exitCode === 124) {
+                        $this->log('warning', "Harvest template jq timed out after 5 seconds");
+                    } else {
+                        $this->log('warning', "Harvest template jq failed (exit {$exitCode}): " . trim($stderr));
+                    }
+                }
+            }
+        }
+
+        // Handle incomplete case
+        if (!$passed && $onIncomplete === 'fail') {
+            return [
+                'success' => false,
+                'error' => "Harvest failed: {$failed} of {$total} steps failed (policy: {$policy})",
+                'output' => $output
+            ];
+        }
+
+        return [
+            'success' => $passed || $onIncomplete !== 'fail',
+            'output' => $output
+        ];
     }
 }

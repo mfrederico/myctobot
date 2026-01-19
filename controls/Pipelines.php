@@ -56,6 +56,12 @@ class Pipelines extends BaseControls\Control {
             'description' => 'Wait for external event or approval',
             'icon' => 'bi-hourglass-split',
             'color' => 'secondary'
+        ],
+        'harvest' => [
+            'label' => 'Harvest',
+            'description' => 'Gather results from parallel rows',
+            'icon' => 'bi-collection',
+            'color' => 'success'
         ]
     ];
 
@@ -503,6 +509,7 @@ class Pipelines extends BaseControls\Control {
         $timeoutSeconds = (int) $this->getParam('timeout_seconds', 300);
         $retryCount = (int) $this->getParam('retry_count', 0);
         $isActive = (bool) $this->getParam('is_active', true);
+        $runParallel = (bool) $this->getParam('run_parallel', false);
 
         // Validate step name
         if (empty($stepName)) {
@@ -577,6 +584,7 @@ class Pipelines extends BaseControls\Control {
         $step->retry_count = max(0, $retryCount);
         $step->retry_delay_seconds = 10;
         $step->is_active = $isActive ? 1 : 0;
+        $step->run_parallel = $runParallel ? 1 : 0;
         $step->sequence = ($row * 100) + $col;
         $step->updated_at = date('Y-m-d H:i:s');
 
@@ -648,7 +656,8 @@ class Pipelines extends BaseControls\Control {
                 'on_failure' => $step->on_failure,
                 'timeout_seconds' => (int) $step->timeout_seconds,
                 'retry_count' => (int) $step->retry_count,
-                'is_active' => (bool) $step->is_active
+                'is_active' => (bool) $step->is_active,
+                'run_parallel' => (bool) $step->run_parallel
             ]
         ]);
     }

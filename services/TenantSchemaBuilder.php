@@ -1692,33 +1692,6 @@ class TenantSchemaBuilder {
             // Index already exists, ignore
         }
     }
-
-    /**
-     * Create generic boards table
-     * Supports multiple board types: jira, github, monday, zoho, etc.
-     * This is the provider-agnostic abstraction layer.
-     */
-    private function createBoardsTable() {
-        $bean = R::dispense('boards');
-        $bean->member = $this->member; // Creates member_id FK
-        $bean->type = 'jira'; // jira, github, monday, zoho, etc.
-        $bean->external_uid = 'cloud_id:board_id'; // Provider-specific unique identifier
-        $bean->name = 'Schema Template Board';
-        $bean->project_key = 'SCHEMA';
-        $bean->project_name = 'Schema Template Project';
-        $bean->is_active = true;
-        $bean->digest_enabled = true;
-        $bean->digest_frequency = 'daily';
-        $bean->digest_time = '09:00';
-        $bean->digest_day = 1;
-        $bean->last_digest_at = date('Y-m-d H:i:s');
-        $bean->provider_config_json = '{}'; // Provider-specific settings (JSON)
-        $bean->created_at = date('Y-m-d H:i:s');
-        $bean->updated_at = date('Y-m-d H:i:s');
-        R::store($bean);
-        return $bean;
-    }
-
     /**
      * Migration: Copy jiraboards data to generic boards table
      * Sets type='jira' and builds external_uid from cloud_uid:board_uid
@@ -2027,6 +2000,7 @@ class TenantSchemaBuilder {
         $bean->name = 'Schema Pipeline';
         $bean->description = 'Schema pipeline description';
         $bean->columns_json = '["Start", "Execute", "Validate", "Complete"]'; // Fixed column names
+        $bean->row_names_json = '{}'; // Named rows: {"0": "setup", "1": "build", "2": "deploy"}
         $bean->trigger_type = 'manual'; // manual, webhook, cron, http_poll
         $bean->trigger_config_json = '{}'; // Type-specific: cron expr, poll URL, webhook secret
         $bean->default_context_json = '{}'; // Default ENV/context vars for runs
@@ -2040,6 +2014,7 @@ class TenantSchemaBuilder {
 
         // Apply JSON column types
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `columns_json` JSON');
+        R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `row_names_json` JSON');
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `trigger_config_json` JSON');
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `default_context_json` JSON');
 
@@ -2077,8 +2052,9 @@ class TenantSchemaBuilder {
         $bean->step_name = 'checkout'; // Unique within pipeline, used for refs: checkout.output
         $bean->row = 0; // 0-indexed row
         $bean->col = 0; // 0-indexed column
+        $bean->run_parallel = false; // If true, this row runs in parallel with other parallel rows
         $bean->label = 'Checkout Code'; // Display label
-        $bean->step_type = 'ai_agent'; // ai_agent, script, direct_exec, parser, webhook_out, wait
+        $bean->step_type = 'ai_agent'; // ai_agent, script, direct_exec, parser, webhook_out, wait, harvest
         $bean->config_json = '{}'; // Type-specific config (agent_id, command, url, etc.)
         $bean->input_source = 'context'; // context, stdin, file, http, getfrom:step_name
         $bean->input_config_json = '{}'; // Input source configuration

@@ -499,6 +499,43 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Harvest Config -->
+                        <div class="config-panel" id="config_harvest" style="display: none;">
+                            <div class="card bg-light mb-3">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Harvest Policy</label>
+                                                <select class="form-select" name="config_harvest_policy">
+                                                    <option value="all_required">All Required - fail if any failed</option>
+                                                    <option value="any_success">Any Success - pass if at least one succeeded</option>
+                                                    <option value="best_effort">Best Effort - always pass, collect results</option>
+                                                </select>
+                                                <small class="text-muted">How to handle incomplete/failed parallel rows</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">On Incomplete</label>
+                                                <select class="form-select" name="config_harvest_on_incomplete">
+                                                    <option value="fail">Fail Pipeline</option>
+                                                    <option value="continue">Continue with Partial Results</option>
+                                                    <option value="goto">Goto Error Handler</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Output Template (optional, jq expression)</label>
+                                        <textarea class="form-control font-monospace" name="config_harvest_template" rows="3"
+                                                  placeholder='{"artifacts": [.[] | select(.status == "success") | .output]}'></textarea>
+                                        <small class="text-muted">Leave empty for default structure. Use jq to reshape harvested results.</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Input Source -->
@@ -526,12 +563,18 @@
                                     <option value="next_col">Next Column</option>
                                     <option value="next_row">Next Row</option>
                                     <option value="exit">Exit (Complete)</option>
+                                    <option value="ignore">Ignore (No Action)</option>
                                     <option value="goto">Goto...</option>
+                                    <option value="handoff">Handoff to Pipeline...</option>
                                 </select>
                             </div>
                             <div class="mb-3" id="gotoSuccessConfig" style="display: none;">
                                 <input type="text" class="form-control font-monospace" name="goto_success_target" id="gotoSuccessTarget" placeholder="2.execute or step_name">
                                 <small class="text-muted">Format: ROW.COLUMN or step_name</small>
+                            </div>
+                            <div class="mb-3" id="handoffSuccessConfig" style="display: none;">
+                                <input type="text" class="form-control font-monospace" name="handoff_success_target" id="handoffSuccessTarget" placeholder="ci-pipeline.run_tests">
+                                <small class="text-muted">Format: pipeline-slug.entry_point</small>
                             </div>
                         </div>
                         <div class="col-md-4">
@@ -541,12 +584,18 @@
                                     <option value="exit">Exit (Fail)</option>
                                     <option value="retry">Retry</option>
                                     <option value="skip">Skip to Next</option>
+                                    <option value="ignore">Ignore (Continue)</option>
                                     <option value="goto">Goto...</option>
+                                    <option value="handoff">Handoff to Pipeline...</option>
                                 </select>
                             </div>
                             <div class="mb-3" id="gotoFailureConfig" style="display: none;">
                                 <input type="text" class="form-control font-monospace" name="goto_failure_target" id="gotoFailureTarget" placeholder="1.error_handler or cleanup">
                                 <small class="text-muted">Format: ROW.COLUMN or step_name</small>
+                            </div>
+                            <div class="mb-3" id="handoffFailureConfig" style="display: none;">
+                                <input type="text" class="form-control font-monospace" name="handoff_failure_target" id="handoffFailureTarget" placeholder="ci-pipeline.rollback">
+                                <small class="text-muted">Format: pipeline-slug.entry_point</small>
                             </div>
                         </div>
                         <div class="col-md-4">
@@ -558,9 +607,20 @@
                         </div>
                     </div>
 
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" name="is_active" id="stepIsActive" checked>
-                        <label class="form-check-label" for="stepIsActive">Step Active</label>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="is_active" id="stepIsActive" checked>
+                                <label class="form-check-label" for="stepIsActive">Step Active</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="run_parallel" id="stepRunParallel">
+                                <label class="form-check-label" for="stepRunParallel">Run Row in Parallel</label>
+                                <small class="d-block text-muted">This row runs concurrently with other parallel rows</small>
+                            </div>
+                        </div>
                     </div>
                 </form>
             </div>
@@ -660,16 +720,29 @@ function updateStepNameHint() {
 function onFlowControlChange(which) {
     if (which === 'success') {
         const select = document.getElementById('onSuccessSelect');
-        const config = document.getElementById('gotoSuccessConfig');
-        config.style.display = select.value === 'goto' ? 'block' : 'none';
+        document.getElementById('gotoSuccessConfig').style.display = select.value === 'goto' ? 'block' : 'none';
+        document.getElementById('handoffSuccessConfig').style.display = select.value === 'handoff' ? 'block' : 'none';
     } else {
         const select = document.getElementById('onFailureSelect');
-        const config = document.getElementById('gotoFailureConfig');
-        config.style.display = select.value === 'goto' ? 'block' : 'none';
+        document.getElementById('gotoFailureConfig').style.display = select.value === 'goto' ? 'block' : 'none';
+        document.getElementById('handoffFailureConfig').style.display = select.value === 'handoff' ? 'block' : 'none';
     }
 }
 
 function setFlowControlValue(which, value) {
+    // Reset all config fields first
+    if (which === 'success') {
+        document.getElementById('gotoSuccessConfig').style.display = 'none';
+        document.getElementById('handoffSuccessConfig').style.display = 'none';
+        document.getElementById('gotoSuccessTarget').value = '';
+        document.getElementById('handoffSuccessTarget').value = '';
+    } else {
+        document.getElementById('gotoFailureConfig').style.display = 'none';
+        document.getElementById('handoffFailureConfig').style.display = 'none';
+        document.getElementById('gotoFailureTarget').value = '';
+        document.getElementById('handoffFailureTarget').value = '';
+    }
+
     // Check if it's a goto value
     if (value && value.startsWith('goto:')) {
         const target = value.substring(5);
@@ -682,15 +755,23 @@ function setFlowControlValue(which, value) {
             document.getElementById('gotoFailureTarget').value = target;
             document.getElementById('gotoFailureConfig').style.display = 'block';
         }
+    // Check if it's a handoff value
+    } else if (value && value.startsWith('handoff:')) {
+        const target = value.substring(8);
+        if (which === 'success') {
+            document.getElementById('onSuccessSelect').value = 'handoff';
+            document.getElementById('handoffSuccessTarget').value = target;
+            document.getElementById('handoffSuccessConfig').style.display = 'block';
+        } else {
+            document.getElementById('onFailureSelect').value = 'handoff';
+            document.getElementById('handoffFailureTarget').value = target;
+            document.getElementById('handoffFailureConfig').style.display = 'block';
+        }
     } else {
         if (which === 'success') {
             document.getElementById('onSuccessSelect').value = value || 'next_col';
-            document.getElementById('gotoSuccessTarget').value = '';
-            document.getElementById('gotoSuccessConfig').style.display = 'none';
         } else {
             document.getElementById('onFailureSelect').value = value || 'exit';
-            document.getElementById('gotoFailureTarget').value = '';
-            document.getElementById('gotoFailureConfig').style.display = 'none';
         }
     }
 }
@@ -701,6 +782,9 @@ function getFlowControlValue(which) {
         if (select.value === 'goto') {
             const target = document.getElementById('gotoSuccessTarget').value.trim();
             return target ? 'goto:' + target : 'next_col';
+        } else if (select.value === 'handoff') {
+            const target = document.getElementById('handoffSuccessTarget').value.trim();
+            return target ? 'handoff:' + target : 'next_col';
         }
         return select.value;
     } else {
@@ -708,6 +792,9 @@ function getFlowControlValue(which) {
         if (select.value === 'goto') {
             const target = document.getElementById('gotoFailureTarget').value.trim();
             return target ? 'goto:' + target : 'exit';
+        } else if (select.value === 'handoff') {
+            const target = document.getElementById('handoffFailureTarget').value.trim();
+            return target ? 'handoff:' + target : 'exit';
         }
         return select.value;
     }
@@ -768,6 +855,7 @@ function editStep(stepId, row, col) {
                 setFlowControlValue('failure', step.on_failure);
                 document.querySelector('[name="timeout_seconds"]').value = step.timeout_seconds;
                 document.getElementById('stepIsActive').checked = step.is_active;
+                document.getElementById('stepRunParallel').checked = step.run_parallel;
 
                 stepModal.show();
             } else {
@@ -778,6 +866,9 @@ function editStep(stepId, row, col) {
 }
 
 function populateConfig(type, config) {
+    // Ensure config is an object to prevent null reference errors
+    config = config || {};
+
     switch (type) {
         case 'ai_agent':
             document.querySelector('[name="config_agent_id"]').value = config.agent_id || '';
@@ -808,6 +899,11 @@ function populateConfig(type, config) {
         case 'wait':
             document.querySelector('[name="config_wait_type"]').value = config.wait_type || 'delay';
             document.querySelector('[name="config_wait_duration"]').value = config.duration || 60;
+            break;
+        case 'harvest':
+            document.querySelector('[name="config_harvest_policy"]').value = config.policy || 'all_required';
+            document.querySelector('[name="config_harvest_on_incomplete"]').value = config.on_incomplete || 'fail';
+            document.querySelector('[name="config_harvest_template"]').value = config.template || '';
             break;
     }
 }
@@ -863,6 +959,13 @@ function buildConfig() {
                 duration: parseInt(document.querySelector('[name="config_wait_duration"]').value) || 60
             };
             break;
+        case 'harvest':
+            config = {
+                policy: document.querySelector('[name="config_harvest_policy"]').value,
+                on_incomplete: document.querySelector('[name="config_harvest_on_incomplete"]').value,
+                template: document.querySelector('[name="config_harvest_template"]').value
+            };
+            break;
     }
 
     return config;
@@ -899,7 +1002,8 @@ async function saveStep() {
         on_success: getFlowControlValue('success'),
         on_failure: getFlowControlValue('failure'),
         timeout_seconds: document.querySelector('[name="timeout_seconds"]').value,
-        is_active: document.getElementById('stepIsActive').checked ? '1' : '0'
+        is_active: document.getElementById('stepIsActive').checked ? '1' : '0',
+        run_parallel: document.getElementById('stepRunParallel').checked ? '1' : '0'
     });
 
     try {

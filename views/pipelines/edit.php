@@ -260,8 +260,8 @@
                             <div class="mb-3">
                                 <label class="form-label">Step Name <span class="text-danger">*</span></label>
                                 <input type="text" class="form-control" name="step_name" id="stepName" required
-                                       pattern="[a-z][a-z0-9_]*" placeholder="checkout_code">
-                                <small class="text-muted">Lowercase, no spaces. Used for references: <code>checkout_code.output</code></small>
+                                       pattern="[a-z][a-z0-9_]*" placeholder="checkout_code" oninput="updateStepNameHint()">
+                                <small class="text-muted">Lowercase, no spaces. Used for references: <code id="stepNameHint">checkout_code</code>.output</small>
                             </div>
                         </div>
                         <div class="col-md-6">
@@ -651,6 +651,12 @@ function onStepTypeChange(type) {
     }
 }
 
+function updateStepNameHint() {
+    const stepName = document.getElementById('stepName').value.trim();
+    const hint = document.getElementById('stepNameHint');
+    hint.textContent = stepName || 'step_name';
+}
+
 function onFlowControlChange(which) {
     if (which === 'success') {
         const select = document.getElementById('onSuccessSelect');
@@ -719,6 +725,8 @@ function addStep(row, col) {
     // Reset flow control to defaults
     setFlowControlValue('success', 'next_col');
     setFlowControlValue('failure', 'exit');
+    // Reset step name hint
+    updateStepNameHint();
     stepModal.show();
 }
 
@@ -737,6 +745,7 @@ function editStep(stepId, row, col) {
                 const step = data.data.step;
                 document.getElementById('stepName').value = step.step_name;
                 document.getElementById('stepLabel').value = step.label;
+                updateStepNameHint();
 
                 // Set step type
                 const typeRadio = document.getElementById('type_' + step.step_type);

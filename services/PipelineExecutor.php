@@ -25,6 +25,14 @@ class PipelineExecutor {
     private array $stepOutputs = [];
     private $logger;
 
+    // Column name mappings
+    private array $columnNames = [];      // index => name (e.g., 0 => 'start', 1 => 'execute')
+    private array $columnIndices = [];    // name => index (e.g., 'start' => 0, 'execute' => 1)
+
+    // Step lookup for goto
+    private array $stepsByPosition = [];  // "row.col" => step
+    private array $stepsByName = [];      // "step_name" => step
+
     public function __construct(int $runId, $logger = null) {
         $this->runId = $runId;
         $this->logger = $logger;
@@ -52,6 +60,14 @@ class PipelineExecutor {
                 return false;
             }
 
+            // Load column names from pipeline
+            $columns = json_decode($this->pipeline->columns_json ?: '[]', true);
+            foreach ($columns as $index => $name) {
+                $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $name));
+                $this->columnNames[$index] = $slug;
+                $this->columnIndices[$slug] = $index;
+            }
+
             // Load steps ordered by sequence
             $this->steps = Bean::find('pipelinesteps',
                 ' pipelines_id = ? AND is_active = 1 ORDER BY sequence ASC ',
@@ -61,6 +77,14 @@ class PipelineExecutor {
             if (empty($this->steps)) {
                 $this->completeRun('completed', 'No active steps to execute');
                 return true;
+            }
+
+            // Build step lookup maps
+            foreach ($this->steps as $step) {
+                $row = (int) $step->row;
+                $col = (int) $step->col;
+                $this->stepsByPosition["{$row}.{$col}"] = $step;
+                $this->stepsByName[$step->step_name] = $step;
             }
 
             // Initialize context from pipeline defaults and trigger data
@@ -115,10 +139,31 @@ class PipelineExecutor {
     /**
      * Execute steps in sequence
      */
+    /**
+     * Execute steps with goto flow control
+     *
+     * Supported flow actions for on_success/on_failure:
+     *   - next_col: Move to next column in same row (default for success)
+     *   - next_row: Move to first column of next row
+     *   - exit: Complete/fail the pipeline
+     *   - skip: Skip this failure and continue (only for on_failure)
+     *   - goto:ROW.COLUMN: Jump to specific row and column (e.g., goto:2.execute)
+     *   - goto:STEP_NAME: Jump to specific step by name (e.g., goto:validate_output)
+     */
     private function executeSteps(): void {
         $completedCount = 0;
+        $executedSteps = [];  // Track which steps have been executed
+        $maxIterations = count($this->steps) * 3;  // Safety limit to prevent infinite loops
+        $iterations = 0;
 
-        foreach ($this->steps as $step) {
+        // Start with first step
+        $stepsArray = array_values($this->steps);
+        $currentIndex = 0;
+
+        while ($currentIndex < count($stepsArray) && $iterations < $maxIterations) {
+            $iterations++;
+            $step = $stepsArray[$currentIndex];
+
             // Check if run was cancelled
             $this->run = Bean::load('pipelineruns', $this->runId);
             if ($this->run->status === 'cancelled') {
@@ -126,7 +171,7 @@ class PipelineExecutor {
                 return;
             }
 
-            // Get or create step run record
+            // Get step run record
             $stepRun = Bean::findOne('pipelinestepruns',
                 ' pipelineruns_id = ? AND pipelinesteps_id = ? ',
                 [$this->run->id, $step->id]
@@ -134,6 +179,7 @@ class PipelineExecutor {
 
             if (!$stepRun) {
                 $this->log('error', "Step run not found for step: {$step->step_name}");
+                $currentIndex++;
                 continue;
             }
 
@@ -145,6 +191,7 @@ class PipelineExecutor {
                 $stepRun->updated_at = date('Y-m-d H:i:s');
                 Bean::store($stepRun);
                 $completedCount++;
+                $currentIndex++;
                 continue;
             }
 
@@ -154,6 +201,7 @@ class PipelineExecutor {
             Bean::store($this->run);
 
             // Execute step with retries
+            $executedSteps[$step->step_name] = true;
             $success = $this->executeStepWithRetries($step, $stepRun);
 
             if ($success) {
@@ -162,28 +210,143 @@ class PipelineExecutor {
 
                 // Handle on_success
                 $nextAction = $step->on_success ?: 'next_col';
-                if ($nextAction === 'exit') {
+                $nextIndex = $this->resolveNextStep($step, $nextAction, $stepsArray, $currentIndex);
+
+                if ($nextIndex === -1) {
+                    // exit
                     $this->completeRun('completed');
                     return;
                 }
-                // For next_col and next_row, just continue to next step in sequence
+                $currentIndex = $nextIndex;
             } else {
                 // Handle on_failure
                 $failAction = $step->on_failure ?: 'exit';
+
                 if ($failAction === 'exit') {
                     $this->completeRun('failed', "Step failed: {$step->step_name}");
                     return;
                 } elseif ($failAction === 'skip') {
                     $completedCount++;
                     $this->updateProgress($completedCount);
+                    $currentIndex++;
                     continue;
+                } else {
+                    // Handle goto on failure
+                    $nextIndex = $this->resolveNextStep($step, $failAction, $stepsArray, $currentIndex);
+                    if ($nextIndex === -1) {
+                        $this->completeRun('failed', "Step failed: {$step->step_name}");
+                        return;
+                    }
+                    $currentIndex = $nextIndex;
                 }
-                // For retry, it's already handled in executeStepWithRetries
             }
+        }
+
+        if ($iterations >= $maxIterations) {
+            $this->completeRun('failed', 'Maximum iterations exceeded (possible infinite loop)');
+            return;
         }
 
         // All steps completed
         $this->completeRun('completed');
+    }
+
+    /**
+     * Resolve next step based on flow action
+     *
+     * @return int Next step index, or -1 for exit
+     */
+    private function resolveNextStep($currentStep, string $action, array $stepsArray, int $currentIndex): int {
+        $currentRow = (int) $currentStep->row;
+        $currentCol = (int) $currentStep->col;
+
+        switch ($action) {
+            case 'exit':
+                return -1;
+
+            case 'next_col':
+                // Find next step in sequence (default behavior)
+                return $currentIndex + 1;
+
+            case 'next_row':
+                // Find first step in next row
+                $nextRow = $currentRow + 1;
+                foreach ($stepsArray as $idx => $step) {
+                    if ((int) $step->row === $nextRow && (int) $step->col === 0) {
+                        return $idx;
+                    }
+                }
+                // No step in next row, find any step in next row
+                foreach ($stepsArray as $idx => $step) {
+                    if ((int) $step->row === $nextRow) {
+                        return $idx;
+                    }
+                }
+                // No next row, continue to next in sequence
+                return $currentIndex + 1;
+
+            default:
+                // Check for goto: prefix
+                if (strpos($action, 'goto:') === 0) {
+                    $target = substr($action, 5);
+                    return $this->resolveGotoTarget($target, $stepsArray);
+                }
+
+                // Unknown action, continue to next
+                return $currentIndex + 1;
+        }
+    }
+
+    /**
+     * Resolve goto target to step index
+     *
+     * Formats:
+     *   - "step_name": Find step by name
+     *   - "2.execute": Find step at row 2, column "execute"
+     *   - "2.1": Find step at row 2, column index 1
+     */
+    private function resolveGotoTarget(string $target, array $stepsArray): int {
+        // Check if it's a direct step name
+        if (isset($this->stepsByName[$target])) {
+            $step = $this->stepsByName[$target];
+            foreach ($stepsArray as $idx => $s) {
+                if ($s->id === $step->id) {
+                    return $idx;
+                }
+            }
+        }
+
+        // Check for row.column format
+        if (strpos($target, '.') !== false) {
+            list($rowPart, $colPart) = explode('.', $target, 2);
+
+            $row = (int) $rowPart;
+
+            // Column can be numeric or name
+            if (is_numeric($colPart)) {
+                $col = (int) $colPart;
+            } else {
+                // Look up column name
+                $colSlug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $colPart));
+                $col = $this->columnIndices[$colSlug] ?? -1;
+            }
+
+            if ($col >= 0) {
+                // Find step at this position
+                $posKey = "{$row}.{$col}";
+                if (isset($this->stepsByPosition[$posKey])) {
+                    $step = $this->stepsByPosition[$posKey];
+                    foreach ($stepsArray as $idx => $s) {
+                        if ($s->id === $step->id) {
+                            return $idx;
+                        }
+                    }
+                }
+            }
+        }
+
+        $this->log('warning', "Could not resolve goto target: {$target}");
+        return -1;  // Exit if target not found
     }
 
     /**
@@ -565,20 +728,65 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Expression required'];
         }
 
-        $inputData = json_encode($input);
+        // If input has 'stdin' key, use that as the raw data to parse (it's already a string)
+        // Otherwise, encode the full input array as JSON
+        if (isset($input['stdin'])) {
+            // stdin contains the raw output from the previous step - use it directly
+            $inputData = trim($input['stdin']);
+        } else {
+            $inputData = json_encode($input);
+        }
 
         switch ($parserType) {
             case 'jq':
-                // Use jq command
-                $cmd = sprintf('echo %s | jq %s',
-                    escapeshellarg($inputData),
-                    escapeshellarg($expression)
-                );
-                $output = shell_exec($cmd . ' 2>&1');
-                $decoded = json_decode(trim($output), true);
+                // Use jq command with proper stderr capture
+                $descriptors = [
+                    0 => ['pipe', 'r'],  // stdin
+                    1 => ['pipe', 'w'],  // stdout
+                    2 => ['pipe', 'w'],  // stderr
+                ];
+
+                $process = proc_open(['jq', $expression], $descriptors, $pipes, '/tmp', null);
+
+                if (!is_resource($process)) {
+                    return ['success' => false, 'error' => 'Failed to execute jq'];
+                }
+
+                // Write input to stdin
+                fwrite($pipes[0], $inputData);
+                fclose($pipes[0]);
+
+                // Read output
+                $stdout = stream_get_contents($pipes[1]);
+                fclose($pipes[1]);
+
+                $stderr = stream_get_contents($pipes[2]);
+                fclose($pipes[2]);
+
+                $exitCode = proc_close($process);
+
+                // Log stderr if present
+                if (!empty(trim($stderr))) {
+                    $this->log('warning', "jq stderr: " . trim($stderr));
+                }
+
+                // Check for errors
+                if ($exitCode !== 0) {
+                    return [
+                        'success' => false,
+                        'error' => trim($stderr) ?: "jq exited with code {$exitCode}",
+                        'stdout' => trim($stdout),
+                        'stderr' => trim($stderr),
+                        'exit_code' => $exitCode
+                    ];
+                }
+
+                $decoded = json_decode(trim($stdout), true);
                 return [
-                    'success' => $decoded !== null || trim($output) === 'null',
-                    'output' => $decoded ?? ['raw' => trim($output)]
+                    'success' => true,
+                    'output' => $decoded ?? ['raw' => trim($stdout)],
+                    'stdout' => trim($stdout),
+                    'stderr' => trim($stderr)
                 ];
 
             case 'regex':

@@ -445,32 +445,38 @@ class Bootstrap {
             return $defaultConfigFile;
         }
 
-        // Extract subdomain (first part if 3+ parts)
-        // clicksimple-inc.myctobot.ai → clicksimple-inc
+        // Determine workspace from subdomain or query parameter
+        // Both methods are interchangeable and work the same way
+        $workspace = null;
+
+        // Check for subdomain (first part if 3+ parts)
+        // gwt.myctobot.ai → gwt
         // myctobot.ai → null (no subdomain)
         $parts = explode('.', $host);
         if (count($parts) >= 3) {
-            $subdomain = $parts[0];
+            $workspace = $parts[0];
+        }
 
-            // Redirect subdomain to main domain with workspace in path
-            // clicksimple-inc.myctobot.ai/login → myctobot.ai/login/clicksimple-inc
-            // clicksimple-inc.myctobot.ai/settings/connections → myctobot.ai/settings/connections?workspace=clicksimple-inc
-            $mainDomain = implode('.', array_slice($parts, 1)); // myctobot.ai
-            $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
-            $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        // Query parameter ?workspace= overrides subdomain if both present
+        if (isset($_GET['workspace']) && !empty($_GET['workspace'])) {
+            $workspace = $_GET['workspace'];
+        }
 
-            // For /login, append workspace to path: /login/workspace
-            // For other paths, add workspace as query param
-            if (preg_match('#^/login/?$#', $requestUri)) {
-                $redirectUrl = "{$scheme}://{$mainDomain}/login/{$subdomain}";
-            } else {
-                // Preserve existing query string and add workspace
-                $separator = (strpos($requestUri, '?') !== false) ? '&' : '?';
-                $redirectUrl = "{$scheme}://{$mainDomain}{$requestUri}{$separator}workspace={$subdomain}";
+        // If we have a workspace, set it in $_REQUEST and load tenant config
+        if (!empty($workspace)) {
+            // Normalize workspace and make it available globally
+            $_REQUEST['workspace'] = $workspace;
+            $_GET['workspace'] = $workspace;
+
+            // Check if tenant config exists
+            $tenantConfigFile = "conf/config.{$workspace}.ini";
+            if (file_exists($tenantConfigFile)) {
+                // Set session tenant if not in CLI mode
+                if (php_sapi_name() !== 'cli') {
+                    $_SESSION['tenant_slug'] = $workspace;
+                }
+                return $tenantConfigFile;
             }
-
-            header("Location: {$redirectUrl}", true, 302);
-            exit;
         }
 
         // Fallback to default

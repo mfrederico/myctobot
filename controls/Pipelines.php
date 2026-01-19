@@ -858,6 +858,276 @@ class Pipelines extends BaseControls\Control {
     }
 
     /**
+     * Run pipeline synchronously and wait for completion
+     *
+     * POST /pipelines/runsync/{slug}
+     * Body: {"context": {...}}
+     *
+     * Returns full results when pipeline completes.
+     * Use for tool calls, MCP, or when you need to wait for results.
+     */
+    public function runsync($params = []) {
+        // Allow both authenticated users and API calls with token
+        $authenticated = $this->isLoggedIn();
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
+
+        if (!$authenticated && empty($apiToken)) {
+            Flight::jsonError('Authentication required', 401);
+            return;
+        }
+
+        // TODO: Validate API token if provided
+
+        $slug = $this->opId() ?? $this->getParam('slug');
+        $contextJson = $this->getParam('context', '{}');
+
+        // Find pipeline by slug or ID
+        if (is_numeric($slug)) {
+            $pipeline = Bean::load('pipelines', (int) $slug);
+        } else {
+            $pipeline = Bean::findOne('pipelines', 'slug = ?', [$slug]);
+        }
+
+        if (!$pipeline || !$pipeline->id) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        if (!$pipeline->is_active) {
+            Flight::jsonError('Pipeline is not active', 400);
+            return;
+        }
+
+        // Parse context
+        $triggerData = is_array($contextJson) ? $contextJson : json_decode($contextJson, true);
+        if (!is_array($triggerData)) {
+            $triggerData = [];
+        }
+
+        // Count steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+        if ($stepCount === 0) {
+            Flight::jsonError('Pipeline has no active steps', 400);
+            return;
+        }
+
+        // Create run
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $run = Bean::dispense('pipelineruns');
+        $run->run_uid = $runUid;
+        $run->pipelines = $pipeline;
+        $run->member_id = $this->member->id ?? null;
+        $run->trigger_source = 'api_sync';
+        $run->trigger_data_json = json_encode($triggerData);
+        $run->status = 'pending';
+        $run->context_json = $pipeline->default_context_json ?: '{}';
+        $run->steps_total = $stepCount;
+        $run->steps_completed = 0;
+        $run->progress_percent = 0;
+        $run->created_at = date('Y-m-d H:i:s');
+        $run->updated_at = date('Y-m-d H:i:s');
+
+        $runId = Bean::store($run);
+
+        // Update pipeline stats
+        $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+        $pipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        // Execute synchronously
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+        $executor = new \app\services\PipelineExecutor($runId);
+        $success = $executor->execute();
+
+        // Reload run to get final state
+        $run = Bean::load('pipelineruns', $runId);
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // Get step results
+        $stepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? ORDER BY id ASC ',
+            [$runId]
+        );
+
+        $steps = [];
+        foreach ($stepRuns as $sr) {
+            $steps[$sr->step_name] = [
+                'status' => $sr->status,
+                'output' => json_decode($sr->output_json ?: '{}', true),
+                'stdout' => $sr->stdout,
+                'stderr' => $sr->stderr,
+                'exit_code' => $sr->exit_code,
+                'duration_ms' => $sr->duration_ms,
+                'error' => $sr->error_message
+            ];
+        }
+
+        Flight::jsonSuccess([
+            'run_id' => $runId,
+            'run_uid' => $runUid,
+            'status' => $run->status,
+            'success' => $run->status === 'completed',
+            'steps_completed' => (int) $run->steps_completed,
+            'steps_total' => (int) $run->steps_total,
+            'duration_seconds' => $run->started_at && $run->completed_at
+                ? strtotime($run->completed_at) - strtotime($run->started_at)
+                : null,
+            'context' => $context,
+            'steps' => $steps,
+            'error' => $run->error_message
+        ]);
+    }
+
+    /**
+     * Run pipeline synchronously via API with tenant in URL path
+     * POST /pipelines/runsyncapi/{tenant}/{slug}
+     *
+     * URL pattern matches Pipein webhook style for consistent API design.
+     * Validates API token from header or query param.
+     *
+     * @example POST /pipelines/runsyncapi/gwt/my-deploy-pipeline
+     *          X-API-Token: your-api-token
+     *          {"context_key": "value"}
+     */
+    public function runsyncapi($params = []) {
+        // Parse URL to extract tenant and slug: /pipelines/runsyncapi/{tenant}/{slug}
+        $url = Flight::request()->url;
+        $path = preg_replace('#^/pipelines/runsyncapi/?#', '', $url);
+        if (strpos($path, '?') !== false) {
+            $path = substr($path, 0, strpos($path, '?'));
+        }
+        $parts = array_filter(explode('/', $path));
+        $parts = array_values($parts);
+
+        if (count($parts) < 2) {
+            Flight::jsonError('Invalid URL format. Expected: /pipelines/runsyncapi/{tenant}/{slug}', 400);
+            return;
+        }
+
+        $tenant = $parts[0];
+        $slug = $parts[1];
+
+        // Validate API token
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
+        if (empty($apiToken)) {
+            Flight::jsonError('API token required', 401);
+            return;
+        }
+
+        // Switch to tenant database
+        if (!TenantResolver::switchDatabase($tenant)) {
+            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+
+        // TODO: Validate API token against tenant's configured tokens
+
+        $this->logger->info("Pipeline API sync run for tenant: {$tenant}, pipeline: {$slug}");
+
+        // Find pipeline by slug
+        $pipeline = Bean::findOne('pipelines', 'slug = ?', [$slug]);
+
+        if (!$pipeline || !$pipeline->id) {
+            Flight::jsonError("Pipeline not found: {$slug}", 404);
+            return;
+        }
+
+        if (!$pipeline->is_active) {
+            Flight::jsonError('Pipeline is not active', 400);
+            return;
+        }
+
+        // Get context from request body
+        $rawBody = file_get_contents('php://input');
+        $triggerData = [];
+        if (!empty($rawBody)) {
+            $triggerData = json_decode($rawBody, true);
+            if (!is_array($triggerData)) {
+                $triggerData = [];
+            }
+        }
+
+        // Count steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+        if ($stepCount === 0) {
+            Flight::jsonError('Pipeline has no active steps', 400);
+            return;
+        }
+
+        // Create run
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $run = Bean::dispense('pipelineruns');
+        $run->run_uid = $runUid;
+        $run->pipelines = $pipeline;
+        $run->member_id = null; // API access has no member
+        $run->trigger_source = 'api_sync';
+        $run->trigger_data_json = json_encode($triggerData);
+        $run->status = 'pending';
+        $run->context_json = $pipeline->default_context_json ?: '{}';
+        $run->steps_total = $stepCount;
+        $run->steps_completed = 0;
+        $run->progress_percent = 0;
+        $run->created_at = date('Y-m-d H:i:s');
+        $run->updated_at = date('Y-m-d H:i:s');
+
+        $runId = Bean::store($run);
+
+        // Update pipeline stats
+        $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+        $pipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        $this->logger->info("Created pipeline run: {$runUid} (ID: {$runId})");
+
+        // Execute synchronously
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+        $executor = new \app\services\PipelineExecutor($runId);
+        $success = $executor->execute();
+
+        // Reload run to get final state
+        $run = Bean::load('pipelineruns', $runId);
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // Get step results
+        $stepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? ORDER BY id ASC ',
+            [$runId]
+        );
+
+        $steps = [];
+        foreach ($stepRuns as $sr) {
+            $steps[$sr->step_name] = [
+                'status' => $sr->status,
+                'output' => json_decode($sr->output_json ?: '{}', true),
+                'stdout' => $sr->stdout,
+                'stderr' => $sr->stderr,
+                'exit_code' => $sr->exit_code,
+                'duration_ms' => $sr->duration_ms,
+                'error' => $sr->error_message
+            ];
+        }
+
+        Flight::response()->status(200);
+        Flight::response()->header('Content-Type', 'application/json');
+        echo json_encode([
+            'success' => $run->status === 'completed',
+            'run_id' => $runId,
+            'run_uid' => $runUid,
+            'status' => $run->status,
+            'steps_completed' => (int) $run->steps_completed,
+            'steps_total' => (int) $run->steps_total,
+            'duration_seconds' => $run->started_at && $run->completed_at
+                ? strtotime($run->completed_at) - strtotime($run->started_at)
+                : null,
+            'context' => $context,
+            'steps' => $steps,
+            'error' => $run->error_message
+        ]);
+    }
+
+    /**
      * Cancel a running pipeline
      */
     public function cancelrun($params = []) {

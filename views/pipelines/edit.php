@@ -522,21 +522,31 @@
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">On Success</label>
-                                <select class="form-select" name="on_success">
+                                <select class="form-select" name="on_success" id="onSuccessSelect" onchange="onFlowControlChange('success')">
                                     <option value="next_col">Next Column</option>
                                     <option value="next_row">Next Row</option>
                                     <option value="exit">Exit (Complete)</option>
+                                    <option value="goto">Goto...</option>
                                 </select>
+                            </div>
+                            <div class="mb-3" id="gotoSuccessConfig" style="display: none;">
+                                <input type="text" class="form-control font-monospace" name="goto_success_target" id="gotoSuccessTarget" placeholder="2.execute or step_name">
+                                <small class="text-muted">Format: ROW.COLUMN or step_name</small>
                             </div>
                         </div>
                         <div class="col-md-4">
                             <div class="mb-3">
                                 <label class="form-label">On Failure</label>
-                                <select class="form-select" name="on_failure">
+                                <select class="form-select" name="on_failure" id="onFailureSelect" onchange="onFlowControlChange('failure')">
                                     <option value="exit">Exit (Fail)</option>
                                     <option value="retry">Retry</option>
                                     <option value="skip">Skip to Next</option>
+                                    <option value="goto">Goto...</option>
                                 </select>
+                            </div>
+                            <div class="mb-3" id="gotoFailureConfig" style="display: none;">
+                                <input type="text" class="form-control font-monospace" name="goto_failure_target" id="gotoFailureTarget" placeholder="1.error_handler or cleanup">
+                                <small class="text-muted">Format: ROW.COLUMN or step_name</small>
                             </div>
                         </div>
                         <div class="col-md-4">
@@ -641,6 +651,62 @@ function onStepTypeChange(type) {
     }
 }
 
+function onFlowControlChange(which) {
+    if (which === 'success') {
+        const select = document.getElementById('onSuccessSelect');
+        const config = document.getElementById('gotoSuccessConfig');
+        config.style.display = select.value === 'goto' ? 'block' : 'none';
+    } else {
+        const select = document.getElementById('onFailureSelect');
+        const config = document.getElementById('gotoFailureConfig');
+        config.style.display = select.value === 'goto' ? 'block' : 'none';
+    }
+}
+
+function setFlowControlValue(which, value) {
+    // Check if it's a goto value
+    if (value && value.startsWith('goto:')) {
+        const target = value.substring(5);
+        if (which === 'success') {
+            document.getElementById('onSuccessSelect').value = 'goto';
+            document.getElementById('gotoSuccessTarget').value = target;
+            document.getElementById('gotoSuccessConfig').style.display = 'block';
+        } else {
+            document.getElementById('onFailureSelect').value = 'goto';
+            document.getElementById('gotoFailureTarget').value = target;
+            document.getElementById('gotoFailureConfig').style.display = 'block';
+        }
+    } else {
+        if (which === 'success') {
+            document.getElementById('onSuccessSelect').value = value || 'next_col';
+            document.getElementById('gotoSuccessTarget').value = '';
+            document.getElementById('gotoSuccessConfig').style.display = 'none';
+        } else {
+            document.getElementById('onFailureSelect').value = value || 'exit';
+            document.getElementById('gotoFailureTarget').value = '';
+            document.getElementById('gotoFailureConfig').style.display = 'none';
+        }
+    }
+}
+
+function getFlowControlValue(which) {
+    if (which === 'success') {
+        const select = document.getElementById('onSuccessSelect');
+        if (select.value === 'goto') {
+            const target = document.getElementById('gotoSuccessTarget').value.trim();
+            return target ? 'goto:' + target : 'next_col';
+        }
+        return select.value;
+    } else {
+        const select = document.getElementById('onFailureSelect');
+        if (select.value === 'goto') {
+            const target = document.getElementById('gotoFailureTarget').value.trim();
+            return target ? 'goto:' + target : 'exit';
+        }
+        return select.value;
+    }
+}
+
 function addStep(row, col) {
     document.getElementById('stepModalTitleText').textContent = 'Add Step';
     document.getElementById('stepId').value = '0';
@@ -650,6 +716,9 @@ function addStep(row, col) {
     document.getElementById('deleteStepBtn').style.display = 'none';
     document.getElementById('type_direct_exec').checked = true;
     onStepTypeChange('direct_exec');
+    // Reset flow control to defaults
+    setFlowControlValue('success', 'next_col');
+    setFlowControlValue('failure', 'exit');
     stepModal.show();
 }
 
@@ -686,8 +755,8 @@ function editStep(stepId, row, col) {
                     document.querySelector('[name="input_getfrom_step"]').value = step.input_config.step;
                 }
 
-                document.querySelector('[name="on_success"]').value = step.on_success;
-                document.querySelector('[name="on_failure"]').value = step.on_failure;
+                setFlowControlValue('success', step.on_success);
+                setFlowControlValue('failure', step.on_failure);
                 document.querySelector('[name="timeout_seconds"]').value = step.timeout_seconds;
                 document.getElementById('stepIsActive').checked = step.is_active;
 
@@ -818,8 +887,8 @@ async function saveStep() {
         input_source: inputSource,
         input_config: JSON.stringify(inputConfig),
         condition: '{}',
-        on_success: document.querySelector('[name="on_success"]').value,
-        on_failure: document.querySelector('[name="on_failure"]').value,
+        on_success: getFlowControlValue('success'),
+        on_failure: getFlowControlValue('failure'),
         timeout_seconds: document.querySelector('[name="timeout_seconds"]').value,
         is_active: document.getElementById('stepIsActive').checked ? '1' : '0'
     });

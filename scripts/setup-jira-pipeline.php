@@ -118,7 +118,7 @@ $pipeline->member_id = $member->id;
 $pipeline->slug = 'jira-webhook-analyzer';
 $pipeline->name = 'Jira Webhook Analyzer';
 $pipeline->description = 'Receives Jira webhooks, analyzes with AI, and outputs insights';
-$pipeline->columns_json = json_encode(['Receive', 'Analyze', 'Output']);
+$pipeline->columns_json = json_encode(['Receive', 'Analyze', 'Output', 'Post to Jira']);
 $pipeline->row_names_json = json_encode(['main' => 0]);
 $pipeline->trigger_type = 'webhook';
 $pipeline->trigger_config_json = json_encode([
@@ -126,7 +126,9 @@ $pipeline->trigger_config_json = json_encode([
     'allowed_sources' => ['jira']
 ]);
 $pipeline->default_context_json = json_encode([
-    'workspace' => $workspaceSlug
+    'workspace' => $workspaceSlug,
+    'jira_base_url' => 'https://your-domain.atlassian.net',
+    'jira_auth' => 'base64(email:api_token)'
 ]);
 $pipeline->is_active = true;
 $pipeline->is_template = false;
@@ -237,7 +239,7 @@ $step3->config_json = json_encode([
 $step3->input_source = 'context';
 $step3->input_config_json = '{}';
 $step3->condition_json = '{}';
-$step3->on_success = 'exit';
+$step3->on_success = 'next_col';
 $step3->on_failure = 'exit';
 $step3->timeout_seconds = 30;
 $step3->is_active = true;
@@ -246,6 +248,40 @@ $step3->created_at = date('Y-m-d H:i:s');
 $step3->updated_at = date('Y-m-d H:i:s');
 Bean::store($step3);
 echo "  Created step: {$step3->step_name}\n";
+
+// Create Step 4: Post to Jira (webhook_out to post comment)
+$step4 = Bean::dispense('pipelinesteps');
+$step4->pipelines_id = $pipeline->id;
+$step4->step_name = 'post_to_jira';
+$step4->row = 0;
+$step4->col = 3;
+$step4->label = 'Post Comment to Jira';
+$step4->step_type = 'webhook_out';
+$step4->config_json = json_encode([
+    'url' => '{context.jira_base_url}/rest/api/3/issue/{receive.output.issue_key}/comment',
+    'method' => 'POST',
+    'headers' => [
+        'Authorization' => 'Basic {context.jira_auth}',
+        'Content-Type' => 'application/json'
+    ],
+    'body' => '{"body":{"type":"doc","version":1,"content":[{"type":"paragraph","content":[{"type":"text","text":"AI Analysis: ","marks":[{"type":"strong"}]},{"type":"text","text":"{analyze.output.parsed.summary}"}]}]}}'
+]);
+$step4->input_source = 'context';
+$step4->input_config_json = '{}';
+$step4->condition_json = json_encode([
+    'if' => '{receive.output.issue_key}',
+    'operator' => 'not_empty'
+]);
+$step4->on_success = 'exit';
+$step4->on_failure = 'ignore';
+$step4->timeout_seconds = 30;
+$step4->retry_count = 1;
+$step4->is_active = true;
+$step4->sequence = 4;
+$step4->created_at = date('Y-m-d H:i:s');
+$step4->updated_at = date('Y-m-d H:i:s');
+Bean::store($step4);
+echo "  Created step: {$step4->step_name}\n";
 
 // Get trigger config for webhook secret
 $triggerConfig = json_decode($pipeline->trigger_config_json, true);

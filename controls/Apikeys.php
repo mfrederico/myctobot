@@ -299,7 +299,7 @@ class Apikeys extends BaseControls\Control {
             return;
         }
 
-        $keyId = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        $keyId = (int) ($this->opId() ?? $params[0] ?? $this->getParam('id') ?? 0);
         $key = Bean::load('apikeys', $keyId);
 
         if (!$key->id) {

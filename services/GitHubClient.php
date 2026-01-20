@@ -132,7 +132,7 @@ class GitHubClient {
     /**
      * Get GitHub configuration with hierarchy:
      * 1. Load base config from conf/github.ini (primary source - shared OAuth app)
-     * 2. Fill in missing/blank values from tenant config [github] section
+     * 2. Fill in missing/blank values from workspace config [github] section
      * 3. Fall back to Flight::get() for any missing values
      */
     private static function getConfig(): array {
@@ -159,14 +159,14 @@ class GitHubClient {
             }
         }
 
-        // 2. Override with tenant-specific config (tenant values take priority when not empty)
-        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-        if ($tenantSlug && $tenantSlug !== 'default') {
-            $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
-            if (file_exists($tenantIni)) {
-                $tenantConfig = parse_ini_file($tenantIni, true);
-                if ($tenantConfig && isset($tenantConfig['github'])) {
-                    foreach ($tenantConfig['github'] as $key => $value) {
+        // 2. Override with workspace-specific config (workspace values take priority when not empty)
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+        if ($workspaceSlug && $workspaceSlug !== 'default') {
+            $workspaceIni = $basePath . "/conf/config.{$workspaceSlug}.ini";
+            if (file_exists($workspaceIni)) {
+                $workspaceConfig = parse_ini_file($workspaceIni, true);
+                if ($workspaceConfig && isset($workspaceConfig['github'])) {
+                    foreach ($workspaceConfig['github'] as $key => $value) {
                         if (!empty($value)) {
                             $config[$key] = $value;
                         }

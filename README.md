@@ -55,7 +55,7 @@ Tiknix includes a sophisticated multi-tier caching system that provides **9.4x f
 - Automatically caches ALL SELECT queries
 - Smart invalidation on INSERT/UPDATE/DELETE
 - Tracks JOIN queries across multiple tables
-- Multi-tenant safe with unique cache namespacing
+- Multi-workspace safe with unique cache namespacing
 - **Performance**: 9.4x faster queries, 99.9% hit rate
 
 #### 2. **Permission Cache** (PermissionCache)

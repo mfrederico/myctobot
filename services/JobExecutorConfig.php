@@ -4,7 +4,7 @@
  *
  * Handles configuration hierarchy for job-executor service:
  * 1. Load base config from conf/jobexecutor.ini (public defaults)
- * 2. Override with tenant-specific values from conf/config.{tenant}.ini [jobexecutor] section
+ * 2. Override with workspace-specific values from conf/config.{workspace}.ini [jobexecutor] section
  * 3. Fall back to Flight::get() for legacy config support
  */
 
@@ -19,18 +19,18 @@ class JobExecutorConfig {
     /**
      * Get job-executor configuration with hierarchy:
      * 1. Load base config from conf/jobexecutor.ini (public defaults)
-     * 2. Override with tenant-specific values from conf/config.{tenant}.ini [jobexecutor] section
+     * 2. Override with workspace-specific values from conf/config.{workspace}.ini [jobexecutor] section
      * 3. Fall back to Flight::get() for legacy config support
      *
-     * @param string|null $tenantSlug Optional tenant slug (uses session if not provided)
+     * @param string|null $workspaceSlug Optional workspace slug (uses session if not provided)
      * @return array Job-executor configuration
      */
-    public static function getConfig(?string $tenantSlug = null): array {
-        // Use provided tenant or get from session
-        $tenant = $tenantSlug ?? ($_SESSION['tenant_slug'] ?? null);
+    public static function getConfig(?string $workspaceSlug = null): array {
+        // Use provided workspace or get from session
+        $workspace = $workspaceSlug ?? ($_SESSION['workspace_slug'] ?? null);
 
-        // Cache key includes tenant for multi-tenant support
-        $cacheKey = $tenant ?? 'default';
+        // Cache key includes workspace for multi-workspace support
+        $cacheKey = $workspace ?? 'default';
 
         if (self::$configCache !== null && isset(self::$configCache[$cacheKey])) {
             return self::$configCache[$cacheKey];
@@ -57,13 +57,13 @@ class JobExecutorConfig {
             }
         }
 
-        // 2. Override with tenant-specific config (tenant values take priority)
-        if ($tenant && $tenant !== 'default') {
-            $tenantIni = $basePath . "/conf/config.{$tenant}.ini";
-            if (file_exists($tenantIni)) {
-                $tenantConfig = parse_ini_file($tenantIni, true);
-                if ($tenantConfig && isset($tenantConfig['jobexecutor'])) {
-                    foreach ($tenantConfig['jobexecutor'] as $key => $value) {
+        // 2. Override with workspace-specific config (workspace values take priority)
+        if ($workspace && $workspace !== 'default') {
+            $workspaceIni = $basePath . "/conf/config.{$workspace}.ini";
+            if (file_exists($workspaceIni)) {
+                $workspaceConfig = parse_ini_file($workspaceIni, true);
+                if ($workspaceConfig && isset($workspaceConfig['jobexecutor'])) {
+                    foreach ($workspaceConfig['jobexecutor'] as $key => $value) {
                         if ($value !== '' && $value !== null) {
                             $config[$key] = $value;
                         }
@@ -97,35 +97,35 @@ class JobExecutorConfig {
     /**
      * Get the job-executor URL
      *
-     * @param string|null $tenantSlug Optional tenant slug
+     * @param string|null $workspaceSlug Optional workspace slug
      * @return string Job-executor URL
      */
-    public static function getUrl(?string $tenantSlug = null): string {
-        return self::getConfig($tenantSlug)['url'];
+    public static function getUrl(?string $workspaceSlug = null): string {
+        return self::getConfig($workspaceSlug)['url'];
     }
 
     /**
      * Get the API timeout in seconds
      *
-     * @param string|null $tenantSlug Optional tenant slug
+     * @param string|null $workspaceSlug Optional workspace slug
      * @return int Timeout in seconds
      */
-    public static function getTimeout(?string $tenantSlug = null): int {
-        return self::getConfig($tenantSlug)['timeout'];
+    public static function getTimeout(?string $workspaceSlug = null): int {
+        return self::getConfig($workspaceSlug)['timeout'];
     }
 
     /**
      * Check if job-executor is enabled
      *
-     * @param string|null $tenantSlug Optional tenant slug
+     * @param string|null $workspaceSlug Optional workspace slug
      * @return bool Whether job-executor is enabled
      */
-    public static function isEnabled(?string $tenantSlug = null): bool {
-        return self::getConfig($tenantSlug)['enabled'];
+    public static function isEnabled(?string $workspaceSlug = null): bool {
+        return self::getConfig($workspaceSlug)['enabled'];
     }
 
     /**
-     * Clear the config cache (useful when switching tenants)
+     * Clear the config cache (useful when switching workspaces)
      */
     public static function clearCache(): void {
         self::$configCache = null;

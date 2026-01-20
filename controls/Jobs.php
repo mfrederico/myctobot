@@ -15,7 +15,8 @@ use \app\services\AIDevJobManager;
 use \app\services\RunnerService;
 use \app\services\RunnerRouter;
 use \app\services\AnthropicKeyService;
-use \app\TenantResolver;
+use \app\services\ApiAuthService;
+use \app\WorkspaceResolver;
 
 require_once __DIR__ . '/../services/EncryptionService.php';
 require_once __DIR__ . '/../services/AIDevJobManager.php';
@@ -366,9 +367,9 @@ class Jobs extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
-            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
-                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
                 : '';
 
             $cmd = sprintf(
@@ -378,7 +379,7 @@ class Jobs extends BaseControls\Control {
                 $this->member->id,
                 escapeshellarg($job->id),
                 escapeshellarg($issueKey),
-                $tenantParam
+                $workspaceParam
             );
 
             exec($cmd);
@@ -453,9 +454,9 @@ class Jobs extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
-            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
-                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
                 : '';
 
             $cmd = sprintf(
@@ -467,7 +468,7 @@ class Jobs extends BaseControls\Control {
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
                 $job->prNumber ?? 0,
-                $tenantParam
+                $workspaceParam
             );
 
             exec($cmd);
@@ -539,36 +540,36 @@ class Jobs extends BaseControls\Control {
      * POST /jobs/cleanup
      * Authentication: X-Cron-Secret header or ?secret= query param
      * Parameters:
-     *   - tenant (required): tenant slug
+     *   - workspace (required): workspace slug
      *   - job_uid OR issue_key (one required): identifies the job
      *
      * This endpoint handles both Jira and GitHub issues based on the job's project_type.
      */
     public function cleanup() {
-        $tenant = $this->getParam('tenant', '');
+        // Support both workspace and workspace parameter names
+        $workspace = $this->getParam('workspace', '') ?: $this->getParam('workspace', '');
         $jobId = $this->getParam('job_uid', '');
         $issueKey = $this->getParam('issue_key', '');
-        $providedSecret = $_SERVER['HTTP_X_API_KEY'] ?? $this->getParam('api_key', '');
 
-        if (empty($tenant)) {
-            Flight::jsonError('tenant parameter required', 400);
+        if (empty($workspace)) {
+            Flight::jsonError('workspace parameter required', 400);
             return;
         }
 
-        // Load tenant config to get aidev.api_key
-        $configFile = __DIR__ . "/../conf/config.{$tenant}.ini";
-        if (!file_exists($configFile)) {
-            Flight::jsonError("Tenant not found: {$tenant}", 404);
+        // Switch to workspace database first (required for API key lookup)
+        if (!$this->switchToWorkspaceDatabase($workspace)) {
+            Flight::jsonError("Failed to switch to workspace: {$workspace}", 500);
             return;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        $apiKey = $tenantConfig['api']['api_key'] ?? '';
-
-        // Authenticate via api.api_key from tenant config
-        if (empty($apiKey) || $providedSecret !== $apiKey) {
-            $this->logger->warning('Jobs cleanup: invalid or missing api_key', ['tenant' => $tenant]);
-            Flight::jsonError('Unauthorized', 401);
+        // Authenticate via ApiAuthService
+        $authResult = ApiAuthService::authenticate('jobs', 'cleanup');
+        if (!$authResult['success']) {
+            $this->logger->warning('Jobs cleanup: authentication failed', [
+                'workspace' => $workspace,
+                'error' => $authResult['error']
+            ]);
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
@@ -578,16 +579,11 @@ class Jobs extends BaseControls\Control {
         }
 
         $this->logger->info('Jobs cleanup called', [
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'job_uid' => $jobId,
-            'issue_key' => $issueKey
+            'issue_key' => $issueKey,
+            'member_id' => $authResult['member']->id
         ]);
-
-        // Switch to tenant database
-        if (!$this->switchToTenantDatabase($tenant)) {
-            Flight::jsonError("Failed to switch to tenant: {$tenant}", 500);
-            return;
-        }
 
         try {
             $service = new \app\services\AIDevJobService();
@@ -597,7 +593,7 @@ class Jobs extends BaseControls\Control {
             );
 
             $this->logger->info('Jobs cleanup completed', [
-                'tenant' => $tenant,
+                'workspace' => $workspace,
                 'result' => $result
             ]);
 
@@ -606,17 +602,17 @@ class Jobs extends BaseControls\Control {
         } catch (Exception $e) {
             $this->logger->error('Jobs cleanup failed', [
                 'error' => $e->getMessage(),
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]);
             Flight::jsonError('Cleanup failed: ' . $e->getMessage(), 500);
         }
     }
 
     /**
-     * Switch to tenant database for internal API calls
+     * Switch to workspace database for internal API calls
      */
-    private function switchToTenantDatabase(string $tenant): bool {
-        return TenantResolver::switchDatabase($tenant);
+    private function switchToWorkspaceDatabase(string $workspace): bool {
+        return WorkspaceResolver::switchDatabase($workspace);
     }
 
     /**

@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# schema-dump.sh - Generate schema documentation from TenantSchemaBuilder
+# schema-dump.sh - Generate schema documentation from WorkspaceSchemaBuilder
 #
-# Usage: ./scripts/schema-dump.sh [tenant|mysql|both]
+# Usage: ./scripts/schema-dump.sh [workspace|mysql|both]
 #
-# This script uses TenantSchemaBuilder.php as the source of truth for tenant
+# This script uses WorkspaceSchemaBuilder.php as the source of truth for workspace
 # database schemas. It creates a temporary database, runs the schema builder,
 # then dumps the resulting schema.
 #
@@ -14,35 +14,35 @@
 # MIGRATION TOOL: scripts/run-migration.php
 # =============================================================================
 #
-# To run schema migrations across tenants, use the migration tool:
+# To run schema migrations across workspaces, use the migration tool:
 #
 #   # Show all available migrations
 #   php scripts/run-migration.php --list
 #
-#   # Show all tenants
-#   php scripts/run-migration.php --tenants
+#   # Show all workspaces
+#   php scripts/run-migration.php --workspaces
 #
-#   # Check migration status for all tenants
+#   # Check migration status for all workspaces
 #   php scripts/run-migration.php --status
 #
-#   # Check status for specific tenant
-#   php scripts/run-migration.php --status --tenant=gwt
+#   # Check status for specific workspace
+#   php scripts/run-migration.php --status --workspace=gwt
 #
-#   # Run all pending migrations on all tenants
+#   # Run all pending migrations on all workspaces
 #   php scripts/run-migration.php --sync
 #
-#   # Run pending migrations on specific tenant
-#   php scripts/run-migration.php --sync --tenant=gwt
+#   # Run pending migrations on specific workspace
+#   php scripts/run-migration.php --sync --workspace=gwt
 #
 #   # Run specific migration(s)
 #   php scripts/run-migration.php --migration=SSHKeys
 #   php scripts/run-migration.php --migration=SSHKeys,AIAgents,Member
 #
 #   # Force rebuild tables (drops and recreates - USE WITH CAUTION)
-#   php scripts/run-migration.php --migration=all --force --tenant=footest4
+#   php scripts/run-migration.php --migration=all --force --workspace=footest4
 #
 #   # Mark migrations as applied without running (for existing DBs with data)
-#   php scripts/run-migration.php --migration=all --mark --tenant=gwt
+#   php scripts/run-migration.php --migration=all --mark --workspace=gwt
 #
 # =============================================================================
 #
@@ -64,7 +64,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 echo "=== Schema Dump Tool ==="
-echo "Source of truth: TenantSchemaBuilder.php"
+echo "Source of truth: WorkspaceSchemaBuilder.php"
 echo ""
 
 # Parse config.ini for database settings
@@ -73,58 +73,58 @@ parse_ini() {
     grep -E "^\s*$key\s*=" "$CONFIG_FILE" 2>/dev/null | sed 's/.*=\s*//' | tr -d '"' | tr -d "'"
 }
 
-# Generate tenant schema from TenantSchemaBuilder
-dump_tenant_schema() {
-    echo -e "${YELLOW}Generating tenant schema from TenantSchemaBuilder...${NC}"
+# Generate workspace schema from WorkspaceSchemaBuilder
+dump_workspace_schema() {
+    echo -e "${YELLOW}Generating workspace schema from WorkspaceSchemaBuilder...${NC}"
 
-    # TenantSchemaBuilder creates MySQL schemas for tenants
-    # We dump from an existing tenant database as reference
-    # Find a tenant config to use - prefer gwt or tiknix which are known good
-    local tenant_config=""
+    # WorkspaceSchemaBuilder creates MySQL schemas for workspaces
+    # We dump from an existing workspace database as reference
+    # Find a workspace config to use - prefer gwt or tiknix which are known good
+    local workspace_config=""
     for preferred in gwt tiknix; do
         if [ -f "$PROJECT_DIR/conf/config.$preferred.ini" ]; then
-            tenant_config="$PROJECT_DIR/conf/config.$preferred.ini"
+            workspace_config="$PROJECT_DIR/conf/config.$preferred.ini"
             break
         fi
     done
 
-    # Fallback to any tenant config
-    if [ -z "$tenant_config" ]; then
-        tenant_config=$(ls "$PROJECT_DIR/conf/config."*.ini 2>/dev/null | grep -v 'config.ini$' | grep -v 'example' | head -1)
+    # Fallback to any workspace config
+    if [ -z "$workspace_config" ]; then
+        workspace_config=$(ls "$PROJECT_DIR/conf/config."*.ini 2>/dev/null | grep -v 'config.ini$' | grep -v 'example' | head -1)
     fi
 
-    if [ -z "$tenant_config" ]; then
-        echo -e "${RED}Error: No tenant config found in conf/${NC}"
+    if [ -z "$workspace_config" ]; then
+        echo -e "${RED}Error: No workspace config found in conf/${NC}"
         return 1
     fi
 
-    local tenant_name=$(basename "$tenant_config" | sed 's/config\.\(.*\)\.ini/\1/')
-    echo "  Using tenant '$tenant_name' as reference"
+    local workspace_name=$(basename "$workspace_config" | sed 's/config\.\(.*\)\.ini/\1/')
+    echo "  Using workspace '$workspace_name' as reference"
 
-    # Parse tenant database config (extract [database] section only)
-    local db_section=$(sed -n '/^\[database\]/,/^\[/p' "$tenant_config" | head -n -1)
+    # Parse workspace database config (extract [database] section only)
+    local db_section=$(sed -n '/^\[database\]/,/^\[/p' "$workspace_config" | head -n -1)
     local t_host=$(echo "$db_section" | grep -E '^\s*host\s*=' | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" | head -1)
     local t_name=$(echo "$db_section" | grep -E '^\s*name\s*=' | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" | head -1)
     local t_user=$(echo "$db_section" | grep -E '^\s*user\s*=' | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" | head -1)
     local t_pass=$(echo "$db_section" | grep -E '^\s*pass\s*=' | sed 's/.*=\s*//' | tr -d '"' | tr -d "'" | head -1)
 
     if [ -z "$t_name" ]; then
-        echo -e "${RED}Error: Could not parse tenant database config${NC}"
+        echo -e "${RED}Error: Could not parse workspace database config${NC}"
         return 1
     fi
 
-    # Dump schema from tenant database (which was created by TenantSchemaBuilder)
-    local output_file="$SQL_DIR/tenant_schema.sql"
+    # Dump schema from workspace database (which was created by WorkspaceSchemaBuilder)
+    local output_file="$SQL_DIR/workspace_schema.sql"
 
     # Add header
     cat > "$output_file" << 'EOF'
 -- MyCTOBot Tenant Database Schema
--- Auto-generated from TenantSchemaBuilder.php by scripts/schema-dump.sh
+-- Auto-generated from WorkspaceSchemaBuilder.php by scripts/schema-dump.sh
 --
--- TenantSchemaBuilder.php is the SOURCE OF TRUTH for tenant schemas.
--- Do not edit this file directly - modify TenantSchemaBuilder.php instead.
+-- WorkspaceSchemaBuilder.php is the SOURCE OF TRUTH for workspace schemas.
+-- Do not edit this file directly - modify WorkspaceSchemaBuilder.php instead.
 --
--- Each tenant gets their own database (MySQL).
+-- Each workspace gets their own database (MySQL).
 -- All table names are lowercase with no underscores (RedBeanPHP requirement).
 --
 
@@ -151,7 +151,7 @@ EOF
             local table_count=$(grep -c "CREATE TABLE" "$output_file" || echo "0")
             echo "  Tables: $table_count"
         else
-            echo -e "${RED}Error: mysqldump failed for tenant database${NC}"
+            echo -e "${RED}Error: mysqldump failed for workspace database${NC}"
             echo "  $err"
             return 1
         fi
@@ -159,7 +159,7 @@ EOF
 
 }
 
-# Dump MySQL schema (main app database - not tenant)
+# Dump MySQL schema (main app database - not workspace)
 dump_mysql() {
     echo -e "${YELLOW}Dumping MySQL schema (main app database)...${NC}"
 
@@ -187,7 +187,7 @@ dump_mysql() {
 -- MyCTOBot MySQL Schema (Main Application Database)
 -- Auto-generated by scripts/schema-dump.sh
 --
--- This is the main application database schema (shared across all tenants).
+-- This is the main application database schema (shared across all workspaces).
 -- Contains: members, atlassiantokens, runners, etc.
 --
 
@@ -208,25 +208,25 @@ EOF
 
 # Show help
 show_help() {
-    echo "Usage: $0 [tenant|mysql|both]"
+    echo "Usage: $0 [workspace|mysql|both]"
     echo ""
     echo "Options:"
-    echo "  tenant  - Generate tenant schema from TenantSchemaBuilder.php"
+    echo "  workspace  - Generate workspace schema from WorkspaceSchemaBuilder.php"
     echo "  mysql   - Dump main MySQL schema"
     echo "  both    - Generate both (default)"
     echo ""
-    echo "The tenant schema is generated from TenantSchemaBuilder.php which is"
+    echo "The workspace schema is generated from WorkspaceSchemaBuilder.php which is"
     echo "the source of truth. The MySQL schema is dumped from the live database."
     echo ""
     echo "MIGRATION TOOL:"
-    echo "  To run migrations across tenants, use: php scripts/run-migration.php"
+    echo "  To run migrations across workspaces, use: php scripts/run-migration.php"
     echo ""
     echo "  Common commands:"
     echo "    --list                        List available migrations"
-    echo "    --tenants                     List all tenants"
-    echo "    --status                      Show migration status for all tenants"
-    echo "    --sync                        Run pending migrations on all tenants"
-    echo "    --sync --tenant=gwt           Run pending on specific tenant"
+    echo "    --workspaces                     List all workspaces"
+    echo "    --status                      Show migration status for all workspaces"
+    echo "    --sync                        Run pending migrations on all workspaces"
+    echo "    --sync --workspace=gwt           Run pending on specific workspace"
     echo "    --migration=SSHKeys           Run specific migration"
     echo "    --migration=all --force       Force rebuild all tables (DESTRUCTIVE)"
     echo "    --migration=all --mark        Mark as applied without running"
@@ -234,14 +234,14 @@ show_help() {
 
 # Main
 case "${1:-both}" in
-    tenant)
-        dump_tenant_schema
+    workspace)
+        dump_workspace_schema
         ;;
     mysql)
         dump_mysql
         ;;
     both)
-        dump_tenant_schema
+        dump_workspace_schema
         echo ""
         dump_mysql
         ;;

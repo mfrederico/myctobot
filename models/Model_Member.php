@@ -3,7 +3,7 @@
  * Member Model
  * FUSE model for member table
  *
- * All data is now in a single MySQL database per tenant.
+ * All data is now in a single MySQL database per workspace.
  * Subscription is WORKSPACE-level, not per-member.
  */
 

@@ -1,6 +1,6 @@
 <?php
 /**
- * TenantSchemaBuilder - Creates tenant database schema using RedBeanPHP
+ * WorkspaceSchemaBuilder - Creates workspace database schema using RedBeanPHP
  *
  * Uses RedBeanPHP associations to create tables with proper foreign keys.
  * Non-FK identifiers use _uid suffix to avoid RedBeanPHP's integer inference.
@@ -12,7 +12,7 @@ namespace app\services;
 
 use RedBeanPHP\R as R;
 
-class TenantSchemaBuilder {
+class WorkspaceSchemaBuilder {
 
     private string $dbName;
     private string $dbUser;
@@ -42,13 +42,13 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Build the complete tenant schema using RedBeanPHP
+     * Build the complete workspace schema using RedBeanPHP
      */
     public function build(): void {
-        // Add tenant database as a secondary connection
+        // Add workspace database as a secondary connection
         $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
-        R::addDatabase('tenant_provision', $dsn, $this->dbUser, $this->dbPass);
-        R::selectDatabase('tenant_provision');
+        R::addDatabase('workspace_provision', $dsn, $this->dbUser, $this->dbPass);
+        R::selectDatabase('workspace_provision');
         R::freeze(false); // Allow schema modifications
 
         // Create base tables first (no dependencies)
@@ -123,10 +123,10 @@ class TenantSchemaBuilder {
         }
 
         try {
-            // Use a unique connection name per tenant to avoid collisions
+            // Use a unique connection name per workspace to avoid collisions
             $connName = 'migration_' . md5($this->dbName);
 
-            // Connect to tenant database (check if already connected)
+            // Connect to workspace database (check if already connected)
             $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
             try {
                 R::selectDatabase($connName);
@@ -316,7 +316,7 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Mark all migrations as applied for a tenant
+     * Mark all migrations as applied for a workspace
      *
      * @return array Result with summary
      */
@@ -349,15 +349,15 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Mark migrations as applied for a tenant by slug
+     * Mark migrations as applied for a workspace by slug
      *
      * @param string|array $migrations Migration name(s) or 'all'
-     * @param string $tenantSlug Tenant slug
+     * @param string $workspaceSlug Workspace slug
      * @return array Result
      */
-    public static function markForTenant($migrations, string $tenantSlug): array {
+    public static function markForworkspace($migrations, string $workspaceSlug): array {
         $projectDir = dirname(__DIR__);
-        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+        $configFile = $projectDir . '/conf/config.' . $workspaceSlug . '.ini';
 
         if (!file_exists($configFile)) {
             return ['success' => false, 'error' => "Config file not found"];
@@ -411,7 +411,7 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Get list of pending migrations for a tenant
+     * Get list of pending migrations for a workspace
      *
      * @return array Result with pending migrations list
      */
@@ -493,14 +493,14 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Run pending migrations for a specific tenant by slug
+     * Run pending migrations for a specific workspace by slug
      *
-     * @param string $tenantSlug Tenant slug (e.g., 'gwt', 'tiknix')
+     * @param string $workspaceSlug Workspace slug (e.g., 'gwt', 'tiknix')
      * @return array Result with summary of what was run
      */
-    public static function syncTenant(string $tenantSlug): array {
+    public static function syncworkspace(string $workspaceSlug): array {
         $projectDir = dirname(__DIR__);
-        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+        $configFile = $projectDir . '/conf/config.' . $workspaceSlug . '.ini';
 
         if (!file_exists($configFile)) {
             return [
@@ -537,14 +537,14 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Get migration status for a tenant
+     * Get migration status for a workspace
      *
-     * @param string $tenantSlug Tenant slug
+     * @param string $workspaceSlug Workspace slug
      * @return array Status with applied and pending migrations
      */
-    public static function getTenantStatus(string $tenantSlug): array {
+    public static function getWorkspaceStatus(string $workspaceSlug): array {
         $projectDir = dirname(__DIR__);
-        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+        $configFile = $projectDir . '/conf/config.' . $workspaceSlug . '.ini';
 
         if (!file_exists($configFile)) {
             return [
@@ -600,16 +600,16 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Run a migration for a specific tenant by slug
-     * Loads config from conf/config.{tenant}.ini automatically
+     * Run a migration for a specific workspace by slug
+     * Loads config from conf/config.{workspace}.ini automatically
      *
      * @param string $migration Migration name (e.g., 'SSHKeys')
-     * @param string $tenantSlug Tenant slug (e.g., 'gwt', 'tiknix')
+     * @param string $workspaceSlug Workspace slug (e.g., 'gwt', 'tiknix')
      * @return array Result with success status and message
      */
-    public static function runMigrationForTenant(string $migration, string $tenantSlug): array {
+    public static function runMigrationForworkspace(string $migration, string $workspaceSlug): array {
         $projectDir = dirname(__DIR__);
-        $configFile = $projectDir . '/conf/config.' . $tenantSlug . '.ini';
+        $configFile = $projectDir . '/conf/config.' . $workspaceSlug . '.ini';
 
         if (!file_exists($configFile)) {
             return [
@@ -646,13 +646,13 @@ class TenantSchemaBuilder {
     }
 
     /**
-     * Get list of available tenants from config files
+     * Get list of available workspaces from config files
      *
-     * @return array Array of tenant info [slug => ['db_name' => ..., 'config_file' => ...]]
+     * @return array Array of workspace info [slug => ['db_name' => ..., 'config_file' => ...]]
      */
-    public static function getAvailableTenants(): array {
+    public static function getAvailableworkspaces(): array {
         $projectDir = dirname(__DIR__);
-        $tenants = [];
+        $workspaces = [];
         $configFiles = glob($projectDir . '/conf/config.*.ini');
 
         foreach ($configFiles as $configFile) {
@@ -663,13 +663,13 @@ class TenantSchemaBuilder {
                 continue;
             }
 
-            // Extract tenant slug from filename: config.{slug}.ini
+            // Extract workspace slug from filename: config.{slug}.ini
             if (preg_match('/^config\.(.+)\.ini$/', $filename, $matches)) {
                 $slug = $matches[1];
                 $config = parse_ini_file($configFile, true);
 
                 if (isset($config['database'])) {
-                    $tenants[$slug] = [
+                    $workspaces[$slug] = [
                         'slug' => $slug,
                         'config_file' => $configFile,
                         'db_name' => $config['database']['name'] ?? null,
@@ -680,8 +680,8 @@ class TenantSchemaBuilder {
             }
         }
 
-        ksort($tenants);
-        return $tenants;
+        ksort($workspaces);
+        return $workspaces;
     }
 
     /**
@@ -991,7 +991,7 @@ class TenantSchemaBuilder {
         $bean->updated_at = date('Y-m-d H:i:s');
         $bean->project_type = 'jira';
         $bean->queue_metadata = '{}';
-        $bean->tenant_slug = 'schema_tenant';
+        $bean->workspace_slug = 'schema_workspace';
         $bean->work_dir = '/tmp/schema-work-dir';
         $bean->job_token = 'schema_job_token_placeholder';
         $bean->token_expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
@@ -1552,6 +1552,15 @@ class TenantSchemaBuilder {
             ['admin', 'index', 50, 'Admin dashboard'],
             ['admin', 'members', 50, 'Manage members'],
 
+            // API Keys management (level 50 - admin access)
+            ['apikeys', 'index', 50, 'List API keys'],
+            ['apikeys', 'store', 50, 'Create API key'],
+            ['apikeys', 'update', 50, 'Update API key'],
+            ['apikeys', 'delete', 50, 'Delete API key'],
+            ['apikeys', 'regenerate', 50, 'Regenerate API key token'],
+            ['apikeys', 'toggle', 50, 'Toggle API key status'],
+            ['apikeys', 'scopes', 50, 'Get available scopes'],
+
             // System endpoints (level 1 - ROOT only)
             ['api', 'crondigest', 1, 'Cron digest endpoint'],
             ['webhook', 'jira', 1, 'Jira webhook'],
@@ -1974,7 +1983,7 @@ class TenantSchemaBuilder {
         $bean->capabilities = '["claude"]'; // JSON array of capabilities
         $bean->runner_token = null; // For API auth
         $bean->last_heartbeat = null;
-        $bean->tenant_id = null; // Null = any tenant
+        $bean->workspace_id = null; // Null = any workspace
         $bean->created_at = date('Y-m-d H:i:s');
         $bean->updated_at = date('Y-m-d H:i:s');
         R::store($bean);

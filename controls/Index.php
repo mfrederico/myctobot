@@ -17,13 +17,13 @@ class Index extends BaseControls\Control {
     public function index() {
         // On public site, redirect to signup
 /*
-        if (TenantResolver::isDefault()) {
+        if (WorkspaceResolver::isDefault()) {
             Flight::redirect('/signup');
             return;
         }
 */
 
-        // On tenant sites, show normal homepage
+        // On workspace sites, show normal homepage
         $googleEnabled = !empty(Flight::get('social.google_client_id'));
 
         $this->render('index/index', [

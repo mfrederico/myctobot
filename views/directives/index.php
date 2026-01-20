@@ -59,7 +59,7 @@
                 <hr>
                 <p class="mb-0">
                     <strong>To receive directives:</strong> Send emails to
-                    <code><?= htmlspecialchars($_SESSION['tenant_slug'] ?? 'your-tenant') ?>@myctobot.ai</code>
+                    <code><?= htmlspecialchars($_SESSION['workspace_slug'] ?? 'your-workspace') ?>@myctobot.ai</code>
                 </p>
                 <p class="mb-0 mt-2">
                     <strong>Tip:</strong> Add <code>[AUTO]</code> to the subject to auto-execute, or <code>[REVIEW]</code> to require approval.

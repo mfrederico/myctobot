@@ -24,7 +24,7 @@ use app\BaseControls\Control;
 
 class Runnerapi extends Control {
 
-    private ?string $tenant = null;
+    private ?string $workspace = null;
     private ?int $jobId = null;
     private ?object $job = null;
 
@@ -67,45 +67,45 @@ class Runnerapi extends Control {
             return null;
         }
 
-        // Load tenant database if job has tenant
-        if ($job->tenant_slug) {
-            $this->switchToTenant($job->tenant_slug);
+        // Load workspace database if job has workspace
+        if ($job->workspace_slug) {
+            $this->switchToworkspace($job->workspace_slug);
         }
 
         return $job;
     }
 
     /**
-     * Switch to tenant database
+     * Switch to workspace database
      */
-    private function switchToTenant(string $tenant): void {
-        $this->tenant = $tenant;
-        $configFile = "conf/config.{$tenant}.ini";
+    private function switchToworkspace(string $workspace): void {
+        $this->workspace = $workspace;
+        $configFile = "conf/config.{$workspace}.ini";
 
         if (!file_exists($configFile)) {
             return;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
+        $workspaceConfig = parse_ini_file($configFile, true);
+        if (!$workspaceConfig || empty($workspaceConfig['database'])) {
             return;
         }
 
-        $dbConfig = $tenantConfig['database'];
+        $dbConfig = $workspaceConfig['database'];
         $type = $dbConfig['type'] ?? 'mysql';
 
         if ($type === 'sqlite') {
-            $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+            $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
             $dsn = "sqlite:{$dbPath}";
-            Bean::useDatabase($tenant, $dsn);
+            Bean::useDatabase($workspace, $dsn);
         } else {
             $host = $dbConfig['host'] ?? 'localhost';
             $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $tenant;
+            $name = $dbConfig['name'] ?? $workspace;
             $user = $dbConfig['user'] ?? 'root';
             $pass = $dbConfig['pass'] ?? '';
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-            Bean::useDatabase($tenant, $dsn, $user, $pass);
+            Bean::useDatabase($workspace, $dsn, $user, $pass);
         }
     }
 
@@ -122,7 +122,7 @@ class Runnerapi extends Control {
 # MyCTOBot Runner Bootstrap
 # Fetched fresh on every job - always up to date
 #
-# Usage: curl -sfL https://myctobot.ai/api/runner/boot | bash -s -- --tenant=TENANT --job=JOB_ID --token=TOKEN
+# Usage: curl -sfL https://myctobot.ai/api/runner/boot | bash -s -- --workspace=workspace --job=JOB_ID --token=TOKEN
 #
 
 set -e
@@ -130,7 +130,7 @@ set -e
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --tenant=*) TENANT="${1#*=}"; shift ;;
+        --workspace=*) workspace="${1#*=}"; shift ;;
         --job=*) JOB_ID="${1#*=}"; shift ;;
         --token=*) TOKEN="${1#*=}"; shift ;;
         *) echo "Unknown option: $1"; exit 1 ;;
@@ -138,18 +138,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate required args
-if [[ -z "$TENANT" || -z "$JOB_ID" || -z "$TOKEN" ]]; then
-    echo "Usage: boot.sh --tenant=TENANT --job=JOB_ID --token=TOKEN"
+if [[ -z "$workspace" || -z "$JOB_ID" || -z "$TOKEN" ]]; then
+    echo "Usage: boot.sh --workspace=workspace --job=JOB_ID --token=TOKEN"
     exit 1
 fi
 
 # Setup
-API="https://${TENANT}.myctobot.ai/api/runner"
-WORK="$HOME/jobs/${TENANT}/${JOB_ID}"
+API="https://${workspace}.myctobot.ai/api/runner"
+WORK="$HOME/jobs/${workspace}/${JOB_ID}"
 AUTH_HEADER="X-Job-Token: ${TOKEN}"
 
 echo "=== MyCTOBot Runner Bootstrap ==="
-echo "Tenant: $TENANT"
+echo "workspace: $workspace"
 echo "Job ID: $JOB_ID"
 echo "Work Dir: $WORK"
 echo ""
@@ -200,7 +200,7 @@ BASH;
             'job_id' => $job->id,
             'job_uid' => $job->job_uid,
             'issue_key' => $job->issue_key,
-            'tenant' => $job->tenant_slug,
+            'workspace' => $job->workspace_slug,
             'created_at' => $job->created_at,
 
             'repo' => $repo ? [
@@ -251,13 +251,13 @@ BASH;
 set -e
 
 # Load manifest
-TENANT=$(jq -r '.tenant' manifest.json)
+workspace=$(jq -r '.workspace' manifest.json)
 JOB_ID=$(jq -r '.job_id' manifest.json)
 REPO_URL=$(jq -r '.repo.url // empty' manifest.json)
 BRANCH=$(jq -r '.repo.default_branch // "main"' manifest.json)
 AGENT_NAME=$(jq -r '.agent.name // "AI Assistant"' manifest.json)
 
-API="https://${TENANT}.myctobot.ai/api/runner"
+API="https://${workspace}.myctobot.ai/api/runner"
 TOKEN="${TOKEN:-$(cat .token 2>/dev/null || echo '')}"
 AUTH_HEADER="X-Job-Token: ${TOKEN}"
 
@@ -367,7 +367,7 @@ BASH;
         }
 
         // Check job work directory
-        $workDir = $job->work_dir ?? "/tmp/aoe-{$job->tenant_slug}-{$job->issue_key}-*";
+        $workDir = $job->work_dir ?? "/tmp/aoe-{$job->workspace_slug}-{$job->issue_key}-*";
         $dirs = glob($workDir, GLOB_ONLYDIR);
 
         if (!empty($dirs)) {
@@ -537,7 +537,7 @@ BASH;
 
         $content .= "## Current Task\n\n";
         $content .= "Issue: {$job->issue_key}\n";
-        $content .= "Tenant: {$job->tenant_slug}\n\n";
+        $content .= "workspace: {$job->workspace_slug}\n\n";
 
         return $content;
     }
@@ -546,7 +546,7 @@ BASH;
      * Generate .mcp.json content for a job
      */
     private function generateMcpJson(object $job): string {
-        $tenant = $job->tenant_slug ?? 'default';
+        $workspace = $job->workspace_slug ?? 'default';
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
 
         // Get member ID and cloud ID from job or related data
@@ -563,7 +563,7 @@ BASH;
             'mcpServers' => [
                 'jira' => [
                     'type' => 'http',
-                    'url' => "{$baseUrl}/mcp/{$tenant}/jira",
+                    'url' => "{$baseUrl}/mcp/{$workspace}/jira",
                     'headers' => [
                         'X-MCP-Member-ID' => (string)$memberId,
                         'X-MCP-Cloud-ID' => $cloudId,
@@ -623,7 +623,7 @@ BASH;
         // Add job metadata
         $lines[] = "export MYCTOBOT_JOB_ID=\"{$job->id}\"";
         $lines[] = "export MYCTOBOT_ISSUE_KEY=\"{$job->issue_key}\"";
-        $lines[] = "export MYCTOBOT_TENANT=\"{$job->tenant_slug}\"";
+        $lines[] = "export MYCTOBOT_workspace=\"{$job->workspace_slug}\"";
 
         return implode("\n", $lines) . "\n";
     }

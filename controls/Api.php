@@ -2,7 +2,7 @@
 /**
  * API Controller for MCP Tool Calls
  * Provides HTTP endpoints for the MCP agent server to call
- * Handles tenant routing based on API key
+ * Handles workspace routing based on API key
  */
 
 namespace app;
@@ -14,6 +14,8 @@ use \Exception as Exception;
 use \app\services\UserDatabaseService;
 use \app\services\LLMProviders\LLMProviderFactory;
 use \app\services\LLMProviders\OllamaProvider;
+use \app\services\ApiAuthService;
+use \app\WorkspaceResolver;
 
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/LLMProviders/LLMProviderInterface.php';
@@ -22,100 +24,56 @@ require_once __DIR__ . '/../services/LLMProviders/OllamaProvider.php';
 
 class Api extends BaseControls\Control {
 
-    private ?string $tenantSlug = null;
-    private ?int $tenantMemberId = null;
+    private ?string $workspaceSlug = null;
+    private ?int $workspaceMemberId = null;
 
     /**
-     * Authenticate via API key
-     * Returns member ID from main DB if valid, null otherwise
-     * Also stores tenant slug for later database switching
+     * Authenticate via API key using ApiAuthService
+     * Requires workspace to be determined first (via URL, header, or query param)
+     *
+     * @param string|null $workspace Workspace slug (from URL, X-Workspace header, or ?workspace= param)
+     * @param string $controller Controller name for scope check
+     * @param string $method Method name for scope check
+     * @return array{success: bool, member: ?object, error: ?string, code: ?int}
      */
-    private function authenticateApiKey(): ?int {
-        // Check X-API-Key header
-        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-        if (empty($apiKey)) {
-            // Check Authorization header (Bearer token)
-            $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            if (preg_match('/^Bearer\s+(.+)$/i', $auth, $matches)) {
-                $apiKey = $matches[1];
-            }
+    private function authenticateWithApiAuth(?string $workspace, string $controller, string $method): array {
+        // Determine workspace from multiple sources
+        if (empty($workspace)) {
+            $workspace = $_SERVER['HTTP_X_WORKSPACE']
+                ?? $this->getParam('workspace')
+                ?? $this->getParam('workspace');
         }
 
-        if (empty($apiKey)) {
-            return null;
+        if (empty($workspace)) {
+            return [
+                'success' => false,
+                'member' => null,
+                'error' => 'Workspace required (via URL, X-Workspace header, or ?workspace= param)',
+                'code' => 400
+            ];
         }
 
-        // Look up member by API token in main database
-        $member = Bean::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
-        if (!$member) {
-            return null;
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            return [
+                'success' => false,
+                'member' => null,
+                'error' => "Invalid workspace: {$workspace}",
+                'code' => 400
+            ];
         }
 
-        // Store tenant slug from member's tenant_slug field
-        $this->tenantSlug = $member->tenant_slug ?: null;
+        $this->workspaceSlug = $workspace;
 
-        return (int) $member->id;
-    }
-
-    /**
-     * Switch to member's tenant database
-     * Returns the member ID in the tenant database
-     */
-    private function switchToMemberDatabase(int $mainMemberId): bool {
-        if (empty($this->tenantSlug)) {
-            // No tenant, use main database
-            $this->tenantMemberId = $mainMemberId;
-            return true;
+        // Authenticate via ApiAuthService
+        $authResult = ApiAuthService::authenticate($controller, $method);
+        if (!$authResult['success']) {
+            return $authResult;
         }
 
-        try {
-            // Load tenant config
-            $configFile = BASE_PATH . "/conf/config.{$this->tenantSlug}.ini";
-            if (!file_exists($configFile)) {
-                Flight::get('log')->error("Tenant config not found: {$configFile}");
-                return false;
-            }
+        $this->workspaceMemberId = $authResult['member']->id;
 
-            $tenantConfig = parse_ini_file($configFile, true);
-            if (!$tenantConfig || empty($tenantConfig['database'])) {
-                Flight::get('log')->error("Invalid tenant config: {$configFile}");
-                return false;
-            }
-
-            // Add and switch to tenant database
-            $dbConfig = $tenantConfig['database'];
-            $type = $dbConfig['type'] ?? 'mysql';
-            $host = $dbConfig['host'] ?? 'localhost';
-            $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $this->tenantSlug;
-            $user = $dbConfig['user'] ?? 'root';
-            $pass = $dbConfig['pass'] ?? '';
-            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-
-            // Check if already added
-            if (!Bean::hasDatabase($this->tenantSlug)) {
-                Bean::addDatabase($this->tenantSlug, $dsn, $user, $pass);
-            }
-            Bean::selectDatabase($this->tenantSlug);
-
-            // Get member from tenant by email (main member has same email)
-            Bean::selectDatabase('default');
-            $mainMember = Bean::load('member', $mainMemberId);
-            Bean::selectDatabase($this->tenantSlug);
-
-            $tenantMember = Bean::findOne('member', 'email = ?', [$mainMember->email]);
-            if ($tenantMember) {
-                $this->tenantMemberId = (int) $tenantMember->id;
-            } else {
-                $this->tenantMemberId = $mainMemberId;
-            }
-
-            Flight::get('log')->debug("Switched to tenant: {$this->tenantSlug}, member ID: {$this->tenantMemberId}");
-            return true;
-        } catch (Exception $e) {
-            Flight::get('log')->error('Failed to switch to tenant database: ' . $e->getMessage());
-            return false;
-        }
+        return $authResult;
     }
 
     /**
@@ -123,19 +81,22 @@ class Api extends BaseControls\Control {
      * GET /api/mcp/tools
      */
     public function mcptools($params = []) {
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
+        // Authenticate with ApiAuthService (requires workspace from header or query)
+        $authResult = $this->authenticateWithApiAuth(null, 'api', 'mcptools');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
-        if (!$this->switchToMemberDatabase($memberId)) {
-            Flight::jsonError('Failed to access tenant database', 500);
-            return;
-        }
+        $this->mcpToolsInternal();
+    }
 
-        // Get all agents with expose_as_mcp = 1 (use tenant member ID)
-        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+    /**
+     * Internal MCP tools list (assumes already authenticated)
+     */
+    private function mcpToolsInternal() {
+        // Get all agents with expose_as_mcp = 1 (use workspace member ID)
+        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->workspaceMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -186,17 +147,20 @@ class Api extends BaseControls\Control {
      * POST /api/mcp/call
      */
     public function mcpcall($params = []) {
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
+        // Authenticate with ApiAuthService (requires workspace from header or query)
+        $authResult = $this->authenticateWithApiAuth(null, 'api', 'mcpcall');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
-        if (!$this->switchToMemberDatabase($memberId)) {
-            Flight::jsonError('Failed to access tenant database', 500);
-            return;
-        }
+        $this->mcpCallInternal();
+    }
 
+    /**
+     * Internal MCP call execution (assumes already authenticated)
+     */
+    private function mcpCallInternal() {
         // Get request body
         $rawBody = file_get_contents('php://input');
         $request = json_decode($rawBody, true);
@@ -222,9 +186,9 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Verify agent ownership and get agent config (use tenant member ID)
+        // Verify agent ownership and get agent config (use workspace member ID)
         $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->aiagents_id, $this->tenantMemberId]);
+            [$tool->aiagents_id, $this->workspaceMemberId]);
         if (!$agent) {
             Flight::jsonError("Tool's agent not accessible", 403);
             return;
@@ -300,102 +264,14 @@ class Api extends BaseControls\Control {
     }
 
     /**
-     * Authenticate using tenant's config [api].api_key
-     * Returns member ID from config if valid, null otherwise
-     */
-    private function authenticateTenantApiKey(string $tenant): ?int {
-        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-        if (empty($apiKey)) {
-            $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            if (preg_match('/^Bearer\s+(.+)$/i', $auth, $matches)) {
-                $apiKey = $matches[1];
-            }
-        }
-
-        if (empty($apiKey)) {
-            return null;
-        }
-
-        // Load tenant config
-        $configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
-        if (!file_exists($configFile)) {
-            Flight::get('log')->error("Tenant config not found: {$configFile}");
-            return null;
-        }
-
-        $config = parse_ini_file($configFile, true);
-        $apiConfig = $config['api'] ?? [];
-
-        // Check if API is enabled
-        if (!($apiConfig['enabled'] ?? false)) {
-            return null;
-        }
-
-        // Validate API key
-        $configApiKey = $apiConfig['api_key'] ?? '';
-        if (empty($configApiKey) || $apiKey !== $configApiKey) {
-            return null;
-        }
-
-        // Return configured member ID
-        return (int) ($apiConfig['api_member_id'] ?? 1);
-    }
-
-    /**
-     * Switch to tenant database directly (without member lookup)
-     */
-    private function switchToTenantDatabase(string $tenant): bool {
-        try {
-            $configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
-            if (!file_exists($configFile)) {
-                return false;
-            }
-
-            $tenantConfig = parse_ini_file($configFile, true);
-            if (!$tenantConfig || empty($tenantConfig['database'])) {
-                return false;
-            }
-
-            $dbConfig = $tenantConfig['database'];
-            $type = $dbConfig['type'] ?? 'mysql';
-            $host = $dbConfig['host'] ?? 'localhost';
-            $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $tenant;
-            $user = $dbConfig['user'] ?? 'root';
-            $pass = $dbConfig['pass'] ?? '';
-            $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-
-            if (!Bean::hasDatabase($tenant)) {
-                Bean::addDatabase($tenant, $dsn, $user, $pass);
-            }
-            Bean::selectDatabase($tenant);
-
-            $this->tenantSlug = $tenant;
-            return true;
-        } catch (\Exception $e) {
-            Flight::get('log')->error('Failed to switch to tenant database: ' . $e->getMessage());
-            return false;
-        }
-    }
-
-    /**
      * List active workstations/runners
-     * GET /api/workstations/@tenant
+     * GET /api/workstations/@workspace
      */
-    public function workstations($tenant = null) {
-        if (empty($tenant)) {
-            Flight::jsonError('Tenant required in URL', 400);
-            return;
-        }
-
-        $memberId = $this->authenticateTenantApiKey($tenant);
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
-            return;
-        }
-
-        if (!$this->switchToTenantDatabase($tenant)) {
-            Flight::jsonError('Failed to access tenant database', 500);
+    public function workstations($workspace = null) {
+        // Authenticate with ApiAuthService (handles workspace switching)
+        $authResult = $this->authenticateWithApiAuth($workspace, 'api', 'workstations');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
@@ -420,15 +296,15 @@ class Api extends BaseControls\Control {
 
     /**
      * MCP JSON-RPC endpoint
-     * POST /api/mcp/{tenant}
+     * POST /api/mcp/workspace
      *
      * Handles MCP protocol requests from Claude Code's HTTP MCP client
      * Methods: initialize, tools/list, tools/call
      */
-    public function mcpjsonrpc($tenant = null) {
-        $urlTenant = $tenant;
-        if (empty($urlTenant)) {
-            $this->jsonRpcError(-32600, 'Tenant required in URL', null);
+    public function mcpjsonrpc($workspace = null) {
+        $urlWorkspace = $workspace;
+        if (empty($urlWorkspace)) {
+            $this->jsonRpcError(-32600, 'Workspace required in URL', null);
             return;
         }
 
@@ -445,7 +321,7 @@ class Api extends BaseControls\Control {
         $rpcParams = $request['params'] ?? [];
         $id = $request['id'] ?? null;
 
-        Flight::get('log')->debug("MCP JSON-RPC: method={$method}, tenant={$urlTenant}");
+        Flight::get('log')->debug("MCP JSON-RPC: method={$method}, workspace={$urlWorkspace}");
 
         // Handle methods
         switch ($method) {
@@ -459,11 +335,11 @@ class Api extends BaseControls\Control {
                 break;
 
             case 'tools/list':
-                $this->mcpToolsList($urlTenant, $id);
+                $this->mcpToolsList($urlWorkspace, $id);
                 break;
 
             case 'tools/call':
-                $this->mcpToolsCall($urlTenant, $rpcParams, $id);
+                $this->mcpToolsCall($urlWorkspace, $rpcParams, $id);
                 break;
 
             default:
@@ -490,26 +366,16 @@ class Api extends BaseControls\Control {
     /**
      * Handle MCP tools/list request
      */
-    private function mcpToolsList(string $urlTenant, $id) {
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            $this->jsonRpcError(-32000, 'Unauthorized - valid API key required', $id);
-            return;
-        }
-
-        // Validate URL tenant matches API key tenant
-        if ($this->tenantSlug !== $urlTenant) {
-            $this->jsonRpcError(-32000, "Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$urlTenant}'", $id);
-            return;
-        }
-
-        if (!$this->switchToMemberDatabase($memberId)) {
-            $this->jsonRpcError(-32000, 'Failed to access tenant database', $id);
+    private function mcpToolsList(string $urlWorkspace, $id) {
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($urlWorkspace, 'api', 'mcptools');
+        if (!$authResult['success']) {
+            $this->jsonRpcError(-32000, $authResult['error'], $id);
             return;
         }
 
         // Get all agents with expose_as_mcp = 1
-        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->tenantMemberId]);
+        $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->workspaceMemberId]);
 
         $tools = [];
         foreach ($agents as $agent) {
@@ -552,20 +418,11 @@ class Api extends BaseControls\Control {
     /**
      * Handle MCP tools/call request
      */
-    private function mcpToolsCall(string $urlTenant, array $params, $id) {
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            $this->jsonRpcError(-32000, 'Unauthorized - valid API key required', $id);
-            return;
-        }
-
-        if ($this->tenantSlug !== $urlTenant) {
-            $this->jsonRpcError(-32000, "Tenant mismatch", $id);
-            return;
-        }
-
-        if (!$this->switchToMemberDatabase($memberId)) {
-            $this->jsonRpcError(-32000, 'Failed to access tenant database', $id);
+    private function mcpToolsCall(string $urlWorkspace, array $params, $id) {
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($urlWorkspace, 'api', 'mcpcall');
+        if (!$authResult['success']) {
+            $this->jsonRpcError(-32000, $authResult['error'], $id);
             return;
         }
 
@@ -586,7 +443,7 @@ class Api extends BaseControls\Control {
 
         // Verify agent ownership
         $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$tool->aiagents_id, $this->tenantMemberId]);
+            [$tool->aiagents_id, $this->workspaceMemberId]);
         if (!$agent) {
             $this->jsonRpcError(-32000, "Tool's agent not accessible", $id);
             return;
@@ -634,99 +491,62 @@ class Api extends BaseControls\Control {
     }
 
     /**
-     * List MCP tools with tenant validation from URL
-     * GET /api/mcp/{tenant}/tools
+     * List MCP tools with workspace validation from URL
+     * GET /api/mcp/workspace/tools
      */
-    public function mcptoolswithtenant($tenant = null) {
-        $urlTenant = $tenant;
-        if (empty($urlTenant)) {
-            Flight::jsonError('Tenant required in URL', 400);
+    public function mcptoolswithworkspace($workspace = null) {
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($workspace, 'api', 'mcptools');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
-            return;
-        }
-
-        // Validate URL tenant matches API key tenant
-        if ($this->tenantSlug !== $urlTenant) {
-            Flight::jsonError("Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$urlTenant}'", 403);
-            return;
-        }
-
-        // Delegate to standard mcpTools
-        $this->mcpTools([]);
+        // Delegate to internal tools list (already authenticated)
+        $this->mcpToolsInternal();
     }
 
     /**
-     * Execute MCP tool with tenant validation from URL
-     * POST /api/mcp/{tenant}/call
+     * Execute MCP tool with workspace validation from URL
+     * POST /api/mcp/workspace/call
      */
-    public function mcpcallwithtenant($tenant = null) {
-        $urlTenant = $tenant;
-        if (empty($urlTenant)) {
-            Flight::jsonError('Tenant required in URL', 400);
+    public function mcpcallwithworkspace($workspace = null) {
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($workspace, 'api', 'mcpcall');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
-            return;
-        }
-
-        // Validate URL tenant matches API key tenant
-        if ($this->tenantSlug !== $urlTenant) {
-            Flight::jsonError("Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$urlTenant}'", 403);
-            return;
-        }
-
-        // Delegate to standard mcpCall
-        $this->mcpCall([]);
+        // Delegate to standard mcpCall (already authenticated)
+        $this->mcpCallInternal();
     }
 
     /**
      * Get MCP configuration for an agent
-     * GET /api/mcp/{tenant}/config/{agentId}
+     * GET /api/mcp/workspace/config/{agentId}
      *
      * Returns a ready-to-use .mcp.json configuration for the specified agent
      */
-    public function mcpconfig($tenant = null, $agentId = 0) {
-        $urlTenant = $tenant;
+    public function mcpconfig($workspace = null, $agentId = 0) {
+        $urlWorkspace = $workspace;
         $agentId = (int) $agentId;
-
-        if (empty($urlTenant)) {
-            Flight::jsonError('Tenant required in URL', 400);
-            return;
-        }
 
         if ($agentId <= 0) {
             Flight::jsonError('Agent ID required in URL', 400);
             return;
         }
 
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
-            return;
-        }
-
-        // Validate URL tenant matches API key tenant
-        if ($this->tenantSlug !== $urlTenant) {
-            Flight::jsonError("Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$urlTenant}'", 403);
-            return;
-        }
-
-        if (!$this->switchToMemberDatabase($memberId)) {
-            Flight::jsonError('Failed to access tenant database', 500);
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($urlWorkspace, 'api', 'mcpconfig');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
         // Get the agent
         $agent = Bean::findOne('aiagents', 'id = ? AND member_id = ? AND expose_as_mcp = 1 AND is_active = 1',
-            [$agentId, $this->tenantMemberId]);
+            [$agentId, $this->workspaceMemberId]);
 
         if (!$agent) {
             Flight::jsonError('Agent not found or not exposed as MCP', 404);
@@ -756,15 +576,15 @@ class Api extends BaseControls\Control {
             'mcpServers' => [
                 $serverName => [
                     'type' => 'http',
-                    'url' => "{$baseUrl}/api/mcp/{$urlTenant}",
+                    'url' => "{$baseUrl}/api/mcp/{$urlWorkspace}",
                     'headers' => [
                         'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                        'X-Tenant' => $urlTenant
+                        'X-Workspace' => $urlWorkspace
                     ]
                 ]
             ],
             '_meta' => [
-                'tenant' => $urlTenant,
+                'workspace' => $urlWorkspace,
                 'agent_id' => $agentId,
                 'agent_name' => $agent->name,
                 'tools' => $toolDescriptions,
@@ -785,28 +605,14 @@ class Api extends BaseControls\Control {
 
     /**
      * Get PM Assistant context data
-     * GET /api/pm/context/{tenant}
-     * GET /api/pm/context/{tenant}?project_uid=xxx
+     * GET /api/pm/context/workspace
+     * GET /api/pm/context/workspace?project_uid=xxx
      */
-    public function pmcontext($tenant = null) {
-        if (empty($tenant)) {
-            Flight::jsonError('Tenant required in URL', 400);
-            return;
-        }
-
-        $memberId = $this->authenticateApiKey();
-        if (!$memberId) {
-            Flight::jsonError('Unauthorized - valid API key required', 401);
-            return;
-        }
-
-        if ($this->tenantSlug !== $tenant) {
-            Flight::jsonError("Tenant mismatch: API key belongs to '{$this->tenantSlug}', URL specifies '{$tenant}'", 403);
-            return;
-        }
-
-        if (!$this->switchToMemberDatabase($memberId)) {
-            Flight::jsonError('Failed to access tenant database', 500);
+    public function pmcontext($workspace = null) {
+        // Authenticate with ApiAuthService
+        $authResult = $this->authenticateWithApiAuth($workspace, 'api', 'pmcontext');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 

@@ -203,7 +203,7 @@ class Settings extends BaseControls\Control {
     public function dismisswizard() {
         if (!$this->requireLogin()) return;
 
-        // Store in enterprisesettings table (tenant database)
+        // Store in enterprisesettings table (workspace database)
         // Use member-specific key so each user can have their own preference
         $key = 'onboarding_wizard_dismissed_' . $this->member->id;
         UserDatabaseService::setSetting($key, '1');

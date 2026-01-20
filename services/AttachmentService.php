@@ -7,7 +7,7 @@
  * - Detection of all file attachments (not just images)
  * - Size validation with configurable limits
  * - Acknowledgment formatting with filenames and sizes
- * - Integration with tenant RAG system for document indexing
+ * - Integration with workspace RAG system for document indexing
  */
 
 namespace app\services;
@@ -276,14 +276,14 @@ class AttachmentService {
     }
 
     /**
-     * Index a document attachment to the tenant's RAG system
+     * Index a document attachment to the workspace's RAG system
      *
-     * @param string $tenantSlug Tenant identifier
+     * @param string $workspaceSlug Workspace identifier
      * @param array $attachment Attachment info from detectAttachments()
      * @param string|null $knowledgeBaseSlug Optional knowledge base slug (defaults to 'ceo-directives')
      * @return array Result with 'success', 'message', 'job_uid' (for async processing)
      */
-    public function indexToRag(string $tenantSlug, array $attachment, ?string $knowledgeBaseSlug = null): array {
+    public function indexToRag(string $workspaceSlug, array $attachment, ?string $knowledgeBaseSlug = null): array {
         // Only index documents and images (not code or archives)
         if (!($attachment['is_indexable'] ?? false)) {
             return [
@@ -318,7 +318,7 @@ class AttachmentService {
             // We send the URL to the RAG service and let it fetch the content
             // This avoids downloading large files through this service
             $result = $this->sendUrlToRagService(
-                $tenantSlug,
+                $workspaceSlug,
                 $kbSlug,
                 $contentUrl,
                 $attachment['filename'],
@@ -343,13 +343,13 @@ class AttachmentService {
     /**
      * Index multiple attachments to RAG
      *
-     * @param string $tenantSlug Tenant identifier
+     * @param string $workspaceSlug Workspace identifier
      * @param array $attachments Array of attachment info
      * @param string|null $knowledgeBaseSlug Optional KB slug
      * @return array Summary with 'indexed', 'skipped', 'failed', 'details'
      */
     public function indexMultipleToRag(
-        string $tenantSlug,
+        string $workspaceSlug,
         array $attachments,
         ?string $knowledgeBaseSlug = null
     ): array {
@@ -359,7 +359,7 @@ class AttachmentService {
         $details = [];
 
         foreach ($attachments as $attachment) {
-            $result = $this->indexToRag($tenantSlug, $attachment, $knowledgeBaseSlug);
+            $result = $this->indexToRag($workspaceSlug, $attachment, $knowledgeBaseSlug);
 
             $details[] = [
                 'filename' => $attachment['filename'] ?? 'unknown',
@@ -387,7 +387,7 @@ class AttachmentService {
     /**
      * Send URL to RAG service for ingestion
      *
-     * @param string $tenantId Tenant identifier
+     * @param string $workspaceId Workspace identifier
      * @param string $kbSlug Knowledge base slug
      * @param string $url Content URL to ingest
      * @param string $filename Original filename
@@ -395,7 +395,7 @@ class AttachmentService {
      * @return array Result from RAG service
      */
     private function sendUrlToRagService(
-        string $tenantId,
+        string $workspaceId,
         string $kbSlug,
         string $url,
         string $filename,
@@ -407,7 +407,7 @@ class AttachmentService {
             $response = $client->post("{$this->ragServiceUrl}/api/ingest-url", [
                 'json' => [
                     'url' => $url,
-                    'tenant_id' => $tenantId,
+                    'workspace_id' => $workspaceId,
                     'kb_slug' => $kbSlug,
                     'filename' => $filename,
                     'mime_type' => $mimeType,

@@ -7,10 +7,10 @@
  * runs build/tests, and optionally creates a preview deployment.
  *
  * Usage:
- *   php scripts/qa-release-builder.php --tenant=footest4 --project=<id> [options]
+ *   php scripts/qa-release-builder.php --workspace=footest4 --project=<id> [options]
  *
  * Options:
- *   --tenant=<name>       Required. Tenant slug (e.g., gwt, footest4)
+ *   --workspace=<name>       Required. Workspace slug (e.g., gwt, footest4)
  *   --project=<id>        Required. Project ID to build QA release for
  *   --stories=<ids>       Optional. Comma-separated story IDs to include (default: all completed)
  *   --branch=<name>       QA branch name (default: qa/release-YYYY-MM-DD-HHMMSS)
@@ -32,8 +32,8 @@
  *   8. Report results and any merge conflicts
  *
  * Examples:
- *   php scripts/qa-release-builder.php --tenant=footest4 --project=1 --verbose
- *   php scripts/qa-release-builder.php --tenant=footest4 --project=1 --dry-run
+ *   php scripts/qa-release-builder.php --workspace=footest4 --project=1 --verbose
+ *   php scripts/qa-release-builder.php --workspace=footest4 --project=1 --dry-run
  */
 
 error_reporting(E_ALL);
@@ -42,7 +42,7 @@ chdir($baseDir);
 
 // Parse command line arguments
 $options = getopt('', [
-    'tenant:',
+    'workspace:',
     'project:',
     'stories:',
     'branch:',
@@ -61,19 +61,19 @@ if (isset($options['help'])) {
     exit(0);
 }
 
-if (empty($options['tenant'])) {
-    echo "Error: --tenant is required\n";
-    echo "Usage: php scripts/qa-release-builder.php --tenant=<tenant> --project=<id>\n";
+if (empty($options['workspace'])) {
+    echo "Error: --workspace is required\n";
+    echo "Usage: php scripts/qa-release-builder.php --workspace=<workspace> --project=<id>\n";
     exit(1);
 }
 
 if (empty($options['project'])) {
     echo "Error: --project is required\n";
-    echo "Usage: php scripts/qa-release-builder.php --tenant=<tenant> --project=<id>\n";
+    echo "Usage: php scripts/qa-release-builder.php --workspace=<workspace> --project=<id>\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 $projectId = (int) $options['project'];
 $storyFilter = isset($options['stories']) ? array_map('intval', explode(',', $options['stories'])) : [];
 $targetBranch = $options['target'] ?? 'main';
@@ -94,10 +94,10 @@ use \app\Bean;
 use \app\services\EncryptionService;
 use \app\services\GitHubClient;
 
-// Load tenant config
-$configFile = "{$baseDir}/conf/config.{$tenant}.ini";
+// Load workspace config
+$configFile = "{$baseDir}/conf/config.{$workspace}.ini";
 if (!file_exists($configFile)) {
-    echo "Error: Tenant config not found: {$configFile}\n";
+    echo "Error: Workspace config not found: {$configFile}\n";
     exit(1);
 }
 
@@ -122,12 +122,12 @@ try {
     $type = $dbConfig['type'] ?? 'mysql';
 
     if ($type === 'sqlite') {
-        $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+        $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
         Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
-        $name = $dbConfig['name'] ?? $tenant;
+        $name = $dbConfig['name'] ?? $workspace;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
         Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
@@ -162,7 +162,7 @@ function outputWarning($message) {
  * QA Release Builder Class
  */
 class QAReleaseBuilder {
-    private string $tenant;
+    private string $workspace;
     private int $projectId;
     private array $storyFilter;
     private string $targetBranch;
@@ -179,7 +179,7 @@ class QAReleaseBuilder {
     private ?string $repoName = null;
 
     public function __construct(
-        string $tenant,
+        string $workspace,
         int $projectId,
         array $storyFilter,
         string $targetBranch,
@@ -189,7 +189,7 @@ class QAReleaseBuilder {
         bool $autoResolve,
         string $baseDir
     ) {
-        $this->tenant = $tenant;
+        $this->workspace = $workspace;
         $this->projectId = $projectId;
         $this->storyFilter = $storyFilter;
         $this->targetBranch = $targetBranch;
@@ -205,7 +205,7 @@ class QAReleaseBuilder {
      */
     public function run(): array {
         output("Starting QA Release Builder", true);
-        output("  Tenant: {$this->tenant}", true);
+        output("  workspace: {$this->workspace}", true);
         output("  Project ID: {$this->projectId}", true);
         if (!empty($this->storyFilter)) {
             output("  Story Filter: " . implode(', ', $this->storyFilter), true);
@@ -375,7 +375,7 @@ class QAReleaseBuilder {
      * Setup working directory
      */
     private function setupWorkDir(): bool {
-        $this->workDir = "/tmp/qa-release-{$this->tenant}-{$this->projectId}-" . date('Ymd-His');
+        $this->workDir = "/tmp/qa-release-{$this->workspace}-{$this->projectId}-" . date('Ymd-His');
 
         if (!mkdir($this->workDir, 0755, true)) {
             outputError("Failed to create work directory: {$this->workDir}");
@@ -1081,7 +1081,7 @@ echo "QA Release Builder\n";
 echo "===========================================\n\n";
 
 $builder = new QAReleaseBuilder(
-    $tenant,
+    $workspace,
     $projectId,
     $storyFilter,
     $targetBranch,

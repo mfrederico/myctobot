@@ -37,10 +37,10 @@ class MailgunService {
     }
 
     /**
-     * Load Mailgun config from tenant config or conf/mailgun.ini fallback
+     * Load Mailgun config from workspace config or conf/mailgun.ini fallback
      */
     private function loadMailgunConfig(): array {
-        // Try tenant/Flight config first
+        // Try workspace/Flight config first
         $apiKey = Flight::get('mailgun.api_key') ?? '';
         $domain = Flight::get('mailgun.domain') ?? '';
 
@@ -261,7 +261,7 @@ HTML;
      * Check if Mailgun is configured
      */
     public static function isConfigured(): bool {
-        // Check tenant/Flight config first
+        // Check workspace/Flight config first
         $apiKey = Flight::get('mailgun.api_key');
         $domain = Flight::get('mailgun.domain');
         if (!empty($apiKey) && !empty($domain)) {

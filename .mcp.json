@@ -13,7 +13,7 @@
       "url": "https://myctobot.ai/api/mcp/footest4",
       "headers": {
         "X-API-Key": "test_api_key_footest4_mcp_tools_2026",
-        "X-Tenant": "footest4"
+        "X-Workspace": "footest4"
       }
     }
   }

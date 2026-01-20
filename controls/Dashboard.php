@@ -50,8 +50,8 @@ class Dashboard extends BaseControls\Control {
         $stats = $this->getStats();
         $stats['user'] = $userStats;
 
-        // Get current tenant for display
-        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
+        // Get current workspace for display
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
 
         $this->render('dashboard/index', [
             'title' => 'Dashboard',
@@ -62,7 +62,7 @@ class Dashboard extends BaseControls\Control {
             'recentAnalyses' => $recentAnalyses,
             'hasAtlassian' => count($sites) > 0,
             'atlassianConfigured' => AtlassianAuth::isConfigured(),
-            'tenantSlug' => $tenantSlug
+            'workspaceSlug' => $workspaceSlug
         ]);
     }
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-A multi-tenant, isolated execution environment where Claude Code + MCP servers run on dedicated LXC containers (shards), orchestrated by the main MyCTOBot application.
+A multi-workspace, isolated execution environment where Claude Code + MCP servers run on dedicated LXC containers (shards), orchestrated by the main MyCTOBot application.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -99,7 +99,7 @@ CREATE TABLE claude_shards (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
--- Shard assignments (which tenants can use which shards)
+-- Shard assignments (which workspaces can use which shards)
 CREATE TABLE shard_assignments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     member_id INT NOT NULL,
@@ -137,7 +137,7 @@ class ShardRouter {
      * Find the best shard for a job based on:
      * - Required capabilities (MCP servers needed)
      * - Shard load (current jobs vs max)
-     * - Tenant assignment
+     * - Workspace assignment
      * - Priority
      */
     public static function findShard(int $memberId, array $requiredCapabilities = []): ?array;
@@ -170,7 +170,7 @@ class ShardRouter {
 - Add/edit/remove shards
 - Test shard connectivity
 - View shard logs and metrics
-- Assign shards to tenants
+- Assign shards to workspaces
 
 **Routes:**
 ```
@@ -181,18 +181,18 @@ GET  /admin/shards/:id          - View shard details
 POST /admin/shards/:id          - Update shard
 POST /admin/shards/:id/test     - Test shard connectivity
 GET  /admin/shards/:id/logs     - View shard logs
-POST /admin/shards/:id/assign   - Assign to tenant
+POST /admin/shards/:id/assign   - Assign to workspace
 ```
 
-### 2.2 Tenant Shard Assignment
+### 2.2 Workspace Shard Assignment
 
 Account Executives can:
-- Assign specific shards to specific tenants
+- Assign specific shards to specific workspaces
 - Set up shard pools (e.g., "Premium Shards" for high-paying customers)
 - Configure fallback behavior
 
 ```
-Tenant: Acme Corp
+workspace: Acme Corp
 ├── Primary Shard: shard-playwright-01 (Playwright + Browser)
 ├── Fallback Shard: shard-general-02 (General purpose)
 └── Capabilities Required: [playwright, git]
@@ -396,7 +396,7 @@ MCP Capabilities Needed:
 
 For high-traffic periods:
 - Queue jobs when all shards are busy
-- Priority queue for premium tenants
+- Priority queue for premium workspaces
 - Estimated wait time display
 - Webhook notifications when job starts
 
@@ -433,7 +433,7 @@ For high-traffic periods:
 - [ ] Job workspaces cleaned after completion
 - [ ] No persistent storage of customer API keys
 - [ ] Audit logging of all shard operations
-- [ ] Rate limiting per tenant
+- [ ] Rate limiting per workspace
 - [ ] Resource limits enforced (CPU, memory, disk, network)
 
 ### 6.3 Secrets Management
@@ -459,7 +459,7 @@ Customer secrets (API keys, tokens) are:
 5. [ ] Shard router with load balancing
 6. [ ] Multiple shard types (general, playwright)
 7. [ ] Job streaming (SSE)
-8. [ ] Tenant shard assignments
+8. [ ] Workspace shard assignments
 
 ### Phase 2 Complete (Weeks 7-10)
 9. [ ] LXC template automation

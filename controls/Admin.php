@@ -1027,9 +1027,9 @@ class Admin extends Control {
             return;
         }
 
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $testId = 'at-' . bin2hex(random_bytes(8));
-        $jobUid = 'test-' . $tenantSlug . '-' . $testId;
+        $jobUid = 'test-' . $workspaceSlug . '-' . $testId;
 
         try {
             // Create test job in aidevjobs
@@ -1052,7 +1052,7 @@ class Admin extends Control {
                 'job_uid' => $jobUid,
                 'agent_id' => $agentId,
                 'runner_id' => $runnerId,
-                'tenant' => $tenantSlug,
+                'workspace' => $workspaceSlug,
             ]);
 
             // Submit to job-executor (PING)
@@ -1068,7 +1068,7 @@ class Admin extends Control {
                     'Accept: application/json',
                 ],
                 CURLOPT_POSTFIELDS => json_encode([
-                    'tenant' => $tenantSlug,
+                    'workspace' => $workspaceSlug,
                     'job_uid' => $jobUid,
                     'callback_url' => $callbackUrl,
                 ]),
@@ -1260,14 +1260,14 @@ class Admin extends Control {
         // Get job-executor URL from POST or use config default
         $jobExecutorUrl = $this->getParam('job_executor_url') ?: \app\services\JobExecutorConfig::getUrl();
 
-        // Get tenant slug
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        // Get workspace slug
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 
         $startTime = microtime(true);
 
         try {
             // Step 1: Create a test job in aidevjobs
-            $jobUid = 'test-' . $tenantSlug . '-' . bin2hex(random_bytes(8));
+            $jobUid = 'test-' . $workspaceSlug . '-' . bin2hex(random_bytes(8));
 
             // Find a repo that has this runner's agent assigned (or any repo for testing)
             $repo = null;
@@ -1293,7 +1293,7 @@ class Admin extends Control {
             Flight::get('log')->info('Created test job for job-executor', [
                 'job_uid' => $jobUid,
                 'runner_id' => $runnerId,
-                'tenant' => $tenantSlug,
+                'workspace' => $workspaceSlug,
             ]);
 
             // Step 2: Submit to job-executor (PING)
@@ -1309,7 +1309,7 @@ class Admin extends Control {
                     'Accept: application/json',
                 ],
                 CURLOPT_POSTFIELDS => json_encode([
-                    'tenant' => $tenantSlug,
+                    'workspace' => $workspaceSlug,
                     'job_uid' => $jobUid,
                     'callback_url' => $callbackUrl,
                 ]),
@@ -1422,7 +1422,7 @@ class Admin extends Control {
     public function sshkeys($params = []) {
         require_once __DIR__ . '/../services/SSHKeyService.php';
 
-        // Connect to user database for tenant-specific keys
+        // Connect to user database for workspace-specific keys
         
         $keys = \app\services\SSHKeyService::getKeys();
 
@@ -1463,7 +1463,7 @@ class Admin extends Control {
             return;
         }
 
-        // Connect to user database for tenant-specific keys
+        // Connect to user database for workspace-specific keys
         
         try {
             $key = \app\services\SSHKeyService::createKey(

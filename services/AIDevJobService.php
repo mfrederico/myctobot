@@ -47,12 +47,12 @@ class AIDevJobService {
      * @param string $cloudId Atlassian cloud ID (or identifier for the project source)
      * @param int|null $boardId Board ID (optional, will be auto-detected for Jira)
      * @param int|null $repoId Repository connection ID (optional, will use first enabled)
-     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @param string|null $workspace Workspace slug for multi-workspace
      * @param bool $useOrchestrator Whether to use orchestrator mode
      * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      * @return array Result with 'success', 'job_uid', 'error' keys
      */
-    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = false, string $projectType = self::PROJECT_TYPE_JIRA): array {
+    public function triggerJob(int $memberId, string $issueKey, string $cloudId, ?int $boardId = null, ?int $repoId = null, ?string $workspace = null, bool $useOrchestrator = false, string $projectType = self::PROJECT_TYPE_JIRA): array {
         try {
             // Validate member exists
             $member = Bean::load('member', $memberId);
@@ -175,7 +175,7 @@ class AIDevJobService {
 
             if ($useLocalRunner) {
                 // Check if there's already a running session for this issue
-                $runningSession = $this->findRunningSessionForIssue($issueKey, $tenant);
+                $runningSession = $this->findRunningSessionForIssue($issueKey, $workspace);
                 if ($runningSession) {
                     // Session already running - don't send generic "check for updates" message
                     // The Webhook controller handles forwarding actual comments/updates directly
@@ -206,7 +206,7 @@ class AIDevJobService {
                     'max' => $wsLimit['max']
                 ]);
 
-                return $this->queueJob($memberId, $issueKey, $boardId, $cloudId, $repoId, $tenant, $useOrchestrator, $projectType, $wsLimit);
+                return $this->queueJob($memberId, $issueKey, $boardId, $cloudId, $repoId, $workspace, $useOrchestrator, $projectType, $wsLimit);
             }
 
             // === API execution path - get key and model from anthropickeys table ===
@@ -417,7 +417,7 @@ class AIDevJobService {
         // Default limit
         $maxConcurrent = 3;
 
-        // 1. Check INI config first (tenant-level setting)
+        // 1. Check INI config first (workspace-level setting)
         $iniMaxConcurrent = Flight::get('aidev.max_concurrent_jobs');
         if ($iniMaxConcurrent !== null && $iniMaxConcurrent !== '') {
             $maxConcurrent = (int)$iniMaxConcurrent;
@@ -463,7 +463,7 @@ class AIDevJobService {
         $maxLocalRunners = 2; // default
         $hardCap = 4; // absolute max for now (future: up to 8 based on tier)
 
-        // 1. Check INI config first (tenant override)
+        // 1. Check INI config first (workspace override)
         $iniMax = Flight::get('aidev.max_concurrent_local_runners');
         if ($iniMax !== null && $iniMax !== '') {
             $maxLocalRunners = min((int)$iniMax, $hardCap);
@@ -484,14 +484,14 @@ class AIDevJobService {
             $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
             if (file_exists($aoePath)) {
                 require_once $aoePath;
-                $tenant = Flight::get('tenant.slug') ?: 'default';
-                \Aoe\Tenant\TenantContext::set($tenant);
+                $workspace = Flight::get('workspace.slug') ?: 'default';
+                \Aoe\workspace\workspaceContext::set($workspace);
 
                 // Use /tmp/.aoe-php (accessible by both CLI and web)
                 $aoeBasePath = '/tmp/.aoe-php';
 
-                $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
-                $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
+                $aoeStorage = new \Aoe\Session\Storage($workspace, $aoeBasePath);
+                $aoeTmux = new \Aoe\Tmux\TmuxService($workspace);
 
                 // Count sessions where tmux is actually running
                 foreach ($aoeStorage->loadAll() as $session) {
@@ -811,10 +811,10 @@ class AIDevJobService {
      * @param int $memberId Member ID
      * @param string $issueKey GitHub issue key (e.g., "owner/repo#123")
      * @param int $repoId Repository connection ID
-     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @param string|null $workspace Workspace slug for multi-workspace
      * @return array Result with 'success', 'job_uid', 'error' keys
      */
-    public function triggerGitHubJob(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
+    public function triggerGitHubJob(int $memberId, string $issueKey, int $repoId, ?string $workspace = null): array {
         try {
             // Validate member exists
             $member = Bean::load('member', $memberId);
@@ -875,7 +875,7 @@ class AIDevJobService {
             }
 
             // Spawn local runner for GitHub (always local for now)
-            return $this->spawnGitHubLocalRunner($memberId, $issueKey, $repoId, $tenant);
+            return $this->spawnGitHubLocalRunner($memberId, $issueKey, $repoId, $workspace);
 
         } catch (\Exception $e) {
             $this->logger->error('Failed to trigger GitHub AI Dev job', [
@@ -890,8 +890,8 @@ class AIDevJobService {
     /**
      * Spawn a local AI Developer runner for GitHub issue
      */
-    private function spawnGitHubLocalRunner(int $memberId, string $issueKey, int $repoId, ?string $tenant = null): array {
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+    private function spawnGitHubLocalRunner(int $memberId, string $issueKey, int $repoId, ?string $workspace = null): array {
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
 
         if ($tmux->exists()) {
             return [
@@ -950,7 +950,7 @@ class AIDevJobService {
         }
 
         // GitHub jobs use the standard spawner but with provider=github
-        if ($tmux->spawnWithScript($scriptPath, true, $jobId, $repoId, $tenant, 'github', $workstation)) {
+        if ($tmux->spawnWithScript($scriptPath, true, $jobId, $repoId, $workspace, 'github', $workstation)) {
             $this->logger->info('Local GitHub AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
@@ -989,13 +989,13 @@ class AIDevJobService {
      * @param int $boardId Board ID (0 for non-Jira projects)
      * @param string $cloudId Cloud ID (or identifier for non-Jira sources)
      * @param int|null $repoId Repository connection ID
-     * @param string|null $tenant Tenant slug for multi-tenancy
+     * @param string|null $workspace Workspace slug for multi-workspace
      * @param bool $useOrchestrator Use orchestrator mode
      * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      * @return array Result with 'success', 'job_uid', 'session_name' keys
      */
-    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $tenant = null, bool $useOrchestrator = true, string $projectType = self::PROJECT_TYPE_JIRA): array {
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+    private function spawnLocalRunner(int $memberId, string $issueKey, int $boardId, string $cloudId, ?int $repoId = null, ?string $workspace = null, bool $useOrchestrator = true, string $projectType = self::PROJECT_TYPE_JIRA): array {
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
 
         // Check if session already exists
         if ($tmux->exists()) {
@@ -1055,7 +1055,7 @@ class AIDevJobService {
             }
         }
 
-        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $tenant, null, $workstation)) {
+        if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $jobId, $repoId, $workspace, null, $workstation)) {
             $this->logger->info('Local AI Developer spawned in tmux', [
                 'issue_key' => $issueKey,
                 'session' => $tmux->getSessionName(),
@@ -1088,10 +1088,10 @@ class AIDevJobService {
      * Find a running AOE session for the given issue
      *
      * @param string $issueKey Issue key to find
-     * @param string|null $tenant Tenant slug
+     * @param string|null $workspace Workspace slug
      * @return array|null Session info if found and running, null otherwise
      */
-    private function findRunningSessionForIssue(string $issueKey, ?string $tenant): ?array
+    private function findRunningSessionForIssue(string $issueKey, ?string $workspace): ?array
     {
         try {
             $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
@@ -1100,14 +1100,14 @@ class AIDevJobService {
             }
             require_once $aoePath;
 
-            $tenantSlug = $tenant ?: (\Aoe\Tmux\TmuxService::getDomainId() ?? 'default');
-            \Aoe\Tenant\TenantContext::set($tenantSlug);
+            $workspaceSlug = $workspace ?: (\Aoe\Tmux\TmuxService::getDomainId() ?? 'default');
+            \Aoe\workspace\workspaceContext::set($workspaceSlug);
 
             // Use /tmp/.aoe-php (accessible by both CLI and web)
             $aoeBasePath = '/tmp/.aoe-php';
 
-            $storage = new \Aoe\Session\Storage($tenantSlug, $aoeBasePath);
-            $tmux = new \Aoe\Tmux\TmuxService($tenantSlug);
+            $storage = new \Aoe\Session\Storage($workspaceSlug, $aoeBasePath);
+            $tmux = new \Aoe\Tmux\TmuxService($workspaceSlug);
 
             // Find session by reference (issue key)
             foreach ($storage->loadAll() as $session) {
@@ -1119,7 +1119,7 @@ class AIDevJobService {
                         return [
                             'session_id' => $session->id,
                             'tmux_name' => $tmuxName,
-                            'tenant' => $tenantSlug,
+                            'workspace' => $workspaceSlug,
                             'session' => $session
                         ];
                     }
@@ -1149,7 +1149,7 @@ class AIDevJobService {
             $aoePath = dirname(__DIR__) . '/../aoe-php/vendor/autoload.php';
             require_once $aoePath;
 
-            $tmux = new \Aoe\Tmux\TmuxService($runningSession['tenant']);
+            $tmux = new \Aoe\Tmux\TmuxService($runningSession['workspace']);
             $tmuxName = $runningSession['tmux_name'];
 
             // Send a message to the running session about the update
@@ -1194,7 +1194,7 @@ class AIDevJobService {
      * @param int $boardId Board ID
      * @param string $cloudId Cloud ID
      * @param int|null $repoId Repository ID
-     * @param string|null $tenant Tenant slug
+     * @param string|null $workspace Workspace slug
      * @param bool $useOrchestrator Use orchestrator mode
      * @param string $projectType Project type (jira, github, etc.)
      * @param array $wsLimit Current workspace limit info
@@ -1206,7 +1206,7 @@ class AIDevJobService {
         ?int $boardId,
         string $cloudId,
         ?int $repoId,
-        ?string $tenant,
+        ?string $workspace,
         bool $useOrchestrator,
         string $projectType,
         array $wsLimit
@@ -1249,7 +1249,7 @@ class AIDevJobService {
 
         // Store queue metadata for later execution
         $job->queue_metadata = json_encode([
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'use_orchestrator' => $useOrchestrator,
             'queued_at' => date('Y-m-d H:i:s'),
             'ws_running_at_queue' => $wsLimit['running'],
@@ -1313,10 +1313,10 @@ class AIDevJobService {
      *
      * Called by cron-directive-processor.php
      *
-     * @param string|null $tenant Optional tenant filter
+     * @param string|null $workspace Optional workspace filter
      * @return array Results with jobs started
      */
-    public function processJobQueue(?string $tenant = null): array {
+    public function processJobQueue(?string $workspace = null): array {
         $results = [
             'jobs_started' => 0,
             'jobs_remaining' => 0,
@@ -1357,13 +1357,13 @@ class AIDevJobService {
 
                 // Parse queue metadata
                 $metadata = json_decode($job->queue_metadata ?? '{}', true);
-                $jobTenant = $metadata['tenant'] ?? $tenant;
+                $jobWorkspace = $metadata['workspace'] ?? $workspace;
                 $useOrchestrator = $metadata['use_orchestrator'] ?? true;
 
                 $this->logger->info('Queue processor: starting queued job', [
                     'job_uid' => $job->id,
                     'issue_key' => $job->issue_key,
-                    'tenant' => $jobTenant
+                    'workspace' => $jobworkspace
                 ]);
 
                 // Update job status to running
@@ -1375,7 +1375,7 @@ class AIDevJobService {
                 Bean::store($job);
 
                 // Spawn the tmux session
-                $tmux = new TmuxService($job->member_id, $job->issue_key, null, $jobTenant);
+                $tmux = new TmuxService($job->member_id, $job->issue_key, null, $jobworkspace);
 
                 // Kill any existing session first
                 if ($tmux->exists()) {
@@ -1416,13 +1416,13 @@ class AIDevJobService {
                     ]);
 
                     $cmd = sprintf(
-                        'php %s --issue=%s --member=%d --job-id=%s --repo=%d --tenant=%s --orchestrator 2>&1',
+                        'php %s --issue=%s --member=%d --job-id=%s --repo=%d --workspace=%s --orchestrator 2>&1',
                         escapeshellarg($scriptPath),
                         escapeshellarg($job->issue_key),
                         $job->member_id,
                         escapeshellarg($job->job_uid),
                         $job->repoconnections_id ?? 0,
-                        escapeshellarg($jobTenant)
+                        escapeshellarg($jobworkspace)
                     );
 
                     $output = [];
@@ -1457,7 +1457,7 @@ class AIDevJobService {
                 }
 
                 // For local jobs (no workstation): spawn tmux session
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobTenant, null, null)) {
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobworkspace, null, null)) {
                     $results['jobs_started']++;
 
                     AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [
@@ -1601,7 +1601,7 @@ class AIDevJobService {
      * Public method to cleanup job labels (for API endpoint use)
      *
      * Handles both Jira and GitHub issues based on job's project_type.
-     * Call this from cleanup endpoint after tenant database is switched.
+     * Call this from cleanup endpoint after workspace database is switched.
      *
      * @param int|null $jobId Job ID (optional if issueKey provided)
      * @param string|null $issueKey Issue key (optional if jobId provided)
@@ -2609,19 +2609,19 @@ class AIDevJobService {
 
         $staleJobs = [];
         foreach ($runningJobs as $job) {
-            // Get tenant from queue_metadata if available
-            $tenant = null;
+            // Get workspace from queue_metadata if available
+            $workspace = null;
             if (!empty($job->queue_metadata)) {
                 $metadata = json_decode($job->queue_metadata, true);
-                $tenant = $metadata['tenant'] ?? null;
+                $workspace = $metadata['workspace'] ?? null;
             }
-            // Fallback to current session tenant
-            if (!$tenant) {
-                $tenant = $_SESSION['tenant_slug'] ?? null;
+            // Fallback to current session workspace
+            if (!$workspace) {
+                $workspace = $_SESSION['workspace_slug'] ?? null;
             }
 
             // Check if tmux session still exists
-            $tmux = new TmuxService($job->member_id, $job->issue_key, null, $tenant);
+            $tmux = new TmuxService($job->member_id, $job->issue_key, null, $workspace);
 
             if (!$tmux->exists()) {
                 // Session is gone - this is a stale job
@@ -2758,10 +2758,10 @@ class AIDevJobService {
      *
      * @param string $jobId Job ID (UUID)
      * @param int $memberId Member ID (for authorization)
-     * @param string|null $tenant Tenant slug
+     * @param string|null $workspace Workspace slug
      * @return array Result with 'success', 'job_uid', 'error' keys
      */
-    public function retryJob(string $jobId, int $memberId, ?string $tenant = null): array {
+    public function retryJob(string $jobId, int $memberId, ?string $workspace = null): array {
         $job = \app\Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
         if (!$job) {
             return ['success' => false, 'error' => 'Job not found'];
@@ -2793,7 +2793,7 @@ class AIDevJobService {
 
         // Update queue metadata for retry
         $metadata = json_decode($job->queue_metadata ?? '{}', true);
-        $metadata['tenant'] = $tenant ?? ($metadata['tenant'] ?? null);
+        $metadata['workspace'] = $workspace ?? ($metadata['workspace'] ?? null);
         $metadata['retry_at'] = date('Y-m-d H:i:s');
         $metadata['retry_count'] = ($metadata['retry_count'] ?? 0) + 1;
         $job->queue_metadata = json_encode($metadata);

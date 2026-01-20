@@ -16,7 +16,7 @@ use \app\services\MailgunService;
 use \app\services\TmuxService;
 use \app\services\CeoDirectiveLogger;
 use \app\services\GitOperations;
-use \app\TenantResolver;
+use \app\WorkspaceResolver;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/GitOperations.php';
@@ -38,23 +38,23 @@ class Webhook extends BaseControls\Control {
 
     /**
      * Handle Jira webhook
-     * Endpoint: POST /webhook/jira or POST /webhook/jira/{tenant}
+     * Endpoint: POST /webhook/jira or POST /webhook/jira/workspace
      *
-     * For multi-tenancy, use /webhook/jira/{tenant} where tenant matches
+     * For multi-workspace, use /webhook/jira/workspace where workspace matches
      * the config file name (e.g., /webhook/jira/gwt loads conf/config.gwt.ini)
      */
     public function jira($params = []) {
-        // Check for tenant parameter (from URL: /webhook/jira/{tenant})
-        $tenant = $this->opId() ?? null;
+        // Check for workspace parameter (from URL: /webhook/jira/workspace)
+        $workspace = $this->opId() ?? null;
 
-        // If tenant specified, switch to tenant database
-        if ($tenant) {
-            if (!$this->switchToTenantForWebhook($tenant)) {
+        // If workspace specified, switch to workspace database
+        if ($workspace) {
+            if (!$this->switchToworkspaceForWebhook($workspace)) {
                 Flight::response()->status(400);
-                echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
+                echo json_encode(['error' => "Invalid workspace: {$workspace}"]);
                 return;
             }
-            $this->logger->info("Webhook using tenant: {$tenant}");
+            $this->logger->info("Webhook using workspace: {$workspace}");
         }
 
         // Get raw payload
@@ -89,7 +89,7 @@ class Webhook extends BaseControls\Control {
 
         $this->logger->info('Jira webhook received', [
             'event' => $data['webhookEvent'] ?? 'unknown',
-            'tenant' => $tenant ?? 'default'
+            'workspace' => $workspace ?? 'default'
         ]);
 
         try {
@@ -127,7 +127,7 @@ class Webhook extends BaseControls\Control {
      * Handle Mailgun incoming email webhook
      * Endpoint: POST /webhook/mailgun
      *
-     * Receives emails sent to {tenant}@myctobot.ai and creates CEO directives.
+     * Receives emails sent to workspace@myctobot.ai and creates CEO directives.
      * Uses the IncomingEmailService for actual processing.
      */
     public function mailgun() {
@@ -137,10 +137,10 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Switch to tenant database for webhook processing
+     * Switch to workspace database for webhook processing
      */
-    private function switchToTenantForWebhook(string $tenant): bool {
-        return TenantResolver::switchDatabase($tenant);
+    private function switchToworkspaceForWebhook(string $workspace): bool {
+        return WorkspaceResolver::switchDatabase($workspace);
     }
 
     /**
@@ -507,17 +507,17 @@ class Webhook extends BaseControls\Control {
                 $this->currentDirectiveId,
                 'job_trigger',
                 'Triggering AI Developer job',
-                ['repo_id' => $repoId, 'tenant' => Flight::get('tenant.slug')]
+                ['repo_id' => $repoId, 'workspace' => Flight::get('workspace.slug')]
             );
         }
 
-        // Get tenant slug for multi-tenancy support
-        $tenant = Flight::get('tenant.slug');
+        // Get workspace slug for multi-workspace support
+        $workspace = Flight::get('workspace.slug');
 
         // AIDevJobService handles local vs remote runner execution based on config
-        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId, tenant)
+        // triggerJob signature: (memberId, issueKey, cloudId, boardId, repoId, workspace)
         $jobService = new AIDevJobService();
-        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $tenant);
+        $result = $jobService->triggerJob($memberId, $issueKey, $cloudId, null, $repoId, $workspace);
 
         if ($result['success']) {
             // Check if session was already running (no new job_uid)
@@ -628,13 +628,13 @@ class Webhook extends BaseControls\Control {
      * Close local tmux session when ai-dev label is removed or complete status reached
      */
     private function closeLocalTmuxSession(string $issueKey, int $memberId, ?string $cloudId = null, string $reason = 'closed'): void {
-        $tenant = Flight::get('tenant.slug');
+        $workspace = Flight::get('workspace.slug');
 
         $this->logger->info('closeLocalTmuxSession called', [
             'issue_key' => $issueKey,
             'member_id' => $memberId,
             'reason' => $reason,
-            'tenant' => $tenant
+            'workspace' => $workspace
         ]);
 
         // Clean up status file regardless of whether tmux session exists
@@ -646,7 +646,7 @@ class Webhook extends BaseControls\Control {
         }
 
         // Get work directory and signal the session to complete
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
         $workDir = $tmux->getWorkDir();
         $sessionExists = $tmux->exists();
 
@@ -747,7 +747,7 @@ class Webhook extends BaseControls\Control {
      * Clean up job status file when session is closed
      */
     private function cleanupJobStatus(int $memberId, string $issueKey, string $reason = 'closed'): void {
-        // Get domain ID for multi-tenant path
+        // Get domain ID for multi-workspace path
         $domainId = \app\TmuxManager::getDomainId();
 
         // Find and update the status file for this issue
@@ -931,8 +931,8 @@ class Webhook extends BaseControls\Control {
      * Download a Jira attachment to the local work directory
      */
     private function downloadJiraAttachment(string $issueKey, int $memberId, string $attachmentUrl, string $filename, string $oauthToken): ?string {
-        $tenant = Flight::get('tenant.slug');
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+        $workspace = Flight::get('workspace.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
         $attachmentsDir = $tmux->getWorkDir() . '/attachments';
 
         if (!is_dir($attachmentsDir)) {
@@ -979,13 +979,13 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        $tenant = Flight::get('tenant.slug');
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+        $workspace = Flight::get('workspace.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
 
         $this->logger->debug('Local session check', [
             'issue_key' => $issueKey,
             'member_id' => $memberId,
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'has_tmux_session' => $tmux->exists(),
         ]);
 
@@ -1235,13 +1235,13 @@ class Webhook extends BaseControls\Control {
         }
 
         // Check if there's a running tmux session for this issue
-        $tenant = Flight::get('tenant.slug');
-        $tmux = new TmuxService($memberId, $issueKey, null, $tenant);
+        $workspace = Flight::get('workspace.slug');
+        $tmux = new TmuxService($memberId, $issueKey, null, $workspace);
         if (!$tmux->exists()) {
             $this->logger->debug('GitHub: No running tmux session to augment', [
                 'issue_key' => $issueKey,
                 'member_id' => $memberId,
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]);
             return;
         }
@@ -1351,10 +1351,10 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Check for workspace query parameter (tenant identifier)
+        // Check for workspace query parameter (workspace identifier)
         $workspace = $_GET['workspace'] ?? null;
         if ($workspace && $workspace !== 'default') {
-            if (!$this->switchToTenantForWebhook($workspace)) {
+            if (!$this->switchToworkspaceForWebhook($workspace)) {
                 $this->logger->warning('GitHub webhook: invalid workspace', ['workspace' => $workspace]);
                 Flight::response()->status(400);
                 echo json_encode(['error' => "Invalid workspace: {$workspace}"]);
@@ -1363,7 +1363,7 @@ class Webhook extends BaseControls\Control {
             $this->logger->info("GitHub webhook using workspace: {$workspace}");
         }
 
-        // Get repo full name from payload to look up tenant and secret
+        // Get repo full name from payload to look up workspace and secret
         $repoFullName = $data['repository']['full_name'] ?? '';
         if (empty($repoFullName)) {
             $this->logger->warning('GitHub webhook: no repository in payload');
@@ -1372,7 +1372,7 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Find the repo connection (if workspace was set, searches that tenant's DB first)
+        // Find the repo connection (if workspace was set, searches that workspace's DB first)
         $repoConnection = $this->findGitHubRepoConnection($repoFullName, $workspace);
         if (!$repoConnection) {
             $this->logger->debug('GitHub webhook: repo not connected', ['repo' => $repoFullName]);
@@ -1394,7 +1394,7 @@ class Webhook extends BaseControls\Control {
         $this->logger->info('GitHub webhook received', [
             'event' => $event,
             'repo' => $repoFullName,
-            'tenant' => $repoConnection['tenant'] ?? 'unknown'
+            'workspace' => $repoConnection['workspace'] ?? 'unknown'
         ]);
 
         try {
@@ -1408,11 +1408,11 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Find GitHub repo connection across all tenants
-     * Returns repo data with tenant info if found
+     * Find GitHub repo connection across all workspaces
+     * Returns repo data with workspace info if found
      *
      * @param string $fullName Repository full name (owner/repo)
-     * @param string|null $workspace If provided, search this tenant first (already switched)
+     * @param string|null $workspace If provided, search this workspace first (already switched)
      */
     private function findGitHubRepoConnection(string $fullName, ?string $workspace = null): ?array {
         // Split full_name into owner/name
@@ -1422,81 +1422,81 @@ class Webhook extends BaseControls\Control {
         }
         list($repoOwner, $repoName) = $parts;
 
-        // If workspace is provided, we already switched to that tenant's database
-        // Search it first before falling back to all tenants
+        // If workspace is provided, we already switched to that workspace's database
+        // Search it first before falling back to all workspaces
         if ($workspace && $workspace !== 'default') {
             $repo = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
             if ($repo) {
                 $repoData = $repo->export();
-                $repoData['tenant'] = $workspace;
-                // Use member_id from repo connection if stored, otherwise fall back to tenant lookup
+                $repoData['workspace'] = $workspace;
+                // Use member_id from repo connection if stored, otherwise fall back to workspace lookup
                 if (empty($repoData['member_id'])) {
-                    $repoData['member_id'] = $this->findMemberIdForTenant($workspace);
+                    $repoData['member_id'] = $this->findMemberIdForworkspace($workspace);
                 }
-                Flight::set('tenant.slug', $workspace);
-                Flight::set('tenant.active', true);
+                Flight::set('workspace.slug', $workspace);
+                Flight::set('workspace.active', true);
                 return $repoData;
             }
-            // Not found in specified workspace, fall through to search all tenants
+            // Not found in specified workspace, fall through to search all workspaces
         }
 
-        // Search all tenant configs for this repo
+        // Search all workspace configs for this repo
         $confDir = __DIR__ . '/../conf';
         $configs = glob($confDir . '/config.*.ini');
 
         foreach ($configs as $configFile) {
-            // Extract tenant slug from filename (config.{tenant}.ini)
+            // Extract workspace slug from filename (config.{workspace}.ini)
             if (!preg_match('/config\.([^.]+)\.ini$/', $configFile, $matches)) {
                 continue;
             }
-            $tenant = $matches[1];
+            $workspace = $matches[1];
 
             // Skip example config
-            if ($tenant === 'example') {
+            if ($workspace === 'example') {
                 continue;
             }
 
-            $tenantConfig = parse_ini_file($configFile, true);
-            if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $workspaceConfig = parse_ini_file($configFile, true);
+            if (!$workspaceConfig || empty($workspaceConfig['database'])) {
                 continue;
             }
 
-            // Connect to tenant database
+            // Connect to workspace database
             try {
-                $dbConfig = $tenantConfig['database'];
+                $dbConfig = $workspaceConfig['database'];
                 $type = $dbConfig['type'] ?? 'mysql';
-                $tenantDbKey = "github_webhook_{$tenant}";
+                $workspaceDbKey = "github_webhook_{$workspace}";
 
                 if ($type === 'sqlite') {
-                    $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                    $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
                     if (!file_exists($dbPath)) continue;
                     $dsn = "sqlite:{$dbPath}";
-                    Bean::useDatabase($tenantDbKey, $dsn);
+                    Bean::useDatabase($workspaceDbKey, $dsn);
                 } else {
                     $host = $dbConfig['host'] ?? 'localhost';
                     $port = $dbConfig['port'] ?? 3306;
-                    $name = $dbConfig['name'] ?? $tenant;
+                    $name = $dbConfig['name'] ?? $workspace;
                     $user = $dbConfig['user'] ?? 'root';
                     $pass = $dbConfig['pass'] ?? '';
                     $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    Bean::useDatabase($tenantDbKey, $dsn, $user, $pass);
+                    Bean::useDatabase($workspaceDbKey, $dsn, $user, $pass);
                 }
 
                 // Look for repo connection (repoOwner/repoName already parsed at top of method)
                 $repo = Bean::findOne('repoconnections', 'repo_owner = ? AND repo_name = ? AND provider = ?', [$repoOwner, $repoName, 'github']);
                 if ($repo) {
                     $repoData = $repo->export();
-                    $repoData['tenant'] = $tenant;
-                    $repoData['tenant_config'] = $tenantConfig;
+                    $repoData['workspace'] = $workspace;
+                    $repoData['workspace_config'] = $workspaceConfig;
 
-                    // Use member_id from repo connection if stored, otherwise fall back to tenant lookup
+                    // Use member_id from repo connection if stored, otherwise fall back to workspace lookup
                     if (empty($repoData['member_id'])) {
-                        $repoData['member_id'] = $this->findMemberIdForTenant($tenant);
+                        $repoData['member_id'] = $this->findMemberIdForworkspace($workspace);
                     }
 
                     // Keep this database selected for subsequent operations
-                    Flight::set('tenant.slug', $tenant);
-                    Flight::set('tenant.active', true);
+                    Flight::set('workspace.slug', $workspace);
+                    Flight::set('workspace.active', true);
 
                     return $repoData;
                 }
@@ -1505,8 +1505,8 @@ class Webhook extends BaseControls\Control {
                 Bean::close();
 
             } catch (\Exception $e) {
-                $this->logger->debug('Error checking tenant for repo', [
-                    'tenant' => $tenant,
+                $this->logger->debug('Error checking workspace for repo', [
+                    'workspace' => $workspace,
                     'error' => $e->getMessage()
                 ]);
             }
@@ -1516,14 +1516,14 @@ class Webhook extends BaseControls\Control {
     }
 
     /**
-     * Find member ID for a tenant
+     * Find member ID for a workspace
      */
-    private function findMemberIdForTenant(string $tenant): ?int {
+    private function findMemberIdForworkspace(string $workspace): ?int {
         // Switch back to default database
         Bean::selectDatabase('default');
 
         // Look up member by workspace slug
-        $member = Bean::findOne('member', 'workspace = ?', [$tenant]);
+        $member = Bean::findOne('member', 'workspace = ?', [$workspace]);
         if ($member) {
             return (int)$member->id;
         }
@@ -1800,7 +1800,7 @@ class Webhook extends BaseControls\Control {
         $repoFullName = $data['repository']['full_name'] ?? '';
         $memberId = $repoConnection['member_id'] ?? null;
         $repoId = $repoConnection['id'] ?? null;
-        $tenant = $repoConnection['tenant'] ?? null;
+        $workspace = $repoConnection['workspace'] ?? null;
 
         if (!$memberId) {
             $this->logger->warning('Cannot trigger GitHub AI Dev: no member_id', [
@@ -1821,7 +1821,7 @@ class Webhook extends BaseControls\Control {
 
         // Use AIDevJobService to trigger the job
         $jobService = new AIDevJobService();
-        $result = $jobService->triggerGitHubJob($memberId, $issueKey, $repoId, $tenant);
+        $result = $jobService->triggerGitHubJob($memberId, $issueKey, $repoId, $workspace);
 
         if ($result['success']) {
             // Check if session was already running (no new job_uid)
@@ -1859,7 +1859,7 @@ class Webhook extends BaseControls\Control {
      */
     private function addGitHubWorkingLabel(array $repoConnection, string $repoFullName, int $issueNumber): void {
         try {
-            // Get GitHub token from tenant settings
+            // Get GitHub token from workspace settings
             $tokenSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
             if (!$tokenSetting || empty($tokenSetting->setting_value)) {
                 return;
@@ -2623,7 +2623,7 @@ class Webhook extends BaseControls\Control {
      */
     private function storeCreditBalanceError(int $memberId, string $errorMsg): void {
         try {
-            // Store in enterprisesettings table (tenant database should already be selected)
+            // Store in enterprisesettings table (workspace database should already be selected)
             $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['credit_balance_error']);
             if (!$setting) {
                 $setting = Bean::dispense('enterprisesettings');

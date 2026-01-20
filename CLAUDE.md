@@ -492,40 +492,40 @@ The logs will usually show the exact error (e.g., `Class "app\Bean" not found`) 
 
 ## Multi-Tenancy
 
-The application supports session-based multi-tenancy. Each tenant has:
-- Their own config file: `conf/config.{tenant}.ini`
+The application supports session-based multi-workspace. Each workspace has:
+- Their own config file: `conf/config.{workspace}.ini`
 - Their own database (SQLite or MySQL)
 - Their own data (members, boards, settings, etc.)
 
 ### Background Scripts
 
-Background scripts must be passed the `--tenant` parameter to load the correct database:
+Background scripts must be passed the `--workspace` parameter to load the correct database:
 
 ```bash
-# Run analysis for a specific tenant
-php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --tenant=gwt
+# Run analysis for a specific workspace
+php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --workspace=gwt
 
-# Run digest cron (processes all tenants automatically)
+# Run digest cron (processes all workspaces automatically)
 php scripts/cron-digest.php --script --verbose
 
-# Run AI Developer for specific tenant
-php scripts/ai-dev-agent.php --secret=KEY --member=3 --job=ID --action=process --tenant=gwt
+# Run AI Developer for specific workspace
+php scripts/ai-dev-agent.php --secret=KEY --member=3 --job=ID --action=process --workspace=gwt
 
 # Run local AI Developer
-php scripts/local-aidev-full.php --issue=SSI-1883 --tenant=gwt
+php scripts/local-aidev-full.php --issue=SSI-1883 --workspace=gwt
 ```
 
 ### Web Requests
 
-For web requests, the tenant is stored in `$_SESSION['tenant_slug']` after login.
-The bootstrap reads this and switches to the tenant database automatically.
+For web requests, the workspace is stored in `$_SESSION['workspace_slug']` after login.
+The bootstrap reads this and switches to the workspace database automatically.
 
-When spawning background scripts from controllers, include the tenant:
+When spawning background scripts from controllers, include the workspace:
 
 ```php
-$tenantSlug = $_SESSION['tenant_slug'] ?? null;
-$tenantParam = $tenantSlug && $tenantSlug !== 'default'
-    ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+$workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+$workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+    ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
     : '';
 
 $cmd = sprintf(
@@ -533,31 +533,31 @@ $cmd = sprintf(
     escapeshellarg($cronSecret),
     $memberId,
     $boardId,
-    $tenantParam
+    $workspaceParam
 );
 ```
 
 ### Webhooks
 
-Jira webhooks now support tenant-specific URLs. Each tenant should register their
-webhook in Jira with their tenant slug in the URL:
+Jira webhooks now support workspace-specific URLs. Each workspace should register their
+webhook in Jira with their workspace slug in the URL:
 
 ```
-https://myctobot.ai/webhook/jira/gwt        # For tenant "gwt"
-https://myctobot.ai/webhook/jira/testcorp   # For tenant "testcorp"
+https://myctobot.ai/webhook/jira/gwt        # For workspace "gwt"
+https://myctobot.ai/webhook/jira/testcorp   # For workspace "testcorp"
 ```
 
 The webhook controller will:
-1. Extract the tenant from the URL
-2. Load the tenant's config file (`conf/config.{tenant}.ini`)
-3. Switch to the tenant's database
-4. Process the webhook with the correct tenant context
+1. Extract the workspace from the URL
+2. Load the workspace's config file (`conf/config.{workspace}.ini`)
+3. Switch to the workspace's database
+4. Process the webhook with the correct workspace context
 
 **To update an existing Jira webhook:**
 1. Go to Jira → Settings → System → Webhooks
-2. Edit the webhook URL to include your tenant slug
+2. Edit the webhook URL to include your workspace slug
 3. Change: `https://myctobot.ai/webhook/jira`
-4. To: `https://myctobot.ai/webhook/jira/your-tenant-slug`
+4. To: `https://myctobot.ai/webhook/jira/your-workspace-slug`
 
 ## See Also
 

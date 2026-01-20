@@ -15,7 +15,7 @@
  *     "mcpServers": {
  *       "myctobot": {
  *         "type": "http",
- *         "url": "https://myctobot.ai/mcp/{tenant}/jobs",
+ *         "url": "https://myctobot.ai/mcp/workspace/jobs",
  *         "headers": {
  *           "Authorization": "Bearer {api_key}"
  *         }
@@ -33,6 +33,7 @@ use app\BaseControls\Control;
 use app\services\AIDevStatusService;
 use app\services\AIDevJobService;
 use app\services\McpResponseTrait;
+use app\services\ApiAuthService;
 
 require_once __DIR__ . '/../services/AIDevStatusService.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
@@ -43,24 +44,24 @@ class Mcpjobs extends Control {
 
     private ?int $memberId = null;
     private ?string $jobId = null;
-    private ?string $tenant = null;
+    private ?string $workspace = null;
 
     public function __construct() {
         $this->logger = Flight::get('log');
     }
 
     /**
-     * Tenant-aware MCP Jobs endpoint
-     * POST /mcp/{tenant}/jobs
+     * Workspace-aware MCP Jobs endpoint
+     * POST /mcp/{workspace}/jobs
      *
-     * @param string $tenant Domain ID from the URL
+     * @param string $workspace Workspace slug from the URL
      */
-    public function handlewithtenant(string $tenant) {
-        $this->tenant = $tenant;
-        $this->logger->debug('MCP Jobs request', ['tenant' => $tenant]);
+    public function handlewithworkspace(string $workspace) {
+        $this->workspace = $workspace;
+        $this->logger->debug('MCP Jobs request', ['workspace' => $workspace]);
 
-        // Load tenant config and switch database context
-        $this->loadTenantDatabase($tenant);
+        // Load workspace config and switch database context
+        $this->loadWorkspaceDatabase($workspace);
 
         $this->handle();
     }
@@ -133,62 +134,56 @@ class Mcpjobs extends Control {
     }
 
     /**
-     * Load tenant database context
+     * Load workspace database context
      */
-    private function loadTenantDatabase(string $tenant): void {
-        $configFile = "conf/config.{$tenant}.ini";
+    private function loadWorkspaceDatabase(string $workspace): void {
+        $configFile = "conf/config.{$workspace}.ini";
         if (!file_exists($configFile)) {
             return;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
+        $workspaceConfig = parse_ini_file($configFile, true);
+        if (!$workspaceConfig || empty($workspaceConfig['database'])) {
             return;
         }
 
-        $dbConfig = $tenantConfig['database'];
+        $dbConfig = $workspaceConfig['database'];
         $type = $dbConfig['type'] ?? 'mysql';
 
         if ($type === 'sqlite') {
-            $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+            $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
             $dsn = "sqlite:{$dbPath}";
-            Bean::useDatabase($tenant, $dsn);
+            Bean::useDatabase($workspace, $dsn);
         } else {
             $host = $dbConfig['host'] ?? 'localhost';
             $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $tenant;
+            $name = $dbConfig['name'] ?? $workspace;
             $user = $dbConfig['user'] ?? 'root';
             $pass = $dbConfig['pass'] ?? '';
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-            Bean::useDatabase($tenant, $dsn, $user, $pass);
+            Bean::useDatabase($workspace, $dsn, $user, $pass);
         }
-        $this->logger->debug('MCP Jobs switched to tenant database', ['tenant' => $tenant]);
+        $this->logger->debug('MCP Jobs switched to workspace database', ['workspace' => $workspace]);
     }
 
     /**
      * Authenticate the MCP request
      *
-     * Supports:
-     * 1. Bearer token with member API key
-     * 2. Custom headers: X-Member-ID + X-Job-ID
+     * Uses ApiAuthService for modern API key authentication.
+     * Falls back to job-specific auth (Basic auth, custom headers) for runner scripts.
      */
     private function authenticate(): bool {
         $request = Flight::request();
 
-        // Method 1: Bearer token (member's api_token)
-        $authHeader = $request->getHeader('Authorization') ?? '';
-        if (preg_match('/^Bearer\s+(.+)$/', $authHeader, $matches)) {
-            $apiKey = $matches[1];
-
-            // Look up member by api_token
-            $member = Bean::findOne('member', 'api_token = ?', [$apiKey]);
-            if ($member) {
-                $this->memberId = (int)$member->id;
-                return true;
-            }
+        // Method 1: ApiAuthService (modern API key from apikeys table)
+        $authResult = ApiAuthService::authenticate('mcpjobs', 'handle');
+        if ($authResult['success']) {
+            $this->memberId = (int)$authResult['member']->id;
+            return true;
         }
 
-        // Method 2: Basic auth with member_id:job_uid
+        // Method 2: Basic auth with member_id:job_uid (for runner scripts)
+        $authHeader = $request->getHeader('Authorization') ?? '';
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
             if ($decoded && strpos($decoded, ':') !== false) {
@@ -199,7 +194,7 @@ class Mcpjobs extends Control {
             }
         }
 
-        // Method 3: Custom headers
+        // Method 3: Custom headers (for runner scripts)
         $this->memberId = (int)($request->getHeader('X-Member-ID') ?? 0);
         $this->jobId = $request->getHeader('X-Job-ID') ?? '';
 

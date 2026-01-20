@@ -380,19 +380,19 @@ class Mcpservers extends BaseControls\Control {
      * Get common MCP server presets
      */
     private function getPresets(): array {
-        // Get tenant-specific values for pipelines preset
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        // Get workspace-specific values for pipelines preset
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
         if (strpos($baseUrl, 'localhost') === false && strpos($baseUrl, '127.0.0.1') === false) {
             $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
         }
 
-        // Get API key from tenant config
-        $tenantApiKey = '';
-        $configFile = BASE_PATH . '/conf/config.' . $tenantSlug . '.ini';
+        // Get API key from workspace config
+        $workspaceApiKey = '';
+        $configFile = BASE_PATH . '/conf/config.' . $workspaceSlug . '.ini';
         if (file_exists($configFile)) {
-            $tenantConfig = parse_ini_file($configFile, true);
-            $tenantApiKey = $tenantConfig['api']['api_key'] ?? '';
+            $workspaceConfig = parse_ini_file($configFile, true);
+            $workspaceApiKey = $workspaceConfig['api']['api_key'] ?? '';
         }
 
         return [
@@ -400,8 +400,8 @@ class Mcpservers extends BaseControls\Control {
                 'name' => 'pipelines',
                 'description' => 'MyCTOBot Pipeline Tools',
                 'server_type' => 'http',
-                'url' => "{$baseUrl}/pipelines/mcp/tools/{$tenantSlug}",
-                'headers' => ['X-API-TOKEN' => $tenantApiKey],
+                'url' => "{$baseUrl}/pipelines/mcp/tools/{$workspaceSlug}",
+                'headers' => ['X-API-TOKEN' => $workspaceApiKey],
                 'env' => []
             ],
             'github' => [

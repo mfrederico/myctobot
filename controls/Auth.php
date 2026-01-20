@@ -11,7 +11,7 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\Bean;
 use \app\plugins\GoogleAuth;
-use \app\TenantResolver;
+use \app\WorkspaceResolver;
 
 // Load Google Auth plugin
 require_once __DIR__ . '/../lib/plugins/GoogleAuth.php';
@@ -75,7 +75,7 @@ class Auth extends BaseControls\Control {
         // Validate workspace if provided
         $workspaceError = null;
         $requestedWorkspace = $workspace; // Save original before clearing
-        if (!empty($workspace) && !TenantResolver::tenantExists($workspace)) {
+        if (!empty($workspace) && !WorkspaceResolver::workspaceExists($workspace)) {
             $workspaceError = "Workspace '{$workspace}' not found";
             $workspace = '';
         }
@@ -86,13 +86,13 @@ class Auth extends BaseControls\Control {
             'workspace' => $workspace,
             'requestedWorkspace' => $requestedWorkspace,
             'workspaceError' => $workspaceError,
-            'googleEnabled' => GoogleAuth::isConfigured() && TenantResolver::isDefault()
+            'googleEnabled' => GoogleAuth::isConfigured() && WorkspaceResolver::isDefault()
         ]);
     }
 
     /**
      * Process login
-     * Supports workspace-based multi-tenant authentication
+     * Supports workspace-based multi-workspace authentication
      */
     public function dologin() {
         try {
@@ -121,23 +121,23 @@ class Auth extends BaseControls\Control {
                 return;
             }
 
-            // If workspace provided, switch to tenant database
+            // If workspace provided, switch to workspace database
             if (!empty($workspace)) {
-                if (!TenantResolver::tenantExists($workspace)) {
+                if (!WorkspaceResolver::workspaceExists($workspace)) {
                     $this->flash('error', "Workspace '{$workspace}' not found");
                     Flight::redirect('/auth/login');
                     return;
                 }
 
-                // Switch to tenant database
-                if (!$this->switchToTenantDatabase($workspace)) {
+                // Switch to workspace database
+                if (!$this->switchToWorkspaceDatabase($workspace)) {
                     $this->flash('error', 'Could not connect to workspace. Please try again.');
                     Flight::redirect('/auth/login');
                     return;
                 }
             }
 
-            // Find member by username or email (in current database - tenant or default)
+            // Find member by username or email (in current database - workspace or default)
             $member = Bean::findOne('member', '(username = ? OR email = ?)', [$login, $login]);
 
             if (!$member || !password_verify($password, $member->password)) {
@@ -172,9 +172,9 @@ class Auth extends BaseControls\Control {
             // Set session
             $_SESSION['member'] = $member->export();
 
-            // Store tenant in session for workspace logins
+            // Store workspace in session for workspace logins
             if (!empty($workspace)) {
-                TenantResolver::setTenant($workspace);
+                WorkspaceResolver::setWorkspace($workspace);
                 $this->logger->info('User logged in to workspace', [
                     'id' => $member->id,
                     'username' => $member->username,
@@ -194,13 +194,13 @@ class Auth extends BaseControls\Control {
     }
 
     /**
-     * Switch to a tenant's database
+     * Switch to a workspace's database
      *
-     * @param string $workspace Tenant workspace code
+     * @param string $workspace Workspace workspace code
      * @return bool True on success
      */
-    private function switchToTenantDatabase(string $workspace): bool {
-        return TenantResolver::switchDatabase($workspace);
+    private function switchToWorkspaceDatabase(string $workspace): bool {
+        return WorkspaceResolver::switchDatabase($workspace);
     }
 
     /**
@@ -235,8 +235,8 @@ class Auth extends BaseControls\Control {
         $parts = explode('.', $host);
         if (count($parts) >= 3) {
             $subdomain = $parts[0];
-            // Verify tenant config exists
-            if (TenantResolver::tenantExists($subdomain)) {
+            // Verify workspace config exists
+            if (WorkspaceResolver::workspaceExists($subdomain)) {
                 return $subdomain;
             }
         }
@@ -248,7 +248,7 @@ class Auth extends BaseControls\Control {
      * Logout user
      */
     public function logout() {
-        $workspace = TenantResolver::getSessionTenant();
+        $workspace = WorkspaceResolver::getSessionWorkspace();
 
         if (isset($_SESSION['member'])) {
             $this->logger->info('User logged out', [
@@ -257,8 +257,8 @@ class Auth extends BaseControls\Control {
             ]);
         }
 
-        // Clear tenant from session
-        TenantResolver::clearTenant();
+        // Clear workspace from session
+        WorkspaceResolver::clearWorkspace();
 
         // Properly clear session data
         $_SESSION = array();
@@ -291,8 +291,8 @@ class Auth extends BaseControls\Control {
      * Show registration form
      */
     public function register() {
-        // Non-tenant (main site) should use /signup for tenant registration
-        if (TenantResolver::isDefault()) {
+        // Non-workspace (main site) should use /signup for workspace registration
+        if (WorkspaceResolver::isDefault()) {
             Flight::redirect('/signup');
             return;
         }
@@ -313,8 +313,8 @@ class Auth extends BaseControls\Control {
      * Process registration - requires email verification
      */
     public function doregister() {
-        // Non-tenant (main site) should use /signup for tenant registration
-        if (TenantResolver::isDefault()) {
+        // Non-workspace (main site) should use /signup for workspace registration
+        if (WorkspaceResolver::isDefault()) {
             Flight::redirect('/signup');
             return;
         }
@@ -424,7 +424,7 @@ class Auth extends BaseControls\Control {
         $token = $this->getParam('token');
 
         // Get workspace from query param (added by subdomain redirect) or session
-        $workspace = $this->getParam('workspace') ?? TenantResolver::getSessionTenant() ?? '';
+        $workspace = $this->getParam('workspace') ?? WorkspaceResolver::getSessionWorkspace() ?? '';
         $loginUrl = $workspace ? "/login/{$workspace}" : '/login';
         $registerUrl = $workspace ? "/auth/register?workspace={$workspace}" : '/register';
 
@@ -466,9 +466,9 @@ class Auth extends BaseControls\Control {
             session_regenerate_id(true);
             $_SESSION['member'] = $member->export();
 
-            // Set tenant in session for workspace logins
+            // Set workspace in session for workspace logins
             if (!empty($workspace)) {
-                TenantResolver::setTenant($workspace);
+                WorkspaceResolver::setWorkspace($workspace);
             }
 
             $this->flash('success', 'Your email has been verified! Welcome to ' . Flight::get('app.name') . '!');
@@ -485,15 +485,15 @@ class Auth extends BaseControls\Control {
      * Send member verification email
      */
     private function sendMemberVerificationEmail(string $email, string $username, string $token): void {
-        $tenant = Flight::get('tenant.slug');
+        $workspace = Flight::get('workspace.slug');
         $appName = Flight::get('app.name');
 
-        // Build verification URL for this tenant
-        if (!empty($tenant)) {
-            // Use tenant subdomain URL
+        // Build verification URL for this workspace
+        if (!empty($workspace)) {
+            // Use workspace subdomain URL
             $protocol = Flight::get('app.protocol') ?? 'https';
             $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
-            $baseUrl = "{$protocol}://{$tenant}.{$baseDomain}";
+            $baseUrl = "{$protocol}://{$workspace}.{$baseDomain}";
         } else {
             $baseUrl = Flight::get('app.base_url');
         }
@@ -592,21 +592,21 @@ TEXT;
                 return;
             }
 
-            // If workspace provided, switch to tenant database
+            // If workspace provided, switch to workspace database
             $member = null;
-            $connectedToTenant = false;
+            $connectedToWorkspace = false;
             if (!empty($workspace)) {
-                if ($this->switchToTenantDatabase($workspace)) {
-                    $connectedToTenant = true;
+                if ($this->switchToWorkspaceDatabase($workspace)) {
+                    $connectedToWorkspace = true;
                     $member = Bean::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
-                    $this->logger->debug('Member lookup in tenant DB', ['found' => $member ? true : false, 'workspace' => $workspace]);
+                    $this->logger->debug('Member lookup in workspace DB', ['found' => $member ? true : false, 'workspace' => $workspace]);
                 }
             } else {
                 $member = Bean::findOne('member', 'email = ? AND status = ?', [$email, 'active']);
             }
 
             if ($member) {
-                // Generate reset token and store (still connected to tenant DB if workspace was provided)
+                // Generate reset token and store (still connected to workspace DB if workspace was provided)
                 $token = bin2hex(random_bytes(32));
                 $member->reset_token = $token;
                 $member->reset_expires = date('Y-m-d H:i:s', strtotime('+1 hour'));
@@ -615,7 +615,7 @@ TEXT;
                 $this->logger->debug('Reset token stored', ['member_id' => $member->id, 'workspace' => $workspace]);
 
                 // Now switch back to default DB
-                if ($connectedToTenant) {
+                if ($connectedToWorkspace) {
                     Bean::selectDatabase('default');
                 }
 
@@ -669,9 +669,9 @@ HTML;
             return;
         }
 
-        // If workspace provided, switch to tenant database
+        // If workspace provided, switch to workspace database
         if (!empty($workspace)) {
-            if (!$this->switchToTenantDatabase($workspace)) {
+            if (!$this->switchToWorkspaceDatabase($workspace)) {
                 $this->flash('error', 'Invalid workspace');
                 Flight::redirect('/auth/login');
                 return;
@@ -739,9 +739,9 @@ HTML;
                 return;
             }
 
-            // If workspace provided, switch to tenant database
+            // If workspace provided, switch to workspace database
             if (!empty($workspace)) {
-                if (!$this->switchToTenantDatabase($workspace)) {
+                if (!$this->switchToWorkspaceDatabase($workspace)) {
                     $this->flash('error', 'Invalid workspace');
                     Flight::redirect('/auth/login');
                     return;
@@ -860,33 +860,33 @@ HTML;
             $redirect = $_SESSION['oauth_redirect'] ?? '/settings/connections';
             unset($_SESSION['oauth_workspace'], $_SESSION['oauth_redirect']);
 
-            // If workspace specified, switch to tenant database
+            // If workspace specified, switch to workspace database
             if (!empty($workspace)) {
-                if (!TenantResolver::tenantExists($workspace)) {
+                if (!WorkspaceResolver::workspaceExists($workspace)) {
                     $this->flash('error', "Workspace '{$workspace}' not found");
                     Flight::redirect('/auth/login');
                     return;
                 }
 
-                if (!$this->switchToTenantDatabase($workspace)) {
+                if (!$this->switchToWorkspaceDatabase($workspace)) {
                     $this->flash('error', 'Could not connect to workspace');
                     Flight::redirect('/auth/login');
                     return;
                 }
 
-                // Re-find member in tenant database
-                $tenantMember = Bean::findOne('member', '(email = ? OR google_id = ?) AND status = ?',
+                // Re-find member in workspace database
+                $workspaceMember = Bean::findOne('member', '(email = ? OR google_id = ?) AND status = ?',
                     [$member->email, $member->google_id, 'active']);
 
-                if (!$tenantMember) {
+                if (!$workspaceMember) {
                     $this->flash('error', 'Your Google account is not registered in this workspace');
                     Flight::redirect("/login/{$workspace}");
                     return;
                 }
-                $member = $tenantMember;
+                $member = $workspaceMember;
 
-                // Set tenant in session
-                TenantResolver::setTenant($workspace);
+                // Set workspace in session
+                WorkspaceResolver::setWorkspace($workspace);
             }
 
             // Regenerate session ID to prevent session fixation attacks
@@ -919,7 +919,7 @@ HTML;
 
         $request = Flight::request();
         $token = $this->opId() ?? '';
-        $tenant = $request->query->workspace ?? $request->data->workspace ?? '';
+        $workspace = $request->query->workspace ?? $request->data->workspace ?? '';
 
         if (empty($token)) {
             $this->render('auth/invite_error', [
@@ -929,17 +929,17 @@ HTML;
             return;
         }
 
-        // If tenant specified, switch database context
-        if (!empty($tenant)) {
-            if (!TenantResolver::tenantExists($tenant)) {
+        // If workspace specified, switch database context
+        if (!empty($workspace)) {
+            if (!WorkspaceResolver::workspaceExists($workspace)) {
                 $this->render('auth/invite_error', [
                     'title' => 'Invalid Workspace',
-                    'error' => "Workspace '{$tenant}' not found"
+                    'error' => "Workspace '{$workspace}' not found"
                 ]);
                 return;
             }
 
-            if (!$this->switchToTenantDatabase($tenant)) {
+            if (!$this->switchToWorkspaceDatabase($workspace)) {
                 $this->render('auth/invite_error', [
                     'title' => 'Connection Error',
                     'error' => 'Could not connect to workspace database'
@@ -958,14 +958,14 @@ HTML;
 
             if (empty($password) || strlen($password) < 8) {
                 $this->flash('error', 'Password must be at least 8 characters');
-                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                $redirectUrl = "/auth/invite/{$token}" . ($workspace ? "?workspace={$workspace}" : '');
                 Flight::redirect($redirectUrl);
                 return;
             }
 
             if ($password !== $confirmPassword) {
                 $this->flash('error', 'Passwords do not match');
-                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                $redirectUrl = "/auth/invite/{$token}" . ($workspace ? "?workspace={$workspace}" : '');
                 Flight::redirect($redirectUrl);
                 return;
             }
@@ -975,7 +975,7 @@ HTML;
 
             if (!$result['success']) {
                 $this->flash('error', $result['error']);
-                $redirectUrl = "/auth/invite/{$token}" . ($tenant ? "?tenant={$tenant}" : '');
+                $redirectUrl = "/auth/invite/{$token}" . ($workspace ? "?workspace={$workspace}" : '');
                 Flight::redirect($redirectUrl);
                 return;
             }
@@ -985,15 +985,15 @@ HTML;
             $this->logger->info('User accepted invitation', [
                 'member_id' => $member->id,
                 'email' => $member->email,
-                'tenant' => $tenant ?: 'default'
+                'workspace' => $workspace ?: 'default'
             ]);
 
             // Regenerate session ID to prevent session fixation attacks
             session_regenerate_id(true);
 
-            // Set tenant in session if applicable
-            if (!empty($tenant)) {
-                TenantResolver::setTenant($tenant);
+            // Set workspace in session if applicable
+            if (!empty($workspace)) {
+                WorkspaceResolver::setWorkspace($workspace);
             }
 
             // Auto-login the user
@@ -1001,12 +1001,12 @@ HTML;
 
             $this->flash('success', 'Welcome! Your account has been activated.');
 
-            // Redirect to tenant-specific URL if applicable
-            if (!empty($tenant)) {
-                // Build tenant URL from base domain
+            // Redirect to workspace-specific URL if applicable
+            if (!empty($workspace)) {
+                // Build workspace URL from base domain
                 $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
                 $protocol = Flight::get('app.protocol') ?? 'https';
-                Flight::redirect("{$protocol}://{$tenant}.{$baseDomain}/dashboard");
+                Flight::redirect("{$protocol}://{$workspace}.{$baseDomain}/dashboard");
             } else {
                 Flight::redirect('/dashboard');
             }
@@ -1014,31 +1014,31 @@ HTML;
         }
 
         // Handle GET - show the form
-        $validation = $inviteService->validateToken($token, $tenant);
+        $validation = $inviteService->validateToken($token, $workspace);
 
         if (!$validation['valid']) {
             $this->render('auth/invite_error', [
                 'title' => 'Invalid Invitation',
                 'error' => $validation['error'],
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]);
             return;
         }
 
         $member = $validation['member'];
 
-        // Get tenant display name for the form
-        $tenantDisplayName = '';
-        if (!empty($tenant)) {
+        // Get workspace display name for the form
+        $workspaceDisplayName = '';
+        if (!empty($workspace)) {
             $setting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['company_name']);
-            $tenantDisplayName = $setting ? $setting->setting_value : ucwords(str_replace(['-', '_'], ' ', $tenant));
+            $workspaceDisplayName = $setting ? $setting->setting_value : ucwords(str_replace(['-', '_'], ' ', $workspace));
         }
 
         $this->render('auth/accept_invite', [
             'title' => 'Accept Invitation',
             'token' => $token,
-            'tenant' => $tenant,
-            'tenantDisplayName' => $tenantDisplayName,
+            'workspace' => $workspace,
+            'workspaceDisplayName' => $workspaceDisplayName,
             'email' => $member->email,
             'displayName' => $member->display_name
         ]);

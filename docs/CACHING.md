@@ -37,7 +37,7 @@ The CachedDatabaseAdapter is a transparent drop-in replacement for RedBeanPHP's 
 - **Automatic Caching**: All SELECT, SHOW queries cached
 - **Smart Invalidation**: Auto-clears on INSERT, UPDATE, DELETE
 - **JOIN Support**: Tracks all tables in complex queries
-- **Multi-tenant Safe**: Unique cache keys per installation
+- **Multi-workspace Safe**: Unique cache keys per installation
 
 #### How It Works:
 
@@ -271,9 +271,9 @@ php test_cached_adapter.php
 # ✓ Hit rate: 99.9%
 ```
 
-## Multi-Tenant Considerations
+## Multi-Workspace Considerations
 
-The caching system is designed for multi-tenant environments:
+The caching system is designed for multi-workspace environments:
 
 ### Namespace Isolation
 
@@ -428,7 +428,7 @@ Regularly check cache statistics:
 
 ### Data Isolation
 
-- Multi-tenant safe with namespace isolation
+- Multi-workspace safe with namespace isolation
 - No cross-site cache access possible
 - Each site has unique cache prefix
 
@@ -473,7 +473,7 @@ Key takeaways:
 - **9.4x faster queries** with CachedDatabaseAdapter
 - **175,000 permission checks/second** with PermissionCache
 - **Zero code changes** required
-- **Multi-tenant safe** by design
+- **Multi-workspace safe** by design
 - **Full admin control** via web interface
 
 For questions or issues, check the logs at `log/app-*.log` or use the admin interface at `/admin/cache`.

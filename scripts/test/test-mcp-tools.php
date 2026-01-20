@@ -3,21 +3,21 @@
 /**
  * MCP Tools Comprehensive Test Suite
  *
- * Tests the Agent MCP Tools API with full tenant validation:
- * - Tenant routing verification
+ * Tests the Agent MCP Tools API with full workspace validation:
+ * - Workspace routing verification
  * - Tool listing with expected values
  * - End-to-end tool execution with real data
- * - Cross-tenant isolation
+ * - Cross-workspace isolation
  * - Vision model integration
  *
  * Usage:
  *   php scripts/test-mcp-tools.php --config=test-config.json
- *   php scripts/test-mcp-tools.php --api-url=https://myctobot.ai --api-key=KEY --tenant=footest4
+ *   php scripts/test-mcp-tools.php --api-url=https://myctobot.ai --api-key=KEY --workspace=footest4
  *
  * Config file format (JSON):
  * {
  *   "api_url": "https://myctobot.ai",
- *   "tenants": [
+ *   "workspaces": [
  *     {
  *       "name": "footest4",
  *       "api_key": "test_api_key_footest4_mcp_tools_2026",
@@ -30,15 +30,15 @@
 
 class McpToolsComprehensiveTest {
     private string $apiUrl;
-    private array $tenants = [];
+    private array $workspaces = [];
     private int $passed = 0;
     private int $failed = 0;
     private int $skipped = 0;
     private array $testResults = [];
 
-    public function __construct(string $apiUrl, array $tenants) {
+    public function __construct(string $apiUrl, array $workspaces) {
         $this->apiUrl = rtrim($apiUrl, '/');
-        $this->tenants = $tenants;
+        $this->workspaces = $workspaces;
     }
 
     public function run(): int {
@@ -49,52 +49,52 @@ class McpToolsComprehensiveTest {
         $this->testHealthEndpoint();
         $this->testUnauthorizedAccess();
 
-        // Per-tenant tests
-        foreach ($this->tenants as $tenant) {
-            $this->section("Tenant: {$tenant['name']}");
-            $this->runTenantTests($tenant);
+        // Per-workspace tests
+        foreach ($this->workspaces as $workspace) {
+            $this->section("Workspace: {$workspace['name']}");
+            $this->runworkspaceTests($workspace);
         }
 
-        // Cross-tenant isolation test (if multiple tenants configured)
-        if (count($this->tenants) >= 2) {
-            $this->section('Cross-Tenant Isolation');
-            $this->testCrossTenantIsolation();
+        // Cross-workspace isolation test (if multiple workspaces configured)
+        if (count($this->workspaces) >= 2) {
+            $this->section('Cross-Workspace Isolation');
+            $this->testCrossworkspaceIsolation();
         }
 
         $this->printSummary();
         return $this->failed > 0 ? 1 : 0;
     }
 
-    private function runTenantTests(array $tenant): void {
-        $apiKey = $tenant['api_key'];
-        $expectedTools = $tenant['expected_tools'] ?? [];
-        $testImage = $tenant['test_image'] ?? null;
+    private function runworkspaceTests(array $workspace): void {
+        $apiKey = $workspace['api_key'];
+        $expectedTools = $workspace['expected_tools'] ?? [];
+        $testImage = $workspace['test_image'] ?? null;
 
         // Test 1: Verify authentication works
-        $this->testTenantAuth($tenant['name'], $apiKey);
+        $this->testworkspaceAuth($workspace['name'], $apiKey);
 
         // Test 2: Verify correct tools are returned
-        $tools = $this->testTenantToolsList($tenant['name'], $apiKey, $expectedTools);
+        $tools = $this->testworkspaceToolsList($workspace['name'], $apiKey, $expectedTools);
 
         // Test 3: Verify tool structure matches schema
         if (!empty($tools)) {
-            $this->testToolSchema($tenant['name'], $tools);
+            $this->testToolSchema($workspace['name'], $tools);
         }
 
         // Test 4: Test tool execution with valid parameters
         if (!empty($tools)) {
-            $this->testToolExecution($tenant['name'], $apiKey, $tools[0]);
+            $this->testToolExecution($workspace['name'], $apiKey, $tools[0]);
         }
 
         // Test 5: End-to-end vision test with real image
         if ($testImage && file_exists($testImage)) {
-            $this->testVisionEndToEnd($tenant['name'], $apiKey, $testImage);
+            $this->testVisionEndToEnd($workspace['name'], $apiKey, $testImage);
         } elseif ($testImage) {
             $this->skip("Vision test - image not found: {$testImage}");
         }
 
         // Test 6: Error handling
-        $this->testErrorHandling($tenant['name'], $apiKey);
+        $this->testErrorHandling($workspace['name'], $apiKey);
     }
 
     private function testHealthEndpoint(): void {
@@ -128,20 +128,20 @@ class McpToolsComprehensiveTest {
         }
     }
 
-    private function testTenantAuth(string $tenantName, string $apiKey): void {
-        $this->startTest("Authentication for tenant '{$tenantName}'");
+    private function testworkspaceAuth(string $workspaceName, string $apiKey): void {
+        $this->startTest("Authentication for workspace '{$workspaceName}'");
 
         $result = $this->makeRequest('GET', '/api/mcp/tools', null, $apiKey);
 
         if ($result['http_code'] === 200 && ($result['data']['success'] ?? false)) {
             $this->pass("API key authenticated successfully");
         } else {
-            $this->fail("Authentication failed for tenant '{$tenantName}'", $result);
+            $this->fail("Authentication failed for workspace '{$workspaceName}'", $result);
         }
     }
 
-    private function testTenantToolsList(string $tenantName, string $apiKey, array $expectedTools): array {
-        $this->startTest("Tool list matches expected for tenant '{$tenantName}'");
+    private function testworkspaceToolsList(string $workspaceName, string $apiKey, array $expectedTools): array {
+        $this->startTest("Tool list matches expected for workspace '{$workspaceName}'");
 
         $result = $this->makeRequest('GET', '/api/mcp/tools', null, $apiKey);
 
@@ -186,8 +186,8 @@ class McpToolsComprehensiveTest {
         return $tools;
     }
 
-    private function testToolSchema(string $tenantName, array $tools): void {
-        $this->startTest("Tool schema validation for tenant '{$tenantName}'");
+    private function testToolSchema(string $workspaceName, array $tools): void {
+        $this->startTest("Tool schema validation for workspace '{$workspaceName}'");
 
         foreach ($tools as $tool) {
             $toolName = $tool['name'] ?? 'unknown';
@@ -224,9 +224,9 @@ class McpToolsComprehensiveTest {
         }
     }
 
-    private function testToolExecution(string $tenantName, string $apiKey, array $tool): void {
+    private function testToolExecution(string $workspaceName, string $apiKey, array $tool): void {
         $toolName = $tool['name'];
-        $this->startTest("Execute tool '{$toolName}' for tenant '{$tenantName}'");
+        $this->startTest("Execute tool '{$toolName}' for workspace '{$workspaceName}'");
 
         // Build test arguments from schema
         $arguments = $this->buildTestArguments($tool['inputSchema']);
@@ -248,8 +248,8 @@ class McpToolsComprehensiveTest {
         }
     }
 
-    private function testVisionEndToEnd(string $tenantName, string $apiKey, string $imagePath): void {
-        $this->startTest("End-to-end vision test for tenant '{$tenantName}'");
+    private function testVisionEndToEnd(string $workspaceName, string $apiKey, string $imagePath): void {
+        $this->startTest("End-to-end vision test for workspace '{$workspaceName}'");
 
         // First check if there's an image analysis tool
         $result = $this->makeRequest('GET', '/api/mcp/tools', null, $apiKey);
@@ -265,7 +265,7 @@ class McpToolsComprehensiveTest {
         }
 
         if (!$visionTool) {
-            $this->skip("No vision tool found for tenant");
+            $this->skip("No vision tool found for workspace");
             return;
         }
 
@@ -340,8 +340,8 @@ class McpToolsComprehensiveTest {
         }
     }
 
-    private function testErrorHandling(string $tenantName, string $apiKey): void {
-        $this->startTest("Error handling for tenant '{$tenantName}'");
+    private function testErrorHandling(string $workspaceName, string $apiKey): void {
+        $this->startTest("Error handling for workspace '{$workspaceName}'");
 
         // Test missing tool_name
         $result = $this->makeRequest('POST', '/api/mcp/call', ['arguments' => []], $apiKey);
@@ -363,44 +363,44 @@ class McpToolsComprehensiveTest {
         }
     }
 
-    private function testCrossTenantIsolation(): void {
-        if (count($this->tenants) < 2) {
-            $this->skip("Need at least 2 tenants for isolation test");
+    private function testCrossworkspaceIsolation(): void {
+        if (count($this->workspaces) < 2) {
+            $this->skip("Need at least 2 workspaces for isolation test");
             return;
         }
 
-        $tenant1 = $this->tenants[0];
-        $tenant2 = $this->tenants[1];
+        $workspace1 = $this->workspaces[0];
+        $workspace2 = $this->workspaces[1];
 
-        $this->startTest("Cross-tenant isolation: {$tenant1['name']} vs {$tenant2['name']}");
+        $this->startTest("Cross-workspace isolation: {$workspace1['name']} vs {$workspace2['name']}");
 
-        // Get tools for tenant 1
-        $result1 = $this->makeRequest('GET', '/api/mcp/tools', null, $tenant1['api_key']);
+        // Get tools for workspace 1
+        $result1 = $this->makeRequest('GET', '/api/mcp/tools', null, $workspace1['api_key']);
         $tools1 = $result1['data']['data']['tools'] ?? [];
         $toolNames1 = array_column($tools1, 'name');
 
-        // Get tools for tenant 2
-        $result2 = $this->makeRequest('GET', '/api/mcp/tools', null, $tenant2['api_key']);
+        // Get tools for workspace 2
+        $result2 = $this->makeRequest('GET', '/api/mcp/tools', null, $workspace2['api_key']);
         $tools2 = $result2['data']['data']['tools'] ?? [];
         $toolNames2 = array_column($tools2, 'name');
 
         // Verify tools are different (or at least API keys return their own tools)
-        $this->pass("Tenant '{$tenant1['name']}' tools: " . implode(', ', $toolNames1 ?: ['none']));
-        $this->pass("Tenant '{$tenant2['name']}' tools: " . implode(', ', $toolNames2 ?: ['none']));
+        $this->pass("Workspace '{$workspace1['name']}' tools: " . implode(', ', $toolNames1 ?: ['none']));
+        $this->pass("Workspace '{$workspace2['name']}' tools: " . implode(', ', $toolNames2 ?: ['none']));
 
-        // Try to access tenant1's tool with tenant2's API key (if tools exist)
+        // Try to access workspace1's tool with workspace2's API key (if tools exist)
         if (!empty($tools1)) {
             $result = $this->makeRequest('POST', '/api/mcp/call', [
                 'tool_name' => $tools1[0]['name'],
                 'arguments' => []
-            ], $tenant2['api_key']);
+            ], $workspace2['api_key']);
 
-            // Should either 404 (not found in tenant2) or 403 (not accessible)
+            // Should either 404 (not found in workspace2) or 403 (not accessible)
             if (in_array($result['http_code'], [403, 404])) {
-                $this->pass("Tenant 2 cannot access Tenant 1's tools (HTTP {$result['http_code']})");
+                $this->pass("Workspace 2 cannot access Workspace 1's tools (HTTP {$result['http_code']})");
             } elseif ($result['http_code'] === 200) {
-                // Could be OK if both tenants have same tool name
-                $this->pass("Tool name exists in both tenants (expected in some configs)");
+                // Could be OK if both workspaces have same tool name
+                $this->pass("Tool name exists in both workspaces (expected in some configs)");
             } else {
                 $this->fail("Unexpected response when testing isolation", $result);
             }
@@ -474,8 +474,8 @@ class McpToolsComprehensiveTest {
         echo "║       MCP Tools Comprehensive Test Suite                     ║\n";
         echo "╚══════════════════════════════════════════════════════════════╝\n\n";
         echo "API URL: {$this->apiUrl}\n";
-        echo "Tenants: " . count($this->tenants) . "\n";
-        foreach ($this->tenants as $t) {
+        echo "Workspaces: " . count($this->workspaces) . "\n";
+        foreach ($this->workspaces as $t) {
             echo "  - {$t['name']}: " . substr($t['api_key'], 0, 12) . "...\n";
         }
         echo "\n";
@@ -540,7 +540,7 @@ $options = getopt('', [
     'config:',
     'api-url:',
     'api-key:',
-    'tenant:',
+    'workspace:',
     'expected-tools:',
     'test-image:',
     'help'
@@ -558,7 +558,7 @@ Options:
   --config=FILE         Load test configuration from JSON file
   --api-url=URL         API base URL (default: https://myctobot.ai)
   --api-key=KEY         API key for authentication
-  --tenant=NAME         Tenant name for reporting
+  --workspace=NAME         Workspace name for reporting
   --expected-tools=LIST Comma-separated list of expected tool names
   --test-image=PATH     Path to image for vision testing
   --help                Show this help message
@@ -566,9 +566,9 @@ Options:
 Config file format:
 {
   "api_url": "https://myctobot.ai",
-  "tenants": [
+  "workspaces": [
     {
-      "name": "tenant1",
+      "name": "workspace1",
       "api_key": "key1",
       "expected_tools": ["tool1", "tool2"],
       "test_image": "/path/to/image.png"
@@ -586,7 +586,7 @@ HELP;
 
 // Load configuration
 $apiUrl = '';
-$tenants = [];
+$workspaces = [];
 
 if (isset($options['config'])) {
     // Load from config file
@@ -601,7 +601,7 @@ if (isset($options['config'])) {
     }
 
     $apiUrl = $config['api_url'] ?? '';
-    $tenants = $config['tenants'] ?? [];
+    $workspaces = $config['workspaces'] ?? [];
 } else {
     // Load from CLI args / env
     $apiUrl = $options['api-url'] ?? getenv('MYCTOBOT_API_URL') ?: 'https://myctobot.ai';
@@ -618,18 +618,18 @@ if (isset($options['config'])) {
         $expectedTools = array_map('trim', explode(',', $options['expected-tools']));
     }
 
-    $tenants = [[
-        'name' => $options['tenant'] ?? 'default',
+    $workspaces = [[
+        'name' => $options['workspace'] ?? 'default',
         'api_key' => $apiKey,
         'expected_tools' => $expectedTools,
         'test_image' => $options['test-image'] ?? null
     ]];
 }
 
-if (empty($tenants)) {
-    die("Error: No tenants configured. Use --api-key or --config\n");
+if (empty($workspaces)) {
+    die("Error: No workspaces configured. Use --api-key or --config\n");
 }
 
 // Run tests
-$test = new McpToolsComprehensiveTest($apiUrl, $tenants);
+$test = new McpToolsComprehensiveTest($apiUrl, $workspaces);
 exit($test->run());

@@ -126,7 +126,7 @@ class Enterprise extends BaseControls\Control {
     }
 
     /**
-     * Re-register Jira webhook with correct tenant URL
+     * Re-register Jira webhook with correct workspace URL
      * POST /enterprise/reregisterwebhook
      */
     public function reregisterwebhook() {
@@ -155,10 +155,10 @@ class Enterprise extends BaseControls\Control {
             $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
 
             if ($result) {
-                $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+                $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
                 $this->json([
                     'success' => true,
-                    'message' => "Webhook re-registered with tenant: {$tenantSlug}"
+                    'message' => "Webhook re-registered with workspace: {$workspaceSlug}"
                 ]);
             } else {
                 $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
@@ -1139,10 +1139,10 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
-            // Get tenant slug for multi-tenancy support
-            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
-                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+            // Get workspace slug for multi-tenancy support
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
                 : '';
 
             $cmd = sprintf(
@@ -1152,7 +1152,7 @@ class Enterprise extends BaseControls\Control {
                 $this->member->id,
                 escapeshellarg($job->id),
                 escapeshellarg($issueKey),
-                $tenantParam
+                $workspaceParam
             );
 
             exec($cmd);
@@ -1234,10 +1234,10 @@ class Enterprise extends BaseControls\Control {
             $cronSecret = Flight::get('cron.api_key');
             $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
 
-            // Get tenant slug for multi-tenancy support
-            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
-                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+            // Get workspace slug for multi-tenancy support
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
                 : '';
 
             $cmd = sprintf(
@@ -1249,7 +1249,7 @@ class Enterprise extends BaseControls\Control {
                 escapeshellarg($issueKey),
                 escapeshellarg($job->branchName),
                 $job->prNumber ?? 0,
-                $tenantParam
+                $workspaceParam
             );
 
             exec($cmd);
@@ -1258,7 +1258,7 @@ class Enterprise extends BaseControls\Control {
                 'member_id' => $this->member->id,
                 'issue_key' => $issueKey,
                 'branch' => $job->branchName,
-                'tenant' => $tenantSlug ?? 'default'
+                'workspace' => $workspaceSlug ?? 'default'
             ]);
 
             $this->json([
@@ -1356,7 +1356,7 @@ class Enterprise extends BaseControls\Control {
 
         // repoconnections is in user SQLite database
         
-        // Verify repo exists (no member_id filter - database is already per-tenant)
+        // Verify repo exists (no member_id filter - database is already per-workspace)
         $repo = Bean::findOne('repoconnections', 'id = ?', [$repoId]);
         if (!$repo) {
                         Flight::jsonError('Repository not found', 404);

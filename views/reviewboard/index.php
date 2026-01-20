@@ -80,7 +80,7 @@
         <p>When CEO directives are processed, stories will appear here for review.</p>
         <hr>
         <p class="mb-0">
-            Send a directive to <code><?= htmlspecialchars($_SESSION['tenant_slug'] ?? 'your-tenant') ?>@myctobot.ai</code> to get started.
+            Send a directive to <code><?= htmlspecialchars($_SESSION['workspace_slug'] ?? 'your-workspace') ?>@myctobot.ai</code> to get started.
         </p>
     </div>
     <?php else: ?>
@@ -1869,7 +1869,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // PM Chatbox - floating assistant for project questions
 // Note: $ragServiceUrl is auto-detected in the partial based on HTTP_HOST
 // $knowledgeBases is passed from controller for KB context dropdown
-$tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+$workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 $projectId = null;
 // $knowledgeBases comes from controller
 include __DIR__ . '/../partials/pmchatbox.php';

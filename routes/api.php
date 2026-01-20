@@ -7,21 +7,21 @@
 
 use \Flight as Flight;
 
-// MCP API endpoints (tenant-agnostic - uses API key to determine tenant)
+// MCP API endpoints (workspace-agnostic - uses API key to determine workspace)
 Flight::route('GET /api/mcp/tools', ['\app\Api', 'mcptools']);
 Flight::route('POST /api/mcp/call', ['\app\Api', 'mcpcall']);
 
-// MCP API endpoints (tenant-specific - tenant encoded in URL for explicit routing)
-// Format: /api/mcp/{tenant}/tools and /api/mcp/{tenant}/call
-Flight::route('GET /api/mcp/@tenant/tools', ['\app\Api', 'mcptoolswithtenant']);
-Flight::route('POST /api/mcp/@tenant/call', ['\app\Api', 'mcpcallwithtenant']);
+// MCP API endpoints (workspace-specific - workspace encoded in URL for explicit routing)
+// Format: /api/mcp/workspace/tools and /api/mcp/workspace/call
+Flight::route('GET /api/mcp/@workspace/tools', ['\app\Api', 'mcptoolswithworkspace']);
+Flight::route('POST /api/mcp/@workspace/call', ['\app\Api', 'mcpcallwithworkspace']);
 
 // MCP JSON-RPC endpoint (for HTTP MCP server protocol)
 // This is the main endpoint Claude Code's MCP client connects to
-Flight::route('POST /api/mcp/@tenant', ['\app\Api', 'mcpjsonrpc']);
+Flight::route('POST /api/mcp/@workspace', ['\app\Api', 'mcpjsonrpc']);
 
 // MCP config endpoint - returns ready-to-use .mcp.json for an agent
-Flight::route('GET /api/mcp/@tenant/config/@agentId', ['\app\Api', 'mcpconfig']);
+Flight::route('GET /api/mcp/@workspace/config/@agentId', ['\app\Api', 'mcpconfig']);
 
 // API index/health check
 Flight::route('GET /api', function() {
@@ -33,8 +33,8 @@ Flight::route('GET /api/health', function() {
 });
 
 // Workstations/Runners endpoint - list active workstations for job execution
-// Requires tenant in URL and API key from tenant's config [api].api_key
-Flight::route('GET /api/workstations/@tenant', ['\app\Api', 'workstations']);
+// Requires workspace in URL and API key from workspace's config [api].api_key
+Flight::route('GET /api/workstations/@workspace', ['\app\Api', 'workstations']);
 
 // Job Executor integration endpoints (ping/pong validation)
 // PONG: Job-executor calls back to validate job and get details
@@ -49,7 +49,7 @@ Flight::route('GET /api/ceo/directive/@id', ['\app\Ceodirective', 'get']);
 
 // PM Assistant context endpoint - returns project/epic/story data for PM chatbot
 // Used by RAG service to fetch live data instead of duplicating queries
-Flight::route('GET /api/pm/context/@tenant', ['\app\Api', 'pmcontext']);
+Flight::route('GET /api/pm/context/@workspace', ['\app\Api', 'pmcontext']);
 
 // Runner API endpoints - remote runner job execution
 // GET /api/runner/boot - Bootstrap script (no auth)

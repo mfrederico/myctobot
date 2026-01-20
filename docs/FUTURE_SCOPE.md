@@ -3,7 +3,7 @@
 - Priority-based queue scheduling for Jira tickets (use priority from analysis dataset)
 - Daily sprint analysis to auto-prioritize tasks
 - GitHub issues priority integration
-- Parallel processing path (multiple workers per tenant)
+- Parallel processing path (multiple workers per workspace)
 
 
 ## Vision OCR Enhancements

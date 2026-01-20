@@ -121,12 +121,12 @@
                         </ul>
                     </li>
                     <?php
-                    $tenantSlug = \app\TenantResolver::getSessionTenant();
-                    if ($tenantSlug && $tenantSlug !== 'default'):
+                    $workspaceSlug = \app\WorkspaceResolver::getSessionWorkspace();
+                    if ($workspaceSlug && $workspaceSlug !== 'default'):
                     ?>
                     <li class="nav-item ms-2">
                         <span class="badge bg-primary d-flex align-items-center" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
-                            <i class="bi bi-building me-1"></i> <?= htmlspecialchars(strtoupper($tenantSlug)) ?>
+                            <i class="bi bi-building me-1"></i> <?= htmlspecialchars(strtoupper($workspaceSlug)) ?>
                         </span>
                     </li>
                     <?php endif; ?>

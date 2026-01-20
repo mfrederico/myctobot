@@ -16,7 +16,7 @@ HIGH-LEVEL ARCHITECTURE
 
                            ┌─────────────────────────────────────┐
                            │         MYCTOBOT (Control Plane)    │
-                           │         {tenant}.myctobot.ai        │
+                           │         workspace.myctobot.ai        │
                            ├─────────────────────────────────────┤
                            │                                     │
                            │  Database:                          │
@@ -80,7 +80,7 @@ PHASE 2: SESSION CREATION
 │                        services/TmuxService.php                                  │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  __construct($memberId, $issueKey, $repoPath, $tenant)                          │
+│  __construct($memberId, $issueKey, $repoPath, $workspace)                          │
 │     │                                                                            │
 │     ├── AoeStorage::loadAllSynced()  ◄── Queries tmux first (source of truth)   │
 │     │       │                                                                    │
@@ -103,7 +103,7 @@ PHASE 2: SESSION CREATION
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │  tmux new-session -d -s "aoe-gwt-SSI-1234-ab12cd34" \                            │
 │       -c "/tmp/aoe-gwt-SSI-1234-ab12cd34" \                                      │
-│       "php scripts/local-aidev-full.php --issue=SSI-1234 --member=1 --tenant=gwt"│
+│       "php scripts/local-aidev-full.php --issue=SSI-1234 --member=1 --workspace=gwt"│
 └─────────────────────────────────────────────────────────────────────────────────┘
 
 
@@ -158,7 +158,7 @@ REMOTE EXECUTION ARCHITECTURE
      ┌─────────────────────────────────────────────────────────────────────┐
      │ ssh clauderunner1@workstation \                                     │
      │   "curl -sfL https://myctobot.ai/api/runner/boot | \               │
-     │    bash -s -- --tenant=gwt --job=abc123 --token=XXXXX"             │
+     │    bash -s -- --workspace=gwt --job=abc123 --token=XXXXX"             │
      └─────────────────────────────────────────────────────────────────────┘
                          │
                          │ (that's ALL that goes over SSH)
@@ -169,9 +169,9 @@ REMOTE EXECUTION ARCHITECTURE
      │ #!/bin/bash                                                         │
      │ # boot.sh (fetched fresh every time via curl)                      │
      │                                                                     │
-     │ TENANT=$1; JOB=$2; TOKEN=$3                                        │
-     │ API="https://${TENANT}.myctobot.ai/api/runner"                     │
-     │ WORK="$HOME/jobs/${TENANT}/${JOB}"                                 │
+     │ workspace=$1; JOB=$2; TOKEN=$3                                        │
+     │ API="https://${workspace}.myctobot.ai/api/runner"                     │
+     │ WORK="$HOME/jobs/${workspace}/${JOB}"                                 │
      │                                                                     │
      │ mkdir -p "$WORK" && cd "$WORK"                                     │
      │                                                                     │
@@ -250,7 +250,7 @@ WORKSTATION DIRECTORY STRUCTURE (per user)
 ├── .gitconfig                          # Git config for this runner
 │
 ├── jobs/                               # Active job workspaces
-│   └── {tenant}/
+│   └── workspace/
 │       └── {job-uuid}/                 # e.g., gwt/abc123-def456/
 │           ├── manifest.json           # Job configuration (from API)
 │           ├── runner.sh               # Runner script (from API)
@@ -279,7 +279,7 @@ MULTIPLE RUNNERS = MULTIPLE LINUX USERS (security isolation)
 
 /home/clauderunner1/    # chmod 700 - Runner 1 (can't see runner 2's files)
 /home/clauderunner2/    # chmod 700 - Runner 2 (can't see runner 1's files)
-/home/clauderunner3/    # chmod 700 - Runner 3 (dedicated to specific tenant)
+/home/clauderunner3/    # chmod 700 - Runner 3 (dedicated to specific workspace)
 
 Benefits:
 - Complete file isolation between runners
@@ -343,7 +343,7 @@ Remote workstation/runner configuration:
 - `capabilities` - JSON array of capabilities (e.g., ["claude", "nodejs"])
 - `runner_token` - API authentication token
 - `last_heartbeat` - Last seen timestamp
-- `tenant_id` - Restrict to specific tenant (null = any)
+- `workspace_id` - Restrict to specific workspace (null = any)
 
 ### aiagents
 Agent configuration:
@@ -369,15 +369,15 @@ Job queue and history:
 
 ```
 /tmp/.aoe-php/
-└── tenants/
+└── workspaces/
     └── gwt/
-        └── sessions.json     # Tracks all sessions for tenant
+        └── sessions.json     # Tracks all sessions for workspace
             {
               "version": 1,
               "sessions": [
                 {
                   "id": "ab12cd3400000000",
-                  "tenant_id": "gwt",
+                  "workspace_id": "gwt",
                   "title": "SSI-1234",
                   "project_path": "/tmp/aoe-gwt-SSI-1234-ab12cd34",
                   "reference": "SSI-1234",
@@ -397,7 +397,7 @@ Note: AOE storage is synced with tmux (source of truth).
 
 ```bash
 # List active sessions (queries tmux first)
-php ../aoe-php/bin/aoe --tenant=gwt sessions
+php ../aoe-php/bin/aoe --workspace=gwt sessions
 
 # Attach to local session
 tmux attach -t aoe-gwt-SSI-1234-ab12cd34

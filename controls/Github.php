@@ -179,7 +179,7 @@ class Github extends BaseControls\Control {
                     // $owner and $repoName already set from earlier parsing
                     // Always use main domain for webhooks (subdomains redirect, breaking webhook delivery)
                     $webhookUrl = 'https://myctobot.ai/webhook/github';
-                    $workspace = $_SESSION['tenant_slug'] ?? null;
+                    $workspace = $_SESSION['workspace_slug'] ?? null;
                     if ($workspace && $workspace !== 'default') {
                         $webhookUrl .= '?workspace=' . urlencode($workspace);
                     }

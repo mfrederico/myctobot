@@ -69,11 +69,11 @@
                             </button>
                         </td>
                         <td>
-                            <span title="<?= htmlspecialchars($key['member_email']) ?>">
-                                <?= htmlspecialchars($key['member_username']) ?>
+                            <span title="<?= htmlspecialchars($key['member_email'] ?? '') ?>">
+                                <?= htmlspecialchars($key['member_username'] ?? '') ?>
                             </span>
                             <?php if ($isAdmin && $key['created_by_member_id'] != $key['member_id']): ?>
-                            <br><small class="text-muted">by <?= htmlspecialchars($key['created_by_username']) ?></small>
+                            <br><small class="text-muted">by <?= htmlspecialchars($key['created_by_username'] ?? '') ?></small>
                             <?php endif; ?>
                         </td>
                         <td>
@@ -198,7 +198,7 @@
                         <select class="form-select" id="keyMemberId" name="member_id">
                             <?php foreach ($members as $m): ?>
                             <option value="<?= $m['id'] ?>" <?= $m['id'] == $member->id ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($m['username']) ?> (<?= htmlspecialchars($m['email']) ?>)
+                                <?= htmlspecialchars($m['username'] ?? '') ?> (<?= htmlspecialchars($m['email'] ?? '') ?>)
                             </option>
                             <?php endforeach; ?>
                         </select>
@@ -328,7 +328,7 @@
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const baseUrl = '<?= rtrim(Flight::get('app.baseurl') ?: '', '/') ?>';
-const tenantSlug = '<?= htmlspecialchars($_SESSION['tenant_slug'] ?? 'default') ?>';
+const workspaceSlug = '<?= htmlspecialchars($_SESSION['workspace_slug'] ?? 'default') ?>';
 
 let currentKeyId = null;
 let createModal, tokenModal, useModal, regenerateModal;
@@ -414,10 +414,10 @@ function showUseKeyModal(keyId, keyName) {
     // Note: We don't have the full token here, just show examples
     const exampleToken = 'tk_your_token_here';
     document.getElementById('curlExample').textContent =
-        `curl -X POST "${baseUrl}/pipein/${tenantSlug}/{pipeline-slug}" \\\n  -H "X-API-TOKEN: ${exampleToken}"`;
+        `curl -X POST "${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}" \\\n  -H "X-API-TOKEN: ${exampleToken}"`;
 
     document.getElementById('webhookUrl').value =
-        `${baseUrl}/pipein/${tenantSlug}/{pipeline-slug}?key=${exampleToken}`;
+        `${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}?key=${exampleToken}`;
 
     useModal.show();
 }

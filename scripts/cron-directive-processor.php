@@ -5,41 +5,41 @@
  *
  * Processes CEO directives through the autonomous CTO system.
  * Run every 5 minutes via cron:
- *   * /5 * * * * php /path/to/scripts/cron-directive-processor.php --tenant=gwt
+ *   * /5 * * * * php /path/to/scripts/cron-directive-processor.php --workspace=gwt
  *
  * Usage:
- *   php cron-directive-processor.php --tenant=gwt [--verbose] [--dry-run]
+ *   php cron-directive-processor.php --workspace=gwt [--verbose] [--dry-run]
  */
 
 // Parse command line arguments
-$options = getopt('', ['tenant:', 'verbose', 'dry-run', 'help']);
+$options = getopt('', ['workspace:', 'verbose', 'dry-run', 'help']);
 
 if (isset($options['help'])) {
     echo <<<HELP
 Directive Processor - Autonomous CTO System
 
-Usage: php cron-directive-processor.php --tenant=<tenant> [options]
+Usage: php cron-directive-processor.php --workspace=<workspace> [options]
 
 Options:
-  --tenant=<name>   Required. Tenant slug (e.g., gwt)
+  --workspace=<name>   Required. Workspace slug (e.g., gwt)
   --verbose         Show detailed output
   --dry-run         Check what would be processed without actually processing
   --help            Show this help message
 
 Example:
-  php cron-directive-processor.php --tenant=gwt --verbose
+  php cron-directive-processor.php --workspace=gwt --verbose
 
 HELP;
     exit(0);
 }
 
-if (empty($options['tenant'])) {
-    echo "Error: --tenant is required\n";
-    echo "Usage: php cron-directive-processor.php --tenant=<tenant>\n";
+if (empty($options['workspace'])) {
+    echo "Error: --workspace is required\n";
+    echo "Usage: php cron-directive-processor.php --workspace=<workspace>\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 $verbose = isset($options['verbose']);
 $dryRun = isset($options['dry-run']);
 
@@ -62,10 +62,10 @@ use \app\services\JiraClient;
 require_once 'lib/plugins/AtlassianAuth.php';
 require_once 'services/JiraClient.php';
 
-// Load tenant config
-$configFile = "conf/config.{$tenant}.ini";
+// Load workspace config
+$configFile = "conf/config.{$workspace}.ini";
 if (!file_exists($configFile)) {
-    echo "Error: Tenant config not found: {$configFile}\n";
+    echo "Error: Workspace config not found: {$configFile}\n";
     exit(1);
 }
 
@@ -76,7 +76,7 @@ if (!$config) {
 }
 
 // Lockfile to prevent concurrent runs (race condition protection)
-$lockFile = "/tmp/cron-directive-processor-{$tenant}.lock";
+$lockFile = "/tmp/cron-directive-processor-{$workspace}.lock";
 $lockHandle = fopen($lockFile, 'c');
 
 if (!$lockHandle) {
@@ -87,7 +87,7 @@ if (!$lockHandle) {
 if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
     // Another instance is already running - this is not an error, just skip
     if ($verbose) {
-        echo "Another directive processor is already running for tenant: {$tenant}\n";
+        echo "Another directive processor is already running for workspace: {$workspace}\n";
     }
     fclose($lockHandle);
     exit(0);
@@ -122,12 +122,12 @@ try {
     $type = $dbConfig['type'] ?? 'mysql';
 
     if ($type === 'sqlite') {
-        $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+        $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
         Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
-        $name = $dbConfig['name'] ?? $tenant;
+        $name = $dbConfig['name'] ?? $workspace;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
         Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
@@ -155,7 +155,7 @@ function output($message, $forceVerbose = false) {
     }
 }
 
-output("Starting Directive Processor for tenant: {$tenant}", true);
+output("Starting Directive Processor for workspace: {$workspace}", true);
 output("Mode: " . ($dryRun ? 'DRY RUN' : 'LIVE'), true);
 
 // Get processing config
@@ -308,9 +308,9 @@ try {
         $aoeBasePath = '/tmp/.aoe-php';
 
         try {
-            \Aoe\Tenant\TenantContext::set($tenant);
-            $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
-            $aoeTmux = new \Aoe\Tmux\TmuxService($tenant);
+            \Aoe\Workspace\WorkspaceContext::set($workspace);
+            $aoeStorage = new \Aoe\Session\Storage($workspace, $aoeBasePath);
+            $aoeTmux = new \Aoe\Tmux\TmuxService($workspace);
             $statusDetector = new \Aoe\Tmux\StatusDetector();
 
             $sessions = $aoeStorage->loadAll();
@@ -385,7 +385,7 @@ try {
             output("AOE sessions synced: {$aoeUpdated} updated, {$aoeStale} marked stopped");
 
             // Clear any queue check trigger files
-            $queueCheckFile = "/tmp/aoe-queue-check-{$tenant}";
+            $queueCheckFile = "/tmp/aoe-queue-check-{$workspace}";
             if (file_exists($queueCheckFile)) {
                 unlink($queueCheckFile);
                 output("Queue check trigger cleared");
@@ -402,7 +402,7 @@ try {
 
     if (file_exists($aoePath)) {
         try {
-            $aoeStorage = new \Aoe\Session\Storage($tenant, $aoeBasePath);
+            $aoeStorage = new \Aoe\Session\Storage($workspace, $aoeBasePath);
             $activeSessions = $aoeStorage->loadAllSynced();
             $orphanedCount = 0;
 
@@ -446,7 +446,7 @@ try {
 
     try {
         $jobService = new AIDevJobService();
-        $queueResults = $jobService->processJobQueue($tenant);
+        $queueResults = $jobService->processJobQueue($workspace);
 
         output("Jobs started from queue: {$queueResults['jobs_started']}");
         output("Jobs remaining in queue: {$queueResults['jobs_remaining']}");

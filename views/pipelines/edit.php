@@ -143,7 +143,7 @@
                             <div class="mb-3">
                                 <label class="form-label">CLI Command</label>
                                 <div class="input-group">
-                                    <input type="text" class="form-control font-monospace" value="php scripts/runpipe.php --tenant=<?= $_SESSION['tenant_slug'] ?? 'default' ?> --pipeline=<?= htmlspecialchars($pipeline['slug']) ?>" readonly id="cliCommand">
+                                    <input type="text" class="form-control font-monospace" value="php scripts/runpipe.php --workspace=<?= $_SESSION['workspace_slug'] ?? 'default' ?> --pipeline=<?= htmlspecialchars($pipeline['slug']) ?>" readonly id="cliCommand">
                                     <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('cliCommand')">
                                         <i class="bi bi-clipboard"></i>
                                     </button>

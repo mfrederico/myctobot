@@ -20,7 +20,7 @@ use \app\Bean;
 class AIDevJobManager {
 
     private int $memberId;
-    private ?string $tenant;
+    private ?string $workspace;
 
     // Job statuses
     const STATUS_PENDING = 'pending';
@@ -30,9 +30,9 @@ class AIDevJobManager {
     const STATUS_FAILED = 'failed';
     const STATUS_COMPLETE = 'complete';
 
-    public function __construct(int $memberId, ?string $tenant = null) {
+    public function __construct(int $memberId, ?string $workspace = null) {
         $this->memberId = $memberId;
-        $this->tenant = $tenant ?? ($_SESSION['tenant_slug'] ?? 'default');
+        $this->workspace = $workspace ?? ($_SESSION['workspace_slug'] ?? 'default');
     }
 
     /**
@@ -393,13 +393,13 @@ class AIDevJobManager {
             }
             require_once $aoePath;
 
-            $tenantSlug = $this->tenant ?: 'default';
-            \Aoe\Tenant\TenantContext::set($tenantSlug);
+            $workspaceSlug = $this->workspace ?: 'default';
+            \Aoe\Workspace\WorkspaceContext::set($workspaceSlug);
 
             // Use consistent storage path that works for both CLI and web
             $basePath = $this->getAoeStoragePath();
-            $storage = new \Aoe\Session\Storage($tenantSlug, $basePath);
-            $tmux = new \Aoe\Tmux\TmuxService($tenantSlug);
+            $storage = new \Aoe\Session\Storage($workspaceSlug, $basePath);
+            $tmux = new \Aoe\Tmux\TmuxService($workspaceSlug);
 
             // Find session by reference (issue key)
             foreach ($storage->loadAll() as $session) {

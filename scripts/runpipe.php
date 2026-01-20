@@ -8,20 +8,20 @@
  * USAGE:
  * ------
  * # Run a pipeline by slug:
- * php scripts/runpipe.php --tenant=gwt --pipeline=my-deploy-pipeline
+ * php scripts/runpipe.php --workspace=gwt --pipeline=my-deploy-pipeline
  *
  * # Run a pipeline by ID:
- * php scripts/runpipe.php --tenant=gwt --pipeline-id=123
+ * php scripts/runpipe.php --workspace=gwt --pipeline-id=123
  *
  * # Resume/execute an existing run:
- * php scripts/runpipe.php --tenant=gwt --run-id=456
+ * php scripts/runpipe.php --workspace=gwt --run-id=456
  *
  * # With context data:
- * php scripts/runpipe.php --tenant=gwt --pipeline=my-pipeline --context='{"key":"value"}'
+ * php scripts/runpipe.php --workspace=gwt --pipeline=my-pipeline --context='{"key":"value"}'
  *
  * OPTIONS:
  * --------
- *   --tenant        REQUIRED - Tenant slug (e.g., gwt)
+ *   --workspace        REQUIRED - Workspace slug (e.g., gwt)
  *   --pipeline      Pipeline slug to run
  *   --pipeline-id   Pipeline ID to run (alternative to slug)
  *   --run-id        Existing run ID to execute (skips creating new run)
@@ -39,7 +39,7 @@ chdir($baseDir);
 
 // Parse command line options
 $options = getopt('', [
-    'tenant:',
+    'workspace:',
     'pipeline:',
     'pipeline-id:',
     'run-id:',
@@ -51,9 +51,9 @@ $options = getopt('', [
 if (isset($options['help'])) {
     echo "MyCTOBot Pipeline Runner\n\n";
     echo "Usage:\n";
-    echo "  php scripts/runpipe.php --tenant=SLUG --pipeline=SLUG [options]\n\n";
+    echo "  php scripts/runpipe.php --workspace=SLUG --pipeline=SLUG [options]\n\n";
     echo "Options:\n";
-    echo "  --tenant        REQUIRED - Tenant slug (e.g., gwt)\n";
+    echo "  --workspace        REQUIRED - Workspace slug (e.g., gwt)\n";
     echo "  --pipeline      Pipeline slug to run\n";
     echo "  --pipeline-id   Pipeline ID to run (alternative to slug)\n";
     echo "  --run-id        Existing run ID to execute\n";
@@ -61,14 +61,14 @@ if (isset($options['help'])) {
     echo "  --verbose       Show detailed output\n";
     echo "  --help          Show this help message\n\n";
     echo "Examples:\n";
-    echo "  php scripts/runpipe.php --tenant=gwt --pipeline=deploy-staging\n";
-    echo "  php scripts/runpipe.php --tenant=gwt --pipeline=ci --context='{\"branch\":\"main\"}'\n";
-    echo "  php scripts/runpipe.php --tenant=gwt --run-id=123\n";
+    echo "  php scripts/runpipe.php --workspace=gwt --pipeline=deploy-staging\n";
+    echo "  php scripts/runpipe.php --workspace=gwt --pipeline=ci --context='{\"branch\":\"main\"}'\n";
+    echo "  php scripts/runpipe.php --workspace=gwt --run-id=123\n";
     exit(0);
 }
 
 $verbose = isset($options['verbose']);
-$tenant = $options['tenant'] ?? null;
+$workspace = $options['workspace'] ?? null;
 $pipelineSlug = $options['pipeline'] ?? null;
 $pipelineId = $options['pipeline-id'] ?? null;
 $runId = $options['run-id'] ?? null;
@@ -82,8 +82,8 @@ if ($verbose) {
 }
 
 // Validate required parameters
-if (empty($tenant)) {
-    echo "Error: --tenant is required\n";
+if (empty($workspace)) {
+    echo "Error: --workspace is required\n";
     exit(1);
 }
 
@@ -106,15 +106,15 @@ use \app\services\PipelineExecutor;
 require_once $baseDir . '/services/PipelineExecutor.php';
 
 try {
-    // Determine config file based on tenant parameter
-    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    // Determine config file based on workspace parameter
+    $configFile = $baseDir . "/conf/config.{$workspace}.ini";
     if (!file_exists($configFile)) {
-        echo "Error: Tenant config not found: {$configFile}\n";
+        echo "Error: Workspace config not found: {$configFile}\n";
         exit(1);
     }
 
     if ($verbose) {
-        echo "Loading tenant config: {$configFile}\n";
+        echo "Loading workspace config: {$configFile}\n";
     }
 
     // Initialize bootstrap

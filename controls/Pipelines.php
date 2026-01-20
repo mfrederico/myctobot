@@ -13,7 +13,7 @@ namespace app;
 
 use \Flight as Flight;
 use \app\Bean;
-use \app\TenantResolver;
+use \app\WorkspaceResolver;
 use \app\services\ApiAuthService;
 use \Exception as Exception;
 
@@ -328,12 +328,12 @@ class Pipelines extends BaseControls\Control {
         }
 
         // Build webhook URL for this pipeline
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
-        $webhookUrl = "{$baseUrl}/pipein/{$tenantSlug}/{$pipeline->slug}";
+        $webhookUrl = "{$baseUrl}/pipein/{$workspaceSlug}/{$pipeline->slug}";
 
         // Build MCP tool URL for this pipeline
-        $mcpToolsUrl = "{$baseUrl}/pipelines/mcp/tools/{$tenantSlug}";
+        $mcpToolsUrl = "{$baseUrl}/pipelines/mcp/tools/{$workspaceSlug}";
 
         $this->viewData['title'] = 'Edit Pipeline: ' . $pipeline->name;
         $this->viewData['pipeline'] = [
@@ -352,7 +352,7 @@ class Pipelines extends BaseControls\Control {
             'input_schema_json' => $pipeline->input_schema_json ?: '{}'
         ];
         $this->viewData['mcpToolsUrl'] = $mcpToolsUrl;
-        $this->viewData['tenantSlug'] = $tenantSlug;
+        $this->viewData['workspaceSlug'] = $workspaceSlug;
         $this->viewData['stepGrid'] = $stepGrid;
         $this->viewData['maxRow'] = $maxRow;
         $this->viewData['stepTypes'] = self::STEP_TYPES;
@@ -872,12 +872,12 @@ class Pipelines extends BaseControls\Control {
         Bean::store($pipeline);
 
         // Spawn background execution
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $scriptPath = __DIR__ . '/../scripts/runpipe.php';
         $cmd = sprintf(
-            'php %s --tenant=%s --run-id=%d > /dev/null 2>&1 &',
+            'php %s --workspace=%s --run-id=%d > /dev/null 2>&1 &',
             escapeshellarg($scriptPath),
-            escapeshellarg($tenantSlug),
+            escapeshellarg($workspaceSlug),
             $runId
         );
         exec($cmd);
@@ -901,14 +901,17 @@ class Pipelines extends BaseControls\Control {
     public function runsync($params = []) {
         // Allow both authenticated users and API calls with token
         $authenticated = $this->isLoggedIn();
-        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
+        $memberId = $this->member->id ?? null;
 
-        if (!$authenticated && empty($apiToken)) {
-            Flight::jsonError('Authentication required', 401);
-            return;
+        // If not logged in via session, try API key authentication
+        if (!$authenticated) {
+            $authResult = ApiAuthService::authenticate('pipelines', 'runsync');
+            if (!$authResult['success']) {
+                Flight::jsonError($authResult['error'], $authResult['code']);
+                return;
+            }
+            $memberId = $authResult['member']->id;
         }
-
-        // TODO: Validate API token if provided
 
         $slug = $this->opId() ?? $this->getParam('slug');
         $contextJson = $this->getParam('context', '{}');
@@ -949,7 +952,7 @@ class Pipelines extends BaseControls\Control {
         $run = Bean::dispense('pipelineruns');
         $run->run_uid = $runUid;
         $run->pipelines = $pipeline;
-        $run->member_id = $this->member->id ?? null;
+        $run->member_id = $memberId;
         $run->trigger_source = 'api_sync';
         $run->trigger_data_json = json_encode($triggerData);
         $run->status = 'pending';
@@ -1012,8 +1015,8 @@ class Pipelines extends BaseControls\Control {
     }
 
     /**
-     * Run pipeline synchronously via API with tenant in URL path
-     * POST /pipelines/runsyncapi/{tenant}/{slug}
+     * Run pipeline synchronously via API with workspace in URL path
+     * POST /pipelines/runsyncapi/workspace/{slug}
      *
      * URL pattern matches Pipein webhook style for consistent API design.
      * Validates API token from header or query param.
@@ -1023,7 +1026,7 @@ class Pipelines extends BaseControls\Control {
      *          {"context_key": "value"}
      */
     public function runsyncapi($params = []) {
-        // Parse URL to extract tenant and slug: /pipelines/runsyncapi/{tenant}/{slug}
+        // Parse URL to extract workspace and slug: /pipelines/runsyncapi/workspace/{slug}
         $url = Flight::request()->url;
         $path = preg_replace('#^/pipelines/runsyncapi/?#', '', $url);
         if (strpos($path, '?') !== false) {
@@ -1033,29 +1036,31 @@ class Pipelines extends BaseControls\Control {
         $parts = array_values($parts);
 
         if (count($parts) < 2) {
-            Flight::jsonError('Invalid URL format. Expected: /pipelines/runsyncapi/{tenant}/{slug}', 400);
+            Flight::jsonError('Invalid URL format. Expected: /pipelines/runsyncapi/{workspace}/{slug}', 400);
             return;
         }
 
-        $tenant = $parts[0];
+        $workspace = $parts[0];
         $slug = $parts[1];
 
-        // Validate API token
-        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
-        if (empty($apiToken)) {
-            Flight::jsonError('API token required', 401);
+        // Switch to workspace database first (required for API key lookup)
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
             return;
         }
 
-        // Switch to tenant database
-        if (!TenantResolver::switchDatabase($tenant)) {
-            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+        // Validate API token against workspace's apikeys table
+        $authResult = ApiAuthService::authenticate('pipelines', 'runsyncapi');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
+        $apiMember = $authResult['member'];
 
-        // TODO: Validate API token against tenant's configured tokens
-
-        $this->logger->info("Pipeline API sync run for tenant: {$tenant}, pipeline: {$slug}");
+        $this->logger->info("Pipeline API sync run for workspace: {$workspace}, pipeline: {$slug}", [
+            'member_id' => $apiMember->id,
+            'member_username' => $apiMember->username
+        ]);
 
         // Find pipeline by slug
         $pipeline = Bean::findOne('pipelines', 'slug = ?', [$slug]);
@@ -1093,7 +1098,7 @@ class Pipelines extends BaseControls\Control {
         $run = Bean::dispense('pipelineruns');
         $run->run_uid = $runUid;
         $run->pipelines = $pipeline;
-        $run->member_id = null; // API access has no member
+        $run->member_id = $apiMember->id;
         $run->trigger_source = 'api_sync';
         $run->trigger_data_json = json_encode($triggerData);
         $run->status = 'pending';
@@ -1162,20 +1167,20 @@ class Pipelines extends BaseControls\Control {
     /**
      * List pipelines exposed as MCP tools
      *
-     * GET /pipelines/mcp/tools/{tenant}
+     * GET /pipelines/mcp/tools/workspace
      * Header: X-API-TOKEN: your-api-key
      *
      * Returns MCP-compatible tool definitions for all pipelines with expose_as_tool=1
      */
-    public function mcptools($tenant = null) {
-        if (empty($tenant)) {
-            Flight::jsonError('Tenant required. Format: /pipelines/mcp/tools/{tenant}', 400);
+    public function mcptools($workspace = null) {
+        if (empty($workspace)) {
+            Flight::jsonError('Workspace required. Format: /pipelines/mcp/tools/workspace', 400);
             return;
         }
 
-        // Switch to tenant database first
-        if (!TenantResolver::switchDatabase($tenant)) {
-            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+        // Switch to workspace database first
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
             return;
         }
 
@@ -1218,21 +1223,21 @@ class Pipelines extends BaseControls\Control {
     /**
      * Execute a pipeline as an MCP tool call
      *
-     * POST /pipelines/mcp/call/{tenant}/{slug}
+     * POST /pipelines/mcp/call/workspace/{slug}
      * Header: X-API-TOKEN: your-api-key
      * Body: {"input": {...}}  (matches the pipeline's input schema)
      *
      * Returns tool result in MCP format
      */
-    public function mcpcall($tenant = null, $slug = null) {
-        if (empty($tenant) || empty($slug)) {
-            Flight::jsonError('Invalid URL format. Expected: /pipelines/mcp/call/{tenant}/{slug}', 400);
+    public function mcpcall($workspace = null, $slug = null) {
+        if (empty($workspace) || empty($slug)) {
+            Flight::jsonError('Invalid URL format. Expected: /pipelines/mcp/call/workspace/{slug}', 400);
             return;
         }
 
-        // Switch to tenant database first
-        if (!TenantResolver::switchDatabase($tenant)) {
-            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+        // Switch to workspace database first
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
             return;
         }
 

@@ -534,6 +534,6 @@ function escapeHtml(text) {
 <?php
 // PM Chatbox - floating assistant for project questions
 $ragServiceUrl = getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501';
-$tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+$workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 include __DIR__ . '/../partials/pmchatbox.php';
 ?>

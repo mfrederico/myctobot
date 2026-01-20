@@ -76,7 +76,7 @@ class Docs extends BaseControls\Control {
                     <li><strong>9.4x faster database queries</strong> with transparent query caching</li>
                     <li><strong>175,000 permission checks/second</strong> with 3-tier permission caching</li>
                     <li><strong>Zero configuration</strong> - works out of the box</li>
-                    <li><strong>Multi-tenant safe</strong> - isolated cache namespaces</li>
+                    <li><strong>Multi-workspace safe</strong> - isolated cache namespaces</li>
                 </ul>
                 <p>For detailed documentation, please ensure <code>docs/CACHING.md</code> exists.</p>
                 </div>';

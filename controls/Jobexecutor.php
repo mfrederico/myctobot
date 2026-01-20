@@ -21,27 +21,27 @@ class Jobexecutor extends BaseControls\Control {
      * PONG: Job-executor calls back to validate a job.
      * Returns job details if valid.
      *
-     * Expected input: { "tenant": "gwt", "job_uid": "abc123..." }
+     * Expected input: { "workspace": "gwt", "job_uid": "abc123..." }
      */
     public function validate() {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input || empty($input['tenant']) || empty($input['job_uid'])) {
-            Flight::jsonError('Missing tenant or job_uid', 400);
+        if (!$input || empty($input['workspace']) || empty($input['job_uid'])) {
+            Flight::jsonError('Missing workspace or job_uid', 400);
             return;
         }
 
-        $tenant = $input['tenant'];
+        $workspace = $input['workspace'];
         $jobUid = $input['job_uid'];
 
         Flight::get('log')->info('Job validation request (PONG)', [
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'job_uid' => substr($jobUid, 0, 8) . '...',
         ]);
 
-        // Switch to tenant database
-        if (!$this->switchToTenantDatabase($tenant)) {
-            Flight::json(['valid' => false, 'error' => 'Failed to access tenant'], 200);
+        // Switch to workspace database
+        if (!$this->switchToWorkspaceDatabase($workspace)) {
+            Flight::json(['valid' => false, 'error' => 'Failed to access workspace'], 200);
             return;
         }
 
@@ -194,26 +194,26 @@ class Jobexecutor extends BaseControls\Control {
      *
      * Job-executor reports status updates.
      *
-     * Expected input: { "tenant": "gwt", "job_uid": "abc123...", "status": "running", "phase": "executing" }
+     * Expected input: { "workspace": "gwt", "job_uid": "abc123...", "status": "running", "phase": "executing" }
      */
     public function status() {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input || empty($input['tenant']) || empty($input['job_uid'])) {
-            Flight::jsonError('Missing tenant or job_uid', 400);
+        if (!$input || empty($input['workspace']) || empty($input['job_uid'])) {
+            Flight::jsonError('Missing workspace or job_uid', 400);
             return;
         }
 
-        $tenant = $input['tenant'];
+        $workspace = $input['workspace'];
         $jobUid = $input['job_uid'];
         $status = $input['status'] ?? '';
         $phase = $input['phase'] ?? '';
         $summary = $input['summary'] ?? null;
         $errorMessage = $input['error_message'] ?? null;
 
-        // Switch to tenant database
-        if (!$this->switchToTenantDatabase($tenant)) {
-            Flight::jsonError('Failed to access tenant', 500);
+        // Switch to workspace database
+        if (!$this->switchToWorkspaceDatabase($workspace)) {
+            Flight::jsonError('Failed to access workspace', 500);
             return;
         }
 
@@ -261,36 +261,36 @@ class Jobexecutor extends BaseControls\Control {
     }
 
     /**
-     * Switch to tenant database
+     * Switch to workspace database
      */
-    private function switchToTenantDatabase(string $tenant): bool {
+    private function switchToWorkspaceDatabase(string $workspace): bool {
         try {
-            $configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
+            $configFile = BASE_PATH . "/conf/config.{$workspace}.ini";
             if (!file_exists($configFile)) {
-                Flight::get('log')->error('Tenant config not found', ['tenant' => $tenant]);
+                Flight::get('log')->error('Workspace config not found', ['workspace' => $workspace]);
                 return false;
             }
 
-            $tenantConfig = parse_ini_file($configFile, true);
-            if (!$tenantConfig || empty($tenantConfig['database'])) {
+            $workspaceConfig = parse_ini_file($configFile, true);
+            if (!$workspaceConfig || empty($workspaceConfig['database'])) {
                 return false;
             }
 
-            $dbConfig = $tenantConfig['database'];
+            $dbConfig = $workspaceConfig['database'];
             $dsn = sprintf('%s:host=%s;port=%d;dbname=%s',
                 $dbConfig['type'] ?? 'mysql',
                 $dbConfig['host'] ?? 'localhost',
                 $dbConfig['port'] ?? 3306,
-                $dbConfig['name'] ?? $tenant
+                $dbConfig['name'] ?? $workspace
             );
 
-            if (!Bean::hasDatabase($tenant)) {
-                Bean::addDatabase($tenant, $dsn, $dbConfig['user'] ?? 'root', $dbConfig['pass'] ?? '');
+            if (!Bean::hasDatabase($workspace)) {
+                Bean::addDatabase($workspace, $dsn, $dbConfig['user'] ?? 'root', $dbConfig['pass'] ?? '');
             }
-            Bean::selectDatabase($tenant);
+            Bean::selectDatabase($workspace);
             return true;
         } catch (\Exception $e) {
-            Flight::get('log')->error('Failed to switch to tenant: ' . $e->getMessage());
+            Flight::get('log')->error('Failed to switch to workspace: ' . $e->getMessage());
             return false;
         }
     }

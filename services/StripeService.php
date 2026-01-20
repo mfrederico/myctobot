@@ -3,7 +3,7 @@
  * Stripe Service
  * Handles Stripe payment integration for WORKSPACE-level subscriptions
  *
- * In multi-tenant mode, each workspace has ONE subscription.
+ * In multi-workspace mode, each workspace has ONE subscription.
  * Any admin can manage billing on behalf of the workspace.
  */
 
@@ -99,12 +99,12 @@ class StripeService {
         }
 
         // Create new Stripe customer for workspace
-        $tenant = $_SESSION['tenant_slug'] ?? 'default';
+        $workspace = $_SESSION['workspace_slug'] ?? 'default';
         $customer = Customer::create([
             'email' => $billingEmail,
             'name' => $billingName ?? $billingEmail,
             'metadata' => [
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]
         ]);
 
@@ -150,11 +150,11 @@ class StripeService {
         $customerId = self::getOrCreateCustomer($billingEmail);
         $successUrl = Flight::get('stripe.success_url');
         $cancelUrl = Flight::get('stripe.cancel_url');
-        $tenant = $_SESSION['tenant_slug'] ?? 'default';
+        $workspace = $_SESSION['workspace_slug'] ?? 'default';
 
         $subscriptionData = [
             'metadata' => [
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]
         ];
 
@@ -177,7 +177,7 @@ class StripeService {
             'success_url' => $successUrl,
             'cancel_url' => $cancelUrl,
             'metadata' => [
-                'tenant' => $tenant
+                'workspace' => $workspace
             ],
             'subscription_data' => $subscriptionData
         ]);
@@ -264,10 +264,10 @@ class StripeService {
      * Handle checkout.session.completed
      */
     private static function handleCheckoutComplete($session): void {
-        $tenant = $session->metadata->tenant ?? 'unknown';
+        $workspace = $session->metadata->workspace ?? 'unknown';
 
         Flight::get('log')->info('Checkout completed', [
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'session_id' => $session->id,
             'subscription_id' => $session->subscription
         ]);

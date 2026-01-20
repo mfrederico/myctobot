@@ -7,7 +7,7 @@
  *
  * Required variables:
  *   $ragServiceUrl - WebSocket URL for RAG service (e.g., 'ws://localhost:9501')
- *   $tenantSlug - Current tenant slug from session
+ *   $workspaceSlug - Current workspace slug from session
  *   $projectId - (optional) Current project ID for context filtering
  *   $knowledgeBases - (optional) Array of KBs for context selection
  */
@@ -28,7 +28,7 @@ if ($isLocalhost) {
     $ragServiceUrl = $ragServiceUrl ?? "{$scheme}://{$_SERVER['HTTP_HOST']}";
 }
 
-$tenantSlug = $tenantSlug ?? ($_SESSION['tenant_slug'] ?? 'default');
+$workspaceSlug = $workspaceSlug ?? ($_SESSION['workspace_slug'] ?? 'default');
 $projectId = $projectId ?? null;
 $knowledgeBases = $knowledgeBases ?? [];
 ?>
@@ -180,7 +180,7 @@ $knowledgeBases = $knowledgeBases ?? [];
 (function() {
     // Configuration
     const PM_CONFIG = {
-        tenant: <?= json_encode($tenantSlug) ?>,
+        workspace: <?= json_encode($workspaceSlug) ?>,
         projectId: <?= json_encode($projectId) ?>,
         ragServiceUrl: <?= json_encode($ragServiceUrl) ?>,
         reconnectDelay: 3000,
@@ -252,7 +252,7 @@ $knowledgeBases = $knowledgeBases ?? [];
 
         // Convert http/https to ws/wss
         let wsUrl = PM_CONFIG.ragServiceUrl.replace(/^http/, 'ws');
-        ws = new WebSocket(`${wsUrl}/ws/pm/${PM_CONFIG.tenant}`);
+        ws = new WebSocket(`${wsUrl}/ws/pm/${PM_CONFIG.workspace}`);
 
         ws.onopen = () => {
             connected = true;

@@ -295,6 +295,21 @@ class Api extends BaseControls\Control {
     }
 
     /**
+     * MCP JSON-RPC endpoint with embedded API key
+     * POST /api/mcp/workspace/apikey
+     *
+     * For Claude Code which doesn't send headers - API key is embedded in URL
+     */
+    public function mcpjsonrpcwithkey($workspace = null, $apikey = null) {
+        // Inject the API key from URL into $_GET so ApiAuthService can find it
+        if (!empty($apikey)) {
+            $_GET['key'] = $apikey;
+        }
+        // Delegate to main handler
+        return $this->mcpjsonrpc($workspace);
+    }
+
+    /**
      * MCP JSON-RPC endpoint
      * POST /api/mcp/workspace
      *
@@ -303,6 +318,12 @@ class Api extends BaseControls\Control {
      */
     public function mcpjsonrpc($workspace = null) {
         $urlWorkspace = $workspace;
+
+        // Debug logging for MCP requests
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? 'none';
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? 'none';
+        Flight::get('log')->debug("MCP request: workspace={$urlWorkspace}, auth_header=" . substr($authHeader, 0, 30) . "..., x-api-token=" . substr($apiToken, 0, 20) . "...");
+
         if (empty($urlWorkspace)) {
             $this->jsonRpcError(-32600, 'Workspace required in URL', null);
             return;
@@ -368,16 +389,26 @@ class Api extends BaseControls\Control {
      */
     private function mcpToolsList(string $urlWorkspace, $id) {
         // Authenticate with ApiAuthService
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? 'none';
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? 'none';
+        $queryKey = $_GET['key'] ?? 'none';
+        $queryString = $_SERVER['QUERY_STRING'] ?? 'none';
+        $requestUri = $_SERVER['REQUEST_URI'] ?? 'none';
+        Flight::get('log')->debug("MCP tools/list auth check: auth_header=" . substr($authHeader, 0, 40) . ", x-api-token=" . substr($apiToken, 0, 25) . ", query_key=" . substr($queryKey, 0, 20) . ", query_string=" . $queryString . ", uri=" . $requestUri);
+
         $authResult = $this->authenticateWithApiAuth($urlWorkspace, 'api', 'mcptools');
+        Flight::get('log')->debug("MCP tools/list auth result: success=" . ($authResult['success'] ? 'true' : 'false') . ", error=" . ($authResult['error'] ?? 'none'));
+
         if (!$authResult['success']) {
             $this->jsonRpcError(-32000, $authResult['error'], $id);
             return;
         }
 
+        $tools = [];
+
         // Get all agents with expose_as_mcp = 1
         $agents = Bean::find('aiagents', 'member_id = ? AND expose_as_mcp = 1 AND is_active = 1', [$this->workspaceMemberId]);
 
-        $tools = [];
         foreach ($agents as $agent) {
             $agentTools = Bean::find('agenttools', 'aiagents_id = ? AND is_active = 1', [$agent->id]);
 
@@ -407,9 +438,34 @@ class Api extends BaseControls\Control {
                 $tools[] = [
                     'name' => $tool->tool_name,
                     'description' => $tool->tool_description ?: "Tool from agent: {$agent->name}",
-                    'inputSchema' => $inputSchema
+                    'inputSchema' => $inputSchema,
+                    '_type' => 'agent_tool'
                 ];
             }
+        }
+
+        // Get all pipelines with expose_as_tool = 1
+        $pipelines = Bean::find('pipelines', 'expose_as_tool = 1 AND is_active = 1');
+
+        foreach ($pipelines as $pipeline) {
+            $inputSchema = json_decode($pipeline->input_schema_json ?: '{}', true);
+            if (empty($inputSchema) || !isset($inputSchema['type'])) {
+                // Default to object with no required properties
+                $inputSchema = [
+                    'type' => 'object',
+                    'properties' => (object) [],
+                    'required' => []
+                ];
+            }
+
+            $tools[] = [
+                'name' => 'myctobot_' . $pipeline->slug,
+                'description' => $pipeline->description ?: "Execute the {$pipeline->name} pipeline",
+                'inputSchema' => $inputSchema,
+                '_type' => 'pipeline',
+                '_pipeline_id' => (int) $pipeline->id,
+                '_pipeline_slug' => $pipeline->slug
+            ];
         }
 
         $this->jsonRpcResult(['tools' => $tools], $id);
@@ -420,7 +476,14 @@ class Api extends BaseControls\Control {
      */
     private function mcpToolsCall(string $urlWorkspace, array $params, $id) {
         // Authenticate with ApiAuthService
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? 'none';
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? 'none';
+        $queryKey = $_GET['key'] ?? 'none';
+        Flight::get('log')->debug("MCP tools/call auth check: auth_header=" . substr($authHeader, 0, 40) . ", x-api-token=" . substr($apiToken, 0, 25) . ", query_key=" . substr($queryKey, 0, 20));
+
         $authResult = $this->authenticateWithApiAuth($urlWorkspace, 'api', 'mcpcall');
+        Flight::get('log')->debug("MCP tools/call auth result: success=" . ($authResult['success'] ? 'true' : 'false') . ", error=" . ($authResult['error'] ?? 'none'));
+
         if (!$authResult['success']) {
             $this->jsonRpcError(-32000, $authResult['error'], $id);
             return;
@@ -434,7 +497,13 @@ class Api extends BaseControls\Control {
             return;
         }
 
-        // Find the tool
+        // Check if this is a pipeline tool (prefixed with myctobot_)
+        if (str_starts_with($toolName, 'myctobot_')) {
+            $this->executePipelineTool($toolName, $arguments, $id);
+            return;
+        }
+
+        // Find the agent tool
         $tool = Bean::findOne('agenttools', 'tool_name = ? AND is_active = 1', [$toolName]);
         if (!$tool) {
             $this->jsonRpcError(-32602, "Tool not found: {$toolName}", $id);
@@ -459,6 +528,111 @@ class Api extends BaseControls\Control {
         } catch (Exception $e) {
             $this->jsonRpcError(-32000, 'Tool execution failed: ' . $e->getMessage(), $id);
         }
+    }
+
+    /**
+     * Execute a pipeline as an MCP tool
+     */
+    private function executePipelineTool(string $toolName, array $arguments, $id) {
+        // Extract pipeline slug from tool name (myctobot_slug -> slug)
+        $slug = substr($toolName, strlen('myctobot_'));
+
+        $pipeline = Bean::findOne('pipelines', 'slug = ? AND expose_as_tool = 1 AND is_active = 1', [$slug]);
+        if (!$pipeline) {
+            $this->jsonRpcError(-32602, "Pipeline not found: {$slug}", $id);
+            return;
+        }
+
+        // Count steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+        if ($stepCount === 0) {
+            $this->jsonRpcError(-32000, 'Pipeline has no active steps', $id);
+            return;
+        }
+
+        // Create run
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $run = Bean::dispense('pipelineruns');
+        // Build context: merge default context with MCP arguments and auth info
+        $context = json_decode($pipeline->default_context_json ?: '{}', true);
+        $context = array_merge($context, $arguments);
+
+        // Add API key info (masked for security) to trigger data
+        // PipelineExecutor builds context from trigger_data_json, so MCP auth must be included there
+        $apiKey = $_GET['key'] ?? '';
+        $triggerData = $arguments;
+        if (!empty($apiKey)) {
+            $triggerData['mcp_key_preview'] = substr($apiKey, 0, 12) . '...' . substr($apiKey, -8);
+            $triggerData['mcp_authenticated'] = 'true';
+            $context['mcp_key_preview'] = $triggerData['mcp_key_preview'];
+            $context['mcp_authenticated'] = 'true';
+        }
+
+        $run->run_uid = $runUid;
+        $run->pipelines = $pipeline;
+        $run->member_id = $this->workspaceMemberId;
+        $run->trigger_source = 'mcp_tool';
+        $run->trigger_data_json = json_encode($triggerData);
+        $run->status = 'pending';
+        $run->context_json = json_encode($context);
+        $run->steps_total = $stepCount;
+        $run->steps_completed = 0;
+        $run->progress_percent = 0;
+        $run->created_at = date('Y-m-d H:i:s');
+        $run->updated_at = date('Y-m-d H:i:s');
+
+        $runId = Bean::store($run);
+
+        // Update pipeline stats
+        $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+        $pipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        // Execute synchronously
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+        $executor = new \app\services\PipelineExecutor($runId);
+        $executor->execute();
+
+        // Reload run to get final state
+        $run = Bean::load('pipelineruns', $runId);
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // Get step results for the output
+        $stepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? ORDER BY id ASC ',
+            [$runId]
+        );
+
+        $lastOutput = null;
+        foreach ($stepRuns as $sr) {
+            if ($sr->status === 'success' && !empty($sr->output_json)) {
+                $lastOutput = json_decode($sr->output_json, true);
+            }
+        }
+
+        // MCP tool result format
+        $isError = $run->status !== 'completed';
+        $content = [];
+
+        if ($isError) {
+            $content[] = [
+                'type' => 'text',
+                'text' => "Pipeline execution failed: " . ($run->error_message ?: 'Unknown error')
+            ];
+        } else {
+            // Return the context/output as the tool result
+            $resultText = json_encode($lastOutput ?? $context, JSON_PRETTY_PRINT);
+            $content[] = [
+                'type' => 'text',
+                'text' => $resultText
+            ];
+        }
+
+        $this->jsonRpcResult([
+            'content' => $content,
+            'isError' => $isError
+        ], $id);
     }
 
     /**

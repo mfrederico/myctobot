@@ -20,6 +20,9 @@ Flight::route('POST /api/mcp/@workspace/call', ['\app\Api', 'mcpcallwithworkspac
 // This is the main endpoint Claude Code's MCP client connects to
 Flight::route('POST /api/mcp/@workspace', ['\app\Api', 'mcpjsonrpc']);
 
+// MCP JSON-RPC with embedded API key (for Claude Code which doesn't send headers)
+Flight::route('POST /api/mcp/@workspace/@apikey', ['\app\Api', 'mcpjsonrpcwithkey']);
+
 // MCP config endpoint - returns ready-to-use .mcp.json for an agent
 Flight::route('GET /api/mcp/@workspace/config/@agentId', ['\app\Api', 'mcpconfig']);
 

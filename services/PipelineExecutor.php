@@ -3,7 +3,7 @@
  * PipelineExecutor Service
  *
  * Executes pipeline runs by processing steps in sequence.
- * Handles step types: ai_agent, direct_exec, script, webhook_out, parser, wait
+ * Handles step types: ai_agent, direct_exec, script, webhook_out, email_out, parser, wait, harvest
  *
  * Usage:
  *   $executor = new PipelineExecutor($runId, $logger);
@@ -664,6 +664,9 @@ class PipelineExecutor {
             case 'webhook_out':
                 return $this->executeWebhookOut($config, $input, $timeout);
 
+            case 'email_out':
+                return $this->executeEmailOut($config, $input);
+
             case 'parser':
                 return $this->executeParser($config, $input);
 
@@ -1022,6 +1025,118 @@ class PipelineExecutor {
             'output' => $output,
             'error' => $success ? null : "HTTP {$httpCode}"
         ];
+    }
+
+    /**
+     * Execute an email step via Mailgun
+     *
+     * Config options:
+     *   to           - Recipient email (required, supports variable substitution)
+     *   cc           - CC recipients (optional, comma-separated)
+     *   subject      - Email subject (required, supports variable substitution)
+     *   body         - Email body in markdown (supports variable substitution)
+     *   template     - Named template to use instead of body (optional)
+     *   from_email   - Override sender email (optional)
+     *   from_name    - Override sender name (optional)
+     */
+    private function executeEmailOut(array $config, array $input): array {
+        require_once __DIR__ . '/MailgunService.php';
+
+        $to = $config['to'] ?? '';
+        $cc = $config['cc'] ?? null;
+        $subject = $config['subject'] ?? '';
+        $body = $config['body'] ?? '';
+        $template = $config['template'] ?? null;
+        $fromEmail = $config['from_email'] ?? null;
+        $fromName = $config['from_name'] ?? null;
+
+        if (empty($to)) {
+            return ['success' => false, 'error' => 'Recipient (to) is required'];
+        }
+
+        if (empty($subject)) {
+            return ['success' => false, 'error' => 'Subject is required'];
+        }
+
+        // Variable substitution
+        $to = $this->substituteVariables($to);
+        $cc = $cc ? $this->substituteVariables($cc) : null;
+        $subject = $this->substituteVariables($subject);
+        $body = $this->substituteVariables($body);
+
+        // If using a template, load it
+        if ($template && empty($body)) {
+            $body = $this->loadEmailTemplate($template, $input);
+        }
+
+        // Build body from input if still empty
+        if (empty($body)) {
+            // Default body: pretty-print the input data
+            $body = "# Pipeline Notification\n\n";
+            $body .= "**Pipeline:** " . ($this->pipeline->name ?? 'Unknown') . "\n";
+            $body .= "**Run ID:** " . $this->runId . "\n\n";
+            $body .= "## Data\n\n```json\n" . json_encode($input, JSON_PRETTY_PRINT) . "\n```";
+        }
+
+        try {
+            $mailgun = new MailgunService();
+
+            if (!$mailgun->isEnabled()) {
+                return [
+                    'success' => false,
+                    'error' => 'Mailgun is not configured. Please configure it in Settings > Connections.'
+                ];
+            }
+
+            $result = $mailgun->sendMarkdownEmail($subject, $body, $to, $cc);
+
+            if ($result) {
+                $this->log('info', "Email sent successfully to {$to}", ['subject' => $subject]);
+                return [
+                    'success' => true,
+                    'output' => [
+                        'sent' => true,
+                        'to' => $to,
+                        'cc' => $cc,
+                        'subject' => $subject
+                    ]
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to send email via Mailgun'
+                ];
+            }
+
+        } catch (\Exception $e) {
+            $this->log('error', "Email send failed: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => "Email exception: " . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Load an email template by name
+     */
+    private function loadEmailTemplate(string $templateName, array $data): string {
+        // Templates can be stored in enterprisesettings or as files
+        $setting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ["email_template_{$templateName}"]);
+
+        if ($setting && !empty($setting->setting_value)) {
+            return $this->substituteVariables($setting->setting_value);
+        }
+
+        // Try loading from file
+        $templatePath = dirname(__DIR__) . "/templates/email/{$templateName}.md";
+        if (file_exists($templatePath)) {
+            $template = file_get_contents($templatePath);
+            return $this->substituteVariables($template);
+        }
+
+        // Return a default template
+        return "# Notification\n\nThis is an automated notification from MyCTOBot.\n\n---\n*Pipeline: " . ($this->pipeline->name ?? 'Unknown') . "*";
     }
 
     /**

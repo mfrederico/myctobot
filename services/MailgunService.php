@@ -37,10 +37,16 @@ class MailgunService {
     }
 
     /**
-     * Load Mailgun config from workspace config or conf/mailgun.ini fallback
+     * Load Mailgun config from database, workspace config, or conf/mailgun.ini fallback
      */
     private function loadMailgunConfig(): array {
-        // Try workspace/Flight config first
+        // Method 1: Try database settings first (UI-configured)
+        $dbConfig = $this->loadFromDatabase();
+        if (!empty($dbConfig['key']) && !empty($dbConfig['domain'])) {
+            return $dbConfig;
+        }
+
+        // Method 2: Try workspace/Flight config
         $apiKey = Flight::get('mailgun.api_key') ?? '';
         $domain = Flight::get('mailgun.domain') ?? '';
 
@@ -54,7 +60,7 @@ class MailgunService {
             ];
         }
 
-        // Fall back to conf/mailgun.ini
+        // Method 3: Fall back to conf/mailgun.ini
         $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
         if (file_exists($iniPath)) {
             $config = parse_ini_file($iniPath);
@@ -64,6 +70,43 @@ class MailgunService {
         }
 
         return [];
+    }
+
+    /**
+     * Load Mailgun config from database (enterprisesettings table)
+     */
+    private function loadFromDatabase(): array {
+        try {
+            $apiKeySetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_api_key']);
+            $domainSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_domain']);
+
+            if (!$apiKeySetting || !$domainSetting) {
+                return [];
+            }
+
+            // Decrypt the API key
+            require_once __DIR__ . '/EncryptionService.php';
+            $apiKey = EncryptionService::decrypt($apiKeySetting->setting_value);
+
+            if (empty($apiKey) || empty($domainSetting->setting_value)) {
+                return [];
+            }
+
+            $fromEmailSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_from_email']);
+            $fromNameSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_from_name']);
+            $endpointSetting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_endpoint']);
+
+            return [
+                'key' => $apiKey,
+                'domain' => $domainSetting->setting_value,
+                'fromEmail' => $fromEmailSetting ? $fromEmailSetting->setting_value : '',
+                'fromName' => $fromNameSetting ? $fromNameSetting->setting_value : '',
+                'endpoint' => $endpointSetting ? $endpointSetting->setting_value : '',
+            ];
+        } catch (\Exception $e) {
+            // Database not available or table doesn't exist
+            return [];
+        }
     }
 
     public function isEnabled(): bool {

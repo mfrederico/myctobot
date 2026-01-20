@@ -1363,7 +1363,7 @@ class AIDevJobService {
                 $this->logger->info('Queue processor: starting queued job', [
                     'job_uid' => $job->id,
                     'issue_key' => $job->issue_key,
-                    'workspace' => $jobworkspace
+                    'workspace' => $jobWorkspace
                 ]);
 
                 // Update job status to running
@@ -1375,7 +1375,7 @@ class AIDevJobService {
                 Bean::store($job);
 
                 // Spawn the tmux session
-                $tmux = new TmuxService($job->member_id, $job->issue_key, null, $jobworkspace);
+                $tmux = new TmuxService($job->member_id, $job->issue_key, null, $jobWorkspace);
 
                 // Kill any existing session first
                 if ($tmux->exists()) {
@@ -1422,7 +1422,7 @@ class AIDevJobService {
                         $job->member_id,
                         escapeshellarg($job->job_uid),
                         $job->repoconnections_id ?? 0,
-                        escapeshellarg($jobworkspace)
+                        escapeshellarg($jobWorkspace)
                     );
 
                     $output = [];
@@ -1457,7 +1457,7 @@ class AIDevJobService {
                 }
 
                 // For local jobs (no workstation): spawn tmux session
-                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobworkspace, null, null)) {
+                if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobWorkspace, null, null)) {
                     $results['jobs_started']++;
 
                     AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [

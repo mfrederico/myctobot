@@ -852,7 +852,7 @@ if ($provider === 'github') {
     // Use fixed main domain with workspace slug in URL path
     // URL pattern: https://myctobot.ai/mcp/workspace/jira
     $mcpWorkspace = $workspace ?? 'default';
-    $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpworkspace}/jira";
+    $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpWorkspace}/jira";
     $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
     $mcpAgentName = $agentConfig['name'] ?? 'AI Assistant';
     $mcpServers->jira = (object) [
@@ -869,7 +869,7 @@ if ($provider === 'github') {
 
 // Add MyCTOBot Jobs MCP for completion callbacks
 $mcpWorkspace = $workspace ?? 'default';
-$mcpJobsUrl = "https://myctobot.ai/mcp/{$mcpworkspace}/jobs";
+$mcpJobsUrl = "https://myctobot.ai/mcp/{$mcpWorkspace}/jobs";
 $mcpJobsCredentials = base64_encode("{$memberId}:{$jobId}");
 $mcpServers->myctobot = (object) [
     'type' => 'http',

@@ -485,7 +485,7 @@ class AIDevJobService {
             if (file_exists($aoePath)) {
                 require_once $aoePath;
                 $workspace = Flight::get('workspace.slug') ?: 'default';
-                \Aoe\workspace\workspaceContext::set($workspace);
+                \Aoe\Workspace\WorkspaceContext::set($workspace);
 
                 // Use /tmp/.aoe-php (accessible by both CLI and web)
                 $aoeBasePath = '/tmp/.aoe-php';
@@ -1101,7 +1101,7 @@ class AIDevJobService {
             require_once $aoePath;
 
             $workspaceSlug = $workspace ?: (\Aoe\Tmux\TmuxService::getDomainId() ?? 'default');
-            \Aoe\workspace\workspaceContext::set($workspaceSlug);
+            \Aoe\Workspace\WorkspaceContext::set($workspaceSlug);
 
             // Use /tmp/.aoe-php (accessible by both CLI and web)
             $aoeBasePath = '/tmp/.aoe-php';

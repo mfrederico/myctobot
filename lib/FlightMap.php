@@ -317,7 +317,7 @@ Flight::map('loadMenu', function() {
     if (Flight::isLoggedIn()) {
         // Member menu items (no Home link when logged in)
         $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
-        $menu[] = ['url' => '/directives', 'label' => 'Directives', 'icon' => 'envelope-paper'];
+        $menu[] = ['url' => '/pipelines', 'label' => 'Pipelines', 'icon' => 'diagram-3'];
         $menu[] = ['url' => '/knowledgebase', 'label' => 'Knowledge Base', 'icon' => 'book'];
 
         // Enterprise tier - AI Developer

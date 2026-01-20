@@ -120,6 +120,7 @@ $presets = $presets ?? [];
                             <div class="col-md-4">
                                 <?php
                                 $icons = [
+                                    'pipelines' => 'diagram-3',
                                     'github' => 'github',
                                     'fetch' => 'cloud-download',
                                     'filesystem' => 'folder',
@@ -129,8 +130,9 @@ $presets = $presets ?? [];
                                     'mantic' => 'search'
                                 ];
                                 $icon = $icons[$key] ?? 'plug';
+                                $btnClass = $key === 'pipelines' ? 'btn-outline-primary' : 'btn-outline-secondary';
                                 ?>
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadPreset('<?= $key ?>')">
+                                <button type="button" class="btn <?= $btnClass ?> w-100" onclick="loadPreset('<?= $key ?>')">
                                     <i class="bi bi-<?= $icon ?>"></i>
                                     <?= ucfirst($key) ?>
                                 </button>

@@ -328,6 +328,11 @@ class Agents extends BaseControls\Control {
                 'name' => $server->name,
                 'description' => $server->description,
                 'server_type' => $server->server_type,
+                'command' => $server->command,
+                'args' => json_decode($server->args_json ?: '[]', true),
+                'url' => $server->url,
+                'headers' => json_decode($server->headers_json ?: '{}', true),
+                'env' => json_decode($server->env_json ?: '{}', true),
                 'is_shared' => (bool) $server->is_shared
             ];
         }
@@ -367,7 +372,17 @@ class Agents extends BaseControls\Control {
         if (strpos($baseUrl, 'localhost') === false && strpos($baseUrl, '127.0.0.1') === false) {
             $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
         }
+
+        // Get API key from tenant config for MCP presets
+        $tenantApiKey = '';
+        $configFile = BASE_PATH . '/conf/config.' . $tenantSlug . '.ini';
+        if (file_exists($configFile)) {
+            $tenantConfig = parse_ini_file($configFile, true);
+            $tenantApiKey = $tenantConfig['api']['api_key'] ?? '';
+        }
+
         $this->viewData['tenantSlug'] = $tenantSlug;
+        $this->viewData['tenantApiKey'] = $tenantApiKey;
         $this->viewData['apiBaseUrl'] = $baseUrl;
         $this->viewData['mcpApiUrl'] = "{$baseUrl}/api/mcp/{$tenantSlug}";
 

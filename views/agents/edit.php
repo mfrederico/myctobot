@@ -864,6 +864,11 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         <label class="form-label fw-bold">Quick Add from Templates</label>
                         <div class="row g-2">
                             <div class="col-md-4">
+                                <button type="button" class="btn btn-outline-primary w-100" onclick="loadMcpPreset('pipelines')">
+                                    <i class="bi bi-diagram-3"></i> Pipelines
+                                </button>
+                            </div>
+                            <div class="col-md-4">
                                 <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('github')">
                                     <i class="bi bi-github"></i> GitHub
                                 </button>
@@ -988,7 +993,12 @@ function updateLinkedServers() {
         id: s.id,
         name: s.name,
         server_type: s.server_type,
-        description: s.description
+        description: s.description,
+        command: s.command,
+        args: s.args,
+        url: s.url,
+        headers: s.headers,
+        env: s.env
     }));
 
     renderMcpServerList();
@@ -996,6 +1006,12 @@ function updateLinkedServers() {
 
 // Preset templates
 const mcpPresets = {
+    pipelines: {
+        name: "pipelines",
+        type: "http",
+        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/pipelines/mcp/tools/<?= htmlspecialchars($tenantSlug) ?>",
+        headers: {"X-API-TOKEN": "<?= htmlspecialchars($tenantApiKey ?? '') ?>"}
+    },
     github: {
         name: "github",
         type: "stdio",

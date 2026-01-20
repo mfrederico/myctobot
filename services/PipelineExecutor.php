@@ -697,9 +697,9 @@ class PipelineExecutor {
      */
     private function executeDirectExec(array $config, array $input, int $timeout): array {
         $command = $config['command'] ?? '';
-        $workingDir = $config['working_dir'] ?: '/tmp';
-        $executor = $config['executor'] ?: '/bin/bash -c';
-        $workstationId = $config['workstation_id'] ?: null;
+        $workingDir = $config['working_dir'] ?? '/tmp';
+        $executor = $config['executor'] ?? '/bin/bash -c';
+        $workstationId = $config['workstation_id'] ?? null;
 
         if (empty($command)) {
             return ['success' => false, 'error' => 'No command specified'];

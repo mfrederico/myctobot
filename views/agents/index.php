@@ -4,6 +4,9 @@
             <i class="bi bi-robot"></i> AI Agent Profiles
         </h1>
         <div>
+            <a href="/mcpservers" class="btn btn-outline-info me-2" title="Manage reusable MCP server configurations">
+                <i class="bi bi-plug"></i> MCP Server Library
+            </a>
             <a href="/admin/runners" class="btn btn-outline-secondary me-2">
                 <i class="bi bi-arrow-left"></i> Back to Runners
             </a>

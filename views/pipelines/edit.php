@@ -152,6 +152,57 @@
                         </div>
                     </div>
 
+                    <!-- MCP Tool Exposure -->
+                    <div class="card bg-light mb-3">
+                        <div class="card-header py-2">
+                            <i class="bi bi-robot"></i> Expose as MCP Tool
+                        </div>
+                        <div class="card-body">
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" name="expose_as_tool" id="exposeAsTool"
+                                       <?= $pipeline['expose_as_tool'] ? 'checked' : '' ?> onchange="toggleInputSchema()">
+                                <label class="form-check-label" for="exposeAsTool">
+                                    <strong>Enable MCP Tool Access</strong>
+                                    <small class="d-block text-muted">Allow AI agents to trigger this pipeline via MCP protocol</small>
+                                </label>
+                            </div>
+
+                            <div id="mcpToolSettings" style="<?= $pipeline['expose_as_tool'] ? '' : 'display: none;' ?>">
+                                <div class="mb-3">
+                                    <label class="form-label">Tool Name</label>
+                                    <div class="input-group">
+                                        <span class="input-group-text font-monospace">myctobot_</span>
+                                        <input type="text" class="form-control font-monospace" value="<?= htmlspecialchars($pipeline['slug']) ?>" readonly>
+                                    </div>
+                                    <small class="text-muted">AI agents will call this tool as <code>myctobot_<?= htmlspecialchars($pipeline['slug']) ?></code></small>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">MCP Endpoint</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control font-monospace" value="<?= htmlspecialchars($mcpToolsUrl) ?>" readonly id="mcpToolsUrl">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('mcpToolsUrl')">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
+                                    <small class="text-muted">Add this as an MCP server to your AI agent</small>
+                                </div>
+
+                                <div class="mb-0">
+                                    <label class="form-label">
+                                        Input Schema (JSON)
+                                        <button type="button" class="btn btn-sm btn-link p-0 ms-2" onclick="insertSampleSchema()">
+                                            <i class="bi bi-lightning"></i> Insert sample
+                                        </button>
+                                    </label>
+                                    <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="6"
+                                              placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($pipeline['input_schema_json']) ?></textarea>
+                                    <small class="text-muted">JSON Schema defining the tool's input parameters. Properties become available in pipeline context.</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="is_active" id="isActive" <?= $pipeline['is_active'] ? 'checked' : '' ?>>
@@ -1068,11 +1119,42 @@ function deleteRow(row) {
     alert('Delete row ' + row + ' - not yet implemented');
 }
 
+// MCP Tool exposure functions
+function toggleInputSchema() {
+    const enabled = document.getElementById('exposeAsTool').checked;
+    document.getElementById('mcpToolSettings').style.display = enabled ? '' : 'none';
+}
+
+function insertSampleSchema() {
+    const sampleSchema = {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "A message to pass to the pipeline"
+            },
+            "options": {
+                "type": "object",
+                "description": "Optional configuration parameters"
+            }
+        },
+        "required": ["message"]
+    };
+    document.getElementById('inputSchemaJson').value = JSON.stringify(sampleSchema, null, 2);
+}
+
 async function saveSettings() {
     const form = document.getElementById('settingsForm');
     const data = new URLSearchParams(new FormData(form));
     data.append('csrf_token', csrfToken);
     data.set('is_active', document.getElementById('isActive').checked ? '1' : '0');
+    data.set('expose_as_tool', document.getElementById('exposeAsTool').checked ? '1' : '0');
+
+    // Include input schema
+    const inputSchemaEl = document.getElementById('inputSchemaJson');
+    if (inputSchemaEl) {
+        data.set('input_schema_json', inputSchemaEl.value);
+    }
 
     try {
         const response = await fetch('/pipelines/update/' + pipelineId, {

@@ -330,6 +330,9 @@ class Pipelines extends BaseControls\Control {
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
         $webhookUrl = "{$baseUrl}/pipein/{$tenantSlug}/{$pipeline->slug}";
 
+        // Build MCP tool URL for this pipeline
+        $mcpToolsUrl = "{$baseUrl}/pipelines/mcp/tools/{$tenantSlug}";
+
         $this->viewData['title'] = 'Edit Pipeline: ' . $pipeline->name;
         $this->viewData['pipeline'] = [
             'id' => $pipeline->id,
@@ -342,8 +345,12 @@ class Pipelines extends BaseControls\Control {
             'default_context' => $defaultContext,
             'is_active' => (bool) $pipeline->is_active,
             'run_count' => $pipeline->run_count,
-            'last_run_at' => $pipeline->last_run_at
+            'last_run_at' => $pipeline->last_run_at,
+            'expose_as_tool' => (bool) $pipeline->expose_as_tool,
+            'input_schema_json' => $pipeline->input_schema_json ?: '{}'
         ];
+        $this->viewData['mcpToolsUrl'] = $mcpToolsUrl;
+        $this->viewData['tenantSlug'] = $tenantSlug;
         $this->viewData['stepGrid'] = $stepGrid;
         $this->viewData['maxRow'] = $maxRow;
         $this->viewData['stepTypes'] = self::STEP_TYPES;
@@ -426,6 +433,19 @@ class Pipelines extends BaseControls\Control {
         }
 
         $pipeline->is_active = $isActive ? 1 : 0;
+
+        // MCP Tool exposure settings
+        $exposeAsTool = (bool) $this->getParam('expose_as_tool', false);
+        $inputSchemaJson = $this->getParam('input_schema_json', '{}');
+
+        $pipeline->expose_as_tool = $exposeAsTool ? 1 : 0;
+
+        // Validate and store input schema
+        $inputSchema = json_decode($inputSchemaJson, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            $pipeline->input_schema_json = json_encode($inputSchema);
+        }
+
         $pipeline->updated_at = date('Y-m-d H:i:s');
 
         Bean::store($pipeline);
@@ -1134,6 +1154,237 @@ class Pipelines extends BaseControls\Control {
             'context' => $context,
             'steps' => $steps,
             'error' => $run->error_message
+        ]);
+    }
+
+    /**
+     * List pipelines exposed as MCP tools
+     *
+     * GET /pipelines/mcp/tools/{tenant}
+     * Header: X-API-TOKEN: your-api-key
+     *
+     * Returns MCP-compatible tool definitions for all pipelines with expose_as_tool=1
+     */
+    public function mcptools($tenant = null) {
+        if (empty($tenant)) {
+            Flight::jsonError('Tenant required. Format: /pipelines/mcp/tools/{tenant}', 400);
+            return;
+        }
+
+        // Validate API token
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
+        if (empty($apiToken)) {
+            Flight::jsonError('API token required', 401);
+            return;
+        }
+
+        // Load tenant config and validate API key
+        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
+        if (!file_exists($configFile)) {
+            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+        $tenantConfig = parse_ini_file($configFile, true);
+        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
+
+        if (empty($expectedApiKey) || $apiToken !== $expectedApiKey) {
+            Flight::jsonError('Invalid API token', 401);
+            return;
+        }
+
+        // Switch to tenant database
+        if (!TenantResolver::switchDatabase($tenant)) {
+            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+
+        // Find all pipelines exposed as tools
+        $pipelines = Bean::find('pipelines', ' expose_as_tool = 1 AND is_active = 1 ');
+
+        $tools = [];
+        foreach ($pipelines as $pipeline) {
+            $inputSchema = json_decode($pipeline->input_schema_json ?: '{}', true);
+            if (empty($inputSchema) || !isset($inputSchema['type'])) {
+                // Default to object with no required properties
+                $inputSchema = [
+                    'type' => 'object',
+                    'properties' => new \stdClass(),
+                    'required' => []
+                ];
+            }
+
+            $tools[] = [
+                'name' => 'myctobot_' . $pipeline->slug,
+                'description' => $pipeline->description ?: "Execute the {$pipeline->name} pipeline",
+                'inputSchema' => $inputSchema
+            ];
+        }
+
+        Flight::response()->status(200);
+        Flight::response()->header('Content-Type', 'application/json');
+        echo json_encode([
+            'tools' => $tools
+        ]);
+    }
+
+    /**
+     * Execute a pipeline as an MCP tool call
+     *
+     * POST /pipelines/mcp/call/{tenant}/{slug}
+     * Header: X-API-TOKEN: your-api-key
+     * Body: {"input": {...}}  (matches the pipeline's input schema)
+     *
+     * Returns tool result in MCP format
+     */
+    public function mcpcall($tenant = null, $slug = null) {
+        if (empty($tenant) || empty($slug)) {
+            Flight::jsonError('Invalid URL format. Expected: /pipelines/mcp/call/{tenant}/{slug}', 400);
+            return;
+        }
+
+        // Validate API token
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
+        if (empty($apiToken)) {
+            Flight::jsonError('API token required', 401);
+            return;
+        }
+
+        // Load tenant config and validate API key
+        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
+        if (!file_exists($configFile)) {
+            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+        $tenantConfig = parse_ini_file($configFile, true);
+        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
+
+        if (empty($expectedApiKey) || $apiToken !== $expectedApiKey) {
+            Flight::jsonError('Invalid API token', 401);
+            return;
+        }
+
+        // Switch to tenant database
+        if (!TenantResolver::switchDatabase($tenant)) {
+            Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+
+        // Find pipeline by slug
+        $pipeline = Bean::findOne('pipelines', 'slug = ?', [$slug]);
+
+        if (!$pipeline || !$pipeline->id) {
+            Flight::jsonError("Tool not found: myctobot_{$slug}", 404);
+            return;
+        }
+
+        if (!$pipeline->is_active) {
+            Flight::jsonError('Tool is not active', 400);
+            return;
+        }
+
+        if (!$pipeline->expose_as_tool) {
+            Flight::jsonError("Pipeline '{$slug}' is not exposed as a tool", 403);
+            return;
+        }
+
+        // Get input from request body
+        $rawBody = file_get_contents('php://input');
+        $requestData = [];
+
+        if (!empty($rawBody)) {
+            $decoded = json_decode($rawBody, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $requestData = $decoded;
+            }
+        }
+
+        // The input for the pipeline comes from the 'arguments' field (MCP standard)
+        $triggerData = $requestData['arguments'] ?? $requestData['input'] ?? $requestData;
+
+        // Count steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+        if ($stepCount === 0) {
+            Flight::jsonError('Tool has no active steps', 400);
+            return;
+        }
+
+        // Create run
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $run = Bean::dispense('pipelineruns');
+        $run->run_uid = $runUid;
+        $run->pipelines = $pipeline;
+        $run->member_id = null;
+        $run->trigger_source = 'mcp_tool';
+        $run->trigger_data_json = json_encode($triggerData);
+        $run->status = 'pending';
+        $run->context_json = $pipeline->default_context_json ?: '{}';
+        $run->steps_total = $stepCount;
+        $run->steps_completed = 0;
+        $run->progress_percent = 0;
+        $run->created_at = date('Y-m-d H:i:s');
+        $run->updated_at = date('Y-m-d H:i:s');
+
+        $runId = Bean::store($run);
+
+        // Update pipeline stats
+        $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+        $pipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        // Execute synchronously
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+        $executor = new \app\services\PipelineExecutor($runId);
+        $executor->execute();
+
+        // Reload run to get final state
+        $run = Bean::load('pipelineruns', $runId);
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // Get step results for the output
+        $stepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? ORDER BY id ASC ',
+            [$runId]
+        );
+
+        $lastOutput = null;
+        foreach ($stepRuns as $sr) {
+            if ($sr->status === 'success' && !empty($sr->output_json)) {
+                $lastOutput = json_decode($sr->output_json, true);
+            }
+        }
+
+        // MCP tool result format
+        $isError = $run->status !== 'completed';
+        $content = [];
+
+        if ($isError) {
+            $content[] = [
+                'type' => 'text',
+                'text' => "Tool execution failed: " . ($run->error_message ?: 'Unknown error')
+            ];
+        } else {
+            // Return the context/output as the tool result
+            $resultText = json_encode($lastOutput ?? $context, JSON_PRETTY_PRINT);
+            $content[] = [
+                'type' => 'text',
+                'text' => $resultText
+            ];
+        }
+
+        Flight::response()->status(200);
+        Flight::response()->header('Content-Type', 'application/json');
+        echo json_encode([
+            'content' => $content,
+            'isError' => $isError,
+            '_meta' => [
+                'run_id' => $runId,
+                'run_uid' => $runUid,
+                'status' => $run->status,
+                'duration_seconds' => $run->started_at && $run->completed_at
+                    ? strtotime($run->completed_at) - strtotime($run->started_at)
+                    : null
+            ]
         ]);
     }
 

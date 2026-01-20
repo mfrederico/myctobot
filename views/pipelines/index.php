@@ -42,12 +42,17 @@
                         <strong>Pipelines are automation workflows organized like a spreadsheet.</strong>
                         Each pipeline has columns (phases) and rows (iterations) with steps that:
                     </p>
-                    <ul class="mb-0">
+                    <ul class="mb-2">
                         <li><strong>Execute AI agents</strong> - Run impl, verify, or custom agents</li>
                         <li><strong>Run shell commands</strong> - Execute scripts with stdin/stdout</li>
                         <li><strong>Call webhooks</strong> - POST to external services</li>
                         <li><strong>Transform data</strong> - Parse and modify output between steps</li>
                     </ul>
+                    <div class="alert alert-info py-2 px-3 mb-0 small">
+                        <i class="bi bi-plug"></i> <strong>MCP Integration:</strong>
+                        Pipelines can be exposed as MCP tools, allowing AI agents (like Claude) to trigger them and receive structured results.
+                        Configure this in <a href="/mcpservers">MCP Server Library</a> or per-pipeline settings.
+                    </div>
                 </div>
                 <div class="col-md-4">
                     <div class="bg-white rounded p-3 border">

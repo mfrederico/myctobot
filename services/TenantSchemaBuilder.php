@@ -2006,6 +2006,8 @@ class TenantSchemaBuilder {
         $bean->default_context_json = '{}'; // Default ENV/context vars for runs
         $bean->is_active = true;
         $bean->is_template = false; // Can be used as starting point for new pipelines
+        $bean->expose_as_tool = false; // Expose as MCP tool: myctobot_{slug}
+        $bean->input_schema_json = '{}'; // JSON Schema for tool inputs (MCP inputSchema)
         $bean->run_count = 0;
         $bean->last_run_at = null;
         $bean->created_at = date('Y-m-d H:i:s');
@@ -2017,6 +2019,7 @@ class TenantSchemaBuilder {
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `row_names_json` JSON');
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `trigger_config_json` JSON');
         R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `default_context_json` JSON');
+        R::exec('ALTER TABLE `pipelines` MODIFY COLUMN `input_schema_json` JSON');
 
         // Add unique slug constraint
         R::exec('ALTER TABLE `pipelines` ADD UNIQUE INDEX IF NOT EXISTS `uk_slug` (`slug`)');

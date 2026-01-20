@@ -43,6 +43,12 @@ class Pipein extends BaseControls\Control {
             return;
         }
 
+        // Validate tenant API key
+        if (!$this->validateTenantApiKey($tenant)) {
+            $this->errorResponse(401, 'Invalid or missing API key. Use X-API-TOKEN header or ?key= parameter.');
+            return;
+        }
+
         $this->logger->info("Pipein webhook for tenant: {$tenant}, pipeline: {$pipelineSlug}");
 
         // Find pipeline by slug
@@ -184,6 +190,46 @@ class Pipein extends BaseControls\Control {
         }
 
         return [];
+    }
+
+    /**
+     * Validate tenant API key from header or query param
+     */
+    private function validateTenantApiKey(string $tenant): bool {
+        // Get API token from X-API-TOKEN header
+        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? '';
+
+        // Check Authorization: Bearer header
+        if (empty($apiToken)) {
+            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+            if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+                $apiToken = $matches[1];
+            }
+        }
+
+        // Check query parameter ?key=xxx
+        if (empty($apiToken)) {
+            $apiToken = $_GET['key'] ?? '';
+        }
+
+        if (empty($apiToken)) {
+            return false;
+        }
+
+        // Load tenant config and get expected API key
+        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
+        if (!file_exists($configFile)) {
+            return false;
+        }
+
+        $tenantConfig = parse_ini_file($configFile, true);
+        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
+
+        if (empty($expectedApiKey)) {
+            return false;
+        }
+
+        return hash_equals($expectedApiKey, $apiToken);
     }
 
     /**

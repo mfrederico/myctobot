@@ -29,3 +29,10 @@ Flight::route('POST|GET|OPTIONS /mcp/@workspace/jobs', function($workspace) {
     $controller = new \app\Mcpjobs();
     $controller->handlewithworkspace($workspace);
 });
+
+// MCP Pipelines endpoint - execute pipelines as MCP tools
+// /mcp/workspace/pipelines - Claude Code calls this to run pipelines
+Flight::route('POST|GET|OPTIONS /mcp/@workspace/pipelines', function($workspace) {
+    $controller = new \app\Mcppipelines();
+    $controller->index($workspace);
+});

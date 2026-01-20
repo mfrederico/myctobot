@@ -14,6 +14,7 @@ namespace app\services;
 
 use \app\Bean;
 use \RedBeanPHP\R as R;
+use \app\services\AnthropicKeyService;
 
 class PipelineExecutor {
 
@@ -846,12 +847,23 @@ class PipelineExecutor {
     }
 
     /**
-     * Execute an AI agent
+     * Execute an AI agent step
+     *
+     * Config options:
+     *   agent_id       - Required: ID from aiagents table
+     *   prompt         - The prompt to send (supports variable substitution)
+     *   system_prompt  - Optional system prompt override
+     *   model          - Optional model override (default: claude-sonnet-4-20250514)
+     *   max_tokens     - Optional max tokens (default: 4096)
+     *   include_input  - Whether to include step input in the prompt (default: true)
      */
     private function executeAIAgent(array $config, array $input, int $timeout): array {
         $agentId = $config['agent_id'] ?? null;
-        $runnerId = $config['runner_id'] ?? null;
         $prompt = $config['prompt'] ?? '';
+        $systemPrompt = $config['system_prompt'] ?? 'You are a helpful assistant processing pipeline data. Analyze the input and respond with structured JSON when appropriate.';
+        $model = $config['model'] ?? 'claude-sonnet-4-20250514';
+        $maxTokens = (int)($config['max_tokens'] ?? 4096);
+        $includeInput = $config['include_input'] ?? true;
 
         if (empty($agentId)) {
             return ['success' => false, 'error' => 'Agent ID required'];
@@ -863,21 +875,92 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Agent not found'];
         }
 
-        // Substitute variables in prompt
+        // Get API key
+        $memberId = $this->run->member_id ?? 1;
+        $apiKey = AnthropicKeyService::getApiKeyForAgent($agent, $memberId);
+        if (empty($apiKey)) {
+            return ['success' => false, 'error' => 'No Anthropic API key available'];
+        }
+
+        // Substitute variables in prompts
         $prompt = $this->substituteVariables($prompt);
+        $systemPrompt = $this->substituteVariables($systemPrompt);
 
-        // TODO: Actually dispatch to agent runner
-        // For now, return a placeholder
-        $this->log('info', "Would execute AI agent {$agent->name} with prompt: {$prompt}");
+        // Build user message with input data if requested
+        $userMessage = $prompt;
+        if ($includeInput && !empty($input)) {
+            $inputJson = json_encode($input, JSON_PRETTY_PRINT);
+            $userMessage = "{$prompt}\n\n## Input Data\n```json\n{$inputJson}\n```";
+        }
 
-        return [
-            'success' => true,
-            'output' => [
-                'agent_id' => $agentId,
-                'prompt' => $prompt,
-                'status' => 'simulated'
-            ]
-        ];
+        $this->log('info', "Executing AI agent: {$agent->name}", [
+            'model' => $model,
+            'prompt_length' => strlen($userMessage)
+        ]);
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => 'https://api.anthropic.com',
+                'timeout' => $timeout,
+            ]);
+
+            $response = $client->post('/v1/messages', [
+                'headers' => [
+                    'x-api-key' => $apiKey,
+                    'anthropic-version' => '2023-06-01',
+                    'content-type' => 'application/json',
+                ],
+                'json' => [
+                    'model' => $model,
+                    'max_tokens' => $maxTokens,
+                    'system' => $systemPrompt,
+                    'messages' => [
+                        ['role' => 'user', 'content' => $userMessage]
+                    ]
+                ]
+            ]);
+
+            $body = json_decode($response->getBody()->getContents(), true);
+            $content = $body['content'][0]['text'] ?? '';
+
+            // Try to parse response as JSON
+            $parsed = null;
+            if (preg_match('/```json\s*([\s\S]*?)\s*```/', $content, $matches)) {
+                $parsed = json_decode($matches[1], true);
+            } elseif (str_starts_with(trim($content), '{') || str_starts_with(trim($content), '[')) {
+                $parsed = json_decode($content, true);
+            }
+
+            $this->log('info', "AI agent completed", [
+                'response_length' => strlen($content),
+                'has_json' => $parsed !== null
+            ]);
+
+            return [
+                'success' => true,
+                'output' => [
+                    'agent_id' => $agentId,
+                    'agent_name' => $agent->name,
+                    'model' => $model,
+                    'response' => $content,
+                    'parsed' => $parsed,
+                    'usage' => $body['usage'] ?? null
+                ]
+            ];
+
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            $errorMessage = $e->getMessage();
+            if ($e->hasResponse()) {
+                $errorBody = json_decode($e->getResponse()->getBody()->getContents(), true);
+                $errorMessage = $errorBody['error']['message'] ?? $errorMessage;
+            }
+            $this->log('error', "AI agent failed: {$errorMessage}");
+            return ['success' => false, 'error' => "AI agent error: {$errorMessage}"];
+
+        } catch (\Exception $e) {
+            $this->log('error', "AI agent exception: {$e->getMessage()}");
+            return ['success' => false, 'error' => "AI agent exception: {$e->getMessage()}"];
+        }
     }
 
     /**

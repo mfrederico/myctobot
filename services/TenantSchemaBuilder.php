@@ -67,6 +67,7 @@ class TenantSchemaBuilder {
         $this->createAIAgentsTable();
         $this->addAiagentsToRepoConnections(); // Add aiagents_id FK to repoconnections
         $this->createMcpServersTable();
+        $this->createApikeysTable();
         $this->createSSHKeysTable();
 
         // Create tables with board/repo associations
@@ -2247,5 +2248,31 @@ class TenantSchemaBuilder {
         if ($pipelineIsTemp) {
             R::trash($pipeline);
         }
+    }
+
+    /**
+     * Create the apikeys table
+     * Stores API keys for programmatic access with member execution context
+     */
+    private function createApikeysTable(): void {
+        $bean = R::dispense('apikeys');
+        $bean->member = $this->member; // Creates member_id FK - key runs as this member
+        $bean->created_by_member_id = $this->member->id; // Audit: who created the key
+        $bean->token = 'tk_' . bin2hex(random_bytes(32)); // Secure token
+        $bean->name = 'Schema API Key';
+        $bean->description = 'Schema key description';
+        $bean->scopes_json = '["*:*"]'; // Array of allowed scopes (controller:method or controller:*)
+        $bean->expires_at = null; // Nullable expiration date
+        $bean->is_active = true;
+        $bean->last_used_at = null;
+        $bean->last_used_ip = null;
+        $bean->usage_count = 0;
+        $bean->created_at = date('Y-m-d H:i:s');
+        $bean->updated_at = date('Y-m-d H:i:s');
+        R::store($bean);
+        R::trash($bean);
+
+        // Apply JSON column type
+        R::exec('ALTER TABLE `apikeys` MODIFY COLUMN `scopes_json` JSON');
     }
 }

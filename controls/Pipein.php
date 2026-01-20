@@ -16,8 +16,13 @@ namespace app;
 use \Flight as Flight;
 use \app\Bean;
 use \app\TenantResolver;
+use \app\services\ApiAuthService;
 
 class Pipein extends BaseControls\Control {
+
+    // Member context from API key authentication
+    private $apiMember = null;
+    private $apiKey = null;
 
     /**
      * Main webhook endpoint
@@ -43,13 +48,21 @@ class Pipein extends BaseControls\Control {
             return;
         }
 
-        // Validate tenant API key
-        if (!$this->validateTenantApiKey($tenant)) {
-            $this->errorResponse(401, 'Invalid or missing API key. Use X-API-TOKEN header or ?key= parameter.');
+        // Authenticate using API key - validates and gets member context
+        $authResult = ApiAuthService::authenticate('pipelines', 'trigger');
+        if (!$authResult['success']) {
+            $this->errorResponse($authResult['code'], $authResult['error']);
             return;
         }
 
-        $this->logger->info("Pipein webhook for tenant: {$tenant}, pipeline: {$pipelineSlug}");
+        $this->apiMember = $authResult['member'];
+        $this->apiKey = $authResult['apikey'];
+
+        $this->logger->info("Pipein webhook for tenant: {$tenant}, pipeline: {$pipelineSlug}", [
+            'member_id' => $this->apiMember->id,
+            'member_username' => $this->apiMember->username,
+            'api_key_id' => $this->apiKey->id
+        ]);
 
         // Find pipeline by slug
         $pipeline = Bean::findOne('pipelines', 'slug = ?', [$pipelineSlug]);
@@ -101,7 +114,7 @@ class Pipein extends BaseControls\Control {
         $run = Bean::dispense('pipelineruns');
         $run->run_uid = $runUid;
         $run->pipelines_id = $pipeline->id;
-        $run->member_id = null; // Webhook has no member
+        $run->member_id = $this->apiMember->id; // From API key authentication
         $run->trigger_source = $triggerSource;
         $run->trigger_data_json = json_encode($triggerData);
         $run->status = 'pending';
@@ -190,46 +203,6 @@ class Pipein extends BaseControls\Control {
         }
 
         return [];
-    }
-
-    /**
-     * Validate tenant API key from header or query param
-     */
-    private function validateTenantApiKey(string $tenant): bool {
-        // Get API token from X-API-TOKEN header
-        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? '';
-
-        // Check Authorization: Bearer header
-        if (empty($apiToken)) {
-            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
-                $apiToken = $matches[1];
-            }
-        }
-
-        // Check query parameter ?key=xxx
-        if (empty($apiToken)) {
-            $apiToken = $_GET['key'] ?? '';
-        }
-
-        if (empty($apiToken)) {
-            return false;
-        }
-
-        // Load tenant config and get expected API key
-        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
-        if (!file_exists($configFile)) {
-            return false;
-        }
-
-        $tenantConfig = parse_ini_file($configFile, true);
-        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
-
-        if (empty($expectedApiKey)) {
-            return false;
-        }
-
-        return hash_equals($expectedApiKey, $apiToken);
     }
 
     /**

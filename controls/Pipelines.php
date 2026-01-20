@@ -13,6 +13,8 @@ namespace app;
 
 use \Flight as Flight;
 use \app\Bean;
+use \app\TenantResolver;
+use \app\services\ApiAuthService;
 use \Exception as Exception;
 
 class Pipelines extends BaseControls\Control {
@@ -1171,30 +1173,16 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
-        // Validate API token
-        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
-        if (empty($apiToken)) {
-            Flight::jsonError('API token required', 401);
-            return;
-        }
-
-        // Load tenant config and validate API key
-        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
-        if (!file_exists($configFile)) {
-            Flight::jsonError("Invalid tenant: {$tenant}", 400);
-            return;
-        }
-        $tenantConfig = parse_ini_file($configFile, true);
-        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
-
-        if (empty($expectedApiKey) || $apiToken !== $expectedApiKey) {
-            Flight::jsonError('Invalid API token', 401);
-            return;
-        }
-
-        // Switch to tenant database
+        // Switch to tenant database first
         if (!TenantResolver::switchDatabase($tenant)) {
             Flight::jsonError("Invalid tenant: {$tenant}", 400);
+            return;
+        }
+
+        // Authenticate using API key
+        $authResult = ApiAuthService::authenticate('pipelines', 'mcptools');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
             return;
         }
 
@@ -1242,32 +1230,20 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
-        // Validate API token
-        $apiToken = $_SERVER['HTTP_X_API_TOKEN'] ?? $this->getParam('api_token');
-        if (empty($apiToken)) {
-            Flight::jsonError('API token required', 401);
-            return;
-        }
-
-        // Load tenant config and validate API key
-        $configFile = BASE_PATH . '/conf/config.' . $tenant . '.ini';
-        if (!file_exists($configFile)) {
-            Flight::jsonError("Invalid tenant: {$tenant}", 400);
-            return;
-        }
-        $tenantConfig = parse_ini_file($configFile, true);
-        $expectedApiKey = $tenantConfig['api']['api_key'] ?? '';
-
-        if (empty($expectedApiKey) || $apiToken !== $expectedApiKey) {
-            Flight::jsonError('Invalid API token', 401);
-            return;
-        }
-
-        // Switch to tenant database
+        // Switch to tenant database first
         if (!TenantResolver::switchDatabase($tenant)) {
             Flight::jsonError("Invalid tenant: {$tenant}", 400);
             return;
         }
+
+        // Authenticate using API key
+        $authResult = ApiAuthService::authenticate('pipelines', 'mcpcall');
+        if (!$authResult['success']) {
+            Flight::jsonError($authResult['error'], $authResult['code']);
+            return;
+        }
+
+        $apiMember = $authResult['member'];
 
         // Find pipeline by slug
         $pipeline = Bean::findOne('pipelines', 'slug = ?', [$slug]);
@@ -1314,7 +1290,7 @@ class Pipelines extends BaseControls\Control {
         $run = Bean::dispense('pipelineruns');
         $run->run_uid = $runUid;
         $run->pipelines = $pipeline;
-        $run->member_id = null;
+        $run->member_id = $apiMember->id; // From API key authentication
         $run->trigger_source = 'mcp_tool';
         $run->trigger_data_json = json_encode($triggerData);
         $run->status = 'pending';

@@ -11,15 +11,10 @@ use \Flight as Flight;
 Flight::route('GET /api/mcp/tools', ['\app\Api', 'mcptools']);
 Flight::route('POST /api/mcp/call', ['\app\Api', 'mcpcall']);
 
-// MCP API endpoints (workspace-specific - workspace encoded in URL for explicit routing)
-// Format: /api/mcp/workspace/tools and /api/mcp/workspace/call
+// MCP API endpoints (workspace-specific - REST style for agent tools)
+// Note: MCP JSON-RPC servers are in routes/mcp.php (e.g., /mcp/workspace/pipelines)
 Flight::route('GET /api/mcp/@workspace/tools', ['\app\Api', 'mcptoolswithworkspace']);
 Flight::route('POST /api/mcp/@workspace/call', ['\app\Api', 'mcpcallwithworkspace']);
-
-// MCP JSON-RPC endpoint (for HTTP MCP server protocol)
-// This is the main endpoint Claude Code's MCP client connects to
-// Auth via Authorization: Bearer header or X-API-TOKEN header
-Flight::route('POST /api/mcp/@workspace', ['\app\Api', 'mcpjsonrpc']);
 
 // MCP config endpoint - returns ready-to-use .mcp.json for an agent
 Flight::route('GET /api/mcp/@workspace/config/@agentId', ['\app\Api', 'mcpconfig']);

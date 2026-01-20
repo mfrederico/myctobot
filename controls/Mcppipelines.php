@@ -35,7 +35,7 @@ class Mcppipelines extends Control {
 
     private ?int $memberId = null;
     private ?string $workspace = null;
-    private $logger;
+    protected $logger;
 
     public function __construct() {
         // Don't call parent - MCP requests don't have sessions

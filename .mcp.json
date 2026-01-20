@@ -13,7 +13,14 @@
       "url": "https://myctobot.ai/api/mcp/footest4",
       "headers": {
         "X-API-Key": "test_api_key_footest4_mcp_tools_2026",
-        "X-Tenant": "footest4"
+        "X-Workspace": "footest4"
+      }
+    },
+    "gwt_pipelines": {
+      "type": "http",
+      "url": "https://myctobot.ai/mcp/gwt/pipelines",
+      "headers": {
+        "Authorization": "Bearer tk_947d25ebeb61542303969a451105e3363c551992306495b9966d9dbe7c5309c1"
       }
     }
   }

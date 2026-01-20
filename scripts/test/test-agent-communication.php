@@ -10,9 +10,9 @@
  * The coordinator calls the worker's MCP tools to perform tasks.
  *
  * Usage:
- *   php scripts/test-agent-communication.php --tenant=footest4 --setup
- *   php scripts/test-agent-communication.php --tenant=footest4 --run
- *   php scripts/test-agent-communication.php --tenant=footest4 --cleanup
+ *   php scripts/test-agent-communication.php --workspace=footest4 --setup
+ *   php scripts/test-agent-communication.php --workspace=footest4 --run
+ *   php scripts/test-agent-communication.php --workspace=footest4 --cleanup
  */
 
 define('BASE_PATH', dirname(__DIR__));
@@ -28,7 +28,7 @@ foreach ($argv as $arg) {
     }
 }
 
-$tenant = $args['tenant'] ?? null;
+$workspace = $args['workspace'] ?? null;
 $action = null;
 if (isset($args['setup'])) $action = 'setup';
 if (isset($args['run'])) $action = 'run';
@@ -36,7 +36,7 @@ if (isset($args['cleanup'])) $action = 'cleanup';
 if (isset($args['status'])) $action = 'status';
 if (isset($args['help'])) $action = 'help';
 
-if (!$tenant || !$action || $action === 'help') {
+if (!$workspace || !$action || $action === 'help') {
     echo <<<HELP
 Agent-to-Agent Communication Test
 ==================================
@@ -44,7 +44,7 @@ Agent-to-Agent Communication Test
 This script demonstrates MCP-based communication between two Claude agents.
 
 Usage:
-  php scripts/test-agent-communication.php --tenant=<tenant> --<action>
+  php scripts/test-agent-communication.php --workspace=<workspace> --<action>
 
 Actions:
   --setup     Create test agents (coordinator + worker) in database
@@ -53,21 +53,21 @@ Actions:
   --cleanup   Stop sessions and remove test agents
 
 Options:
-  --tenant=<name>   Required. Tenant slug (e.g., footest4)
+  --workspace=<name>   Required. Workspace slug (e.g., footest4)
   --help            Show this help
 
 Example:
   # Set up test agents
-  php scripts/test-agent-communication.php --tenant=footest4 --setup
+  php scripts/test-agent-communication.php --workspace=footest4 --setup
 
   # Run the communication test
-  php scripts/test-agent-communication.php --tenant=footest4 --run
+  php scripts/test-agent-communication.php --workspace=footest4 --run
 
   # Check status
-  php scripts/test-agent-communication.php --tenant=footest4 --status
+  php scripts/test-agent-communication.php --workspace=footest4 --status
 
   # Clean up when done
-  php scripts/test-agent-communication.php --tenant=footest4 --cleanup
+  php scripts/test-agent-communication.php --workspace=footest4 --cleanup
 
 Architecture:
   ┌─────────────────────┐    MCP call    ┌─────────────────────┐
@@ -88,30 +88,30 @@ HELP;
     exit($action === 'help' ? 0 : 1);
 }
 
-// Load tenant config
-$configFile = BASE_PATH . "/conf/config.{$tenant}.ini";
+// Load workspace config
+$configFile = BASE_PATH . "/conf/config.{$workspace}.ini";
 if (!file_exists($configFile)) {
-    echo "Error: Tenant config not found: $configFile\n";
+    echo "Error: Workspace config not found: $configFile\n";
     exit(1);
 }
 
 $config = parse_ini_file($configFile, true);
 if (!$config || empty($config['database'])) {
-    echo "Error: Invalid tenant config\n";
+    echo "Error: Invalid workspace config\n";
     exit(1);
 }
 
-// Connect to tenant database
+// Connect to workspace database
 $dbConfig = $config['database'];
 $type = $dbConfig['type'] ?? 'mysql';
 
 if ($type === 'sqlite') {
-    $dsn = 'sqlite:' . ($dbConfig['file'] ?? BASE_PATH . "/database/{$tenant}.sqlite");
+    $dsn = 'sqlite:' . ($dbConfig['file'] ?? BASE_PATH . "/database/{$workspace}.sqlite");
     R::setup($dsn);
 } else {
     $host = $dbConfig['host'] ?? 'localhost';
     $port = $dbConfig['port'] ?? 3306;
-    $name = $dbConfig['name'] ?? $tenant;
+    $name = $dbConfig['name'] ?? $workspace;
     $user = $dbConfig['user'] ?? 'root';
     $pass = $dbConfig['pass'] ?? '';
     $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
@@ -120,7 +120,7 @@ if ($type === 'sqlite') {
 
 R::freeze(false);
 
-// Get member for this tenant (use --email if provided, otherwise first non-system member)
+// Get member for this workspace (use --email if provided, otherwise first non-system member)
 $memberEmail = $args['email'] ?? null;
 if ($memberEmail) {
     $member = R::findOne('member', 'email = ?', [$memberEmail]);
@@ -132,7 +132,7 @@ if ($memberEmail) {
     }
 }
 if (!$member) {
-    echo "Error: No member found in tenant database\n";
+    echo "Error: No member found in workspace database\n";
     exit(1);
 }
 $memberId = (int) $member->id;
@@ -141,23 +141,23 @@ echo "Using member ID: $memberId ({$member->email})\n";
 // Action handlers
 switch ($action) {
     case 'setup':
-        setupAgents($memberId, $tenant, $config);
+        setupAgents($memberId, $workspace, $config);
         break;
     case 'run':
-        runTest($memberId, $tenant, $config);
+        runTest($memberId, $workspace, $config);
         break;
     case 'status':
-        checkStatus($tenant);
+        checkStatus($workspace);
         break;
     case 'cleanup':
-        cleanup($memberId, $tenant);
+        cleanup($memberId, $workspace);
         break;
 }
 
 /**
  * Set up the test agents
  */
-function setupAgents(int $memberId, string $tenant, array $config) {
+function setupAgents(int $memberId, string $workspace, array $config) {
     echo "\n=== Setting up test agents ===\n";
 
     // Check for existing test agents
@@ -248,7 +248,7 @@ PROMPT;
     R::store($generateTool);
     echo "    - generate_code tool\n";
 
-    // Get API base URL from tenant config
+    // Get API base URL from workspace config
     $baseUrl = $config['app']['baseurl'] ?? 'https://myctobot.ai';
     if (strpos($baseUrl, 'localhost') === false) {
         $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
@@ -269,10 +269,10 @@ PROMPT;
         [
             'name' => 'ollama_worker',
             'type' => 'http',
-            'url' => "{$baseUrl}/api/mcp/{$tenant}",
+            'url' => "{$baseUrl}/api/mcp/{$workspace}",
             'headers' => [
                 'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                'X-Tenant' => $tenant
+                'X-Workspace' => $workspace
             ]
         ]
     ]);
@@ -287,17 +287,17 @@ PROMPT;
 
     echo "\n=== Setup Complete ===\n";
     echo "\nNext steps:\n";
-    echo "1. Make sure you have an API key set up for tenant '$tenant'\n";
-    echo "2. Run: php scripts/test-agent-communication.php --tenant=$tenant --run\n";
+    echo "1. Make sure you have an API key set up for workspace '$workspace'\n";
+    echo "2. Run: php scripts/test-agent-communication.php --workspace=$workspace --run\n";
     echo "\nMCP Configuration for Coordinator:\n";
     echo json_encode([
         'mcpServers' => [
             'ollama_worker' => [
                 'type' => 'http',
-                'url' => "{$baseUrl}/api/mcp/{$tenant}",
+                'url' => "{$baseUrl}/api/mcp/{$workspace}",
                 'headers' => [
                     'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                    'X-Tenant' => $tenant
+                    'X-Workspace' => $workspace
                 ]
             ]
         ]
@@ -307,7 +307,7 @@ PROMPT;
 /**
  * Run the communication test
  */
-function runTest(int $memberId, string $tenant, array $config) {
+function runTest(int $memberId, string $workspace, array $config) {
     echo "\n=== Running Agent Communication Test ===\n";
 
     // Find our test agents
@@ -322,7 +322,7 @@ function runTest(int $memberId, string $tenant, array $config) {
     echo "Found Coordinator Agent: ID {$coordinator->id}\n";
     echo "Found Worker Agent: ID {$worker->id}\n";
 
-    // Get API key for this tenant
+    // Get API key for this workspace
     $mainConfigFile = BASE_PATH . '/conf/config.ini';
     $mainConfig = parse_ini_file($mainConfigFile, true);
 
@@ -334,10 +334,10 @@ function runTest(int $memberId, string $tenant, array $config) {
         if (!empty($mainDbConfig)) {
             R::addDatabase('main', "mysql:host={$mainDbConfig['host']};dbname={$mainDbConfig['name']}", $mainDbConfig['user'], $mainDbConfig['pass']);
             R::selectDatabase('main');
-            $mainMember = R::findOne('member', 'tenant_slug = ?', [$tenant]);
+            $mainMember = R::findOne('member', 'workspace_slug = ?', [$workspace]);
             if ($mainMember && $mainMember->api_token) {
                 $apiKey = $mainMember->api_token;
-                echo "Found API key for tenant '$tenant'\n";
+                echo "Found API key for workspace '$workspace'\n";
             }
             R::selectDatabase('default');
         }
@@ -350,12 +350,12 @@ function runTest(int $memberId, string $tenant, array $config) {
     }
 
     // Create work directory
-    $workDir = "/tmp/agent-comm-test-{$tenant}";
+    $workDir = "/tmp/agent-comm-test-{$workspace}";
     if (!is_dir($workDir)) {
         mkdir($workDir, 0755, true);
     }
 
-    // Generate .mcp.json for coordinator - use tenant config
+    // Generate .mcp.json for coordinator - use workspace config
     $baseUrl = $config['app']['baseurl'] ?? 'https://myctobot.ai';
     if (strpos($baseUrl, 'localhost') === false) {
         $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
@@ -365,10 +365,10 @@ function runTest(int $memberId, string $tenant, array $config) {
         'mcpServers' => [
             'ollama_worker' => [
                 'type' => 'http',
-                'url' => "{$baseUrl}/api/mcp/{$tenant}",
+                'url' => "{$baseUrl}/api/mcp/{$workspace}",
                 'headers' => [
                     'X-API-Key' => $apiKey,
-                    'X-Tenant' => $tenant
+                    'X-Workspace' => $workspace
                 ]
             ]
         ]
@@ -401,7 +401,7 @@ PROMPT;
     echo "Generated test prompt: $promptFile\n";
 
     // Check if tmux session already exists
-    $sessionName = "agent-test-{$tenant}";
+    $sessionName = "agent-test-{$workspace}";
     exec("tmux has-session -t " . escapeshellarg($sessionName) . " 2>/dev/null", $output, $exitCode);
 
     if ($exitCode === 0) {
@@ -458,18 +458,18 @@ BASH;
     echo "\nTo view the session:\n";
     echo "  tmux attach -t $sessionName\n";
     echo "\nTo check status:\n";
-    echo "  php scripts/test-agent-communication.php --tenant=$tenant --status\n";
+    echo "  php scripts/test-agent-communication.php --workspace=$workspace --status\n";
     echo "\nTo clean up:\n";
-    echo "  php scripts/test-agent-communication.php --tenant=$tenant --cleanup\n";
+    echo "  php scripts/test-agent-communication.php --workspace=$workspace --cleanup\n";
 }
 
 /**
  * Check status of running sessions
  */
-function checkStatus(string $tenant) {
+function checkStatus(string $workspace) {
     echo "\n=== Agent Communication Test Status ===\n";
 
-    $sessionName = "agent-test-{$tenant}";
+    $sessionName = "agent-test-{$workspace}";
 
     // Check tmux session
     exec("tmux has-session -t " . escapeshellarg($sessionName) . " 2>/dev/null", $output, $exitCode);
@@ -491,7 +491,7 @@ function checkStatus(string $tenant) {
     }
 
     // Check work directory
-    $workDir = "/tmp/agent-comm-test-{$tenant}";
+    $workDir = "/tmp/agent-comm-test-{$workspace}";
     if (is_dir($workDir)) {
         echo "\nWork directory: $workDir\n";
         $files = glob("$workDir/*");
@@ -504,10 +504,10 @@ function checkStatus(string $tenant) {
 /**
  * Clean up test resources
  */
-function cleanup(int $memberId, string $tenant) {
+function cleanup(int $memberId, string $workspace) {
     echo "\n=== Cleaning up Agent Communication Test ===\n";
 
-    $sessionName = "agent-test-{$tenant}";
+    $sessionName = "agent-test-{$workspace}";
 
     // Kill tmux session
     exec("tmux has-session -t " . escapeshellarg($sessionName) . " 2>/dev/null", $output, $exitCode);
@@ -517,7 +517,7 @@ function cleanup(int $memberId, string $tenant) {
     }
 
     // Remove work directory
-    $workDir = "/tmp/agent-comm-test-{$tenant}";
+    $workDir = "/tmp/agent-comm-test-{$workspace}";
     if (is_dir($workDir)) {
         echo "Removing work directory: $workDir\n";
         system("rm -rf " . escapeshellarg($workDir));

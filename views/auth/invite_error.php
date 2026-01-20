@@ -32,8 +32,8 @@
                     <?php endif; ?>
 
                     <div class="d-grid gap-2">
-                        <?php if (!empty($tenant)): ?>
-                        <a href="/login/<?= htmlspecialchars($tenant) ?>" class="btn btn-primary">
+                        <?php if (!empty($workspace)): ?>
+                        <a href="/login/<?= htmlspecialchars($workspace) ?>" class="btn btn-primary">
                             <i class="bi bi-box-arrow-in-right"></i> Go to Login
                         </a>
                         <?php else: ?>

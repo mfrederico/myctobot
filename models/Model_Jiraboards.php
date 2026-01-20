@@ -3,7 +3,7 @@
  * Jiraboards Model
  * FUSE model for jiraboards table
  *
- * All data is now in a single MySQL database per tenant.
+ * All data is now in a single MySQL database per workspace.
  */
 
 use \RedBeanPHP\R as R;

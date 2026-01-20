@@ -82,7 +82,20 @@
                     </div>
                     <p class="mb-1">Configure access controls and permissions</p>
                 </a>
-                
+
+                <a href="/apikeys" class="list-group-item list-group-item-action">
+                    <div class="d-flex w-100 justify-content-between">
+                        <h5 class="mb-1"><i class="bi bi-key"></i> API Keys</h5>
+                        <?php
+                        $activeKeys = \app\Bean::count('apikeys', 'is_active = 1');
+                        if ($activeKeys > 0):
+                        ?>
+                        <span class="badge bg-success"><?= $activeKeys ?> Active</span>
+                        <?php endif; ?>
+                    </div>
+                    <p class="mb-1">Manage API keys for programmatic access to webhooks and pipelines</p>
+                </a>
+
                 <a href="/admin/settings" class="list-group-item list-group-item-action">
                     <div class="d-flex w-100 justify-content-between">
                         <h5 class="mb-1">System Settings</h5>

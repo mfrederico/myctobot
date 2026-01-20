@@ -4,7 +4,7 @@
  * MyCTOBot Agent MCP Server
  *
  * A dynamic MCP server that exposes agent-defined tools.
- * Routes through HTTP API to maintain tenant affinity.
+ * Routes through HTTP API to maintain workspace affinity.
  *
  * Usage:
  *   MYCTOBOT_API_URL=https://myctobot.ai MYCTOBOT_API_KEY=your-key php mcp-agent-server.php

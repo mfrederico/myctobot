@@ -60,12 +60,12 @@ test.describe('Login Flow', () => {
     await expect(csrfInput.first()).toBeAttached();
   });
 
-  test('should support workspace/tenant login', async ({ page }) => {
-    // Check if workspace field exists (multi-tenant feature)
+  test('should support workspace login', async ({ page }) => {
+    // Check if workspace field exists (multi-workspace feature)
     const workspaceField = page.locator('input[name="workspace"]');
     const hasWorkspace = await workspaceField.isVisible().catch(() => false);
 
-    // If multi-tenant, workspace field should exist
+    // If multi-workspace, workspace field should exist
     // This is optional based on deployment mode
     if (hasWorkspace) {
       await expect(workspaceField).toBeVisible();

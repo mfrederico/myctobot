@@ -41,9 +41,9 @@
             "suggestion": "Standard pattern, but consider a withErrorHandling() wrapper",
             "severity": "low"
         },
-        "Hardcoded tenant check": {
-            "pattern": "\\$_SESSION\\[['\"]tenant_slug['\"]\\]\\s*(===|==)\\s*['\"]\\w+['\"]",
-            "suggestion": "Avoid hardcoding tenant slugs, use config or constants",
+        "Hardcoded workspace check": {
+            "pattern": "\\$_SESSION\\[['\"]workspace_slug['\"]\\]\\s*(===|==)\\s*['\"]\\w+['\"]",
+            "suggestion": "Avoid hardcoding workspace slugs, use config or constants",
             "severity": "medium"
         },
         "Manual CSRF token access": {
@@ -51,9 +51,9 @@
             "suggestion": "Use Flight::csrf()->validateRequest() instead of manual token access",
             "severity": "medium"
         },
-        "tenant_slug usage (refactor to workspace)": {
-            "pattern": "tenant_slug|tenant\\.slug|--tenant=",
-            "suggestion": "TODO: Refactor 'tenant' to 'workspace' for consistency with user-facing terminology",
+        "workspace_slug usage (refactor to workspace)": {
+            "pattern": "workspace_slug|workspace\\.slug|--workspace=",
+            "suggestion": "TODO: Refactor 'workspace' to 'workspace' for consistency with user-facing terminology",
             "severity": "low"
         },
         "Hyphenated route endpoints": {

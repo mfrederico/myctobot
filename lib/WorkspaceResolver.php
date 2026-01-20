@@ -1,38 +1,38 @@
 <?php
 /**
- * TenantResolver - Helper for multi-tenant routing
+ * WorkspaceResolver - Helper for multi-workspace routing
  *
  * Supports two modes:
  * 1. Session-based tenancy (primary): User logs in with workspace code, stored in session
  * 2. Subdomain-based tenancy: gwt.myctobot.ai → conf/config.gwt.ini
  *
  * Session-based flow:
- *   myctobot.ai/login/gwt → login with workspace "gwt" → session stores tenant
- *   All subsequent requests check session for tenant
+ *   myctobot.ai/login/gwt → login with workspace "gwt" → session stores workspace
+ *   All subsequent requests check session for workspace
  *
  * Config resolution:
- *   Session tenant "gwt" → conf/config.gwt.ini
- *   No session tenant   → conf/config.ini (default)
+ *   Session workspace "gwt" → conf/config.gwt.ini
+ *   No session workspace   → conf/config.ini (default)
  */
 
 namespace app;
 
 use \Flight as Flight;
 
-class TenantResolver {
+class WorkspaceResolver {
 
-    private static $sessionTenant = null;
+    private static $sessionWorkspace = null;
     private static $initialized = false;
 
     /**
-     * Get tenant slug from session or subdomain
+     * Get workspace slug from session or subdomain
      *
-     * @return string Tenant slug (e.g., 'gwt', 'acme', 'default')
+     * @return string Workspace slug (e.g., 'gwt', 'acme', 'default')
      */
     public static function getSlug(): string {
         // Check session first (session-based tenancy)
-        if (isset($_SESSION['tenant_slug']) && !empty($_SESSION['tenant_slug'])) {
-            return $_SESSION['tenant_slug'];
+        if (isset($_SESSION['workspace_slug']) && !empty($_SESSION['workspace_slug'])) {
+            return $_SESSION['workspace_slug'];
         }
 
         // Check subdomain
@@ -40,54 +40,54 @@ class TenantResolver {
     }
 
     /**
-     * Set tenant in session
+     * Set workspace in session
      *
-     * @param string $slug Tenant slug (e.g., 'gwt')
-     * @return bool True if tenant config exists and was set
+     * @param string $slug Workspace slug (e.g., 'gwt')
+     * @return bool True if workspace config exists and was set
      */
-    public static function setTenant(string $slug): bool {
+    public static function setWorkspace(string $slug): bool {
         $slug = strtolower(trim($slug));
 
         if (empty($slug) || $slug === 'default') {
-            self::clearTenant();
+            self::clearworkspace();
             return true;
         }
 
-        // Validate tenant config exists
+        // Validate workspace config exists
         $configFile = "conf/config.{$slug}.ini";
         if (!file_exists($configFile)) {
             return false;
         }
 
-        $_SESSION['tenant_slug'] = $slug;
-        self::$sessionTenant = $slug;
+        $_SESSION['workspace_slug'] = $slug;
+        self::$sessionWorkspace = $slug;
         return true;
     }
 
     /**
-     * Clear tenant from session (logout or switch to default)
+     * Clear workspace from session (logout or switch to default)
      */
-    public static function clearTenant(): void {
-        unset($_SESSION['tenant_slug']);
-        self::$sessionTenant = null;
+    public static function clearworkspace(): void {
+        unset($_SESSION['workspace_slug']);
+        self::$sessionWorkspace = null;
     }
 
     /**
-     * Get tenant slug from session only (not subdomain)
+     * Get workspace slug from session only (not subdomain)
      *
-     * @return string|null Tenant slug or null if not in session
+     * @return string|null Workspace slug or null if not in session
      */
-    public static function getSessionTenant(): ?string {
-        return $_SESSION['tenant_slug'] ?? null;
+    public static function getSessionworkspace(): ?string {
+        return $_SESSION['workspace_slug'] ?? null;
     }
 
     /**
-     * Check if a tenant config exists
+     * Check if a workspace config exists
      *
-     * @param string $slug Tenant slug to check
+     * @param string $slug Workspace slug to check
      * @return bool True if config file exists
      */
-    public static function tenantExists(string $slug): bool {
+    public static function workspaceExists(string $slug): bool {
         if (empty($slug) || $slug === 'default') {
             return true;
         }
@@ -95,9 +95,9 @@ class TenantResolver {
     }
 
     /**
-     * Get the config file path for a tenant
+     * Get the config file path for a workspace
      *
-     * @param string|null $slug Tenant slug (null for current tenant)
+     * @param string|null $slug Workspace slug (null for current workspace)
      * @return string Config file path
      */
     public static function getConfigFile(?string $slug = null): string {
@@ -150,23 +150,23 @@ class TenantResolver {
     }
 
     /**
-     * Check if current request is for a specific tenant
+     * Check if current request is for a specific workspace
      *
-     * @param string $slug Tenant slug to check
-     * @return bool True if current tenant matches
+     * @param string $slug Workspace slug to check
+     * @return bool True if current workspace matches
      */
-    public static function isTenant(string $slug): bool {
+    public static function isworkspace(string $slug): bool {
         return self::getSlug() === strtolower($slug);
     }
 
     /**
-     * Check if current request is for the default (public) tenant
+     * Check if current request is for the default (public) workspace
      *
-     * @return bool True if default/public tenant (no session tenant, no subdomain)
+     * @return bool True if default/public workspace (no session workspace, no subdomain)
      */
     public static function isDefault(): bool {
-        // Check session tenant first
-        if (isset($_SESSION['tenant_slug']) && !empty($_SESSION['tenant_slug'])) {
+        // Check session workspace first
+        if (isset($_SESSION['workspace_slug']) && !empty($_SESSION['workspace_slug'])) {
             return false;
         }
 
@@ -176,7 +176,7 @@ class TenantResolver {
     }
 
     /**
-     * Get the current tenant's base URL
+     * Get the current workspace's base URL
      *
      * @return string The base URL from config
      */
@@ -185,53 +185,53 @@ class TenantResolver {
     }
 
     /**
-     * Get tenant info array
+     * Get workspace info array
      *
-     * @return array Tenant info
+     * @return array Workspace info
      */
-    public static function getTenant(): array {
+    public static function getWorkspace(): array {
         return [
             'slug' => self::getSlug(),
             'host' => $_SERVER['HTTP_HOST'] ?? 'localhost',
             'baseurl' => self::getBaseUrl(),
             'is_default' => self::isDefault(),
-            'from_session' => isset($_SESSION['tenant_slug'])
+            'from_session' => isset($_SESSION['workspace_slug'])
         ];
     }
 
     /**
-     * Switch to tenant database and load config
+     * Switch to workspace database and load config
      *
-     * Loads tenant config file, sets Flight config values, and switches
+     * Loads workspace config file, sets Flight config values, and switches
      * Bean database connection. Use this for webhooks, API calls, and
-     * background scripts that need to operate in a tenant context.
+     * background scripts that need to operate in a workspace context.
      *
-     * @param string $slug Tenant slug (e.g., 'gwt')
+     * @param string $slug Workspace slug (e.g., 'gwt')
      * @return bool True if switch successful
      */
     public static function switchDatabase(string $slug): bool {
         $logger = Flight::get('log');
         $slug = strtolower(trim($slug));
 
-        // Load tenant config
+        // Load workspace config
         $configFile = __DIR__ . "/../conf/config.{$slug}.ini";
         if (!file_exists($configFile)) {
             if ($logger) {
-                $logger->warning("TenantResolver: Config not found", ['tenant' => $slug, 'file' => $configFile]);
+                $logger->warning("WorkspaceResolver: Config not found", ['workspace' => $slug, 'file' => $configFile]);
             }
             return false;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
+        $workspaceConfig = parse_ini_file($configFile, true);
+        if (!$workspaceConfig || empty($workspaceConfig['database'])) {
             if ($logger) {
-                $logger->warning("TenantResolver: Invalid config", ['tenant' => $slug]);
+                $logger->warning("WorkspaceResolver: Invalid config", ['workspace' => $slug]);
             }
             return false;
         }
 
         // Override Flight config values
-        foreach ($tenantConfig as $section => $values) {
+        foreach ($workspaceConfig as $section => $values) {
             if (is_array($values)) {
                 foreach ($values as $key => $value) {
                     Flight::set("{$section}.{$key}", $value);
@@ -241,7 +241,7 @@ class TenantResolver {
 
         // Switch Bean database connection
         try {
-            $dbConfig = $tenantConfig['database'];
+            $dbConfig = $workspaceConfig['database'];
             $type = $dbConfig['type'] ?? 'mysql';
 
             if ($type === 'sqlite') {
@@ -258,19 +258,19 @@ class TenantResolver {
                 \app\Bean::useDatabase($slug, $dsn, $user, $pass);
             }
 
-            Flight::set('tenant.slug', $slug);
-            Flight::set('tenant.active', true);
-            $_SESSION['tenant_slug'] = $slug;
+            Flight::set('workspace.slug', $slug);
+            Flight::set('workspace.active', true);
+            $_SESSION['workspace_slug'] = $slug;
 
             if ($logger) {
-                $logger->debug("TenantResolver: Switched to tenant", ['tenant' => $slug]);
+                $logger->debug("WorkspaceResolver: Switched to workspace", ['workspace' => $slug]);
             }
 
             return true;
         } catch (\Exception $e) {
             if ($logger) {
-                $logger->error("TenantResolver: Database switch failed", [
-                    'tenant' => $slug,
+                $logger->error("WorkspaceResolver: Database switch failed", [
+                    'workspace' => $slug,
                     'error' => $e->getMessage()
                 ]);
             }

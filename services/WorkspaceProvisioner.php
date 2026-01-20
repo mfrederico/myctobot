@@ -1,20 +1,20 @@
 <?php
 /**
- * TenantProvisioner - Creates new tenant databases and config files
+ * WorkspaceProvisioner - Creates new workspace databases and config files
  *
- * Handles full tenant isolation:
- * - Separate database per tenant
- * - Separate database user per tenant
- * - Separate config file per tenant
+ * Handles full workspace isolation:
+ * - Separate database per workspace
+ * - Separate database user per workspace
+ * - Separate config file per workspace
  */
 
 namespace app\services;
 
 use \Flight;
 use \PDO;
-use app\services\TenantSchemaBuilder;
+use app\services\WorkspaceSchemaBuilder;
 
-class TenantProvisioner {
+class WorkspaceProvisioner {
 
     private PDO $adminDb;
     private string $configDir;
@@ -88,9 +88,9 @@ class TenantProvisioner {
     }
 
     /**
-     * Provision a new tenant
+     * Provision a new workspace
      *
-     * @param string $subdomain Tenant subdomain (e.g., 'acme')
+     * @param string $subdomain Workspace subdomain (e.g., 'acme')
      * @param string $businessName Business/company name
      * @param string $adminEmail Admin user email
      * @param string $adminPassword Admin user password (plain text, will be hashed)
@@ -132,7 +132,7 @@ class TenantProvisioner {
             // Step 5: Create config file
             $configPath = $this->createConfigFile($subdomain, $dbName, $dbUser, $dbPass, $businessName);
 
-            // Step 6: Create admin user in tenant database
+            // Step 6: Create admin user in workspace database
             $this->createAdminUser($dbName, $dbUser, $dbPass, $adminEmail, $adminPassword, $businessName);
 
             return [
@@ -159,12 +159,12 @@ class TenantProvisioner {
      * Run the schema on the new database using RedBeanPHP
      */
     private function runSchema(string $dbName, string $dbUser, string $dbPass): void {
-        $schemaBuilder = new TenantSchemaBuilder($dbName, $dbUser, $dbPass, 'localhost');
+        $schemaBuilder = new WorkspaceSchemaBuilder($dbName, $dbUser, $dbPass, 'localhost');
         $schemaBuilder->build();
     }
 
     /**
-     * Create the tenant config file
+     * Create the workspace config file
      */
     private function createConfigFile(
         string $subdomain,
@@ -175,12 +175,12 @@ class TenantProvisioner {
     ): string {
         $configPath = "{$this->configDir}/config.{$subdomain}.ini";
 
-        // Generate a unique encryption key for this tenant
+        // Generate a unique encryption key for this workspace
         $encryptionKey = bin2hex(random_bytes(32));
 
         $config = <<<INI
-; MyCTOBot - Tenant Configuration
-; Tenant: {$businessName}
+; MyCTOBot - Workspace Configuration
+; workspace: {$businessName}
 ; Subdomain: {$subdomain}.myctobot.ai
 ; Generated: {$this->now()}
 
@@ -260,7 +260,7 @@ message = "We are currently performing maintenance. Please check back soon."
 allowed_ips = "127.0.0.1"
 
 [atlassian]
-; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is tenant-specific
+; Atlassian OAuth - credentials from conf/atlassian.ini, redirect_uri is workspace-specific
 client_id = ""
 client_secret = ""
 redirect_uri = "https://myctobot.ai/atlassian/callback?workspace={$subdomain}"
@@ -289,7 +289,7 @@ INI;
     }
 
     /**
-     * Create the first admin user in the tenant database
+     * Create the first admin user in the workspace database
      */
     private function createAdminUser(
         string $dbName,
@@ -323,7 +323,7 @@ INI;
         // Also create default auth permissions
         $memberId = $db->lastInsertId();
 
-        // Insert default permissions for the tenant (IGNORE duplicates if schema already has them)
+        // Insert default permissions for the workspace (IGNORE duplicates if schema already has them)
         $db->exec("
             INSERT IGNORE INTO authcontrol (control, method, level) VALUES
             ('index', 'index', 101),
@@ -383,10 +383,10 @@ INI;
     }
 
     /**
-     * List all provisioned tenants
+     * List all provisioned workspaces
      */
-    public function listTenants(): array {
-        $tenants = [];
+    public function listworkspaces(): array {
+        $workspaces = [];
         $configs = glob("{$this->configDir}/config.*.ini");
 
         foreach ($configs as $configPath) {
@@ -394,7 +394,7 @@ INI;
             if (preg_match('/^config\.([a-z0-9-]+)\.ini$/', $filename, $matches)) {
                 $slug = $matches[1];
                 if ($slug !== 'example' && $slug !== 'sqlite') {
-                    $tenants[] = [
+                    $workspaces[] = [
                         'slug' => $slug,
                         'config' => $configPath,
                         'url' => "https://{$slug}.myctobot.ai"
@@ -403,6 +403,6 @@ INI;
             }
         }
 
-        return $tenants;
+        return $workspaces;
     }
 }

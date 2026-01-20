@@ -1097,9 +1097,9 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        $tenant = $_SESSION['tenant_slug'] ?? null;
+        $workspace = $_SESSION['workspace_slug'] ?? null;
         $jobService = new AIDevJobService();
-        $result = $jobService->retryJob($jobId, $this->member->id, $tenant);
+        $result = $jobService->retryJob($jobId, $this->member->id, $workspace);
 
         if ($result['success']) {
             // Update linked story status
@@ -1166,12 +1166,12 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        // Get tenant
-        $tenant = $_SESSION['tenant_slug'] ?? null;
+        // Get workspace
+        $workspace = $_SESSION['workspace_slug'] ?? null;
 
         // Build the command to run qa-release-builder.php in background
         $storyIdList = implode(',', $validStoryIds);
-        $tenantParam = $tenant ? sprintf(' --tenant=%s', escapeshellarg($tenant)) : '';
+        $workspaceParam = $workspace ? sprintf(' --workspace=%s', escapeshellarg($workspace)) : '';
 
         // If user enters "main", generate a unique QA branch name
         // Otherwise use their custom branch name (e.g., "qa/rc1")
@@ -1190,7 +1190,7 @@ class Reviewboard extends BaseControls\Control {
             $projectId,
             escapeshellarg($storyIdList),
             escapeshellarg($qaBranch),
-            $tenantParam,
+            $workspaceParam,
             escapeshellarg($baseDir . '/' . $logFile)
         );
 
@@ -1205,7 +1205,7 @@ class Reviewboard extends BaseControls\Control {
 
         // Generate a unique build ID for tracking
         $buildId = date('Ymd-His');
-        $workDir = "/tmp/qa-release-{$tenant}-{$projectId}-{$buildId}";
+        $workDir = "/tmp/qa-release-{$workspace}-{$projectId}-{$buildId}";
 
         // Execute in background
         exec($cmd);
@@ -1461,7 +1461,7 @@ class Reviewboard extends BaseControls\Control {
             return;
         }
 
-        $tenant = $_SESSION['tenant_slug'] ?? null;
+        $workspace = $_SESSION['workspace_slug'] ?? null;
         $repoId = $githubConfig['repo_id'] ?? null;
 
         // Use AIDevJobService to trigger the job
@@ -1472,7 +1472,7 @@ class Reviewboard extends BaseControls\Control {
             '',        // cloudId (not used for GitHub)
             null,      // boardId (not used for GitHub)
             $repoId,   // repoId
-            $tenant,
+            $workspace,
             false,     // useOrchestrator
             AIDevJobService::PROJECT_TYPE_GITHUB  // projectType
         );

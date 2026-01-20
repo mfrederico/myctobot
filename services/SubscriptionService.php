@@ -3,7 +3,7 @@
  * Subscription Service
  * Manages WORKSPACE-level subscription tiers and feature access
  *
- * In multi-tenant mode, each tenant database has ONE subscription
+ * In multi-workspace mode, each workspace database has ONE subscription
  * that applies to ALL members in that workspace.
  */
 
@@ -18,7 +18,7 @@ class SubscriptionService {
     /**
      * Get the workspace subscription tier
      *
-     * Each tenant database has a single subscription record.
+     * Each workspace database has a single subscription record.
      * All members in the workspace share this tier.
      *
      * @return string Tier name ('free', 'pro', 'enterprise')
@@ -244,9 +244,9 @@ class SubscriptionService {
 
         Bean::store($subscription);
 
-        $tenant = $_SESSION['tenant_slug'] ?? 'default';
+        $workspace = $_SESSION['workspace_slug'] ?? 'default';
         Flight::get('log')->info('Manual workspace tier assignment', [
-            'tenant' => $tenant,
+            'workspace' => $workspace,
             'tier' => $tier,
             'expires' => $expiresAt ?? 'never'
         ]);

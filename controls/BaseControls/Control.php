@@ -93,10 +93,10 @@ abstract class Control {
                 Flight::jsonError('Login required', 401);
             } else {
                 $redirect = urlencode(Flight::request()->url);
-                // Use tenant-aware login URL if tenant is set
-                $tenant = $_SESSION['tenant_slug'] ?? '';
-                if ($tenant && $tenant !== 'default') {
-                    Flight::redirect("/login/{$tenant}?redirect={$redirect}");
+                // Use workspace-aware login URL if workspace is set
+                $workspace = $_SESSION['workspace_slug'] ?? '';
+                if ($workspace && $workspace !== 'default') {
+                    Flight::redirect("/login/{$workspace}?redirect={$redirect}");
                 } else {
                     Flight::redirect("/login?redirect={$redirect}");
                 }

@@ -25,7 +25,7 @@ class Bootstrap {
         // Initialize autoloader first - this must come before any framework usage
         $this->initAutoloader();
 
-        // Resolve tenant from subdomain and load tenant-specific config
+        // Resolve workspace from subdomain and load workspace-specific config
         $configFile = $this->resolveConfigFile($configFile);
 
         // Now load configuration (after autoloader so Flight class is available)
@@ -38,7 +38,7 @@ class Bootstrap {
         $this->initLogging();
         $this->initDatabase();
         $this->initSession();
-        $this->initTenantFromSession();  // Check for session-based tenancy after session starts
+        $this->initWorkspaceFromSession();  // Check for session-based tenancy after session starts
         $this->initFlight();
         $this->initCORS();
         
@@ -116,9 +116,9 @@ class Bootstrap {
 			// Create logger
 			$log = new Logger($config['log.name']);
 
-			// Create formatter with tenant ID prefix for better readability
+			// Create formatter with workspace ID prefix for better readability
 			$formatter = new LineFormatter(
-				"[%datetime%] [%extra.tenant%] %channel%.%level_name%: %message% %context%\n",
+				"[%datetime%] [%extra.workspace%] %channel%.%level_name%: %message% %context%\n",
 				"Y-m-d H:i:s",
 				true,
 				true
@@ -129,10 +129,10 @@ class Bootstrap {
 			$handler->setFormatter($formatter);
 			$log->pushHandler($handler);
 
-			// Add processor to include tenant ID in every log entry
+			// Add processor to include workspace ID in every log entry
 			$log->pushProcessor(function ($record) {
-				$tenant = $_SESSION['tenant_slug'] ?? 'default';
-				$record['extra']['tenant'] = $tenant;
+				$workspace = $_SESSION['workspace_slug'] ?? 'default';
+				$record['extra']['workspace'] = $workspace;
 				return $record;
 			});
 
@@ -264,40 +264,40 @@ class Bootstrap {
     }
 
     /**
-     * Initialize tenant from session (session-based multi-tenancy)
+     * Initialize workspace from session (session-based multi-workspace)
      *
-     * If user logged in with a workspace code, their session stores the tenant slug.
-     * This method switches to that tenant's database for subsequent requests.
+     * If user logged in with a workspace code, their session stores the workspace slug.
+     * This method switches to that workspace's database for subsequent requests.
      */
-    private function initTenantFromSession() {
+    private function initWorkspaceFromSession() {
         // Skip in CLI mode (no session)
         if (php_sapi_name() === 'cli') {
             return;
         }
 
-        // Check for session tenant
-        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-        if (empty($tenantSlug) || $tenantSlug === 'default') {
+        // Check for session workspace
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+        if (empty($workspaceSlug) || $workspaceSlug === 'default') {
             return;
         }
 
-        // Load tenant config file
-        $configFile = "conf/config.{$tenantSlug}.ini";
+        // Load workspace config file
+        $configFile = "conf/config.{$workspaceSlug}.ini";
         if (!file_exists($configFile)) {
-            $this->logger->warning("Tenant config not found: {$configFile}, clearing session tenant");
-            unset($_SESSION['tenant_slug']);
+            $this->logger->warning("Workspace config not found: {$configFile}, clearing session workspace");
+            unset($_SESSION['workspace_slug']);
             return;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
-            $this->logger->warning("Invalid tenant config: {$configFile}");
-            unset($_SESSION['tenant_slug']);
+        $workspaceConfig = parse_ini_file($configFile, true);
+        if (!$workspaceConfig || empty($workspaceConfig['database'])) {
+            $this->logger->warning("Invalid workspace config: {$configFile}");
+            unset($_SESSION['workspace_slug']);
             return;
         }
 
-        // Override current config with tenant config (keep any non-overlapping settings)
-        foreach ($tenantConfig as $section => $values) {
+        // Override current config with workspace config (keep any non-overlapping settings)
+        foreach ($workspaceConfig as $section => $values) {
             if (is_array($values)) {
                 foreach ($values as $key => $value) {
                     Flight::set("{$section}.{$key}", $value);
@@ -305,41 +305,41 @@ class Bootstrap {
             }
         }
 
-        // Add and switch to tenant database
+        // Add and switch to workspace database
         try {
-            $dbConfig = $tenantConfig['database'];
+            $dbConfig = $workspaceConfig['database'];
             $type = $dbConfig['type'] ?? 'mysql';
 
-            // Add (if not already registered) and select tenant database
+            // Add (if not already registered) and select workspace database
             if ($type === 'sqlite') {
-                $dbPath = $dbConfig['path'] ?? "database/{$tenantSlug}.sqlite";
+                $dbPath = $dbConfig['path'] ?? "database/{$workspaceSlug}.sqlite";
                 $dsn = "sqlite:{$dbPath}";
-                Bean::useDatabase($tenantSlug, $dsn);
+                Bean::useDatabase($workspaceSlug, $dsn);
             } else {
                 $host = $dbConfig['host'] ?? 'localhost';
                 $port = $dbConfig['port'] ?? 3306;
-                $name = $dbConfig['name'] ?? $tenantSlug;
+                $name = $dbConfig['name'] ?? $workspaceSlug;
                 $user = $dbConfig['user'] ?? 'root';
                 $pass = $dbConfig['pass'] ?? '';
 
                 // Check if database exists before connecting
                 if (!$this->databaseExists($host, $port, $user, $pass, $name)) {
-                    $this->logger->error("Tenant database '{$name}' does not exist");
+                    $this->logger->error("Workspace database '{$name}' does not exist");
                     // Clear session and redirect to home
-                    unset($_SESSION['tenant_slug']);
+                    unset($_SESSION['workspace_slug']);
                     header('Location: /');
                     exit;
                 }
 
                 $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                Bean::useDatabase($tenantSlug, $dsn, $user, $pass);
+                Bean::useDatabase($workspaceSlug, $dsn, $user, $pass);
             }
-            Flight::set('tenant.slug', $tenantSlug);
-            Flight::set('tenant.active', true);
-            $this->logger->info("Switched to tenant database: {$tenantSlug}");
+            Flight::set('workspace.slug', $workspaceSlug);
+            Flight::set('workspace.active', true);
+            $this->logger->info("Switched to workspace database: {$workspaceSlug}");
         } catch (\Exception $e) {
-            $this->logger->error("Failed to switch to tenant database: " . $e->getMessage());
-            unset($_SESSION['tenant_slug']);
+            $this->logger->error("Failed to switch to workspace database: " . $e->getMessage());
+            unset($_SESSION['workspace_slug']);
         }
     }
 
@@ -462,20 +462,20 @@ class Bootstrap {
             $workspace = $_GET['workspace'];
         }
 
-        // If we have a workspace, set it in $_REQUEST and load tenant config
+        // If we have a workspace, set it in $_REQUEST and load workspace config
         if (!empty($workspace)) {
             // Normalize workspace and make it available globally
             $_REQUEST['workspace'] = $workspace;
             $_GET['workspace'] = $workspace;
 
-            // Check if tenant config exists
-            $tenantConfigFile = "conf/config.{$workspace}.ini";
-            if (file_exists($tenantConfigFile)) {
-                // Set session tenant if not in CLI mode
+            // Check if workspace config exists
+            $workspaceConfigFile = "conf/config.{$workspace}.ini";
+            if (file_exists($workspaceConfigFile)) {
+                // Set session workspace if not in CLI mode
                 if (php_sapi_name() !== 'cli') {
-                    $_SESSION['tenant_slug'] = $workspace;
+                    $_SESSION['workspace_slug'] = $workspace;
                 }
-                return $tenantConfigFile;
+                return $workspaceConfigFile;
             }
         }
 

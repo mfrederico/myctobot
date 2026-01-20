@@ -1,17 +1,17 @@
 <?php
 /**
- * Run TenantSchemaBuilder migrations across all tenants
+ * Run WorkspaceSchemaBuilder migrations across all workspaces
  *
  * Usage:
- *   php scripts/run-migration.php --sync                         # Run all pending migrations on all tenants
- *   php scripts/run-migration.php --sync --tenant=gwt            # Run pending migrations on specific tenant
- *   php scripts/run-migration.php --migration=SSHKeys            # Run specific migration on all tenants
- *   php scripts/run-migration.php --migration=SSHKeys --tenant=gwt  # Run on specific tenant
+ *   php scripts/run-migration.php --sync                         # Run all pending migrations on all workspaces
+ *   php scripts/run-migration.php --sync --workspace=gwt            # Run pending migrations on specific workspace
+ *   php scripts/run-migration.php --migration=SSHKeys            # Run specific migration on all workspaces
+ *   php scripts/run-migration.php --migration=SSHKeys --workspace=gwt  # Run on specific workspace
  *   php scripts/run-migration.php --migration=SSHKeys --force    # Force re-run even if already applied
- *   php scripts/run-migration.php --status                       # Show migration status for all tenants
- *   php scripts/run-migration.php --status --tenant=gwt          # Show status for specific tenant
+ *   php scripts/run-migration.php --status                       # Show migration status for all workspaces
+ *   php scripts/run-migration.php --status --workspace=gwt          # Show status for specific workspace
  *   php scripts/run-migration.php --list                         # List available migrations
- *   php scripts/run-migration.php --tenants                      # List all tenants
+ *   php scripts/run-migration.php --workspaces                      # List all workspaces
  */
 
 // Ensure running from CLI
@@ -23,12 +23,12 @@ $projectDir = dirname(__DIR__);
 chdir($projectDir);
 
 require_once $projectDir . '/vendor/autoload.php';
-require_once $projectDir . '/services/TenantSchemaBuilder.php';
+require_once $projectDir . '/services/WorkspaceSchemaBuilder.php';
 
-use app\services\TenantSchemaBuilder;
+use app\services\WorkspaceSchemaBuilder;
 
 // Parse arguments
-$options = getopt('', ['migration:', 'tenant:', 'list', 'tenants', 'help', 'sync', 'status', 'force', 'mark']);
+$options = getopt('', ['migration:', 'workspace:', 'list', 'workspaces', 'help', 'sync', 'status', 'force', 'mark']);
 
 // Colors for CLI output
 function colorize($text, $color) {
@@ -44,36 +44,36 @@ function colorize($text, $color) {
 }
 
 function printHelp() {
-    echo "TenantSchemaBuilder Migration Tool\n";
+    echo "WorkspaceSchemaBuilder Migration Tool\n";
     echo "===================================\n\n";
     echo "Usage:\n";
-    echo "  php scripts/run-migration.php --sync                      Run all pending migrations on all tenants\n";
-    echo "  php scripts/run-migration.php --sync --tenant=<slug>      Run pending migrations on specific tenant\n";
-    echo "  php scripts/run-migration.php --migration=<name>          Run migration on all tenants (skips if applied)\n";
+    echo "  php scripts/run-migration.php --sync                      Run all pending migrations on all workspaces\n";
+    echo "  php scripts/run-migration.php --sync --workspace=<slug>      Run pending migrations on specific workspace\n";
+    echo "  php scripts/run-migration.php --migration=<name>          Run migration on all workspaces (skips if applied)\n";
     echo "  php scripts/run-migration.php --migration=Name1,Name2     Run multiple migrations (comma-separated)\n";
     echo "  php scripts/run-migration.php --migration=<name> --force  Force re-run even if already applied\n";
     echo "  php scripts/run-migration.php --migration=<name> --mark   Mark as applied without running (for existing tables)\n";
-    echo "  php scripts/run-migration.php --status                    Show migration status for all tenants\n";
-    echo "  php scripts/run-migration.php --status --tenant=<slug>    Show status for specific tenant\n";
+    echo "  php scripts/run-migration.php --status                    Show migration status for all workspaces\n";
+    echo "  php scripts/run-migration.php --status --workspace=<slug>    Show status for specific workspace\n";
     echo "  php scripts/run-migration.php --list                      List available migrations\n";
-    echo "  php scripts/run-migration.php --tenants                   List all tenants\n";
+    echo "  php scripts/run-migration.php --workspaces                   List all workspaces\n";
     echo "  php scripts/run-migration.php --help                      Show this help\n\n";
     echo "Examples:\n";
-    echo "  php scripts/run-migration.php --sync                      # Sync all tenants\n";
-    echo "  php scripts/run-migration.php --sync --tenant=gwt         # Sync only gwt tenant\n";
-    echo "  php scripts/run-migration.php --migration=SSHKeys         # Run SSHKeys on all tenants\n";
+    echo "  php scripts/run-migration.php --sync                      # Sync all workspaces\n";
+    echo "  php scripts/run-migration.php --sync --workspace=gwt         # Sync only gwt workspace\n";
+    echo "  php scripts/run-migration.php --migration=SSHKeys         # Run SSHKeys on all workspaces\n";
     echo "  php scripts/run-migration.php --migration=SSHKeys,AIAgents,Member  # Run multiple\n";
-    echo "  php scripts/run-migration.php --migration=all --mark --tenant=gwt  # Mark all as applied for existing DB\n";
-    echo "  php scripts/run-migration.php --status --tenant=tiknix    # Check tiknix status\n";
+    echo "  php scripts/run-migration.php --migration=all --mark --workspace=gwt  # Mark all as applied for existing DB\n";
+    echo "  php scripts/run-migration.php --status --workspace=tiknix    # Check tiknix status\n";
 }
 
-/** @var array<string, TenantSchemaBuilder> Cache of builder instances per tenant */
+/** @var array<string, WorkspaceSchemaBuilder> Cache of builder instances per workspace */
 $builderCache = [];
 
 /**
- * Get or create a TenantSchemaBuilder for a tenant (reuses same instance)
+ * Get or create a WorkspaceSchemaBuilder for a workspace (reuses same instance)
  */
-function getBuilderForTenant(string $slug): ?TenantSchemaBuilder {
+function getBuilderForworkspace(string $slug): ?WorkspaceSchemaBuilder {
     global $builderCache;
 
     if (isset($builderCache[$slug])) {
@@ -93,7 +93,7 @@ function getBuilderForTenant(string $slug): ?TenantSchemaBuilder {
     }
 
     $db = $config['database'];
-    $builderCache[$slug] = new TenantSchemaBuilder(
+    $builderCache[$slug] = new WorkspaceSchemaBuilder(
         $db['name'],
         $db['user'],
         $db['pass'] ?? '',
@@ -104,10 +104,10 @@ function getBuilderForTenant(string $slug): ?TenantSchemaBuilder {
 }
 
 /**
- * Run a migration on a tenant using TenantSchemaBuilder
+ * Run a migration on a workspace using WorkspaceSchemaBuilder
  */
-function runMigrationOnTenant(string $migration, string $slug, bool $force = false): array {
-    $builder = getBuilderForTenant($slug);
+function runMigrationOnworkspace(string $migration, string $slug, bool $force = false): array {
+    $builder = getBuilderForworkspace($slug);
 
     if (!$builder) {
         return ['success' => false, 'error' => 'Config file not found or invalid'];
@@ -126,7 +126,7 @@ if (isset($options['help']) || (empty($options) && $argc === 1)) {
 if (isset($options['list'])) {
     echo "Available Migrations:\n";
     echo "=====================\n";
-    $migrations = TenantSchemaBuilder::getAvailableMigrations();
+    $migrations = WorkspaceSchemaBuilder::getAvailableMigrations();
     foreach ($migrations as $migration) {
         echo "  - $migration\n";
     }
@@ -134,43 +134,43 @@ if (isset($options['list'])) {
     exit(0);
 }
 
-// Handle --tenants
-if (isset($options['tenants'])) {
-    echo "Available Tenants:\n";
+// Handle --workspaces
+if (isset($options['workspaces'])) {
+    echo "Available Workspaces:\n";
     echo "==================\n";
-    $tenants = TenantSchemaBuilder::getAvailableTenants();
-    foreach ($tenants as $slug => $tenant) {
+    $workspaces = WorkspaceSchemaBuilder::getAvailableworkspaces();
+    foreach ($workspaces as $slug => $workspace) {
         echo "  - $slug";
-        if ($tenant['db_name']) {
-            echo " (db: {$tenant['db_name']})";
+        if ($workspace['db_name']) {
+            echo " (db: {$workspace['db_name']})";
         }
         echo "\n";
     }
-    echo "\nTotal: " . count($tenants) . " tenants\n";
+    echo "\nTotal: " . count($workspaces) . " workspaces\n";
     exit(0);
 }
 
 // Handle --status
 if (isset($options['status'])) {
-    $tenants = TenantSchemaBuilder::getAvailableTenants();
+    $workspaces = WorkspaceSchemaBuilder::getAvailableworkspaces();
 
-    // Filter to specific tenant if provided
-    if (isset($options['tenant'])) {
-        $targetTenant = $options['tenant'];
-        if (!isset($tenants[$targetTenant])) {
-            echo colorize("Error: Tenant '$targetTenant' not found.\n", 'red');
+    // Filter to specific workspace if provided
+    if (isset($options['workspace'])) {
+        $targetWorkspace = $options['workspace'];
+        if (!isset($workspaces[$targetWorkspace])) {
+            echo colorize("Error: Workspace '$targetWorkspace' not found.\n", 'red');
             exit(1);
         }
-        $tenants = [$targetTenant => $tenants[$targetTenant]];
+        $workspaces = [$targetWorkspace => $workspaces[$targetWorkspace]];
     }
 
     echo "Migration Status\n";
     echo "================\n\n";
 
-    foreach ($tenants as $slug => $tenant) {
-        echo colorize("[$slug]", 'blue') . " ({$tenant['db_name']})\n";
+    foreach ($workspaces as $slug => $workspace) {
+        echo colorize("[$slug]", 'blue') . " ({$workspace['db_name']})\n";
 
-        $status = TenantSchemaBuilder::getTenantStatus($slug);
+        $status = WorkspaceSchemaBuilder::getWorkspaceStatus($slug);
         if (!$status['success']) {
             echo "  " . colorize("Error: " . $status['error'], 'red') . "\n\n";
             continue;
@@ -192,30 +192,30 @@ if (isset($options['status'])) {
 
 // Handle --sync
 if (isset($options['sync'])) {
-    $tenants = TenantSchemaBuilder::getAvailableTenants();
+    $workspaces = WorkspaceSchemaBuilder::getAvailableworkspaces();
 
-    // Filter to specific tenant if provided
-    if (isset($options['tenant'])) {
-        $targetTenant = $options['tenant'];
-        if (!isset($tenants[$targetTenant])) {
-            echo colorize("Error: Tenant '$targetTenant' not found.\n", 'red');
+    // Filter to specific workspace if provided
+    if (isset($options['workspace'])) {
+        $targetWorkspace = $options['workspace'];
+        if (!isset($workspaces[$targetWorkspace])) {
+            echo colorize("Error: Workspace '$targetWorkspace' not found.\n", 'red');
             exit(1);
         }
-        $tenants = [$targetTenant => $tenants[$targetTenant]];
+        $workspaces = [$targetWorkspace => $workspaces[$targetWorkspace]];
     }
 
     echo "Syncing Migrations\n";
     echo "==================\n";
-    echo "Tenants: " . count($tenants) . "\n";
+    echo "Workspaces: " . count($workspaces) . "\n";
     echo str_repeat('-', 50) . "\n";
 
     $totalRan = 0;
     $totalFailed = 0;
 
-    foreach ($tenants as $slug => $tenant) {
+    foreach ($workspaces as $slug => $workspace) {
         echo "\n" . colorize("[$slug]", 'blue') . " ";
 
-        $result = TenantSchemaBuilder::syncTenant($slug);
+        $result = WorkspaceSchemaBuilder::syncworkspace($slug);
 
         if (!$result['success']) {
             echo colorize("ERROR", 'red') . "\n";
@@ -258,7 +258,7 @@ if (isset($options['migration'])) {
     $markOnly = isset($options['mark']);
 
     // Handle 'all' keyword
-    $availableMigrations = TenantSchemaBuilder::getAvailableMigrations();
+    $availableMigrations = WorkspaceSchemaBuilder::getAvailableMigrations();
     if (strtolower($migrationInput) === 'all') {
         $migrations = $availableMigrations;
     } else {
@@ -275,20 +275,20 @@ if (isset($options['migration'])) {
         }
     }
 
-    $tenants = TenantSchemaBuilder::getAvailableTenants();
+    $workspaces = WorkspaceSchemaBuilder::getAvailableworkspaces();
 
-    // Filter to specific tenant if provided
-    if (isset($options['tenant'])) {
-        $targetTenant = $options['tenant'];
-        if (!isset($tenants[$targetTenant])) {
-            echo colorize("Error: Tenant '$targetTenant' not found.\n", 'red');
+    // Filter to specific workspace if provided
+    if (isset($options['workspace'])) {
+        $targetWorkspace = $options['workspace'];
+        if (!isset($workspaces[$targetWorkspace])) {
+            echo colorize("Error: Workspace '$targetWorkspace' not found.\n", 'red');
             exit(1);
         }
-        $tenants = [$targetTenant => $tenants[$targetTenant]];
+        $workspaces = [$targetWorkspace => $workspaces[$targetWorkspace]];
     }
 
-    if (empty($tenants)) {
-        echo colorize("No tenants found.\n", 'yellow');
+    if (empty($workspaces)) {
+        echo colorize("No workspaces found.\n", 'yellow');
         exit(0);
     }
 
@@ -302,31 +302,31 @@ if (isset($options['migration'])) {
         echo " " . colorize("(MARK ONLY)", 'cyan');
     }
     echo "\n";
-    echo "Tenants: " . count($tenants) . "\n";
+    echo "Workspaces: " . count($workspaces) . "\n";
     echo str_repeat('-', 50) . "\n";
 
     $success = 0;
     $skipped = 0;
     $failed = 0;
 
-    foreach ($tenants as $slug => $tenant) {
+    foreach ($workspaces as $slug => $workspace) {
         echo "\n  " . colorize("[$slug]", 'cyan');
 
         if ($markOnly) {
             // Mark mode - just record without running
-            $result = TenantSchemaBuilder::markForTenant($migrations, $slug);
+            $result = WorkspaceSchemaBuilder::markForworkspace($migrations, $slug);
             if ($result['success']) {
                 $marked = count($result['marked'] ?? []);
-                $tenantSkipped = count($result['skipped'] ?? []);
+                $workspaceSkipped = count($result['skipped'] ?? []);
                 if ($marked > 0) {
                     echo " " . colorize("$marked MARKED", 'green');
                     $success += $marked;
                 }
-                if ($tenantSkipped > 0) {
-                    echo ($marked > 0 ? ", " : " ") . colorize("$tenantSkipped skipped", 'yellow');
-                    $skipped += $tenantSkipped;
+                if ($workspaceSkipped > 0) {
+                    echo ($marked > 0 ? ", " : " ") . colorize("$workspaceSkipped skipped", 'yellow');
+                    $skipped += $workspaceSkipped;
                 }
-                if ($marked === 0 && $tenantSkipped === 0) {
+                if ($marked === 0 && $workspaceSkipped === 0) {
                     echo " " . colorize("NOTHING TO DO", 'yellow');
                 }
             } else {
@@ -335,40 +335,40 @@ if (isset($options['migration'])) {
             }
         } else {
             // Run mode
-            $tenantSuccess = 0;
-            $tenantSkipped = 0;
-            $tenantFailed = 0;
+            $workspaceSuccess = 0;
+            $workspaceSkipped = 0;
+            $workspaceFailed = 0;
 
             foreach ($migrations as $migration) {
-                $result = runMigrationOnTenant($migration, $slug, $force);
+                $result = runMigrationOnworkspace($migration, $slug, $force);
 
                 if ($result['success']) {
                     if (!empty($result['skipped'])) {
-                        $tenantSkipped++;
+                        $workspaceSkipped++;
                     } else {
-                        $tenantSuccess++;
+                        $workspaceSuccess++;
                     }
                 } else {
-                    $tenantFailed++;
+                    $workspaceFailed++;
                     echo "\n    " . colorize("✗ $migration", 'red') . ": " . ($result['error'] ?? 'Unknown error');
                 }
             }
 
-            // Show tenant summary
-            if ($tenantFailed === 0) {
-                if ($tenantSkipped === count($migrations)) {
+            // Show workspace summary
+            if ($workspaceFailed === 0) {
+                if ($workspaceSkipped === count($migrations)) {
                     echo " " . colorize("SKIPPED", 'yellow') . " (already applied)";
                 } else {
                     echo " " . colorize("OK", 'green');
-                    if ($tenantSkipped > 0) {
-                        echo " ($tenantSkipped skipped)";
+                    if ($workspaceSkipped > 0) {
+                        echo " ($workspaceSkipped skipped)";
                     }
                 }
             }
 
-            $success += $tenantSuccess;
-            $skipped += $tenantSkipped;
-            $failed += $tenantFailed;
+            $success += $workspaceSuccess;
+            $skipped += $workspaceSkipped;
+            $failed += $workspaceFailed;
         }
     }
 

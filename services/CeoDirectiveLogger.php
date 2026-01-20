@@ -40,7 +40,7 @@ class CeoDirectiveLogger {
     /**
      * Constructor
      *
-     * @param int $memberId Member ID for the current user/tenant
+     * @param int $memberId Member ID for the current user/workspace
      */
     public function __construct(int $memberId) {
         $this->memberId = $memberId;

@@ -7,10 +7,10 @@
  * Works with both Jira and GitHub issue sources.
  *
  * Usage:
- *   php scripts/story-build-orchestrator.php --tenant=footest4 [options]
+ *   php scripts/story-build-orchestrator.php --workspace=footest4 [options]
  *
  * Options:
- *   --tenant=<name>       Required. Tenant slug (e.g., gwt, footest4)
+ *   --workspace=<name>       Required. Workspace slug (e.g., gwt, footest4)
  *   --member=<id>         Member ID to run as (default: first admin)
  *   --max-concurrent=<n>  Max parallel builds (default: 1)
  *   --once                Process one batch and exit (don't loop)
@@ -19,8 +19,8 @@
  *   --help                Show this help
  *
  * Examples:
- *   php scripts/story-build-orchestrator.php --tenant=footest4 --verbose
- *   php scripts/story-build-orchestrator.php --tenant=gwt --max-concurrent=2
+ *   php scripts/story-build-orchestrator.php --workspace=footest4 --verbose
+ *   php scripts/story-build-orchestrator.php --workspace=gwt --max-concurrent=2
  */
 
 error_reporting(E_ALL);
@@ -29,7 +29,7 @@ chdir($baseDir);
 
 // Parse command line arguments
 $options = getopt('', [
-    'tenant:',
+    'workspace:',
     'member:',
     'max-concurrent:',
     'once',
@@ -45,13 +45,13 @@ if (isset($options['help'])) {
     exit(0);
 }
 
-if (empty($options['tenant'])) {
-    echo "Error: --tenant is required\n";
-    echo "Usage: php scripts/story-build-orchestrator.php --tenant=<tenant>\n";
+if (empty($options['workspace'])) {
+    echo "Error: --workspace is required\n";
+    echo "Usage: php scripts/story-build-orchestrator.php --workspace=<workspace>\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 $memberIdParam = isset($options['member']) ? (int)$options['member'] : null;
 $maxConcurrent = isset($options['max-concurrent']) ? (int)$options['max-concurrent'] : 1;
 $runOnce = isset($options['once']);
@@ -65,10 +65,10 @@ require_once $baseDir . '/lib/FlightMap.php';
 use \Flight as Flight;
 use \app\Bean;
 
-// Load tenant config
-$configFile = "{$baseDir}/conf/config.{$tenant}.ini";
+// Load workspace config
+$configFile = "{$baseDir}/conf/config.{$workspace}.ini";
 if (!file_exists($configFile)) {
-    echo "Error: Tenant config not found: {$configFile}\n";
+    echo "Error: Workspace config not found: {$configFile}\n";
     exit(1);
 }
 
@@ -93,12 +93,12 @@ try {
     $type = $dbConfig['type'] ?? 'mysql';
 
     if ($type === 'sqlite') {
-        $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+        $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
         Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
-        $name = $dbConfig['name'] ?? $tenant;
+        $name = $dbConfig['name'] ?? $workspace;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
         Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
@@ -137,7 +137,7 @@ function output($message, $force = false) {
  * Story Build Orchestrator Class
  */
 class StoryBuildOrchestrator {
-    private string $tenant;
+    private string $workspace;
     private int $memberId;
     private int $maxConcurrent;
     private bool $dryRun;
@@ -149,14 +149,14 @@ class StoryBuildOrchestrator {
     /** @var int Seconds before considering a session stuck */
     private int $stuckThreshold = 600; // 10 minutes
 
-    public function __construct(string $tenant, int $memberId, int $maxConcurrent, bool $dryRun, string $baseDir) {
-        $this->tenant = $tenant;
+    public function __construct(string $workspace, int $memberId, int $maxConcurrent, bool $dryRun, string $baseDir) {
+        $this->workspace = $workspace;
         $this->memberId = $memberId;
         $this->maxConcurrent = max(1, $maxConcurrent);
         $this->dryRun = $dryRun;
         $this->baseDir = $baseDir;
 
-        // Discover any existing running sessions for this tenant
+        // Discover any existing running sessions for this workspace
         $this->discoverExistingSessions();
     }
 
@@ -164,12 +164,12 @@ class StoryBuildOrchestrator {
      * Discover existing tmux sessions that match our pattern
      */
     private function discoverExistingSessions(): void {
-        $pattern = "story-{$this->tenant}-";
+        $pattern = "story-{$this->workspace}-";
         exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $sessions);
 
         foreach ($sessions as $sessionName) {
             if (strpos($sessionName, $pattern) === 0) {
-                // Parse story ID from session name: story-{tenant}-{storyId}-{issueKey}
+                // Parse story ID from session name: story-{workspace}-{storyId}-{issueKey}
                 if (preg_match('/^story-[^-]+-(\d+)-(.+)$/', $sessionName, $matches)) {
                     $storyId = (int)$matches[1];
 
@@ -213,7 +213,7 @@ class StoryBuildOrchestrator {
     private function buildSessionName(int $storyId, string $issueKey): string {
         // Sanitize issue key for tmux session name
         $safe = preg_replace('/[^a-zA-Z0-9_-]/', '-', $issueKey);
-        return "story-{$this->tenant}-{$storyId}-{$safe}";
+        return "story-{$this->workspace}-{$storyId}-{$safe}";
     }
 
     /**
@@ -269,10 +269,10 @@ class StoryBuildOrchestrator {
 
         // Build the command
         $cmd = sprintf(
-            'php %s/scripts/job-dispatcher.php --issue=%s --tenant=%s --provider=%s --member=%d --print',
+            'php %s/scripts/job-dispatcher.php --issue=%s --workspace=%s --provider=%s --member=%d --print',
             escapeshellarg($this->baseDir),
             escapeshellarg($issueKey),
-            escapeshellarg($this->tenant),
+            escapeshellarg($this->workspace),
             $provider,
             $this->memberId
         );
@@ -551,7 +551,7 @@ class StoryBuildOrchestrator {
     private function getWorkDir(string $issueKey): string {
         // Sanitize issue key for directory path
         $safe = preg_replace('/[^a-zA-Z0-9_-]/', '-', $issueKey);
-        return "/tmp/local-aidev-{$this->tenant}-{$this->memberId}-{$safe}";
+        return "/tmp/local-aidev-{$this->workspace}-{$this->memberId}-{$safe}";
     }
 
     /**
@@ -777,7 +777,7 @@ class StoryBuildOrchestrator {
      */
     public function run(): void {
         output("Starting Story Build Orchestrator", true);
-        output("  Tenant: {$this->tenant}", true);
+        output("  workspace: {$this->workspace}", true);
         output("  Member: {$this->memberId}", true);
         output("  Max Concurrent: {$this->maxConcurrent}", true);
         output("  Dry Run: " . ($this->dryRun ? 'YES' : 'NO'), true);
@@ -854,7 +854,7 @@ echo "Story Build Orchestrator\n";
 echo "===========================================\n\n";
 
 $orchestrator = new StoryBuildOrchestrator(
-    $tenant,
+    $workspace,
     $memberId,
     $maxConcurrent,
     $dryRun,

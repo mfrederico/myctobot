@@ -6,38 +6,38 @@
  * Called by wrapper script exit trap to update session status when Claude exits.
  *
  * Usage:
- *   php aoe-session-cleanup.php --tenant=gwt --session-id=<id> [--status=stopped|completed]
+ *   php aoe-session-cleanup.php --workspace=gwt --session-id=<id> [--status=stopped|completed]
  */
 
 // Parse command line arguments
-$options = getopt('', ['tenant:', 'session-id:', 'status:', 'exit-code:', 'help']);
+$options = getopt('', ['workspace:', 'session-id:', 'status:', 'exit-code:', 'help']);
 
 if (isset($options['help'])) {
     echo <<<HELP
 AOE Session Cleanup
 
-Usage: php aoe-session-cleanup.php --tenant=<tenant> --session-id=<id> [options]
+Usage: php aoe-session-cleanup.php --workspace=<workspace> --session-id=<id> [options]
 
 Options:
-  --tenant=<name>      Required. Tenant slug (e.g., gwt)
+  --workspace=<name>      Required. Workspace slug (e.g., gwt)
   --session-id=<id>    Required. AOE session ID
   --status=<status>    Status to set (stopped, completed, error). Default: auto-detect
   --exit-code=<code>   Exit code from claude process (used for auto-detection)
   --help               Show this help message
 
 Example:
-  php aoe-session-cleanup.php --tenant=gwt --session-id=abc123 --exit-code=0
+  php aoe-session-cleanup.php --workspace=gwt --session-id=abc123 --exit-code=0
 
 HELP;
     exit(0);
 }
 
-if (empty($options['tenant']) || empty($options['session-id'])) {
-    echo "Error: --tenant and --session-id are required\n";
+if (empty($options['workspace']) || empty($options['session-id'])) {
+    echo "Error: --workspace and --session-id are required\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 $sessionId = $options['session-id'];
 $requestedStatus = $options['status'] ?? null;
 $exitCode = isset($options['exit-code']) ? (int) $options['exit-code'] : null;
@@ -55,16 +55,16 @@ require_once $aoePath;
 
 use Aoe\Session\Storage;
 use Aoe\Session\Status;
-use Aoe\Tenant\TenantContext;
+use Aoe\Workspace\WorkspaceContext;
 use Aoe\Tmux\TmuxService;
 use Aoe\Tmux\StatusDetector;
 
-// Set tenant context
-TenantContext::set($tenant);
+// Set workspace context
+workspaceContext::set($workspace);
 
 // Load storage (/tmp/.aoe-php for CLI/web consistency)
 $aoeBasePath = '/tmp/.aoe-php';
-$storage = new Storage($tenant, $aoeBasePath);
+$storage = new Storage($workspace, $aoeBasePath);
 
 // Find session
 $session = $storage->find($sessionId);
@@ -97,7 +97,7 @@ if ($requestedStatus) {
     $newStatus = ($exitCode === 0) ? Status::Idle : Status::Error;
 } else {
     // Check if tmux session still exists
-    $tmux = new TmuxService($tenant);
+    $tmux = new TmuxService($workspace);
     $tmuxName = $session->getTmuxName();
 
     if ($tmux->sessionExistsByName($tmuxName)) {
@@ -121,7 +121,7 @@ echo "[AOE Cleanup] Updated status: {$newStatus->value}\n";
 
 // Optional: Trigger queue check for next job
 // This could notify the directive processor that a slot is available
-$queueCheckFile = "/tmp/aoe-queue-check-{$tenant}";
+$queueCheckFile = "/tmp/aoe-queue-check-{$workspace}";
 touch($queueCheckFile);
 echo "[AOE Cleanup] Triggered queue check: {$queueCheckFile}\n";
 

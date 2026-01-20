@@ -42,7 +42,7 @@ $options = getopt('', [
     'member:',
     'board:',
     'job:',
-    'tenant:',
+    'workspace:',
     'status-filter:',
     'email',
     'verbose',
@@ -91,12 +91,12 @@ use \app\services\AnalysisService;
 require_once $baseDir . '/services/AnalysisService.php';
 
 try {
-    // Determine config file based on tenant parameter
-    $tenant = $options['tenant'] ?? null;
-    if ($tenant) {
-        $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    // Determine config file based on workspace parameter
+    $workspace = $options['workspace'] ?? null;
+    if ($workspace) {
+        $configFile = $baseDir . "/conf/config.{$workspace}.ini";
         if (!file_exists($configFile)) {
-            echo "Error: Tenant config not found: {$configFile}\n";
+            echo "Error: Workspace config not found: {$configFile}\n";
             exit(1);
         }
     } else {
@@ -106,7 +106,7 @@ try {
     $bootstrap = new \app\Bootstrap($configFile);
 
     if ($verbose) {
-        echo "Application initialized" . ($tenant ? " (tenant: {$tenant})" : "") . "\n\n";
+        echo "Application initialized" . ($workspace ? " (workspace: {$workspace})" : "") . "\n\n";
     }
 
     // Validate CLI secret key for authentication

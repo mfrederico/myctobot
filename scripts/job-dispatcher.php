@@ -21,7 +21,7 @@ $options = getopt('', [
     'issue:',
     'member:',
     'job-id:',
-    'tenant:',
+    'workspace:',
     'repo:',
     'provider:',  // jira or github
     'aoe-session:',  // AOE session ID (passed from TmuxService)
@@ -40,7 +40,7 @@ if (isset($options['help']) || empty($options['issue'])) {
     echo "Options:\n";
     echo "  --issue         Issue key (e.g., SSI-1883) [required]\n";
     echo "  --member        Member ID (default: 3)\n";
-    echo "  --tenant        Tenant slug for multi-tenancy (e.g., gwt)\n";
+    echo "  --workspace        Workspace slug for multi-workspace (e.g., gwt)\n";
     echo "  --job-id        Job ID for status tracking (auto-generated if not provided)\n";
     echo "  --repo          Repository connection ID (from repo-{slug} label)\n";
     echo "  --workstation   JSON workstation config to run Claude via SSH\n";
@@ -74,7 +74,7 @@ use Aoe\Session\Instance as AoeInstance;
 use Aoe\Session\Storage as AoeStorage;
 use Aoe\Session\Status as AoeStatus;
 use Aoe\Tmux\TmuxService as AoeTmux;
-use Aoe\Tenant\TenantContext;
+use Aoe\Workspace\WorkspaceContext;
 use \app\services\JiraClient;
 use \app\services\GitHubClient;
 use \app\services\EncryptionService;
@@ -83,12 +83,12 @@ use \app\services\AIDevStatusService;
 use \app\services\UserDatabaseService;
 use \app\plugins\AtlassianAuth;
 
-// Determine config file based on tenant parameter
-$tenant = $options['tenant'] ?? null;
-if ($tenant) {
-    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+// Determine config file based on workspace parameter
+$workspace = $options['workspace'] ?? null;
+if ($workspace) {
+    $configFile = $baseDir . "/conf/config.{$workspace}.ini";
     if (!file_exists($configFile)) {
-        echo "Error: Tenant config not found: {$configFile}\n";
+        echo "Error: Workspace config not found: {$configFile}\n";
         exit(1);
     }
 } else {
@@ -120,13 +120,13 @@ if (!empty($options['workstation'])) {
     echo "Running on workstation: {$workstationConfig['user']}@{$workstationConfig['host']}:{$workstationConfig['port']}\n";
 }
 
-// Get domain/tenant identifier using AOE (single source of truth)
-$tenantSlug = $tenant ?: AoeTmux::getDomainId();
-TenantContext::set($tenantSlug);
+// Get domain/workspace identifier using AOE (single source of truth)
+$workspaceSlug = $workspace ?: AoeTmux::getDomainId();
+workspaceContext::set($workspaceSlug);
 
 // Initialize AOE storage for session tracking (/tmp/.aoe-php for CLI/web consistency)
 $aoeBasePath = '/tmp/.aoe-php';
-$aoeStorage = new AoeStorage($tenantSlug, $aoeBasePath);
+$aoeStorage = new AoeStorage($workspaceSlug, $aoeBasePath);
 
 // Check if AOE session ID was passed (from TmuxService)
 $aoeSessionId = $options['aoe-session'] ?? null;
@@ -137,7 +137,7 @@ if ($aoeSessionId) {
     if (!$aoeSession) {
         echo "Warning: Could not load AOE session {$aoeSessionId}, creating new one\n";
         $aoeSession = AoeInstance::create(
-            tenantId: $tenantSlug,
+            workspaceId: $workspaceSlug,
             title: $issueKey,
             projectPath: '/tmp',
             tool: 'claude',
@@ -147,7 +147,7 @@ if ($aoeSessionId) {
 } else {
     // Create new AOE session (manual run without TmuxService)
     $aoeSession = AoeInstance::create(
-        tenantId: $tenantSlug,
+        workspaceId: $workspaceSlug,
         title: $issueKey,
         projectPath: '/tmp',
         tool: 'claude',
@@ -155,7 +155,7 @@ if ($aoeSessionId) {
     );
 }
 
-// Session name format: aoe-{tenant}-{issue}-{shortId}
+// Session name format: aoe-{workspace}-{issue}-{shortId}
 $sessionName = $aoeSession->getTmuxName();
 $safeIssueKey = AoeTmux::sanitize($issueKey);
 $workDir = "/tmp/{$sessionName}";
@@ -849,10 +849,10 @@ if ($provider === 'github') {
     $mcpProviderInfo = "GitHub MCP: stdio transport (npx @modelcontextprotocol/server-github)";
 } else {
     // Jira provider - use Jira HTTP MCP
-    // Use fixed main domain with tenant slug in URL path
-    // URL pattern: https://myctobot.ai/mcp/{tenant}/jira
-    $mcpTenant = $tenant ?? 'default';
-    $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jira";
+    // Use fixed main domain with workspace slug in URL path
+    // URL pattern: https://myctobot.ai/mcp/workspace/jira
+    $mcpWorkspace = $workspace ?? 'default';
+    $mcpHttpUrl = "https://myctobot.ai/mcp/{$mcpWorkspace}/jira";
     $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
     $mcpAgentName = $agentConfig['name'] ?? 'AI Assistant';
     $mcpServers->jira = (object) [
@@ -868,8 +868,8 @@ if ($provider === 'github') {
 }
 
 // Add MyCTOBot Jobs MCP for completion callbacks
-$mcpTenant = $tenant ?? 'default';
-$mcpJobsUrl = "https://myctobot.ai/mcp/{$mcpTenant}/jobs";
+$mcpWorkspace = $workspace ?? 'default';
+$mcpJobsUrl = "https://myctobot.ai/mcp/{$mcpWorkspace}/jobs";
 $mcpJobsCredentials = base64_encode("{$memberId}:{$jobId}");
 $mcpServers->myctobot = (object) [
     'type' => 'http',
@@ -1058,12 +1058,12 @@ SHOPIFY_ECHO;
 $webhookUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
 $apiKey = Flight::get('api.api_key') ?? '';
 
-// Hook environment variables for multi-tenant support
+// Hook environment variables for multi-workspace support
 $hookEnvSection = <<<HOOK_ENV
 
-# MyCTOBot Hook Environment Variables (for multi-tenant hooks)
+# MyCTOBot Hook Environment Variables (for multi-workspace hooks)
 export MYCTOBOT_APP_ROOT="{$baseDir}"
-export MYCTOBOT_WORKSPACE="{$tenant}"
+export MYCTOBOT_WORKSPACE="{$workspace}"
 export MYCTOBOT_JOB_ID="{$jobId}"
 export MYCTOBOT_ISSUE_KEY="{$issueKey}"
 export MYCTOBOT_MEMBER_ID="{$memberId}"
@@ -1177,7 +1177,7 @@ $envScript = <<<BASH
 export PATH="\$HOME/.local/bin:\$HOME/.npm-global/bin:/usr/local/bin:\$PATH"
 
 # AOE Session Tracking
-export AOE_TENANT="{$tenantSlug}"
+export AOE_workspace="{$workspaceSlug}"
 export AOE_SESSION_ID="{$aoeSessionId}"
 export AOE_SESSION_NAME="{$sessionName}"
 
@@ -1185,7 +1185,7 @@ export AOE_SESSION_NAME="{$sessionName}"
 aoe_session_cleanup() {
     local exit_code=\${1:-0}
     echo "Updating AOE session status..."
-    php "{$cleanupScript}" --tenant="\$AOE_TENANT" --session-id="\$AOE_SESSION_ID" --exit-code="\$exit_code" || true
+    php "{$cleanupScript}" --workspace="\$AOE_workspace" --session-id="\$AOE_SESSION_ID" --exit-code="\$exit_code" || true
 }
 
 {$providerEnvSection}
@@ -1202,7 +1202,7 @@ echo "==========================================="
 echo "AI Developer Session - Using YOUR Claude"
 echo "==========================================="
 echo ""
-echo "Tenant: {$tenantSlug}"
+echo "Workspace: {$workspaceSlug}"
 echo "Provider: {$provider}"
 echo "Issue: {$issueKey}"
 echo "Summary: {$summary}"
@@ -1251,11 +1251,11 @@ cleanup_labels() {
     fi
 
     # Use main domain to avoid subdomain redirect losing POST data
-    local api_url="https://myctobot.ai/jobs/cleanup?tenant=$MYCTOBOT_WORKSPACE"
+    local api_url="https://myctobot.ai/jobs/cleanup?workspace=$MYCTOBOT_WORKSPACE"
     local response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
         -H "X-API-Key: $MYCTOBOT_API_KEY" \
         -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "tenant=$MYCTOBOT_WORKSPACE&issue_key=$MYCTOBOT_ISSUE_KEY&job_uid=$MYCTOBOT_JOB_ID" 2>/dev/null)
+        -d "workspace=$MYCTOBOT_WORKSPACE&issue_key=$MYCTOBOT_ISSUE_KEY&job_uid=$MYCTOBOT_JOB_ID" 2>/dev/null)
 
     local http_code=$(echo "$response" | tail -1)
     local body=$(echo "$response" | head -n -1)
@@ -1433,7 +1433,7 @@ if ($dryRun) {
     echo "===========================================\n\n";
     echo "Summary:\n";
     echo "  - Member: {$memberId} ({$member->email})\n";
-    echo "  - Tenant: {$tenantSlug}\n";
+    echo "  - workspace: {$workspaceSlug}\n";
     echo "  - Repository: {$repoOwner}/{$repoName}\n";
     echo "  - Default Branch: {$defaultBranch}\n";
     echo "  - GitHub Token: " . (!empty($githubToken) ? "****" . substr($githubToken, -4) : "NOT SET") . "\n";
@@ -1457,7 +1457,7 @@ if ($dryRun) {
 // When agent has a workstation (runner) configured, use job-executor
 // This runs the job ON the remote workstation instead of SSHing from local
 $useJobExecutor = false;
-$jobExecutorConfig = \app\services\JobExecutorConfig::getConfig($tenantSlug);
+$jobExecutorConfig = \app\services\JobExecutorConfig::getConfig($workspaceSlug);
 $jobExecutorUrl = $jobExecutorConfig['url'];
 $runnersId = null;
 
@@ -1486,7 +1486,7 @@ if ($useJobExecutor) {
 
     // Generate job_uid if not provided
     if (empty($jobId)) {
-        $jobId = 'aoe-' . $tenantSlug . '-' . bin2hex(random_bytes(8));
+        $jobId = 'aoe-' . $workspaceSlug . '-' . bin2hex(random_bytes(8));
     }
 
     // Create/update aidevjobs record
@@ -1525,7 +1525,7 @@ if ($useJobExecutor) {
 
     // Submit to job-executor (PING)
     $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-    // Use main domain for callback since tenant is passed in body
+    // Use main domain for callback since workspace is passed in body
     // (subdomain URLs may redirect which breaks the callback)
     $callbackUrl = 'https://myctobot.ai/api/jobexecutor';
 
@@ -1541,7 +1541,7 @@ if ($useJobExecutor) {
             'Accept: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'tenant' => $tenantSlug,
+            'workspace' => $workspaceSlug,
             'job_uid' => $jobId,
             'callback_url' => $callbackUrl,
         ]),
@@ -1601,8 +1601,8 @@ if ($useJobExecutor) {
         echo "AOE Session: {$aoeSession->id} (short: {$aoeSession->getShortId()})\n";
         echo "\n";
         echo "Monitor commands:\n";
-        echo "  Status:   bin/aoe --tenant={$tenantSlug} session:status {$aoeSession->getShortId()}\n";
-        echo "  Jobs:     bin/aoe --tenant={$tenantSlug} job:list\n";
+        echo "  Status:   bin/aoe --workspace={$workspaceSlug} session:status {$aoeSession->getShortId()}\n";
+        echo "  Jobs:     bin/aoe --workspace={$workspaceSlug} job:list\n";
         echo "\n";
         echo "The job will run on the remote workstation.\n";
         echo "Use the MyCTOBot dashboard to monitor progress.\n";
@@ -1635,7 +1635,7 @@ if ($alreadyInTmux) {
 
 // Manual mode - create our own tmux session using AOE
 echo "Setting up tmux session...\n";
-$aoeTmux = new AoeTmux($tenantSlug);
+$aoeTmux = new AoeTmux($workspaceSlug);
 
 // Kill existing session if any (use session name with ticket reference)
 if ($aoeTmux->sessionExistsByName($sessionName)) {
@@ -1698,8 +1698,8 @@ echo "\n";
 echo "Commands:\n";
 echo "  Attach now:    tmux attach -t {$sessionName}\n";
 echo "  Watch log:     tail -f {$workDir}/session.log\n";
-echo "  Kill session:  bin/aoe --tenant={$tenantSlug} session:stop {$aoeSession->getShortId()}\n";
-echo "  Session info:  bin/aoe --tenant={$tenantSlug} session:status {$aoeSession->getShortId()}\n";
+echo "  Kill session:  bin/aoe --workspace={$workspaceSlug} session:stop {$aoeSession->getShortId()}\n";
+echo "  Session info:  bin/aoe --workspace={$workspaceSlug} session:status {$aoeSession->getShortId()}\n";
 echo "\n";
 echo "AOE Session ID: {$aoeSession->id} (short: {$aoeSession->getShortId()})\n";
 echo "\n";

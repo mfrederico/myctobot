@@ -14,7 +14,7 @@
  * OPTIONS:
  * --------
  *   --script     REQUIRED for CLI execution
- *   --tenant     Process specific tenant (e.g., gwt, greenworks). If omitted, processes all tenants.
+ *   --workspace     Process specific workspace (e.g., gwt, greenworks). If omitted, processes all workspaces.
  *   --verbose    Show detailed output
  *   --dry-run    Check what would be sent without actually sending
  *   --force      Send digests now, ignoring time window (for missed digests)
@@ -29,14 +29,14 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'tenant:', 'help']);
+$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'workspace:', 'help']);
 
 if (isset($options['help'])) {
     echo "MyCTOBot Daily Digest Scheduler\n\n";
     echo "Usage: php cron-digest.php --script [options]\n\n";
     echo "Options:\n";
     echo "  --script     REQUIRED for standalone script mode\n";
-    echo "  --tenant     Process specific tenant (omit to process all tenants)\n";
+    echo "  --workspace     Process specific workspace (omit to process all workspaces)\n";
     echo "  --verbose    Show detailed output\n";
     echo "  --dry-run    Check what would be sent without sending\n";
     echo "  --force      Send digests now, ignoring time window\n";
@@ -47,14 +47,14 @@ if (isset($options['help'])) {
 $verbose = isset($options['verbose']);
 $dryRun = isset($options['dry-run']);
 $force = isset($options['force']);
-$specificTenant = $options['tenant'] ?? null;
+$specificWorkspace = $options['workspace'] ?? null;
 
 if ($verbose) {
     echo "MyCTOBot Digest Scheduler\n";
     echo "=========================\n";
     echo "Time: " . date('Y-m-d H:i:s') . "\n";
     echo "Base: {$baseDir}\n";
-    if ($specificTenant) echo "Tenant: {$specificTenant}\n";
+    if ($specificWorkspace) echo "Workspace: {$specificWorkspace}\n";
     if ($force) echo "Mode: FORCE (ignoring time windows)\n";
     if ($dryRun) echo "Mode: DRY RUN\n";
     echo "\n";
@@ -74,54 +74,54 @@ use \app\services\AnalysisService;
 require_once $baseDir . '/services/AnalysisService.php';
 
 try {
-    // Discover tenants to process
-    $tenantsToProcess = [];
-    if ($specificTenant) {
-        // Single tenant specified
-        $tenantConfig = $baseDir . "/conf/config.{$specificTenant}.ini";
-        if (!file_exists($tenantConfig)) {
-            echo "Error: Tenant config not found: {$tenantConfig}\n";
+    // Discover workspaces to process
+    $workspacesToProcess = [];
+    if ($specificWorkspace) {
+        // Single workspace specified
+        $workspaceConfig = $baseDir . "/conf/config.{$specificWorkspace}.ini";
+        if (!file_exists($workspaceConfig)) {
+            echo "Error: Workspace config not found: {$workspaceConfig}\n";
             exit(1);
         }
-        $tenantsToProcess[$specificTenant] = $tenantConfig;
+        $workspacesToProcess[$specificWorkspace] = $workspaceConfig;
     } else {
-        // Discover all tenant configs
+        // Discover all workspace configs
         $configFiles = glob($baseDir . '/conf/config.*.ini');
         foreach ($configFiles as $configFile) {
             $basename = basename($configFile);
-            // Extract tenant name from config.{tenant}.ini
+            // Extract workspace name from config.{workspace}.ini
             if (preg_match('/^config\.([a-z0-9]+)\.ini$/', $basename, $matches)) {
-                $tenantSlug = $matches[1];
+                $workspaceSlug = $matches[1];
                 // Skip 'example' config
-                if ($tenantSlug !== 'example') {
-                    $tenantsToProcess[$tenantSlug] = $configFile;
+                if ($workspaceSlug !== 'example') {
+                    $workspacesToProcess[$workspaceSlug] = $configFile;
                 }
             }
         }
     }
 
-    if (empty($tenantsToProcess)) {
+    if (empty($workspacesToProcess)) {
         if ($verbose) {
-            echo "No tenant configs found. Nothing to process.\n";
+            echo "No workspace configs found. Nothing to process.\n";
         }
         exit(0);
     }
 
     if ($verbose) {
-        echo "Tenants to process: " . implode(', ', array_keys($tenantsToProcess)) . "\n\n";
+        echo "Workspaces to process: " . implode(', ', array_keys($workspacesToProcess)) . "\n\n";
     }
 
     $totalProcessed = 0;
     $totalErrors = 0;
 
-    // Process each tenant
-    foreach ($tenantsToProcess as $tenantSlug => $configFile) {
+    // Process each workspace
+    foreach ($workspacesToProcess as $workspaceSlug => $configFile) {
         if ($verbose) {
-            echo "=== Processing tenant: {$tenantSlug} ===\n";
+            echo "=== Processing workspace: {$workspaceSlug} ===\n";
         }
 
         try {
-            // Initialize fresh bootstrap for this tenant
+            // Initialize fresh bootstrap for this workspace
             $bootstrap = new \app\Bootstrap($configFile);
 
             // Set timezone from config
@@ -129,17 +129,17 @@ try {
             date_default_timezone_set($configTimezone);
 
             if ($verbose) {
-                echo "Tenant initialized, timezone: {$configTimezone}\n";
+                echo "Workspace initialized, timezone: {$configTimezone}\n";
             }
 
-            // Process all boards with digests enabled for this tenant
+            // Process all boards with digests enabled for this workspace
             $boards = Bean::findAll('boards', 'is_active = 1 AND digest_enabled = 1');
             $processedCount = 0;
             $errorCount = 0;
 
             if (empty($boards)) {
                 if ($verbose) {
-                    echo "No boards with digests enabled for tenant {$tenantSlug}\n";
+                    echo "No boards with digests enabled for workspace {$workspaceSlug}\n";
                 }
                 continue;
             }
@@ -170,7 +170,7 @@ try {
                         echo "Error processing member {$member->id}: {$e->getMessage()}\n";
                     }
                     Flight::get('log')->error('Digest cron error for member', [
-                        'tenant' => $tenantSlug,
+                        'workspace' => $workspaceSlug,
                         'member_id' => $member->id,
                         'error' => $e->getMessage()
                     ]);
@@ -181,20 +181,20 @@ try {
             $totalErrors += $errorCount;
 
             if ($verbose) {
-                echo "Tenant {$tenantSlug}: {$processedCount} digests sent, {$errorCount} errors\n\n";
+                echo "Workspace {$workspaceSlug}: {$processedCount} digests sent, {$errorCount} errors\n\n";
             }
 
         } catch (\Exception $e) {
             $totalErrors++;
             if ($verbose) {
-                echo "Error processing tenant {$tenantSlug}: {$e->getMessage()}\n\n";
+                echo "Error processing workspace {$workspaceSlug}: {$e->getMessage()}\n\n";
             }
         }
     }
 
     if ($verbose) {
         echo "=========================\n";
-        echo "All tenants complete!\n";
+        echo "All workspaces complete!\n";
         echo "Total digests sent: {$totalProcessed}\n";
         echo "Total errors: {$totalErrors}\n";
     }

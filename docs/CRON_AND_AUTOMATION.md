@@ -37,25 +37,25 @@ Processes incoming CEO directives through the autonomous CTO system. Handles the
 
 ```bash
 # Basic usage
-php scripts/cron-directive-processor.php --tenant=gwt
+php scripts/cron-directive-processor.php --workspace=gwt
 
 # With verbose output
-php scripts/cron-directive-processor.php --tenant=gwt --verbose
+php scripts/cron-directive-processor.php --workspace=gwt --verbose
 
 # Dry run (see what would be processed)
-php scripts/cron-directive-processor.php --tenant=gwt --dry-run
+php scripts/cron-directive-processor.php --workspace=gwt --dry-run
 ```
 
 **Options:**
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--tenant=<name>` | Yes | Tenant slug (e.g., `gwt`, `footest4`) |
+| `--workspace=<name>` | Yes | Workspace slug (e.g., `gwt`, `footest4`) |
 | `--verbose` | No | Show detailed processing output |
 | `--dry-run` | No | Check without actually processing |
 
 **Crontab:**
 ```bash
-*/5 * * * * php /path/to/scripts/cron-directive-processor.php --tenant=gwt >> /path/to/log/directive-processor.log 2>&1
+*/5 * * * * php /path/to/scripts/cron-directive-processor.php --workspace=gwt >> /path/to/log/directive-processor.log 2>&1
 ```
 
 ---
@@ -66,25 +66,25 @@ Processes the `ctostories` queue, spawning AI dev agents for each story. Support
 
 ```bash
 # Basic usage (processes stories until queue is empty)
-php scripts/story-build-orchestrator.php --tenant=footest4
+php scripts/story-build-orchestrator.php --workspace=footest4
 
 # With verbose output
-php scripts/story-build-orchestrator.php --tenant=footest4 --verbose
+php scripts/story-build-orchestrator.php --workspace=footest4 --verbose
 
 # Run 2 parallel builds
-php scripts/story-build-orchestrator.php --tenant=gwt --max-concurrent=2
+php scripts/story-build-orchestrator.php --workspace=gwt --max-concurrent=2
 
 # Process one batch and exit (for cron)
-php scripts/story-build-orchestrator.php --tenant=gwt --once
+php scripts/story-build-orchestrator.php --workspace=gwt --once
 
 # Dry run
-php scripts/story-build-orchestrator.php --tenant=footest4 --dry-run
+php scripts/story-build-orchestrator.php --workspace=footest4 --dry-run
 ```
 
 **Options:**
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--tenant=<name>` | Yes | Tenant slug |
+| `--workspace=<name>` | Yes | Workspace slug |
 | `--member=<id>` | No | Member ID to run as (default: first admin) |
 | `--max-concurrent=<n>` | No | Max parallel builds (default: 1) |
 | `--once` | No | Process one batch and exit |
@@ -120,10 +120,10 @@ Runs AI Developer using your local Claude Code subscription (not API credits). C
 
 ```bash
 # Basic usage with Jira issue
-php scripts/local-aidev-full.php --issue=SSI-1883 --tenant=gwt
+php scripts/local-aidev-full.php --issue=SSI-1883 --workspace=gwt
 
 # With GitHub issue (owner/repo#number format)
-php scripts/local-aidev-full.php --issue=mfrederico/myctobot#26 --tenant=footest4 --provider=github
+php scripts/local-aidev-full.php --issue=mfrederico/myctobot#26 --workspace=footest4 --provider=github
 
 # Attach to tmux session immediately
 php scripts/local-aidev-full.php --issue=SSI-1883 --attach
@@ -132,7 +132,7 @@ php scripts/local-aidev-full.php --issue=SSI-1883 --attach
 php scripts/local-aidev-full.php --issue=SSI-1883 --print
 
 # Specify member and repo
-php scripts/local-aidev-full.php --issue=SSI-1883 --member=3 --repo=5 --tenant=gwt
+php scripts/local-aidev-full.php --issue=SSI-1883 --member=3 --repo=5 --workspace=gwt
 
 # Dry run (test without spawning Claude)
 php scripts/local-aidev-full.php --issue=SSI-1883 --dry-run
@@ -142,7 +142,7 @@ php scripts/local-aidev-full.php --issue=SSI-1883 --dry-run
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--issue=<key>` | Yes | Issue key (e.g., `SSI-1883` or `owner/repo#123`) |
-| `--tenant=<name>` | No | Tenant slug |
+| `--workspace=<name>` | No | Workspace slug |
 | `--member=<id>` | No | Member ID (default: 3) |
 | `--provider=<type>` | No | `jira` or `github` (default: jira) |
 | `--repo=<id>` | No | Repository connection ID |
@@ -155,7 +155,7 @@ php scripts/local-aidev-full.php --issue=SSI-1883 --dry-run
 
 **Work directory structure:**
 ```
-/tmp/local-aidev-{tenant}-{member}-{issueKey}/
+/tmp/local-aidev-{workspace}-{member}-{issueKey}/
 ├── repo/           # Cloned repository
 ├── prompt.txt      # Generated prompt for Claude
 ├── run-claude.sh   # Execution script
@@ -172,11 +172,11 @@ Shard-side AI Developer runner. Called by remote shards to process jobs using AP
 ```bash
 # Process a new job
 php scripts/ai-dev-agent.php --secret=KEY --member=3 --job=JOB_ID \
-    --issue=SSI-1883 --cloud=CLOUD_ID --repo=5 --action=process --tenant=gwt
+    --issue=SSI-1883 --cloud=CLOUD_ID --repo=5 --action=process --workspace=gwt
 
 # Resume a job after clarification
 php scripts/ai-dev-agent.php --secret=KEY --member=3 --job=JOB_ID \
-    --action=resume --comment=COMMENT_ID --tenant=gwt
+    --action=resume --comment=COMMENT_ID --workspace=gwt
 ```
 
 **Note:** This script is typically not run manually. It's invoked by the shard infrastructure when jobs are dispatched.
@@ -191,7 +191,7 @@ Runs board analysis (sprint analysis, velocity, trends, etc.).
 
 ```bash
 # Run analysis for a specific board
-php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --tenant=gwt
+php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --workspace=gwt
 
 # With verbose output
 php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --verbose
@@ -210,7 +210,7 @@ php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --job=a
 | `--secret=<key>` | Yes | Auth key (from `cron.api_key` in config) |
 | `--member=<id>` | Yes | Member ID |
 | `--board=<id>` | Yes | Board ID to analyze |
-| `--tenant=<name>` | No | Tenant slug |
+| `--workspace=<name>` | No | Workspace slug |
 | `--job=<id>` | No | Job ID for progress tracking |
 | `--status-filter=<list>` | No | Comma-separated status list |
 | `--email` | No | Send digest email after analysis |
@@ -220,14 +220,14 @@ php scripts/cron-analysis.php --script --secret=KEY --member=3 --board=1 --job=a
 
 ### cron-digest.php
 
-Processes scheduled digests for all tenants/boards based on configured times.
+Processes scheduled digests for all workspaces/boards based on configured times.
 
 ```bash
-# Process all tenants
+# Process all workspaces
 php scripts/cron-digest.php --script --verbose
 
-# Process specific tenant
-php scripts/cron-digest.php --script --tenant=gwt --verbose
+# Process specific workspace
+php scripts/cron-digest.php --script --workspace=gwt --verbose
 
 # Dry run (see what would be sent)
 php scripts/cron-digest.php --script --dry-run
@@ -240,7 +240,7 @@ php scripts/cron-digest.php --script --force
 | Option | Required | Description |
 |--------|----------|-------------|
 | `--script` | Yes | Required for CLI execution |
-| `--tenant=<name>` | No | Process specific tenant only |
+| `--workspace=<name>` | No | Process specific workspace only |
 | `--verbose` | No | Show detailed output |
 | `--dry-run` | No | Check without sending |
 | `--force` | No | Send now, ignore time windows |
@@ -347,7 +347,7 @@ php scripts/resetcache.php
 # ============================================
 # CEO Directive Processor (every 5 minutes)
 # ============================================
-*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --tenant=gwt >> /var/www/myctobot/log/directive-processor.log 2>&1
+*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --workspace=gwt >> /var/www/myctobot/log/directive-processor.log 2>&1
 
 # ============================================
 # Daily Digest Scheduler (every 15 minutes)
@@ -357,7 +357,7 @@ php scripts/resetcache.php
 # ============================================
 # Story Build Orchestrator (every 10 minutes, one batch)
 # ============================================
-*/10 * * * * php /var/www/myctobot/scripts/story-build-orchestrator.php --tenant=gwt --once >> /var/www/myctobot/log/orchestrator.log 2>&1
+*/10 * * * * php /var/www/myctobot/scripts/story-build-orchestrator.php --workspace=gwt --once >> /var/www/myctobot/log/orchestrator.log 2>&1
 
 # ============================================
 # Log rotation (daily at midnight)
@@ -365,16 +365,16 @@ php scripts/resetcache.php
 0 0 * * * find /var/www/myctobot/log -name "*.log" -mtime +30 -delete
 ```
 
-### Multi-Tenant Setup
+### Multi-Workspace Setup
 
-For multiple tenants, add separate cron entries:
+For multiple workspaces, add separate cron entries:
 
 ```bash
-# Tenant: gwt
-*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --tenant=gwt >> /var/www/myctobot/log/directive-gwt.log 2>&1
+# Workspace: gwt
+*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --workspace=gwt >> /var/www/myctobot/log/directive-gwt.log 2>&1
 
-# Tenant: footest4
-*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --tenant=footest4 >> /var/www/myctobot/log/directive-footest4.log 2>&1
+# Workspace: footest4
+*/5 * * * * php /var/www/myctobot/scripts/cron-directive-processor.php --workspace=footest4 >> /var/www/myctobot/log/directive-footest4.log 2>&1
 ```
 
 ---
@@ -422,8 +422,8 @@ cat /tmp/local-aidev-*/session.log
 - Labels `ai-dev`, `myctobot-working`, `in-progress` are now removed on completion
 
 **Job not found in database:**
-- Ensure correct `--tenant` parameter
-- Check tenant config file exists: `conf/config.{tenant}.ini`
+- Ensure correct `--workspace` parameter
+- Check workspace config file exists: `conf/config.{workspace}.ini`
 
 **Permission denied:**
 - Scripts should be run as web server user or with appropriate permissions
@@ -438,7 +438,7 @@ Scripts may use these environment variables:
 | Variable | Description |
 |----------|-------------|
 | `MYCTOBOT_APP_ROOT` | Application root directory |
-| `MYCTOBOT_WORKSPACE` | Current workspace/tenant |
+| `MYCTOBOT_WORKSPACE` | Current workspace/workspace |
 | `MYCTOBOT_JOB_ID` | Current job ID |
 | `MYCTOBOT_MEMBER_ID` | Current member ID |
 | `MYCTOBOT_PROJECT_ROOT` | Repository clone path |

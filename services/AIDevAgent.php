@@ -40,8 +40,8 @@ class AIDevAgent {
     private string $model = 'claude-sonnet-4-20250514';
     private bool $isShopifyTheme = false;
 
-    /** @var string Tenant slug for RAG integration */
-    private string $tenantSlug = 'default';
+    /** @var string Workspace slug for RAG integration */
+    private string $workspaceSlug = 'default';
 
     /**
      * Create a new AI Developer Agent
@@ -77,8 +77,8 @@ class AIDevAgent {
         // Initialize Shopify client if connected
         $this->initShopify();
 
-        // Set tenant slug from session if available
-        $this->tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        // Set workspace slug from session if available
+        $this->workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
     }
 
     /**
@@ -784,7 +784,7 @@ PROMPT;
     }
 
     /**
-     * Index document attachments to the tenant's RAG system
+     * Index document attachments to the workspace's RAG system
      *
      * @param array $attachments Detected attachments
      */
@@ -801,7 +801,7 @@ PROMPT;
 
         try {
             $result = $this->attachmentService->indexMultipleToRag(
-                $this->tenantSlug,
+                $this->workspaceSlug,
                 $indexable,
                 'ceo-directives' // Default knowledge base for CEO directives
             );

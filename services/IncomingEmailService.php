@@ -9,7 +9,7 @@ namespace app\services;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\Bean;
-use \app\TenantResolver;
+use \app\WorkspaceResolver;
 
 require_once __DIR__ . '/UserDatabaseService.php';
 require_once __DIR__ . '/CeoDirectiveService.php';
@@ -81,14 +81,14 @@ class IncomingEmailService {
         $strippedText = $_POST['stripped-text'] ?? $bodyPlain;
         $messageId = $_POST['Message-Id'] ?? '';
 
-        // Parse tenant from recipient email (e.g., gwt@myctobot.ai -> gwt)
-        $tenant = $this->parseTenantFromRecipient($recipient);
+        // Parse workspace from recipient email (e.g., gwt@myctobot.ai -> gwt)
+        $workspace = $this->parseworkspaceFromRecipient($recipient);
 
         $this->log('info','Mailgun webhook received', [
             'recipient' => $recipient,
             'sender' => $sender,
             'subject' => $subject,
-            'tenant' => $tenant
+            'workspace' => $workspace
         ]);
 
         // Verify authentication - either via query key or Mailgun signature
@@ -117,20 +117,20 @@ class IncomingEmailService {
             }
         }
 
-        // Switch to tenant database if tenant found
-        if ($tenant) {
-            if (!TenantResolver::switchDatabase($tenant)) {
-                $this->log('warning',"Invalid tenant for incoming email: {$tenant}");
+        // Switch to workspace database if workspace found
+        if ($workspace) {
+            if (!WorkspaceResolver::switchDatabase($workspace)) {
+                $this->log('warning',"Invalid workspace for incoming email: {$workspace}");
                 Flight::response()->status(400);
-                echo json_encode(['error' => "Invalid tenant: {$tenant}"]);
+                echo json_encode(['error' => "Invalid workspace: {$workspace}"]);
                 return;
             }
         } else {
-            $this->log('warning','No tenant found in recipient email', [
+            $this->log('warning','No workspace found in recipient email', [
                 'recipient' => $recipient
             ]);
             Flight::response()->status(400);
-            echo json_encode(['error' => 'No tenant found in recipient email']);
+            echo json_encode(['error' => 'No workspace found in recipient email']);
             return;
         }
 
@@ -147,7 +147,7 @@ class IncomingEmailService {
             $this->log('warning','Rejected email from non-workspace member', [
                 'sender' => $sender,
                 'from' => $from,
-                'tenant' => $tenant
+                'workspace' => $workspace
             ]);
             // Return 200 so Mailgun stops retrying, but don't process the email
             Flight::response()->status(200);
@@ -236,35 +236,35 @@ class IncomingEmailService {
     }
 
     /**
-     * Parse tenant from recipient email
+     * Parse workspace from recipient email
      * Examples:
      *   gwt@myctobot.ai -> gwt
      *   ceo@gwt.myctobot.ai -> gwt
      *   directive@testcorp.myctobot.ai -> testcorp
      */
-    private function parseTenantFromRecipient(string $recipient): ?string {
-        // Pattern 1: {tenant}@myctobot.ai
+    private function parseworkspaceFromRecipient(string $recipient): ?string {
+        // Pattern 1: workspace@myctobot.ai
         if (preg_match('/^([a-z0-9_-]+)@myctobot\.ai$/i', $recipient, $matches)) {
             return strtolower($matches[1]);
         }
 
-        // Pattern 2: {anything}@{tenant}.myctobot.ai
+        // Pattern 2: {anything}@workspace.myctobot.ai
         if (preg_match('/@([a-z0-9_-]+)\.myctobot\.ai$/i', $recipient, $matches)) {
             return strtolower($matches[1]);
         }
 
-        // Pattern 3: Check configured domain in tenant configs
-        // Extract domain from recipient and check if it matches a tenant
+        // Pattern 3: Check configured domain in workspace configs
+        // Extract domain from recipient and check if it matches a workspace
         if (preg_match('/@(.+)$/i', $recipient, $matches)) {
             $domain = strtolower($matches[1]);
             // Look for config files matching the domain
             $configFiles = glob(dirname(__DIR__) . '/conf/config.*.ini');
             foreach ($configFiles as $configFile) {
-                $tenantName = preg_replace('/^.*config\.(.+)\.ini$/', '$1', $configFile);
+                $workspaceName = preg_replace('/^.*config\.(.+)\.ini$/', '$1', $configFile);
                 $config = parse_ini_file($configFile, true);
-                $tenantDomain = $config['directives']['email_domain'] ?? null;
-                if ($tenantDomain && strtolower($tenantDomain) === $domain) {
-                    return $tenantName;
+                $workspaceDomain = $config['directives']['email_domain'] ?? null;
+                if ($workspaceDomain && strtolower($workspaceDomain) === $domain) {
+                    return $workspaceName;
                 }
             }
         }

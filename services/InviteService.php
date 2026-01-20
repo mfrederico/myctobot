@@ -1,7 +1,7 @@
 <?php
 /**
  * Invite Service
- * Handles tenant-aware member invitations via email
+ * Handles workspace-aware member invitations via email
  */
 
 namespace app\services;
@@ -13,12 +13,12 @@ use \app\Bean;
 class InviteService {
 
     private MailgunService $mailer;
-    private string $tenant;
+    private string $workspace;
     private string $baseUrl;
 
     public function __construct() {
         $this->mailer = new MailgunService();
-        $this->tenant = $_SESSION['tenant_slug'] ?? 'default';
+        $this->workspace = $_SESSION['workspace_slug'] ?? 'default';
         $this->baseUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
     }
 
@@ -149,23 +149,23 @@ class InviteService {
             ];
         }
 
-        // Build tenant-aware invite URL
+        // Build workspace-aware invite URL
         $inviteUrl = $this->buildInviteUrl($token);
 
         // Get inviter info
         $inviter = Bean::load('member', $member->invited_by);
         $inviterName = $inviter->display_name ?: $inviter->username ?: 'An administrator';
 
-        // Get tenant display name
-        $tenantName = $this->getTenantDisplayName();
+        // Get workspace display name
+        $workspaceName = $this->getWorkspaceDisplayName();
 
         // Build email content
-        $subject = "You've been invited to join {$tenantName} on MyCTOBot";
+        $subject = "You've been invited to join {$workspaceName} on MyCTOBot";
 
         $markdown = <<<MD
 # Welcome to MyCTOBot!
 
-**{$inviterName}** has invited you to join **{$tenantName}** as a team member.
+**{$inviterName}** has invited you to join **{$workspaceName}** as a team member.
 
 MyCTOBot is an AI-powered development assistant that helps teams manage projects, analyze sprints, and automate development tasks.
 
@@ -202,32 +202,32 @@ MD;
     }
 
     /**
-     * Build tenant-aware invite URL
+     * Build workspace-aware invite URL
      */
     private function buildInviteUrl(string $token): string {
-        // For tenant invites, build URL to tenant subdomain
-        // URL pattern: https://{tenant}.myctobot.ai/auth/invite/{token}
-        if ($this->tenant && $this->tenant !== 'default') {
+        // For workspace invites, build URL to workspace subdomain
+        // URL pattern: https://workspace.myctobot.ai/auth/invite/{token}
+        if ($this->workspace && $this->workspace !== 'default') {
             $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
             $protocol = Flight::get('app.protocol') ?? 'https';
-            return "{$protocol}://{$this->tenant}.{$baseDomain}/auth/invite/{$token}";
+            return "{$protocol}://{$this->workspace}.{$baseDomain}/auth/invite/{$token}";
         }
         return "{$this->baseUrl}/auth/invite/{$token}";
     }
 
     /**
-     * Get tenant display name
+     * Get workspace display name
      */
-    private function getTenantDisplayName(): string {
+    private function getWorkspaceDisplayName(): string {
         // Try to get from enterprisesettings (workspace-level, shared)
         $setting = Bean::findOne('enterprisesettings', 'setting_key = ? AND is_shared = 1', ['company_name']);
         if ($setting && $setting->setting_value) {
             return $setting->setting_value;
         }
 
-        // Fall back to tenant slug formatted nicely
-        if ($this->tenant && $this->tenant !== 'default') {
-            return ucwords(str_replace(['-', '_'], ' ', $this->tenant));
+        // Fall back to workspace slug formatted nicely
+        if ($this->workspace && $this->workspace !== 'default') {
+            return ucwords(str_replace(['-', '_'], ' ', $this->workspace));
         }
 
         return 'MyCTOBot';
@@ -236,8 +236,8 @@ MD;
     /**
      * Validate an invite token and return the member
      */
-    public function validateToken(string $token, ?string $tenant = null): array {
-        // If tenant specified, we need to switch database context first
+    public function validateToken(string $token, ?string $workspace = null): array {
+        // If workspace specified, we need to switch database context first
         // This is handled by the bootstrap before this is called
 
         $member = Bean::findOne('member', 'invite_token = ?', [$token]);

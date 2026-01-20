@@ -162,14 +162,14 @@ ON DUPLICATE KEY UPDATE tier = 'enterprise', status = 'active';
 
 ### Database Schema
 
-Enterprise tables are created automatically by `TenantSchemaBuilder.php` when a new tenant is provisioned.
-For existing tenants, run the migration tool:
+Enterprise tables are created automatically by `WorkspaceSchemaBuilder.php` when a new workspace is provisioned.
+For existing workspaces, run the migration tool:
 
 ```bash
-php scripts/run-migration.php --sync --tenant=TENANT_SLUG
+php scripts/run-migration.php --sync --workspace=workspace_SLUG
 ```
 
-See `services/TenantSchemaBuilder.php` for the complete schema definition.
+See `services/WorkspaceSchemaBuilder.php` for the complete schema definition.
 
 ---
 

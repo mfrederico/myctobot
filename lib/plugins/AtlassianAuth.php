@@ -37,7 +37,7 @@ class AtlassianAuth {
     /**
      * Get Atlassian configuration with hierarchy:
      * 1. Load base config from conf/atlassian.ini (primary source - shared OAuth app)
-     * 2. Fill in missing/blank values from conf/config.{tenant}.ini [atlassian] section
+     * 2. Fill in missing/blank values from conf/config.{workspace}.ini [atlassian] section
      * 3. Fall back to Flight::get() for any missing values
      *
      * @return array Atlassian configuration
@@ -68,15 +68,15 @@ class AtlassianAuth {
             }
         }
 
-        // 2. Override with tenant-specific config (tenant values take priority)
-        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-        if ($tenantSlug && $tenantSlug !== 'default') {
-            $tenantIni = $basePath . "/conf/config.{$tenantSlug}.ini";
-            if (file_exists($tenantIni)) {
-                $tenantConfig = parse_ini_file($tenantIni, true);
-                if ($tenantConfig && isset($tenantConfig['atlassian'])) {
-                    // Tenant values override base config when present
-                    foreach ($tenantConfig['atlassian'] as $key => $value) {
+        // 2. Override with workspace-specific config (workspace values take priority)
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+        if ($workspaceSlug && $workspaceSlug !== 'default') {
+            $workspaceIni = $basePath . "/conf/config.{$workspaceSlug}.ini";
+            if (file_exists($workspaceIni)) {
+                $workspaceConfig = parse_ini_file($workspaceIni, true);
+                if ($workspaceConfig && isset($workspaceConfig['atlassian'])) {
+                    // Workspace values override base config when present
+                    foreach ($workspaceConfig['atlassian'] as $key => $value) {
                         if (!empty($value)) {
                             $config[$key] = $value;
                         }
@@ -104,7 +104,7 @@ class AtlassianAuth {
     }
 
     /**
-     * Clear the config cache (useful when switching tenants)
+     * Clear the config cache (useful when switching workspaces)
      */
     public static function clearConfigCache(): void {
         self::$configCache = null;
@@ -647,10 +647,10 @@ class AtlassianAuth {
 
         $baseUrl = Flight::get('baseurl');
 
-        // Include tenant slug in webhook URL for multi-tenancy
-        $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-        if ($tenantSlug && $tenantSlug !== 'default') {
-            $webhookUrl = $baseUrl . '/webhook/jira/' . $tenantSlug;
+        // Include workspace slug in webhook URL for multi-workspace
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+        if ($workspaceSlug && $workspaceSlug !== 'default') {
+            $webhookUrl = $baseUrl . '/webhook/jira/' . $workspaceSlug;
         } else {
             $webhookUrl = $baseUrl . '/webhook/jira';
         }
@@ -662,7 +662,7 @@ class AtlassianAuth {
                 $logger->debug('AI Developer webhook already registered', [
                     'cloud_uid' => $cloudId,
                     'webhook_uid' => $webhook['id'] ?? 'unknown',
-                    'tenant' => $tenantSlug ?? 'default'
+                    'workspace' => $workspaceSlug ?? 'default'
                 ]);
                 return true;
             }
@@ -867,7 +867,7 @@ class AtlassianAuth {
     }
 
     /**
-     * Re-register AI Developer webhook with correct tenant URL
+     * Re-register AI Developer webhook with correct workspace URL
      * Removes existing webhook and creates new one
      */
     public static function reregisterAIDevWebhook(int $memberId, string $cloudId): bool {
@@ -890,7 +890,7 @@ class AtlassianAuth {
         // Step 2: Clear stored webhook ID so registerAIDevWebhook doesn't skip
         self::storeWebhookId($memberId, $cloudId, null);
 
-        // Step 3: Register new webhook (will include tenant slug from session)
+        // Step 3: Register new webhook (will include workspace slug from session)
         return self::registerAIDevWebhook($memberId, $cloudId, $accessToken);
     }
 }

@@ -3,7 +3,7 @@
  * PipelineExecutor Service
  *
  * Executes pipeline runs by processing steps in sequence.
- * Handles step types: ai_agent, direct_exec, script, webhook_out, parser, wait
+ * Handles step types: ai_agent, direct_exec, script, webhook_out, email_out, parser, wait, harvest
  *
  * Usage:
  *   $executor = new PipelineExecutor($runId, $logger);
@@ -14,6 +14,7 @@ namespace app\services;
 
 use \app\Bean;
 use \RedBeanPHP\R as R;
+use \app\services\AnthropicKeyService;
 
 class PipelineExecutor {
 
@@ -663,6 +664,9 @@ class PipelineExecutor {
             case 'webhook_out':
                 return $this->executeWebhookOut($config, $input, $timeout);
 
+            case 'email_out':
+                return $this->executeEmailOut($config, $input);
+
             case 'parser':
                 return $this->executeParser($config, $input);
 
@@ -846,12 +850,23 @@ class PipelineExecutor {
     }
 
     /**
-     * Execute an AI agent
+     * Execute an AI agent step
+     *
+     * Config options:
+     *   agent_id       - Required: ID from aiagents table
+     *   prompt         - The prompt to send (supports variable substitution)
+     *   system_prompt  - Optional system prompt override
+     *   model          - Optional model override (default: claude-sonnet-4-20250514)
+     *   max_tokens     - Optional max tokens (default: 4096)
+     *   include_input  - Whether to include step input in the prompt (default: true)
      */
     private function executeAIAgent(array $config, array $input, int $timeout): array {
         $agentId = $config['agent_id'] ?? null;
-        $runnerId = $config['runner_id'] ?? null;
         $prompt = $config['prompt'] ?? '';
+        $systemPrompt = $config['system_prompt'] ?? 'You are a helpful assistant processing pipeline data. Analyze the input and respond with structured JSON when appropriate.';
+        $model = $config['model'] ?? 'claude-sonnet-4-20250514';
+        $maxTokens = (int)($config['max_tokens'] ?? 4096);
+        $includeInput = $config['include_input'] ?? true;
 
         if (empty($agentId)) {
             return ['success' => false, 'error' => 'Agent ID required'];
@@ -863,21 +878,92 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Agent not found'];
         }
 
-        // Substitute variables in prompt
+        // Get API key
+        $memberId = $this->run->member_id ?? 1;
+        $apiKey = AnthropicKeyService::getApiKeyForAgent($agent, $memberId);
+        if (empty($apiKey)) {
+            return ['success' => false, 'error' => 'No Anthropic API key available'];
+        }
+
+        // Substitute variables in prompts
         $prompt = $this->substituteVariables($prompt);
+        $systemPrompt = $this->substituteVariables($systemPrompt);
 
-        // TODO: Actually dispatch to agent runner
-        // For now, return a placeholder
-        $this->log('info', "Would execute AI agent {$agent->name} with prompt: {$prompt}");
+        // Build user message with input data if requested
+        $userMessage = $prompt;
+        if ($includeInput && !empty($input)) {
+            $inputJson = json_encode($input, JSON_PRETTY_PRINT);
+            $userMessage = "{$prompt}\n\n## Input Data\n```json\n{$inputJson}\n```";
+        }
 
-        return [
-            'success' => true,
-            'output' => [
-                'agent_id' => $agentId,
-                'prompt' => $prompt,
-                'status' => 'simulated'
-            ]
-        ];
+        $this->log('info', "Executing AI agent: {$agent->name}", [
+            'model' => $model,
+            'prompt_length' => strlen($userMessage)
+        ]);
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => 'https://api.anthropic.com',
+                'timeout' => $timeout,
+            ]);
+
+            $response = $client->post('/v1/messages', [
+                'headers' => [
+                    'x-api-key' => $apiKey,
+                    'anthropic-version' => '2023-06-01',
+                    'content-type' => 'application/json',
+                ],
+                'json' => [
+                    'model' => $model,
+                    'max_tokens' => $maxTokens,
+                    'system' => $systemPrompt,
+                    'messages' => [
+                        ['role' => 'user', 'content' => $userMessage]
+                    ]
+                ]
+            ]);
+
+            $body = json_decode($response->getBody()->getContents(), true);
+            $content = $body['content'][0]['text'] ?? '';
+
+            // Try to parse response as JSON
+            $parsed = null;
+            if (preg_match('/```json\s*([\s\S]*?)\s*```/', $content, $matches)) {
+                $parsed = json_decode($matches[1], true);
+            } elseif (str_starts_with(trim($content), '{') || str_starts_with(trim($content), '[')) {
+                $parsed = json_decode($content, true);
+            }
+
+            $this->log('info', "AI agent completed", [
+                'response_length' => strlen($content),
+                'has_json' => $parsed !== null
+            ]);
+
+            return [
+                'success' => true,
+                'output' => [
+                    'agent_id' => $agentId,
+                    'agent_name' => $agent->name,
+                    'model' => $model,
+                    'response' => $content,
+                    'parsed' => $parsed,
+                    'usage' => $body['usage'] ?? null
+                ]
+            ];
+
+        } catch (\GuzzleHttp\Exception\RequestException $e) {
+            $errorMessage = $e->getMessage();
+            if ($e->hasResponse()) {
+                $errorBody = json_decode($e->getResponse()->getBody()->getContents(), true);
+                $errorMessage = $errorBody['error']['message'] ?? $errorMessage;
+            }
+            $this->log('error', "AI agent failed: {$errorMessage}");
+            return ['success' => false, 'error' => "AI agent error: {$errorMessage}"];
+
+        } catch (\Exception $e) {
+            $this->log('error', "AI agent exception: {$e->getMessage()}");
+            return ['success' => false, 'error' => "AI agent exception: {$e->getMessage()}"];
+        }
     }
 
     /**
@@ -939,6 +1025,118 @@ class PipelineExecutor {
             'output' => $output,
             'error' => $success ? null : "HTTP {$httpCode}"
         ];
+    }
+
+    /**
+     * Execute an email step via Mailgun
+     *
+     * Config options:
+     *   to           - Recipient email (required, supports variable substitution)
+     *   cc           - CC recipients (optional, comma-separated)
+     *   subject      - Email subject (required, supports variable substitution)
+     *   body         - Email body in markdown (supports variable substitution)
+     *   template     - Named template to use instead of body (optional)
+     *   from_email   - Override sender email (optional)
+     *   from_name    - Override sender name (optional)
+     */
+    private function executeEmailOut(array $config, array $input): array {
+        require_once __DIR__ . '/MailgunService.php';
+
+        $to = $config['to'] ?? '';
+        $cc = $config['cc'] ?? null;
+        $subject = $config['subject'] ?? '';
+        $body = $config['body'] ?? '';
+        $template = $config['template'] ?? null;
+        $fromEmail = $config['from_email'] ?? null;
+        $fromName = $config['from_name'] ?? null;
+
+        if (empty($to)) {
+            return ['success' => false, 'error' => 'Recipient (to) is required'];
+        }
+
+        if (empty($subject)) {
+            return ['success' => false, 'error' => 'Subject is required'];
+        }
+
+        // Variable substitution
+        $to = $this->substituteVariables($to);
+        $cc = $cc ? $this->substituteVariables($cc) : null;
+        $subject = $this->substituteVariables($subject);
+        $body = $this->substituteVariables($body);
+
+        // If using a template, load it
+        if ($template && empty($body)) {
+            $body = $this->loadEmailTemplate($template, $input);
+        }
+
+        // Build body from input if still empty
+        if (empty($body)) {
+            // Default body: pretty-print the input data
+            $body = "# Pipeline Notification\n\n";
+            $body .= "**Pipeline:** " . ($this->pipeline->name ?? 'Unknown') . "\n";
+            $body .= "**Run ID:** " . $this->runId . "\n\n";
+            $body .= "## Data\n\n```json\n" . json_encode($input, JSON_PRETTY_PRINT) . "\n```";
+        }
+
+        try {
+            $mailgun = new MailgunService();
+
+            if (!$mailgun->isEnabled()) {
+                return [
+                    'success' => false,
+                    'error' => 'Mailgun is not configured. Please configure it in Settings > Connections.'
+                ];
+            }
+
+            $result = $mailgun->sendMarkdownEmail($subject, $body, $to, $cc);
+
+            if ($result) {
+                $this->log('info', "Email sent successfully to {$to}", ['subject' => $subject]);
+                return [
+                    'success' => true,
+                    'output' => [
+                        'sent' => true,
+                        'to' => $to,
+                        'cc' => $cc,
+                        'subject' => $subject
+                    ]
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'error' => 'Failed to send email via Mailgun'
+                ];
+            }
+
+        } catch (\Exception $e) {
+            $this->log('error', "Email send failed: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => "Email exception: " . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Load an email template by name
+     */
+    private function loadEmailTemplate(string $templateName, array $data): string {
+        // Templates can be stored in enterprisesettings or as files
+        $setting = \app\Bean::findOne('enterprisesettings', 'setting_key = ?', ["email_template_{$templateName}"]);
+
+        if ($setting && !empty($setting->setting_value)) {
+            return $this->substituteVariables($setting->setting_value);
+        }
+
+        // Try loading from file
+        $templatePath = dirname(__DIR__) . "/templates/email/{$templateName}.md";
+        if (file_exists($templatePath)) {
+            $template = file_get_contents($templatePath);
+            return $this->substituteVariables($template);
+        }
+
+        // Return a default template
+        return "# Notification\n\nThis is an automated notification from MyCTOBot.\n\n---\n*Pipeline: " . ($this->pipeline->name ?? 'Unknown') . "*";
     }
 
     /**

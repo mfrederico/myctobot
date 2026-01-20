@@ -1,12 +1,12 @@
 #!/usr/bin/env php
 <?php
 /**
- * Test script for tenant provisioning
+ * Test script for workspace provisioning
  *
- * Usage: php scripts/test-tenant-provision.php [subdomain]
- *        php scripts/test-tenant-provision.php --cleanup [subdomain]
+ * Usage: php scripts/test-workspace-provision.php [subdomain]
+ *        php scripts/test-workspace-provision.php --cleanup [subdomain]
  *
- * Tests the TenantProvisioner and TenantSchemaBuilder without modifying production.
+ * Tests the WorkspaceProvisioner and WorkspaceSchemaBuilder without modifying production.
  */
 
 $baseDir = dirname(__DIR__);
@@ -15,7 +15,7 @@ chdir($baseDir);
 require_once $baseDir . '/vendor/autoload.php';
 require_once $baseDir . '/bootstrap.php';
 
-use app\services\TenantProvisioner;
+use app\services\WorkspaceProvisioner;
 use \Flight as Flight;
 
 // Parse arguments
@@ -27,7 +27,7 @@ if ($subdomain === '--cleanup') {
     $subdomain = $argv[2] ?? 'testprovision';
 }
 
-echo "=== Tenant Provisioning Test ===\n";
+echo "=== Workspace Provisioning Test ===\n";
 echo "Subdomain: {$subdomain}\n\n";
 
 // Initialize bootstrap with gwt config (has valid DB credentials)
@@ -53,11 +53,11 @@ echo "Using admin user: {$adminUser}\n";
 echo "Database host: {$dbHost}\n\n";
 
 try {
-    $provisioner = new TenantProvisioner($dbHost, $adminUser, $adminPass);
+    $provisioner = new WorkspaceProvisioner($dbHost, $adminUser, $adminPass);
 
     if ($cleanup) {
-        // Cleanup mode - remove test tenant
-        echo "Cleaning up test tenant...\n";
+        // Cleanup mode - remove test workspace
+        echo "Cleaning up test workspace...\n";
 
         $dbName = "myctobot_{$subdomain}";
         $dbUserName = "mctb_{$subdomain}";
@@ -81,8 +81,8 @@ try {
     }
     echo "  OK: Subdomain is available\n\n";
 
-    // Step 2: Provision tenant
-    echo "Step 2: Provisioning tenant...\n";
+    // Step 2: Provision workspace
+    echo "Step 2: Provisioning workspace...\n";
     $result = $provisioner->provision(
         $subdomain,
         'Test Business Name',
@@ -95,7 +95,7 @@ try {
         exit(1);
     }
 
-    echo "  OK: Tenant provisioned successfully!\n";
+    echo "  OK: Workspace provisioned successfully!\n";
     echo "\n=== Results ===\n";
     echo "Subdomain: {$result['subdomain']}\n";
     echo "Database: {$result['database']}\n";
@@ -106,12 +106,12 @@ try {
     // Step 3: Verify database tables were created
     // Note: We need to read the generated config to get the actual DB password
     $configPath = $result['config_file'];
-    $tenantConfig = parse_ini_file($configPath, true);
-    $tenantDbPass = $tenantConfig['database']['pass'] ?? '';
+    $workspaceConfig = parse_ini_file($configPath, true);
+    $workspaceDbPass = $workspaceConfig['database']['pass'] ?? '';
 
     echo "\nStep 3: Verifying database schema...\n";
     $dsn = "mysql:host={$dbHost};dbname={$result['database']};charset=utf8mb4";
-    $pdo = new PDO($dsn, $result['db_user'], $tenantDbPass);
+    $pdo = new PDO($dsn, $result['db_user'], $workspaceDbPass);
     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
 
     $expectedTables = [
@@ -177,7 +177,7 @@ try {
     }
 
     echo "\n=== Test Complete ===\n";
-    echo "To cleanup: php scripts/test-tenant-provision.php --cleanup {$subdomain}\n";
+    echo "To cleanup: php scripts/test-workspace-provision.php --cleanup {$subdomain}\n";
 
 } catch (Exception $e) {
     echo "FATAL ERROR: " . $e->getMessage() . "\n";

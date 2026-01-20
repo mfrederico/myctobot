@@ -531,7 +531,7 @@ class GitOperations {
      * Looks up job by issueKey to get repo connection info, then clones if needed.
      * Provider-agnostic: works with GitHub, GitLab, Bitbucket, etc.
      *
-     * @param string $workDir Work directory (e.g., /tmp/aoe-tenant-issue-xxx)
+     * @param string $workDir Work directory (e.g., /tmp/aoe-workspace-issue-xxx)
      * @param string $issueKey Issue key to look up job
      * @param int $memberId Member ID for database access
      * @return bool True if repo exists or was successfully cloned

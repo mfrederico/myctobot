@@ -15,7 +15,7 @@
  *     "mcpServers": {
  *       "myctobot": {
  *         "type": "http",
- *         "url": "https://myctobot.ai/mcp/{tenant}/jobs",
+ *         "url": "https://myctobot.ai/mcp/workspace/jobs",
  *         "headers": {
  *           "Authorization": "Bearer {api_key}"
  *         }
@@ -33,6 +33,7 @@ use app\BaseControls\Control;
 use app\services\AIDevStatusService;
 use app\services\AIDevJobService;
 use app\services\McpResponseTrait;
+use app\services\ApiAuthService;
 
 require_once __DIR__ . '/../services/AIDevStatusService.php';
 require_once __DIR__ . '/../services/AIDevJobService.php';
@@ -43,24 +44,24 @@ class Mcpjobs extends Control {
 
     private ?int $memberId = null;
     private ?string $jobId = null;
-    private ?string $tenant = null;
+    private ?string $workspace = null;
 
     public function __construct() {
         $this->logger = Flight::get('log');
     }
 
     /**
-     * Tenant-aware MCP Jobs endpoint
-     * POST /mcp/{tenant}/jobs
+     * Workspace-aware MCP Jobs endpoint
+     * POST /mcp/{workspace}/jobs
      *
-     * @param string $tenant Domain ID from the URL
+     * @param string $workspace Workspace slug from the URL
      */
-    public function handlewithtenant(string $tenant) {
-        $this->tenant = $tenant;
-        $this->logger->debug('MCP Jobs request', ['tenant' => $tenant]);
+    public function handlewithworkspace(string $workspace) {
+        $this->workspace = $workspace;
+        $this->logger->debug('MCP Jobs request', ['workspace' => $workspace]);
 
-        // Load tenant config and switch database context
-        $this->loadTenantDatabase($tenant);
+        // Load workspace config and switch database context
+        $this->loadWorkspaceDatabase($workspace);
 
         $this->handle();
     }
@@ -133,62 +134,56 @@ class Mcpjobs extends Control {
     }
 
     /**
-     * Load tenant database context
+     * Load workspace database context
      */
-    private function loadTenantDatabase(string $tenant): void {
-        $configFile = "conf/config.{$tenant}.ini";
+    private function loadWorkspaceDatabase(string $workspace): void {
+        $configFile = "conf/config.{$workspace}.ini";
         if (!file_exists($configFile)) {
             return;
         }
 
-        $tenantConfig = parse_ini_file($configFile, true);
-        if (!$tenantConfig || empty($tenantConfig['database'])) {
+        $workspaceConfig = parse_ini_file($configFile, true);
+        if (!$workspaceConfig || empty($workspaceConfig['database'])) {
             return;
         }
 
-        $dbConfig = $tenantConfig['database'];
+        $dbConfig = $workspaceConfig['database'];
         $type = $dbConfig['type'] ?? 'mysql';
 
         if ($type === 'sqlite') {
-            $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+            $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
             $dsn = "sqlite:{$dbPath}";
-            Bean::useDatabase($tenant, $dsn);
+            Bean::useDatabase($workspace, $dsn);
         } else {
             $host = $dbConfig['host'] ?? 'localhost';
             $port = $dbConfig['port'] ?? 3306;
-            $name = $dbConfig['name'] ?? $tenant;
+            $name = $dbConfig['name'] ?? $workspace;
             $user = $dbConfig['user'] ?? 'root';
             $pass = $dbConfig['pass'] ?? '';
             $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-            Bean::useDatabase($tenant, $dsn, $user, $pass);
+            Bean::useDatabase($workspace, $dsn, $user, $pass);
         }
-        $this->logger->debug('MCP Jobs switched to tenant database', ['tenant' => $tenant]);
+        $this->logger->debug('MCP Jobs switched to workspace database', ['workspace' => $workspace]);
     }
 
     /**
      * Authenticate the MCP request
      *
-     * Supports:
-     * 1. Bearer token with member API key
-     * 2. Custom headers: X-Member-ID + X-Job-ID
+     * Uses ApiAuthService for modern API key authentication.
+     * Falls back to job-specific auth (Basic auth, custom headers) for runner scripts.
      */
     private function authenticate(): bool {
         $request = Flight::request();
 
-        // Method 1: Bearer token (member's api_token)
-        $authHeader = $request->getHeader('Authorization') ?? '';
-        if (preg_match('/^Bearer\s+(.+)$/', $authHeader, $matches)) {
-            $apiKey = $matches[1];
-
-            // Look up member by api_token
-            $member = Bean::findOne('member', 'api_token = ?', [$apiKey]);
-            if ($member) {
-                $this->memberId = (int)$member->id;
-                return true;
-            }
+        // Method 1: ApiAuthService (modern API key from apikeys table)
+        $authResult = ApiAuthService::authenticate('mcpjobs', 'handle');
+        if ($authResult['success']) {
+            $this->memberId = (int)$authResult['member']->id;
+            return true;
         }
 
-        // Method 2: Basic auth with member_id:job_uid
+        // Method 2: Basic auth with member_id:job_uid (for runner scripts)
+        $authHeader = $request->getHeader('Authorization') ?? '';
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
             if ($decoded && strpos($decoded, ':') !== false) {
@@ -199,7 +194,7 @@ class Mcpjobs extends Control {
             }
         }
 
-        // Method 3: Custom headers
+        // Method 3: Custom headers (for runner scripts)
         $this->memberId = (int)($request->getHeader('X-Member-ID') ?? 0);
         $this->jobId = $request->getHeader('X-Job-ID') ?? '';
 
@@ -233,14 +228,10 @@ class Mcpjobs extends Control {
         $tools = [
             [
                 'name' => 'job_complete',
-                'description' => 'Mark the current AI Dev job as complete. Call this after creating a PR and posting the summary to the issue tracker. This signals the orchestrator that the job is done.',
+                'description' => 'Mark the current AI Dev job as complete. Call this after creating a PR and posting the summary to the issue tracker.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_uid' => [
-                            'type' => 'string',
-                            'description' => 'The job ID (from MYCTOBOT_JOB_ID environment variable)'
-                        ],
                         'success' => [
                             'type' => 'boolean',
                             'description' => 'Whether the job completed successfully'
@@ -271,19 +262,15 @@ class Mcpjobs extends Control {
                             'description' => 'Whether verification tests passed'
                         ]
                     ],
-                    'required' => ['job_uid', 'success']
+                    'required' => ['success']
                 ]
             ],
             [
                 'name' => 'job_update_status',
-                'description' => 'Update the status/progress of the current job. Use this to report progress during long-running operations.',
+                'description' => 'Update the status/progress of the current job.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_uid' => [
-                            'type' => 'string',
-                            'description' => 'The job ID'
-                        ],
                         'status' => [
                             'type' => 'string',
                             'enum' => ['running', 'implementing', 'verifying', 'creating_pr', 'waiting_clarification'],
@@ -300,19 +287,15 @@ class Mcpjobs extends Control {
                             'description' => 'Progress percentage (0-100)'
                         ]
                     ],
-                    'required' => ['job_uid', 'status']
+                    'required' => ['status']
                 ]
             ],
             [
                 'name' => 'job_failed',
-                'description' => 'Mark the current job as failed. Call this when the job cannot be completed due to an error.',
+                'description' => 'Mark the current job as failed.',
                 'inputSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'job_uid' => [
-                            'type' => 'string',
-                            'description' => 'The job ID'
-                        ],
                         'error_message' => [
                             'type' => 'string',
                             'description' => 'Description of what went wrong'
@@ -323,7 +306,50 @@ class Mcpjobs extends Control {
                             'description' => 'Type of failure'
                         ]
                     ],
-                    'required' => ['job_uid', 'error_message']
+                    'required' => ['error_message']
+                ]
+            ],
+            [
+                'name' => 'job_checkpoint',
+                'description' => 'Save a checkpoint with current progress. Use this after creating a PR to record results while keeping your session ALIVE to receive further updates from the issue tracker. This does NOT end the job.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'success' => [
+                            'type' => 'boolean',
+                            'description' => 'Whether the current phase completed successfully'
+                        ],
+                        'issue_key' => [
+                            'type' => 'string',
+                            'description' => 'The Jira/GitHub issue key'
+                        ],
+                        'pr_url' => [
+                            'type' => 'string',
+                            'description' => 'URL of the created pull request'
+                        ],
+                        'pr_number' => [
+                            'type' => 'integer',
+                            'description' => 'PR number'
+                        ],
+                        'branch_name' => [
+                            'type' => 'string',
+                            'description' => 'Name of the feature branch'
+                        ],
+                        'files_changed' => [
+                            'type' => 'array',
+                            'items' => ['type' => 'string'],
+                            'description' => 'List of files that were modified'
+                        ],
+                        'summary' => [
+                            'type' => 'string',
+                            'description' => 'Brief summary of what was done'
+                        ],
+                        'verification_passed' => [
+                            'type' => 'boolean',
+                            'description' => 'Whether verification tests passed'
+                        ]
+                    ],
+                    'required' => ['success']
                 ]
             ]
         ];
@@ -362,6 +388,10 @@ class Mcpjobs extends Control {
                     $result = $this->toolJobFailed($args);
                     break;
 
+                case 'job_checkpoint':
+                    $result = $this->toolJobCheckpoint($args);
+                    break;
+
                 default:
                     return $this->errorResponse($id, -32602, "Unknown tool: {$toolName}");
             }
@@ -388,7 +418,7 @@ class Mcpjobs extends Control {
      * Tool: job_complete - Mark job as complete
      */
     private function toolJobComplete(array $args): array {
-        $jobId = $args['job_uid'] ?? '';
+        $jobId = $args['job_uid'] ?? $this->jobId ?? '';
         $success = $args['success'] ?? false;
         $prUrl = $args['pr_url'] ?? '';
         $prNumber = $args['pr_number'] ?? null;
@@ -398,7 +428,7 @@ class Mcpjobs extends Control {
         $verificationPassed = $args['verification_passed'] ?? false;
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_uid is required');
+            throw new \InvalidArgumentException('job_uid is required - not provided in args and not found in auth context');
         }
 
         // Update job status via AIDevStatusService
@@ -457,13 +487,13 @@ class Mcpjobs extends Control {
      * Tool: job_update_status - Update job progress
      */
     private function toolJobUpdateStatus(array $args): array {
-        $jobId = $args['job_uid'] ?? '';
+        $jobId = $args['job_uid'] ?? $this->jobId ?? '';
         $status = $args['status'] ?? 'running';
         $message = $args['message'] ?? '';
         $progress = $args['progress'] ?? null;
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_uid is required');
+            throw new \InvalidArgumentException('job_uid is required - not provided in args and not found in auth context');
         }
 
         // Map friendly status to internal status
@@ -502,12 +532,12 @@ class Mcpjobs extends Control {
      * Tool: job_failed - Mark job as failed
      */
     private function toolJobFailed(array $args): array {
-        $jobId = $args['job_uid'] ?? '';
+        $jobId = $args['job_uid'] ?? $this->jobId ?? '';
         $errorMessage = $args['error_message'] ?? 'Unknown error';
         $errorType = $args['error_type'] ?? 'technical_error';
 
         if (empty($jobId)) {
-            throw new \InvalidArgumentException('job_uid is required');
+            throw new \InvalidArgumentException('job_uid is required - not provided in args and not found in auth context');
         }
 
         AIDevStatusService::fail($this->memberId, $jobId, $errorMessage);
@@ -527,6 +557,83 @@ class Mcpjobs extends Control {
             'message' => 'Job marked as failed. Error has been logged.',
             'job_uid' => $jobId,
             'error_type' => $errorType
+        ];
+    }
+
+    /**
+     * Tool: job_checkpoint - Save checkpoint without ending the job
+     *
+     * This saves progress (PR URL, summary, etc.) but keeps the session alive
+     * to receive further updates from the issue tracker.
+     */
+    private function toolJobCheckpoint(array $args): array {
+        // Use job_uid from auth context if not provided in args
+        $jobId = $args['job_uid'] ?? $this->jobId ?? '';
+        $success = $args['success'] ?? false;
+        $issueKey = $args['issue_key'] ?? '';
+        $prUrl = $args['pr_url'] ?? '';
+        $prNumber = $args['pr_number'] ?? null;
+        $branchName = $args['branch_name'] ?? '';
+        $filesChanged = $args['files_changed'] ?? [];
+        $summary = $args['summary'] ?? '';
+        $verificationPassed = $args['verification_passed'] ?? false;
+
+        if (empty($jobId)) {
+            throw new \InvalidArgumentException('job_uid is required - not provided in args and not found in auth context');
+        }
+
+        // Find the job bean to update
+        $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
+        if (!$job) {
+            throw new \InvalidArgumentException("Job not found: {$jobId}");
+        }
+
+        // Save checkpoint data to job record
+        $checkpointData = [
+            'success' => $success,
+            'issue_key' => $issueKey ?: $job->issue_key,
+            'pr_url' => $prUrl,
+            'pr_number' => $prNumber,
+            'branch_name' => $branchName,
+            'files_changed' => $filesChanged,
+            'summary' => $summary,
+            'verification_passed' => $verificationPassed,
+            'checkpoint_at' => date('Y-m-d H:i:s')
+        ];
+
+        // Update job with checkpoint data (but keep status as 'running')
+        $job->checkpoint_data = json_encode($checkpointData);
+        $job->pr_url = $prUrl ?: $job->pr_url;
+        $job->branch_name = $branchName ?: $job->branch_name;
+        $job->updated_at = date('Y-m-d H:i:s');
+        // Keep status as running - session stays alive
+        if ($job->status !== 'waiting_clarification') {
+            $job->status = 'running';
+        }
+        $job->current_step = $success ? 'PR created, waiting for feedback' : 'Checkpoint saved';
+        Bean::store($job);
+
+        $this->logger->info('Job checkpoint saved', [
+            'job_uid' => $jobId,
+            'member_id' => $this->memberId,
+            'pr_url' => $prUrl,
+            'success' => $success,
+            'verification_passed' => $verificationPassed
+        ]);
+
+        // Log the checkpoint event
+        AIDevStatusService::log($jobId, $this->memberId, 'info', 'Checkpoint saved', [
+            'pr_url' => $prUrl,
+            'summary' => $summary,
+            'verification_passed' => $verificationPassed
+        ]);
+
+        return [
+            'status' => 'checkpoint_saved',
+            'message' => 'Checkpoint saved successfully. Your session remains ALIVE to receive further updates.',
+            'job_uid' => $jobId,
+            'pr_url' => $prUrl,
+            'session_alive' => true
         ];
     }
 

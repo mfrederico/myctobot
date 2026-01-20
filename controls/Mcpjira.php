@@ -38,12 +38,12 @@ require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/JiraClient.php';
 require_once __DIR__ . '/../services/McpResponseTrait.php';
 
-class Mcp extends Control {
+class Mcpjira extends Control {
     use McpResponseTrait;
 
     private ?int $memberId = null;
     private ?string $cloudId = null;
-    private ?string $tenant = null;
+    private ?string $workspace = null;
     private ?JiraClient $jiraClient = null;
 
     public function __construct() {
@@ -52,46 +52,46 @@ class Mcp extends Control {
     }
 
     /**
-     * Tenant-aware MCP endpoint - handles JSON-RPC requests with tenant context
-     * POST /mcp/{tenant}/jira
+     * workspace-aware MCP endpoint - handles JSON-RPC requests with workspace context
+     * POST /mcp/workspace/jira
      *
-     * The tenant parameter is the domain ID (e.g., gwt-myctobot-ai)
+     * The workspace parameter is the domain ID (e.g., gwt-myctobot-ai)
      * This allows using a fixed URL regardless of which subdomain is active.
      *
-     * @param string $tenant Domain ID from the URL
+     * @param string $workspace Domain ID from the URL
      */
-    public function jirawithtenant(string $tenant) {
-        // Store tenant for agent name lookup and logging
-        $this->tenant = $tenant;
-        $this->logger->debug('MCP Jira request with tenant', ['tenant' => $tenant]);
+    public function jirawithworkspace(string $workspace) {
+        // Store workspace for agent name lookup and logging
+        $this->workspace = $workspace;
+        $this->logger->debug('MCP Jira request with workspace', ['workspace' => $workspace]);
 
-        // Load tenant config and switch database context
-        $configFile = "conf/config.{$tenant}.ini";
+        // Load workspace config and switch database context
+        $configFile = "conf/config.{$workspace}.ini";
         if (file_exists($configFile)) {
-            $tenantConfig = parse_ini_file($configFile, true);
-            if ($tenantConfig && !empty($tenantConfig['database'])) {
-                // Switch to tenant database for token lookup
-                $dbConfig = $tenantConfig['database'];
+            $workspaceConfig = parse_ini_file($configFile, true);
+            if ($workspaceConfig && !empty($workspaceConfig['database'])) {
+                // Switch to workspace database for token lookup
+                $dbConfig = $workspaceConfig['database'];
                 $type = $dbConfig['type'] ?? 'mysql';
                 if ($type === 'sqlite') {
-                    $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+                    $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
                     $dsn = "sqlite:{$dbPath}";
-                    Bean::useDatabase($tenant, $dsn);
+                    Bean::useDatabase($workspace, $dsn);
                 } else {
                     $host = $dbConfig['host'] ?? 'localhost';
                     $port = $dbConfig['port'] ?? 3306;
-                    $name = $dbConfig['name'] ?? $tenant;
+                    $name = $dbConfig['name'] ?? $workspace;
                     $user = $dbConfig['user'] ?? 'root';
                     $pass = $dbConfig['pass'] ?? '';
                     $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    Bean::useDatabase($tenant, $dsn, $user, $pass);
+                    Bean::useDatabase($workspace, $dsn, $user, $pass);
                 }
-                $this->logger->debug('MCP switched to tenant database', ['tenant' => $tenant]);
+                $this->logger->debug('MCP switched to workspace database', ['workspace' => $workspace]);
             }
         }
 
         // Call the main jira handler
-        $this->jira(['tenant' => $tenant]);
+        $this->jira(['workspace' => $workspace]);
     }
 
     /**
@@ -99,9 +99,9 @@ class Mcp extends Control {
      * POST /mcp/jira
      */
     public function jira($params = []) {
-        // Store tenant if passed from jirawithtenant
-        if (!empty($params['tenant']) && !$this->tenant) {
-            $this->tenant = $params['tenant'];
+        // Store workspace if passed from jirawithworkspace
+        if (!empty($params['workspace']) && !$this->workspace) {
+            $this->workspace = $params['workspace'];
         }
 
         // Set CORS headers for MCP clients

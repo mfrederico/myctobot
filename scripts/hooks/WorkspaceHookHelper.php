@@ -1,20 +1,20 @@
 <?php
 /**
- * TenantHookHelper - Shared tenant database access for Claude Code hooks
+ * WorkspaceHookHelper - Shared workspace database access for Claude Code hooks
  *
- * This helper class provides multi-tenant database connectivity for hooks
+ * This helper class provides multi-workspace database connectivity for hooks
  * that need to update aidevjobs records or log activity.
  *
  * Environment Variables (set by job-dispatcher.php):
  *   MYCTOBOT_APP_ROOT     - Path to myctobot application (for vendor, config)
- *   MYCTOBOT_WORKSPACE    - Tenant workspace name (e.g., "clicksimple-inc")
+ *   MYCTOBOT_WORKSPACE    - Workspace workspace name (e.g., "clicksimple-inc")
  *   MYCTOBOT_JOB_ID       - Current aidevjobs.id being worked on
  *   MYCTOBOT_MEMBER_ID    - Member ID running the job
  *   MYCTOBOT_PROJECT_ROOT - Repo clone directory (workspace isolation)
  *
  * Usage in hooks:
- *   require_once __DIR__ . '/TenantHookHelper.php';
- *   $helper = new TenantHookHelper();
+ *   require_once __DIR__ . '/WorkspaceHookHelper.php';
+ *   $helper = new WorkspaceHookHelper();
  *   if ($helper->connect()) {
  *       $job = $helper->getJob();
  *       $job->status = 'running';
@@ -24,7 +24,7 @@
 
 use \app\Bean;
 
-class TenantHookHelper
+class WorkspaceHookHelper
 {
     private ?string $appRoot = null;
     private ?string $workspace = null;
@@ -56,7 +56,7 @@ class TenantHookHelper
     }
 
     /**
-     * Check if we have the required environment for tenant operations
+     * Check if we have the required environment for workspace operations
      */
     public function hasContext(): bool
     {
@@ -96,7 +96,7 @@ class TenantHookHelper
     }
 
     /**
-     * Connect to the tenant database
+     * Connect to the workspace database
      */
     public function connect(): bool
     {
@@ -117,10 +117,10 @@ class TenantHookHelper
         }
         require_once $autoloader;
 
-        // Find tenant config
-        $configPath = $this->findTenantConfig();
+        // Find workspace config
+        $configPath = $this->findworkspaceConfig();
         if (!$configPath) {
-            $this->log('ERROR', "Tenant config not found for workspace: {$this->workspace}");
+            $this->log('ERROR', "Workspace config not found for workspace: {$this->workspace}");
             return false;
         }
 
@@ -157,7 +157,7 @@ class TenantHookHelper
 
             Bean::freeze(false); // Allow schema modifications if needed
             $this->connected = true;
-            $this->log('DEBUG', "Connected to tenant database: {$this->workspace}");
+            $this->log('DEBUG', "Connected to workspace database: {$this->workspace}");
             return true;
 
         } catch (\Exception $e) {
@@ -167,9 +167,9 @@ class TenantHookHelper
     }
 
     /**
-     * Find the tenant config file
+     * Find the workspace config file
      */
-    private function findTenantConfig(): ?string
+    private function findworkspaceConfig(): ?string
     {
         // Try workspace-specific config first
         $configPath = $this->appRoot . '/conf/config.' . $this->workspace . '.ini';
@@ -177,7 +177,7 @@ class TenantHookHelper
             return $configPath;
         }
 
-        // Try default config (for single-tenant setups)
+        // Try default config (for single-workspace setups)
         $configPath = $this->appRoot . '/conf/config.ini';
         if (file_exists($configPath)) {
             return $configPath;

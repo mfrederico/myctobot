@@ -14,15 +14,15 @@
  * # Scan a single repository:
  * php scripts/scan-plugins.php --script --secret=KEY --repo-id=5 --verbose
  *
- * # With tenant support:
- * php scripts/scan-plugins.php --script --secret=KEY --tenant=gwt --verbose
+ * # With workspace support:
+ * php scripts/scan-plugins.php --script --secret=KEY --workspace=gwt --verbose
  *
  * OPTIONS:
  * --------
  *   --script        REQUIRED for CLI execution
  *   --secret        REQUIRED - Authentication key (cron.api_key in config.ini)
  *   --repo-id       Optional - Scan only this repository connection ID
- *   --tenant        Optional - Tenant slug for multi-tenant setups
+ *   --workspace        Optional - Workspace slug for multi-workspace setups
  *   --verbose       Show detailed output
  *   --help          Show this help message
  *
@@ -42,7 +42,7 @@ chdir($baseDir);
 // Parse command line options
 $options = getopt('', [
     'repo-id:',
-    'tenant:',
+    'workspace:',
     'verbose',
     'help',
     'script',
@@ -57,7 +57,7 @@ if (isset($options['help'])) {
     echo "  --script      REQUIRED for CLI execution\n";
     echo "  --secret      REQUIRED - Authentication key (from config.ini)\n";
     echo "  --repo-id     Scan only this repository connection ID (optional)\n";
-    echo "  --tenant      Tenant slug for multi-tenant setups (optional)\n";
+    echo "  --workspace      Workspace slug for multi-workspace setups (optional)\n";
     echo "  --verbose     Show detailed output\n";
     echo "  --help        Show this help message\n\n";
     echo "Examples:\n";
@@ -65,8 +65,8 @@ if (isset($options['help'])) {
     echo "  php scripts/scan-plugins.php --script --secret=mykey --verbose\n\n";
     echo "  # Scan single repository\n";
     echo "  php scripts/scan-plugins.php --script --secret=mykey --repo-id=5\n\n";
-    echo "  # With tenant\n";
-    echo "  php scripts/scan-plugins.php --script --secret=mykey --tenant=gwt\n";
+    echo "  # With workspace\n";
+    echo "  php scripts/scan-plugins.php --script --secret=mykey --workspace=gwt\n";
     exit(0);
 }
 
@@ -92,12 +92,12 @@ use \app\services\PluginScannerService;
 require_once $baseDir . '/services/PluginScannerService.php';
 
 try {
-    // Determine config file based on tenant parameter
-    $tenant = $options['tenant'] ?? null;
-    if ($tenant) {
-        $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+    // Determine config file based on workspace parameter
+    $workspace = $options['workspace'] ?? null;
+    if ($workspace) {
+        $configFile = $baseDir . "/conf/config.{$workspace}.ini";
         if (!file_exists($configFile)) {
-            echo "Error: Tenant config not found: {$configFile}\n";
+            echo "Error: Workspace config not found: {$configFile}\n";
             exit(1);
         }
     } else {
@@ -107,7 +107,7 @@ try {
     $bootstrap = new \app\Bootstrap($configFile);
 
     if ($verbose) {
-        echo "Application initialized" . ($tenant ? " (tenant: {$tenant})" : "") . "\n\n";
+        echo "Application initialized" . ($workspace ? " (workspace: {$workspace})" : "") . "\n\n";
     }
 
     // Validate CLI secret key for authentication

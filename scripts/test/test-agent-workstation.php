@@ -9,23 +9,23 @@
  *   --workstation=ID Workstation/shard ID to use
  *   --quick          Just test SSH connectivity (skip Claude test)
  *   --list           List available agents and workstations
- *   --tenant=SLUG    Tenant database to use (required)
+ *   --workspace=SLUG    Workspace database to use (required)
  */
 
 // Change to project root
 chdir(dirname(__DIR__, 2));
 
 // Parse command line arguments
-$options = getopt('', ['agent:', 'workstation:', 'quick', 'list', 'tenant:', 'help']);
+$options = getopt('', ['agent:', 'workstation:', 'quick', 'list', 'workspace:', 'help']);
 
 if (isset($options['help'])) {
     echo <<<HELP
 Agent + Workstation Test Script
 
-Usage: php scripts/test/test-agent-workstation.php --tenant=<tenant> [options]
+Usage: php scripts/test/test-agent-workstation.php --workspace=<workspace> [options]
 
 Options:
-  --tenant=<name>       Required. Tenant slug (e.g., gwt)
+  --workspace=<name>       Required. Workspace slug (e.g., gwt)
   --agent=<id>          Agent ID to test
   --workstation=<id>    Workstation/shard ID to use
   --quick               Just test SSH connectivity (skip Claude test)
@@ -33,21 +33,21 @@ Options:
   --help                Show this help message
 
 Examples:
-  php scripts/test/test-agent-workstation.php --tenant=gwt --list
-  php scripts/test/test-agent-workstation.php --tenant=gwt --agent=2 --workstation=1
-  php scripts/test/test-agent-workstation.php --tenant=gwt --agent=2 --workstation=1 --quick
+  php scripts/test/test-agent-workstation.php --workspace=gwt --list
+  php scripts/test/test-agent-workstation.php --workspace=gwt --agent=2 --workstation=1
+  php scripts/test/test-agent-workstation.php --workspace=gwt --agent=2 --workstation=1 --quick
 
 HELP;
     exit(0);
 }
 
-if (empty($options['tenant'])) {
-    echo "Error: --tenant is required\n";
-    echo "Usage: php scripts/test/test-agent-workstation.php --tenant=<tenant> --list\n";
+if (empty($options['workspace'])) {
+    echo "Error: --workspace is required\n";
+    echo "Usage: php scripts/test/test-agent-workstation.php --workspace=<workspace> --list\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 
 // Bootstrap
 require_once 'vendor/autoload.php';
@@ -59,10 +59,10 @@ use \Flight as Flight;
 use \app\Bean;
 use \app\services\AgentTestService;
 
-// Load tenant config
-$configFile = "conf/config.{$tenant}.ini";
+// Load workspace config
+$configFile = "conf/config.{$workspace}.ini";
 if (!file_exists($configFile)) {
-    echo "Error: Tenant config not found: {$configFile}\n";
+    echo "Error: Workspace config not found: {$configFile}\n";
     exit(1);
 }
 
@@ -87,12 +87,12 @@ try {
     $type = $dbConfig['type'] ?? 'mysql';
 
     if ($type === 'sqlite') {
-        $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+        $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
         Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
-        $name = $dbConfig['name'] ?? $tenant;
+        $name = $dbConfig['name'] ?? $workspace;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
         Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);
@@ -108,7 +108,7 @@ $args = [
     'workstation' => $options['workstation'] ?? null,
     'quick' => isset($options['quick']),
     'list' => isset($options['list']),
-    'tenant' => $tenant
+    'workspace' => $workspace
 ];
 
 echo "===========================================\n";
@@ -156,7 +156,7 @@ if (!isset($args['agent']) || !isset($args['workstation'])) {
     echo "  --workstation=ID Workstation/shard ID to use\n";
     echo "  --quick          Just test SSH connectivity\n";
     echo "  --list           List available agents and workstations\n";
-    echo "  --tenant=SLUG    Tenant database to use\n";
+    echo "  --workspace=SLUG    Workspace database to use\n";
     exit(1);
 }
 

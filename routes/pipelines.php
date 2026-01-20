@@ -8,11 +8,11 @@
 use \Flight as Flight;
 
 // Pipeline MCP tool endpoints - expose pipelines as LLM tools
-// GET /pipelines/mcp/tools/{tenant} - List available pipeline tools
-Flight::route('GET /pipelines/mcp/tools/@tenant', ['\app\Pipelines', 'mcptools']);
+// GET /pipelines/mcp/tools/workspace - List available pipeline tools
+Flight::route('GET /pipelines/mcp/tools/@workspace', ['\app\Pipelines', 'mcptools']);
 
-// POST /pipelines/mcp/call/{tenant}/{slug} - Execute a pipeline tool
-Flight::route('POST /pipelines/mcp/call/@tenant/@slug', ['\app\Pipelines', 'mcpcall']);
+// POST /pipelines/mcp/call/workspace/{slug} - Execute a pipeline tool
+Flight::route('POST /pipelines/mcp/call/@workspace/@slug', ['\app\Pipelines', 'mcpcall']);
 
 // Default routing for other pipeline URLs handled by FlightPHP auto-routing
 require_once __DIR__ . '/default.php';

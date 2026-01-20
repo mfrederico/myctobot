@@ -7,27 +7,27 @@
  * Results are stored in a status file that can be polled by the frontend.
  *
  * Usage:
- *   php scripts/agent-test-runner.php --tenant=gwt --agent=2 --workstation=1 --test-id=abc123
+ *   php scripts/agent-test-runner.php --workspace=gwt --agent=2 --workstation=1 --test-id=abc123
  *
  * Status file: /tmp/agent-test-{test_id}.json
  */
 
 // Parse command line arguments
-$options = getopt('', ['tenant:', 'agent:', 'workstation:', 'test-id:', 'help']);
+$options = getopt('', ['workspace:', 'agent:', 'workstation:', 'test-id:', 'help']);
 
-if (isset($options['help']) || empty($options['tenant']) || empty($options['agent']) ||
+if (isset($options['help']) || empty($options['workspace']) || empty($options['agent']) ||
     empty($options['workstation']) || empty($options['test-id'])) {
     echo "Agent Test Runner - Background test execution\n\n";
-    echo "Usage: php scripts/agent-test-runner.php --tenant=<tenant> --agent=<id> --workstation=<id> --test-id=<id>\n\n";
+    echo "Usage: php scripts/agent-test-runner.php --workspace=<workspace> --agent=<id> --workstation=<id> --test-id=<id>\n\n";
     echo "Options:\n";
-    echo "  --tenant=<name>       Required. Tenant slug\n";
+    echo "  --workspace=<name>       Required. Workspace slug\n";
     echo "  --agent=<id>          Required. Agent ID to test\n";
     echo "  --workstation=<id>    Required. Workstation/shard ID\n";
     echo "  --test-id=<id>        Required. Unique test ID for status tracking\n";
     exit(1);
 }
 
-$tenant = $options['tenant'];
+$workspace = $options['workspace'];
 $agentId = (int)$options['agent'];
 $workstationId = (int)$options['workstation'];
 $testId = $options['test-id'];
@@ -56,10 +56,10 @@ try {
     require_once 'lib/Bean.php';
     require_once 'services/AgentTestService.php';
 
-    // Load tenant config
-    $configFile = "conf/config.{$tenant}.ini";
+    // Load workspace config
+    $configFile = "conf/config.{$workspace}.ini";
     if (!file_exists($configFile)) {
-        throw new \Exception("Tenant config not found: {$configFile}");
+        throw new \Exception("Workspace config not found: {$configFile}");
     }
 
     $config = parse_ini_file($configFile, true);
@@ -81,12 +81,12 @@ try {
     $type = $dbConfig['type'] ?? 'mysql';
 
     if ($type === 'sqlite') {
-        $dbPath = $dbConfig['path'] ?? "database/{$tenant}.sqlite";
+        $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
         \app\Bean::setup("sqlite:{$dbPath}");
     } else {
         $host = $dbConfig['host'] ?? 'localhost';
         $port = $dbConfig['port'] ?? 3306;
-        $name = $dbConfig['name'] ?? $tenant;
+        $name = $dbConfig['name'] ?? $workspace;
         $user = $dbConfig['user'] ?? 'root';
         $pass = $dbConfig['pass'] ?? '';
         \app\Bean::setup("mysql:host={$host};port={$port};dbname={$name}", $user, $pass);

@@ -365,26 +365,26 @@ class Agents extends BaseControls\Control {
         // csrf already set by parent constructor
         $this->viewData['activeTab'] = $this->getParam('tab', 'general');
 
-        // MCP config data for tenant-aware API
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        // MCP config data for workspace-aware API
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
         // Ensure HTTPS in production
         if (strpos($baseUrl, 'localhost') === false && strpos($baseUrl, '127.0.0.1') === false) {
             $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
         }
 
-        // Get API key from tenant config for MCP presets
-        $tenantApiKey = '';
-        $configFile = BASE_PATH . '/conf/config.' . $tenantSlug . '.ini';
+        // Get API key from workspace config for MCP presets
+        $workspaceApiKey = '';
+        $configFile = BASE_PATH . '/conf/config.' . $workspaceSlug . '.ini';
         if (file_exists($configFile)) {
-            $tenantConfig = parse_ini_file($configFile, true);
-            $tenantApiKey = $tenantConfig['api']['api_key'] ?? '';
+            $workspaceConfig = parse_ini_file($configFile, true);
+            $workspaceApiKey = $workspaceConfig['api']['api_key'] ?? '';
         }
 
-        $this->viewData['tenantSlug'] = $tenantSlug;
-        $this->viewData['tenantApiKey'] = $tenantApiKey;
+        $this->viewData['workspaceSlug'] = $workspaceSlug;
+        $this->viewData['workspaceApiKey'] = $workspaceApiKey;
         $this->viewData['apiBaseUrl'] = $baseUrl;
-        $this->viewData['mcpApiUrl'] = "{$baseUrl}/api/mcp/{$tenantSlug}";
+        $this->viewData['mcpApiUrl'] = "{$baseUrl}/api/mcp/{$workspaceSlug}";
 
         $this->render('agents/edit', $this->viewData);
     }
@@ -611,15 +611,15 @@ class Agents extends BaseControls\Control {
         // Generate unique test ID
         $testId = 'at-' . bin2hex(random_bytes(8));
 
-        // Get tenant slug
-        $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+        // Get workspace slug
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 
         // Spawn background script
         $scriptPath = __DIR__ . '/../scripts/agent-test-runner.php';
         $cmd = sprintf(
-            'php %s --tenant=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
+            'php %s --workspace=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
             escapeshellarg($scriptPath),
-            escapeshellarg($tenantSlug),
+            escapeshellarg($workspaceSlug),
             $agentId,
             $workstationId,
             escapeshellarg($testId)

@@ -66,6 +66,15 @@ class ConnectionsService {
             'tier_required' => 'free',  // Available to all tiers
             'auth_type' => 'oauth',
             'features' => ['Theme Development', 'Store Analysis']
+        ],
+        'mailgun' => [
+            'name' => 'Mailgun',
+            'description' => 'Email service for pipeline notifications and alerts',
+            'icon' => 'bi-envelope',
+            'color' => 'danger',
+            'tier_required' => 'free',  // Available to all tiers
+            'auth_type' => 'api_key',
+            'features' => ['Pipeline Email Steps', 'Notifications', 'Digest Emails']
         ]
     ];
 
@@ -118,6 +127,9 @@ class ConnectionsService {
                         break;
                     case 'shopify':
                         $connection = array_merge($connection, $this->getShopifyStatus());
+                        break;
+                    case 'mailgun':
+                        $connection = array_merge($connection, $this->getMailgunStatus());
                         break;
                 }
             }
@@ -399,6 +411,68 @@ class ConnectionsService {
         } catch (\Exception $e) {
             return $result;
         }
+    }
+
+    /**
+     * Get Mailgun connection status
+     */
+    private function getMailgunStatus(): array {
+        $result = [
+            'connected' => false,
+            'status' => 'Not configured',
+            'details' => null,
+            'actions' => [
+                ['label' => 'Configure', 'url' => '/mailgun', 'class' => 'btn-danger']
+            ]
+        ];
+
+        try {
+            // Check for Mailgun settings in enterprisesettings
+            $apiKeySetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_api_key']);
+            $domainSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_domain']);
+
+            if (!$apiKeySetting || empty($apiKeySetting->setting_value) ||
+                !$domainSetting || empty($domainSetting->setting_value)) {
+                return $result;
+            }
+
+            $domain = $domainSetting->setting_value;
+            $fromEmailSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['mailgun_from_email']);
+            $fromEmail = $fromEmailSetting ? $fromEmailSetting->setting_value : "noreply@{$domain}";
+
+            return [
+                'connected' => true,
+                'status' => "Domain: {$domain}",
+                'details' => [
+                    'domain' => $domain,
+                    'from_email' => $fromEmail,
+                    'masked_key' => $this->maskApiKey($apiKeySetting->setting_value)
+                ],
+                'actions' => [
+                    ['label' => 'Manage', 'url' => '/mailgun', 'class' => 'btn-outline-danger'],
+                    ['label' => 'Test', 'url' => '/mailgun/test', 'class' => 'btn-outline-secondary', 'ajax' => true]
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            return $result;
+        }
+    }
+
+    /**
+     * Mask an API key for display
+     */
+    private function maskApiKey(string $key): string {
+        if (empty($key)) {
+            return '(not configured)';
+        }
+
+        $len = strlen($key);
+        if ($len < 8) {
+            return '****';
+        }
+
+        return substr($key, 0, 4) . '...' . substr($key, -4);
     }
 
     /**

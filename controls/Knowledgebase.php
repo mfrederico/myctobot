@@ -27,10 +27,10 @@ class Knowledgebase extends BaseControls\Control {
     }
 
     /**
-     * Get current tenant slug
+     * Get current workspace slug
      */
-    private function getTenantSlug(): string {
-        return $_SESSION['tenant_slug'] ?? 'default';
+    private function getWorkspaceSlug(): string {
+        return $_SESSION['workspace_slug'] ?? 'default';
     }
 
     /**
@@ -105,7 +105,7 @@ class Knowledgebase extends BaseControls\Control {
             'maxStorageMB' => $maxStorageMB,
             'chatAvailable' => $chatAvailable,
             'tier' => $tier,
-            'tenantSlug' => $this->getTenantSlug(),
+            'workspaceSlug' => $this->getWorkspaceSlug(),
             'ragServiceUrl' => $this->ragServiceUrl,
             'agentProfiles' => $agentProfiles,
             'selectedAgent' => $selectedAgent
@@ -136,7 +136,7 @@ class Knowledgebase extends BaseControls\Control {
             // Generate slug from name (for MCP/API access)
             $slug = $this->generateSlug($name);
 
-            // Ensure slug is unique within tenant
+            // Ensure slug is unique within workspace
             $existing = Bean::findOne('knowledgebases', ' slug = ? ', [$slug]);
             if ($existing) {
                 $slug = $slug . '-' . time();
@@ -189,9 +189,9 @@ class Knowledgebase extends BaseControls\Control {
             }
 
             // Delete all documents in this KB via association
-            $tenantSlug = $this->getTenantSlug();
+            $workspaceSlug = $this->getWorkspaceSlug();
             foreach ($kb->ownRagdocumentsList as $doc) {
-                $this->deleteFromRagService($tenantSlug, $doc->filename);
+                $this->deleteFromRagService($workspaceSlug, $doc->filename);
                 Bean::trash($doc);
             }
 
@@ -230,7 +230,7 @@ class Knowledgebase extends BaseControls\Control {
         }
 
         $file = $_FILES['document'];
-        $tenantSlug = $this->getTenantSlug();
+        $workspaceSlug = $this->getWorkspaceSlug();
 
         // Check file size (use PHP's upload_max_filesize setting)
         $maxFileSize = $this->parseIniSize(ini_get('upload_max_filesize'));
@@ -303,7 +303,7 @@ class Knowledgebase extends BaseControls\Control {
             $result = $this->sendToRagService(
                 $doc->id,
                 $file['tmp_name'],
-                $tenantSlug,
+                $workspaceSlug,
                 $doc->filename,
                 $visionConfig,
                 true // async mode
@@ -450,7 +450,7 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        $tenantSlug = $this->getTenantSlug();
+        $workspaceSlug = $this->getWorkspaceSlug();
 
         try {
             // Create document record
@@ -467,7 +467,7 @@ class Knowledgebase extends BaseControls\Control {
             Bean::store($doc);
 
             // Send URL to RAG service
-            $result = $this->sendUrlToRagService($doc->id, $url, $tenantSlug);
+            $result = $this->sendUrlToRagService($doc->id, $url, $workspaceSlug);
 
             if ($result['success']) {
                 $doc->status = 'ready';
@@ -522,11 +522,11 @@ class Knowledgebase extends BaseControls\Control {
                 return;
             }
 
-            $tenantSlug = $this->getTenantSlug();
+            $workspaceSlug = $this->getWorkspaceSlug();
             $filename = $doc->filename;
 
             // Delete from RAG service vector store
-            $this->deleteFromRagService($tenantSlug, $filename);
+            $this->deleteFromRagService($workspaceSlug, $filename);
 
             // Delete from database
             Bean::trash($doc);
@@ -585,7 +585,7 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
-        $tenantSlug = $this->getTenantSlug();
+        $workspaceSlug = $this->getWorkspaceSlug();
 
         // Get selected KB from query param
         $kbId = $this->getParam('kb');
@@ -600,14 +600,14 @@ class Knowledgebase extends BaseControls\Control {
         }
 
         // Build chat URL with KB slug if available
-        $chatUrl = "{$this->ragServiceUrl}/chat/{$tenantSlug}";
+        $chatUrl = "{$this->ragServiceUrl}/chat/{$workspaceSlug}";
         if ($kbSlug) {
             $chatUrl .= "/{$kbSlug}";
         }
 
         $this->render('knowledgebase/chat', [
             'title' => 'Knowledge Base Chat' . ($selectedKb ? ': ' . $selectedKb->name : ''),
-            'tenantSlug' => $tenantSlug,
+            'workspaceSlug' => $workspaceSlug,
             'ragServiceUrl' => $this->ragServiceUrl,
             'chatUrl' => $chatUrl,
             'selectedKb' => $selectedKb
@@ -644,12 +644,12 @@ class Knowledgebase extends BaseControls\Control {
      *
      * @param int $docId Document ID
      * @param string $filePath Path to uploaded file
-     * @param string $tenantId Tenant identifier
+     * @param string $workspaceId Workspace identifier
      * @param string|null $originalFilename Original filename
      * @param array $visionConfig Optional vision OCR config (model, host)
      * @param bool $async Use async mode (returns immediately with job_uid)
      */
-    private function sendToRagService(int $docId, string $filePath, string $tenantId, string $originalFilename = null, array $visionConfig = [], bool $async = true): array {
+    private function sendToRagService(int $docId, string $filePath, string $workspaceId, string $originalFilename = null, array $visionConfig = [], bool $async = true): array {
         try {
             // Short timeout for async (just submission), longer for sync
             $timeout = $async ? 30 : 300;
@@ -662,8 +662,8 @@ class Knowledgebase extends BaseControls\Control {
                     'filename' => $originalFilename ?? basename($filePath)
                 ],
                 [
-                    'name' => 'tenant_id',
-                    'contents' => $tenantId
+                    'name' => 'workspace_id',
+                    'contents' => $workspaceId
                 ],
                 [
                     'name' => 'doc_id',
@@ -772,14 +772,14 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Send URL to RAG service for processing
      */
-    private function sendUrlToRagService(int $docId, string $url, string $tenantId): array {
+    private function sendUrlToRagService(int $docId, string $url, string $workspaceId): array {
         try {
             $client = new \GuzzleHttp\Client(['timeout' => 300]); // 5 min for vision OCR
 
             $response = $client->post("{$this->ragServiceUrl}/api/ingest-url", [
                 'json' => [
                     'url' => $url,
-                    'tenant_id' => $tenantId,
+                    'workspace_id' => $workspaceId,
                     'doc_id' => $docId
                 ]
             ]);
@@ -796,13 +796,13 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Delete document from RAG service
      */
-    private function deleteFromRagService(string $tenantId, string $filename): bool {
+    private function deleteFromRagService(string $workspaceId, string $filename): bool {
         try {
             $client = new \GuzzleHttp\Client(['timeout' => 30]);
 
             $response = $client->delete("{$this->ragServiceUrl}/api/documents", [
                 'json' => [
-                    'tenant_id' => $tenantId,
+                    'workspace_id' => $workspaceId,
                     'filename' => $filename
                 ]
             ]);
@@ -955,7 +955,7 @@ class Knowledgebase extends BaseControls\Control {
             'selectedKb' => $selectedKb,
             'selectedKbId' => $kbId,
             'selectedAgent' => $selectedAgent,
-            'tenantSlug' => $this->getTenantSlug(),
+            'workspaceSlug' => $this->getWorkspaceSlug(),
             'ragServiceUrl' => $this->ragServiceUrl
         ]);
     }
@@ -996,10 +996,10 @@ class Knowledgebase extends BaseControls\Control {
                 return;
             }
 
-            $tenantSlug = $this->getTenantSlug();
+            $workspaceSlug = $this->getWorkspaceSlug();
 
             // Send query to RAG service
-            $result = $this->sendQueryToRagService($tenantSlug, $kb->slug, $query, $options);
+            $result = $this->sendQueryToRagService($workspaceSlug, $kb->slug, $query, $options);
 
             if ($result['success']) {
                 // Map RAG service response fields to expected format
@@ -1030,13 +1030,13 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Send query to RAG service
      */
-    private function sendQueryToRagService(string $tenantId, string $kbSlug, string $query, array $options): array {
+    private function sendQueryToRagService(string $workspaceId, string $kbSlug, string $query, array $options): array {
         try {
             $client = new \GuzzleHttp\Client(['timeout' => 60]);
 
             $response = $client->post("{$this->ragServiceUrl}/api/query", [
                 'json' => [
-                    'tenant_id' => $tenantId,
+                    'workspace_id' => $workspaceId,
                     'kb_slug' => $kbSlug,
                     'query' => $query,
                     'similarity_threshold' => $options['similarity_threshold'],

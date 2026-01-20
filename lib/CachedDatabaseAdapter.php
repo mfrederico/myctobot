@@ -36,7 +36,7 @@ class CachedDatabaseAdapter extends DBAdapter {
     public function __construct($database) {
         parent::__construct($database);
 
-        // Generate unique prefix for multi-tenant safety
+        // Generate unique prefix for multi-workspace safety
         $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
         $this->cachePrefix = "rdb_{$siteId}_";
 

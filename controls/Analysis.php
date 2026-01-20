@@ -110,10 +110,10 @@ class Analysis extends BaseControls\Control {
             $scriptPath = realpath(__DIR__ . '/../scripts/cron-analysis.php');
             $cronSecret = Flight::get('cron.api_key');
 
-            // Get tenant slug for multi-tenancy support
-            $tenantSlug = $_SESSION['tenant_slug'] ?? null;
-            $tenantParam = $tenantSlug && $tenantSlug !== 'default'
-                ? sprintf(' --tenant=%s', escapeshellarg($tenantSlug))
+            // Get workspace slug for multi-tenancy support
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
                 : '';
 
             $cmd = sprintf(
@@ -124,7 +124,7 @@ class Analysis extends BaseControls\Control {
                 (int)$boardId,
                 escapeshellarg($jobId),
                 escapeshellarg($statusFilter),
-                $tenantParam
+                $workspaceParam
             );
 
             // Execute in background
@@ -134,7 +134,7 @@ class Analysis extends BaseControls\Control {
                 'member_id' => $this->member->id,
                 'board_id' => $boardId,
                 'job_uid' => $jobId,
-                'tenant' => $tenantSlug ?? 'default'
+                'workspace' => $workspaceSlug ?? 'default'
             ]);
 
             // Redirect to progress page

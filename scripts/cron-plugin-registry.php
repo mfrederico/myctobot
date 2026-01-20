@@ -17,7 +17,7 @@
  * OPTIONS:
  * --------
  *   --script     REQUIRED for CLI execution
- *   --tenant     Process specific tenant (e.g., gwt, greenworks). If omitted, processes all tenants.
+ *   --workspace     Process specific workspace (e.g., gwt, greenworks). If omitted, processes all workspaces.
  *   --verbose    Show detailed output
  *   --force      Force refresh regardless of TTL
  *   --help       Show this help message
@@ -31,14 +31,14 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['verbose', 'force', 'script', 'tenant:', 'help']);
+$options = getopt('', ['verbose', 'force', 'script', 'workspace:', 'help']);
 
 if (isset($options['help'])) {
     echo "MyCTOBot Plugin Registry Cache Refresh\n\n";
     echo "Usage: php cron-plugin-registry.php --script [options]\n\n";
     echo "Options:\n";
     echo "  --script     REQUIRED for standalone script mode\n";
-    echo "  --tenant     Process specific tenant (omit to process all tenants)\n";
+    echo "  --workspace     Process specific workspace (omit to process all workspaces)\n";
     echo "  --verbose    Show detailed output\n";
     echo "  --force      Force refresh regardless of TTL\n";
     echo "  --help       Show this help message\n";
@@ -47,14 +47,14 @@ if (isset($options['help'])) {
 
 $verbose = isset($options['verbose']);
 $force = isset($options['force']);
-$specificTenant = $options['tenant'] ?? null;
+$specificWorkspace = $options['workspace'] ?? null;
 
 if ($verbose) {
     echo "MyCTOBot Plugin Registry Refresh\n";
     echo "================================\n";
     echo "Time: " . date('Y-m-d H:i:s') . "\n";
     echo "Base: {$baseDir}\n";
-    if ($specificTenant) echo "Tenant: {$specificTenant}\n";
+    if ($specificWorkspace) echo "Workspace: {$specificWorkspace}\n";
     if ($force) echo "Mode: FORCE (ignoring TTL)\n";
     echo "\n";
 }
@@ -72,66 +72,66 @@ use \app\PluginRegistryCache;
 require_once $baseDir . '/lib/PluginRegistryCache.php';
 
 try {
-    // Discover tenants to process
-    $tenantsToProcess = [];
-    if ($specificTenant) {
-        // Single tenant specified
-        $tenantConfig = $baseDir . "/conf/config.{$specificTenant}.ini";
-        if (!file_exists($tenantConfig)) {
-            echo "Error: Tenant config not found: {$tenantConfig}\n";
+    // Discover workspaces to process
+    $workspacesToProcess = [];
+    if ($specificWorkspace) {
+        // Single workspace specified
+        $workspaceConfig = $baseDir . "/conf/config.{$specificWorkspace}.ini";
+        if (!file_exists($workspaceConfig)) {
+            echo "Error: Workspace config not found: {$workspaceConfig}\n";
             exit(1);
         }
-        $tenantsToProcess[$specificTenant] = $tenantConfig;
+        $workspacesToProcess[$specificWorkspace] = $workspaceConfig;
     } else {
-        // Discover all tenant configs
+        // Discover all workspace configs
         $configFiles = glob($baseDir . '/conf/config.*.ini');
         foreach ($configFiles as $configFile) {
             $basename = basename($configFile);
-            // Extract tenant name from config.{tenant}.ini
+            // Extract workspace name from config.{workspace}.ini
             if (preg_match('/^config\.([a-z0-9]+)\.ini$/', $basename, $matches)) {
-                $tenantSlug = $matches[1];
+                $workspaceSlug = $matches[1];
                 // Skip 'example' config
-                if ($tenantSlug !== 'example') {
-                    $tenantsToProcess[$tenantSlug] = $configFile;
+                if ($workspaceSlug !== 'example') {
+                    $workspacesToProcess[$workspaceSlug] = $configFile;
                 }
             }
         }
     }
 
-    if (empty($tenantsToProcess)) {
+    if (empty($workspacesToProcess)) {
         if ($verbose) {
-            echo "No tenant configs found. Nothing to process.\n";
+            echo "No workspace configs found. Nothing to process.\n";
         }
         exit(0);
     }
 
     if ($verbose) {
-        echo "Tenants to process: " . implode(', ', array_keys($tenantsToProcess)) . "\n\n";
+        echo "Workspaces to process: " . implode(', ', array_keys($workspacesToProcess)) . "\n\n";
     }
 
     $totalProcessed = 0;
     $totalErrors = 0;
     $totalSkipped = 0;
 
-    // Process each tenant
-    foreach ($tenantsToProcess as $tenantSlug => $configFile) {
+    // Process each workspace
+    foreach ($workspacesToProcess as $workspaceSlug => $configFile) {
         if ($verbose) {
-            echo "=== Processing tenant: {$tenantSlug} ===\n";
+            echo "=== Processing workspace: {$workspaceSlug} ===\n";
         }
 
         try {
-            // Initialize fresh bootstrap for this tenant
+            // Initialize fresh bootstrap for this workspace
             $bootstrap = new \app\Bootstrap($configFile);
 
-            // Set tenant in session for cache key differentiation
-            $_SESSION['tenant_slug'] = $tenantSlug;
+            // Set workspace in session for cache key differentiation
+            $_SESSION['workspace_slug'] = $workspaceSlug;
 
             // Set timezone from config
             $configTimezone = Flight::get('app.timezone') ?? 'America/New_York';
             date_default_timezone_set($configTimezone);
 
             if ($verbose) {
-                echo "Tenant initialized, timezone: {$configTimezone}\n";
+                echo "Workspace initialized, timezone: {$configTimezone}\n";
 
                 // Show current cache status
                 $stats = PluginRegistryCache::getStats();
@@ -174,7 +174,7 @@ try {
 
             // Log the result
             Flight::get('log')->info('Plugin registry cache refreshed', [
-                'tenant' => $tenantSlug,
+                'workspace' => $workspaceSlug,
                 'plugins_count' => $result['count'],
                 'errors_count' => count($result['errors'] ?? []),
                 'forced' => $force,
@@ -184,7 +184,7 @@ try {
         } catch (\Exception $e) {
             $totalErrors++;
             if ($verbose) {
-                echo "Error processing tenant {$tenantSlug}: {$e->getMessage()}\n\n";
+                echo "Error processing workspace {$workspaceSlug}: {$e->getMessage()}\n\n";
             }
         }
 
@@ -195,7 +195,7 @@ try {
 
     if ($verbose) {
         echo "================================\n";
-        echo "All tenants complete!\n";
+        echo "All workspaces complete!\n";
         echo "Total processed: {$totalProcessed}\n";
         echo "Total skipped (TTL): {$totalSkipped}\n";
         echo "Total errors: {$totalErrors}\n";

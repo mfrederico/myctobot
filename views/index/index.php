@@ -28,7 +28,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                     </div>
                 </div>
                 <div class="d-grid gap-2 d-md-flex">
-                    <?php if (\app\TenantResolver::isDefault()): ?>
+                    <?php if (\app\WorkspaceResolver::isDefault()): ?>
                         <a href="/signup" class="btn btn-primary btn-lg">
                             <i class="bi bi-play-fill"></i> Start Building
                         </a>
@@ -299,7 +299,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                             <h5 class="mb-0">SaaS Applications</h5>
                         </div>
                         <p class="text-muted small">
-                            Multi-tenant architectures, subscription billing, user management, API integrations.
+                            Multi-workspace architectures, subscription billing, user management, API integrations.
                             Build production-ready SaaS with security baked in.
                         </p>
                     </div>
@@ -487,7 +487,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                             <li class="mb-2"><i class="bi bi-check text-success me-2"></i> GitHub integration</li>
                             <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Basic AI analysis</li>
                         </ul>
-                        <?php if (\app\TenantResolver::isDefault()): ?>
+                        <?php if (\app\WorkspaceResolver::isDefault()): ?>
                         <a href="/signup" class="btn btn-outline-primary w-100">Get Started</a>
                         <?php endif; ?>
                     </div>
@@ -509,7 +509,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                             <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Shopify integration</li>
                             <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Priority support</li>
                         </ul>
-                        <?php if (\app\TenantResolver::isDefault()): ?>
+                        <?php if (\app\WorkspaceResolver::isDefault()): ?>
                         <a href="/signup" class="btn btn-primary w-100">Start 14-Day Trial</a>
                         <?php endif; ?>
                     </div>
@@ -526,7 +526,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
         <p class="lead mb-4 opacity-75">
             Connect your infrastructure, define your guidelines, and start building with AI that follows your rules.
         </p>
-        <?php if (\app\TenantResolver::isDefault()): ?>
+        <?php if (\app\WorkspaceResolver::isDefault()): ?>
             <a href="/signup" class="btn btn-primary btn-lg me-2">
                 <i class="bi bi-plus-circle"></i> Create Your Workspace
             </a>

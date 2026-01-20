@@ -1,6 +1,6 @@
 <?php
 // With session-based tenancy, we're always on the main domain so Google OAuth works
-// Pass workspace to Google OAuth so it can set the tenant after callback
+// Pass workspace to Google OAuth so it can set the workspace after callback
 $showGoogleOAuth = !empty($googleEnabled);
 $hasWorkspace = !empty($workspace);
 // $requestedWorkspace is passed from controller (preserves original before clearing on error)

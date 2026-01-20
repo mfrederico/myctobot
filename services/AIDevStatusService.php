@@ -2,7 +2,7 @@
 /**
  * AI Developer Status Service
  * Tracks progress of AI Developer jobs via database
- * Status is stored per-tenant in the aidevjobs table
+ * Status is stored per-workspace in the aidevjobs table
  */
 
 namespace app\services;

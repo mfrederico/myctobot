@@ -4,11 +4,11 @@
  * AI Developer Agent Background Runner
  *
  * Usage:
- *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE_KEY --cloud=CLOUD_ID --repo=REPO_ID --action=process [--tenant=TENANT]
- *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--tenant=TENANT]
+ *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE_KEY --cloud=CLOUD_ID --repo=REPO_ID --action=process [--workspace=workspace]
+ *   php scripts/ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--workspace=workspace]
  *
  * Options:
- *   --tenant     Tenant slug for multi-tenancy (e.g., gwt). Loads conf/config.{tenant}.ini
+ *   --workspace     Workspace slug for multi-workspace (e.g., gwt). Loads conf/config.{workspace}.ini
  */
 
 // Set up error reporting
@@ -46,7 +46,7 @@ use \app\services\AIDevAgent;
 use \app\services\AIDevStatusService;
 use \app\services\AnthropicKeyService;
 
-// Parse command line arguments BEFORE bootstrap (need tenant param for config)
+// Parse command line arguments BEFORE bootstrap (need workspace param for config)
 $options = getopt('', [
     'script',
     'secret:',
@@ -59,7 +59,7 @@ $options = getopt('', [
     'comment:',
     'branch:',
     'pr:',
-    'tenant:',
+    'workspace:',
     'help',
     'verbose'
 ]);
@@ -69,11 +69,11 @@ if (isset($options['help'])) {
     echo "AI Developer Agent Background Runner\n\n";
     echo "Usage:\n";
     echo "  Process new ticket:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE --cloud=CLOUD --repo=REPO --action=process [--tenant=TENANT]\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --issue=ISSUE --cloud=CLOUD --repo=REPO --action=process [--workspace=workspace]\n\n";
     echo "  Resume after clarification:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--tenant=TENANT]\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=resume [--comment=COMMENT_ID] [--workspace=workspace]\n\n";
     echo "  Retry on existing branch:\n";
-    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=retry --branch=BRANCH [--pr=PR_NUMBER] [--tenant=TENANT]\n\n";
+    echo "    php ai-dev-agent.php --secret=KEY --member=ID --job=JOB_ID --action=retry --branch=BRANCH [--pr=PR_NUMBER] [--workspace=workspace]\n\n";
     echo "Options:\n";
     echo "  --secret     Required. CLI authentication secret\n";
     echo "  --member     Required. Member ID\n";
@@ -85,24 +85,24 @@ if (isset($options['help'])) {
     echo "  --comment    Comment ID containing clarification (optional for resume)\n";
     echo "  --branch     Branch name (required for retry action)\n";
     echo "  --pr         PR number (optional for retry action)\n";
-    echo "  --tenant     Tenant slug for multi-tenancy (e.g., gwt)\n";
+    echo "  --workspace     Workspace slug for multi-workspace (e.g., gwt)\n";
     echo "  --verbose    Show detailed output\n";
     exit(0);
 }
 
-// Determine config file based on tenant parameter
-$tenant = $options['tenant'] ?? null;
-if ($tenant) {
-    $configFile = $baseDir . "/conf/config.{$tenant}.ini";
+// Determine config file based on workspace parameter
+$workspace = $options['workspace'] ?? null;
+if ($workspace) {
+    $configFile = $baseDir . "/conf/config.{$workspace}.ini";
     if (!file_exists($configFile)) {
-        echo "Error: Tenant config not found: {$configFile}\n";
+        echo "Error: Workspace config not found: {$configFile}\n";
         exit(1);
     }
 } else {
     $configFile = $baseDir . '/conf/config.ini';
 }
 
-// Initialize the application with tenant-specific config
+// Initialize the application with workspace-specific config
 $bootstrap = new \app\Bootstrap($configFile);
 
 // Validate CLI secret key

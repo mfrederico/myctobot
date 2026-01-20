@@ -5,7 +5,7 @@
  * Falls back to per-request caching if APCu is not available
  *
  * Features:
- * - Multi-tenant support via tenant-specific cache keys
+ * - Multi-workspace support via workspace-specific cache keys
  * - Automatic TTL-based refresh
  * - Source error preservation (keeps cached data on source failure)
  * - Manual refresh capability for administrators
@@ -20,7 +20,7 @@ class PluginRegistryCache {
     // Process-local cache (fastest access)
     private static $localCache = null;
 
-    // Cache configuration - Use unique keys per installation/tenant
+    // Cache configuration - Use unique keys per installation/workspace
     private static $CACHE_KEY = null;
     private static $STATS_KEY = null;
     private static $ERRORS_KEY = null;
@@ -46,17 +46,17 @@ class PluginRegistryCache {
     private static function getCacheVersionFile() {
         if (self::$CACHE_VERSION_FILE === null) {
             $cacheDir = self::getCacheDir();
-            $tenantSlug = self::getTenantSlug();
-            self::$CACHE_VERSION_FILE = $cacheDir . "/.plugin_cache_version_{$tenantSlug}";
+            $workspaceSlug = self::getWorkspaceSlug();
+            self::$CACHE_VERSION_FILE = $cacheDir . "/.plugin_cache_version_{$workspaceSlug}";
         }
         return self::$CACHE_VERSION_FILE;
     }
 
     /**
-     * Get current tenant slug for multi-tenancy support
+     * Get current workspace slug for multi-workspace support
      */
-    private static function getTenantSlug() {
-        return $_SESSION['tenant_slug'] ?? 'default';
+    private static function getWorkspaceSlug() {
+        return $_SESSION['workspace_slug'] ?? 'default';
     }
 
     /**
@@ -83,13 +83,13 @@ class PluginRegistryCache {
     }
 
     /**
-     * Get unique cache key for this installation/tenant (includes version for cache busting)
+     * Get unique cache key for this installation/workspace (includes version for cache busting)
      */
     private static function getCacheKey() {
         if (self::$CACHE_KEY === null) {
-            // Create unique key based on installation path, tenant, and version
-            $tenantSlug = self::getTenantSlug();
-            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli') . '_' . $tenantSlug);
+            // Create unique key based on installation path, workspace, and version
+            $workspaceSlug = self::getWorkspaceSlug();
+            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli') . '_' . $workspaceSlug);
             $version = self::getCacheVersion();
             self::$CACHE_KEY = "myctobot_{$siteId}_plugins_v{$version}";
             self::$STATS_KEY = "myctobot_{$siteId}_plugin_stats";
@@ -152,7 +152,7 @@ class PluginRegistryCache {
         }
 
         // Fallback to file-based error storage
-        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getTenantSlug() . '.json';
+        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getWorkspaceSlug() . '.json';
         if (file_exists($errorFile)) {
             $content = file_get_contents($errorFile);
             return json_decode($content, true) ?: [];
@@ -319,7 +319,7 @@ class PluginRegistryCache {
         }
 
         // Clear errors file
-        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getTenantSlug() . '.json';
+        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getWorkspaceSlug() . '.json';
         if (file_exists($errorFile)) {
             @unlink($errorFile);
         }
@@ -447,7 +447,7 @@ class PluginRegistryCache {
      * Get file cache path
      */
     private static function getFileCachePath() {
-        return self::getCacheDir() . '/plugin_registry_' . self::getTenantSlug() . '.cache';
+        return self::getCacheDir() . '/plugin_registry_' . self::getWorkspaceSlug() . '.cache';
     }
 
     /**
@@ -485,7 +485,7 @@ class PluginRegistryCache {
         }
 
         // Also store in file for persistence
-        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getTenantSlug() . '.json';
+        $errorFile = self::getCacheDir() . '/.plugin_errors_' . self::getWorkspaceSlug() . '.json';
         file_put_contents($errorFile, json_encode($errors, JSON_PRETTY_PRINT));
     }
 

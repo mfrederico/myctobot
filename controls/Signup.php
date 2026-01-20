@@ -1,30 +1,30 @@
 <?php
 /**
- * Signup Controller - Tenant Registration
+ * Signup Controller - Workspace Registration
  *
- * Handles new business/tenant registration from the public site.
- * Creates a new subdomain, database, and admin user for the tenant.
+ * Handles new business/workspace registration from the public site.
+ * Creates a new subdomain, database, and admin user for the workspace.
  *
- * Flow: Form → Email Verification → Provision Tenant
+ * Flow: Form → Email Verification → Provision workspace
  *
- * Only accessible from the default (public) site, not from tenant subdomains.
+ * Only accessible from the default (public) site, not from workspace subdomains.
  */
 
 namespace app;
 
 use \Flight as Flight;
 use \app\Bean;
-use \app\services\TenantProvisioner;
+use \app\services\WorkspaceProvisioner;
 use \app\services\MailgunService;
 
 class Signup extends BaseControls\Control {
 
     /**
-     * Show the tenant signup form
+     * Show the workspace signup form
      */
     public function index() {
         // Only allow signup from the main/public site
-        if (!TenantResolver::isDefault()) {
+        if (!WorkspaceResolver::isDefault()) {
             Flight::redirect('/auth/login');
             return;
         }
@@ -53,7 +53,7 @@ class Signup extends BaseControls\Control {
             $adminUser = Flight::get('provisioner.db_user') ?? Flight::get('database.user');
             $adminPass = Flight::get('provisioner.db_pass') ?? Flight::get('database.pass');
 
-            $provisioner = new TenantProvisioner($adminHost, $adminUser, $adminPass);
+            $provisioner = new WorkspaceProvisioner($adminHost, $adminUser, $adminPass);
             $result = $provisioner->validateSubdomain($subdomain);
 
             // Also check if subdomain is pending verification
@@ -77,11 +77,11 @@ class Signup extends BaseControls\Control {
     }
 
     /**
-     * Process tenant signup - stores pending signup and sends verification email
+     * Process workspace signup - stores pending signup and sends verification email
      */
     public function dosignup() {
         // Only allow signup from the main/public site
-        if (!TenantResolver::isDefault()) {
+        if (!WorkspaceResolver::isDefault()) {
             Flight::jsonError('Signup not available', 403);
             return;
         }
@@ -144,7 +144,7 @@ class Signup extends BaseControls\Control {
             $adminUser = Flight::get('provisioner.db_user') ?? Flight::get('database.user');
             $adminPass = Flight::get('provisioner.db_pass') ?? Flight::get('database.pass');
 
-            $provisioner = new TenantProvisioner($adminHost, $adminUser, $adminPass);
+            $provisioner = new WorkspaceProvisioner($adminHost, $adminUser, $adminPass);
 
             // Auto-generate an available subdomain from business name
             $subdomain = $this->generateAvailableSubdomain($businessName, $provisioner);
@@ -216,7 +216,7 @@ class Signup extends BaseControls\Control {
      * Generate an available subdomain from business name
      * Tries base name first, then appends numbers until one is available
      */
-    private function generateAvailableSubdomain(string $businessName, TenantProvisioner $provisioner): ?string {
+    private function generateAvailableSubdomain(string $businessName, WorkspaceProvisioner $provisioner): ?string {
         // Convert business name to a valid subdomain base
         $base = strtolower($businessName);
         $base = preg_replace('/[^a-z0-9]+/', '-', $base);
@@ -288,7 +288,7 @@ class Signup extends BaseControls\Control {
     }
 
     /**
-     * Verify email and provision tenant
+     * Verify email and provision workspace
      * URL: /signup/verify/{token}
      */
     public function verify($params) {
@@ -347,7 +347,7 @@ class Signup extends BaseControls\Control {
                 'pass_set' => !empty($adminPass)
             ]);
 
-            $provisioner = new TenantProvisioner($adminHost, $adminUser, $adminPass);
+            $provisioner = new WorkspaceProvisioner($adminHost, $adminUser, $adminPass);
 
             $this->logger->info('Verify: starting provision', [
                 'subdomain' => $pending->subdomain,
@@ -355,7 +355,7 @@ class Signup extends BaseControls\Control {
                 'email' => $pending->email
             ]);
 
-            // Provision the tenant (password is already hashed, need to pass plain for provisioner)
+            // Provision the workspace (password is already hashed, need to pass plain for provisioner)
             // We stored the hash, so we need a workaround - provision with a temp password
             // then update it directly
             $tempPassword = bin2hex(random_bytes(16));
@@ -383,7 +383,7 @@ class Signup extends BaseControls\Control {
                 'db_user' => $result['db_user']
             ]);
 
-            // Update the password hash directly in the new tenant database
+            // Update the password hash directly in the new workspace database
             $this->updatePasswordHash(
                 $result['database'],
                 $result['db_user'],
@@ -394,7 +394,7 @@ class Signup extends BaseControls\Control {
             // Delete the pending signup
             Bean::trash($pending);
 
-            $this->logger->info('Tenant provisioned after email verification', [
+            $this->logger->info('Workspace provisioned after email verification', [
                 'subdomain' => $pending->subdomain,
                 'business' => $pending->business_name,
                 'email' => $pending->email,
@@ -407,7 +407,7 @@ class Signup extends BaseControls\Control {
             Flight::redirect("{$baseUrl}/login/{$pending->subdomain}?welcome=1");
 
         } catch (\Exception $e) {
-            $this->logger->error('Tenant provisioning failed after verification', [
+            $this->logger->error('Workspace provisioning failed after verification', [
                 'subdomain' => $pending->subdomain,
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
@@ -550,27 +550,27 @@ TEXT;
     }
 
     /**
-     * Update password hash directly in tenant database
-     * (Since TenantProvisioner hashes the password, we need to overwrite with our pre-hashed version)
+     * Update password hash directly in workspace database
+     * (Since WorkspaceProvisioner hashes the password, we need to overwrite with our pre-hashed version)
      */
     private function updatePasswordHash(string $dbName, string $dbUser, string $passwordHash, string $email): void {
         // Extract subdomain from dbUser (mctb_subdomain -> subdomain)
         $subdomain = str_replace('mctb_', '', $dbUser);
         $configPath = dirname(__DIR__) . "/conf/config.{$subdomain}.ini";
 
-        // Read the tenant's config file to get the database password
+        // Read the workspace's config file to get the database password
         if (!file_exists($configPath)) {
-            throw new \Exception("Tenant config not found: {$configPath}");
+            throw new \Exception("Workspace config not found: {$configPath}");
         }
 
         $config = parse_ini_file($configPath, true);
         $dbPass = $config['database']['pass'] ?? '';
 
         if (empty($dbPass)) {
-            throw new \Exception("Database password not found in tenant config");
+            throw new \Exception("Database password not found in workspace config");
         }
 
-        // Connect to tenant database
+        // Connect to workspace database
         $dsn = "mysql:host=localhost;dbname={$dbName};charset=utf8mb4";
         $db = new \PDO($dsn, $dbUser, $dbPass, [
             \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION

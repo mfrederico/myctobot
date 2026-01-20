@@ -11,7 +11,7 @@ use \RedBeanPHP\R as R;
 use \Exception as Exception;
 use \app\Bean;
 use \app\plugins\AtlassianAuth;
-use \app\TenantResolver;
+use \app\WorkspaceResolver;
 
 // Load Atlassian Auth plugin
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
@@ -84,7 +84,7 @@ class Atlassian extends BaseControls\Control {
             $errorDescription = $this->getParam('error_description');
             $workspace = $this->getParam('workspace');
 
-            // Handle workspace parameter for multi-tenant callbacks
+            // Handle workspace parameter for multi-workspace callbacks
             if ($workspace && $workspace !== 'default') {
                 $this->switchToWorkspace($workspace);
             }
@@ -345,7 +345,7 @@ class Atlassian extends BaseControls\Control {
     }
 
     /**
-     * Re-register Jira webhook with correct tenant URL (AJAX)
+     * Re-register Jira webhook with correct workspace URL (AJAX)
      * POST /atlassian/reregisterwebhook
      */
     public function reregisterwebhook() {
@@ -374,10 +374,10 @@ class Atlassian extends BaseControls\Control {
             $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
 
             if ($result) {
-                $tenantSlug = $_SESSION['tenant_slug'] ?? 'default';
+                $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
                 $this->json([
                     'success' => true,
-                    'message' => "Webhook re-registered with tenant: {$tenantSlug}"
+                    'message' => "Webhook re-registered with workspace: {$workspaceSlug}"
                 ]);
             } else {
                 $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
@@ -399,13 +399,13 @@ class Atlassian extends BaseControls\Control {
     }
 
     /**
-     * Switch to a workspace/tenant database context
+     * Switch to a workspace/workspace database context
      * Used when callback URL contains ?workspace=xxx parameter
      *
-     * @param string $workspace Workspace/tenant slug
+     * @param string $workspace Workspace/workspace slug
      */
     private function switchToWorkspace(string $workspace): void {
-        if (!TenantResolver::switchDatabase($workspace)) {
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
             $this->logger->warning("Failed to switch to workspace: {$workspace}");
         }
     }

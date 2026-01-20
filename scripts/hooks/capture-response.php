@@ -10,7 +10,7 @@
  *
  * Environment Variables (set by job-dispatcher.php):
  *   MYCTOBOT_APP_ROOT     - Path to myctobot application
- *   MYCTOBOT_WORKSPACE    - Tenant workspace name
+ *   MYCTOBOT_WORKSPACE    - Workspace workspace name
  *   MYCTOBOT_JOB_ID       - Current aidevjobs.id
  *   MYCTOBOT_MEMBER_ID    - Member ID running the job
  *   MYCTOBOT_PROJECT_ROOT - Repo clone directory
@@ -28,7 +28,7 @@
  * Hook Output: Always outputs empty JSON object and exits 0
  */
 
-require_once __DIR__ . '/TenantHookHelper.php';
+require_once __DIR__ . '/WorkspaceHookHelper.php';
 
 // Read hook input from stdin
 $input = json_decode(file_get_contents('php://stdin'), true);
@@ -44,7 +44,7 @@ if (!$input) {
 }
 
 // Check if we have job context
-$helper = new TenantHookHelper();
+$helper = new WorkspaceHookHelper();
 if (!$helper->hasContext()) {
     // Not running in aidev job context
     exitClean();
@@ -72,9 +72,9 @@ if (str_starts_with($trimmed, '{') || str_starts_with($trimmed, '[')) {
     exitClean();
 }
 
-// Connect to tenant database
+// Connect to workspace database
 if (!$helper->connect()) {
-    $helper->log('WARNING', 'Could not connect to tenant database for response capture');
+    $helper->log('WARNING', 'Could not connect to workspace database for response capture');
     exitClean();
 }
 

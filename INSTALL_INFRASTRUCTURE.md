@@ -25,7 +25,7 @@ flowchart TB
 
         subgraph Data["Data Layer"]
             MySQL[(MySQL/MariaDB)]
-            SQLite[(SQLite<br/>per-tenant)]
+            SQLite[(SQLite<br/>per-workspace)]
         end
     end
 

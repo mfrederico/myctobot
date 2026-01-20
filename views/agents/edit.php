@@ -1009,8 +1009,8 @@ const mcpPresets = {
     pipelines: {
         name: "pipelines",
         type: "http",
-        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/pipelines/mcp/tools/<?= htmlspecialchars($tenantSlug) ?>",
-        headers: {"X-API-TOKEN": "<?= htmlspecialchars($tenantApiKey ?? '') ?>"}
+        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/pipelines/mcp/tools/<?= htmlspecialchars($workspaceSlug) ?>",
+        headers: {"X-API-TOKEN": "<?= htmlspecialchars($workspaceApiKey ?? '') ?>"}
     },
     github: {
         name: "github",
@@ -1947,7 +1947,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <div class="mb-2">
                                 <small class="text-muted">
                                     <i class="bi bi-info-circle"></i>
-                                    Tenant: <code><?= htmlspecialchars($tenantSlug ?? 'default') ?></code> |
+                                    workspace: <code><?= htmlspecialchars($workspaceSlug ?? 'default') ?></code> |
                                     API URL: <code><?= htmlspecialchars($mcpApiUrl ?? '') ?></code>
                                 </small>
                             </div>
@@ -1960,7 +1960,7 @@ $mcpConfigJson = [
             'url' => ($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default'),
             'headers' => [
                 'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                'X-Tenant' => ($tenantSlug ?? 'default')
+                'X-Workspace' => ($workspaceSlug ?? 'default')
             ]
         ]
     ]
@@ -2209,7 +2209,7 @@ function copyMcpConfig() {
 function updateMcpConfig() {
     const toolName = document.getElementById('mcp_tool_name')?.value || '';
     const agentName = '<?= addslashes($agentName) ?>';
-    const tenantSlug = '<?= addslashes($tenantSlug ?? 'default') ?>';
+    const workspaceSlug = '<?= addslashes($workspaceSlug ?? 'default') ?>';
     const mcpApiUrl = '<?= addslashes($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default') ?>';
 
     // Derive server name from tool name or agent name
@@ -2223,7 +2223,7 @@ function updateMcpConfig() {
         url: mcpApiUrl,
         headers: {
             'X-API-Key': '${MYCTOBOT_API_KEY}',
-            'X-Tenant': tenantSlug
+            'X-Workspace': workspaceSlug
         }
     };
 

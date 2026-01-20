@@ -9,10 +9,10 @@
                     </h4>
                 </div>
                 <div class="card-body p-4">
-                    <?php if (!empty($tenantDisplayName)): ?>
+                    <?php if (!empty($workspaceDisplayName)): ?>
                     <div class="alert alert-info">
                         <i class="bi bi-building"></i>
-                        You're joining <strong><?= htmlspecialchars($tenantDisplayName) ?></strong>
+                        You're joining <strong><?= htmlspecialchars($workspaceDisplayName) ?></strong>
                     </div>
                     <?php endif; ?>
 
@@ -21,14 +21,14 @@
                         <strong class="fs-5"><?= htmlspecialchars($email ?? '') ?></strong>
                     </div>
 
-                    <form method="POST" action="/auth/invite/<?= htmlspecialchars($token ?? '') ?><?= !empty($tenant) ? '?tenant=' . htmlspecialchars($tenant) : '' ?>">
+                    <form method="POST" action="/auth/invite/<?= htmlspecialchars($token ?? '') ?><?= !empty($workspace) ? '?workspace=' . htmlspecialchars($workspace) : '' ?>">
                         <?php if (!empty($csrf) && is_array($csrf)): ?>
                             <?php foreach ($csrf as $name => $value): ?>
                                 <input type="hidden" name="<?= htmlspecialchars($name) ?>" value="<?= htmlspecialchars($value) ?>">
                             <?php endforeach; ?>
                         <?php endif; ?>
                         <input type="hidden" name="token" value="<?= htmlspecialchars($token ?? '') ?>">
-                        <input type="hidden" name="tenant" value="<?= htmlspecialchars($tenant ?? '') ?>">
+                        <input type="hidden" name="workspace" value="<?= htmlspecialchars($workspace ?? '') ?>">
 
                         <div class="mb-3">
                             <label for="display_name" class="form-label">Your Name</label>

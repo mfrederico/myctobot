@@ -8,8 +8,8 @@
  * converted to proper RedBeanPHP associations.
  *
  * Usage:
- *   php scripts/find-orphan-id-columns.php --script --tenant=tiknix
- *   php scripts/find-orphan-id-columns.php --script --tenant=tiknix --verbose
+ *   php scripts/find-orphan-id-columns.php --script --workspace=tiknix
+ *   php scripts/find-orphan-id-columns.php --script --workspace=tiknix --verbose
  *   php scripts/find-orphan-id-columns.php --script --db=default  # Check default DB
  */
 
@@ -17,15 +17,15 @@ $scriptDir = dirname(__FILE__);
 $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
-$options = getopt('', ['script', 'tenant:', 'db:', 'verbose', 'help']);
+$options = getopt('', ['script', 'workspace:', 'db:', 'verbose', 'help']);
 
 if (isset($options['help'])) {
     echo "Find _id columns that are not actual foreign keys\n\n";
     echo "Usage: php scripts/find-orphan-id-columns.php --script [options]\n\n";
     echo "Options:\n";
     echo "  --script     REQUIRED for CLI execution\n";
-    echo "  --tenant     Tenant slug (e.g., tiknix, gwt)\n";
-    echo "  --db         Database to check: 'default' or 'tenant' (default: tenant)\n";
+    echo "  --workspace     Workspace slug (e.g., tiknix, gwt)\n";
+    echo "  --db         Database to check: 'default' or 'workspace' (default: workspace)\n";
     echo "  --verbose    Show detailed output\n";
     echo "  --help       Show this help message\n";
     exit(0);
@@ -37,19 +37,19 @@ if (!isset($options['script'])) {
 }
 
 $verbose = isset($options['verbose']);
-$tenantSlug = $options['tenant'] ?? null;
-$dbType = $options['db'] ?? 'tenant';
+$workspaceSlug = $options['workspace'] ?? null;
+$dbType = $options['db'] ?? 'workspace';
 
-if (!$tenantSlug && $dbType === 'tenant') {
-    echo "Error: --tenant required when checking tenant database\n";
+if (!$workspaceSlug && $dbType === 'workspace') {
+    echo "Error: --workspace required when checking workspace database\n";
     exit(1);
 }
 
 require_once $baseDir . '/vendor/autoload.php';
 
 // Load bootstrap
-if ($tenantSlug) {
-    $configFile = $baseDir . "/conf/config.{$tenantSlug}.ini";
+if ($workspaceSlug) {
+    $configFile = $baseDir . "/conf/config.{$workspaceSlug}.ini";
     if (!file_exists($configFile)) {
         echo "Error: Config not found: {$configFile}\n";
         exit(1);
@@ -64,7 +64,7 @@ if ($tenantSlug) {
 use \app\Bean;
 
 echo "=== Finding Orphan _id Columns ===\n";
-echo "Tenant: " . ($tenantSlug ?? 'default') . "\n";
+echo "Workspace: " . ($workspaceSlug ?? 'default') . "\n";
 echo "Database: {$dbType}\n\n";
 
 // Get PDO connection from Bean wrapper

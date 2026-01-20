@@ -117,13 +117,13 @@ mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issue
 
 ## Job Checkpoint (After PR Created)
 
-When you've created the PR and completed initial work, run `send-checkpoint.sh` from the job directory:
+When you've created the PR and completed initial work, save a checkpoint using the MyCTOBot MCP tool:
 
-```bash
-../send-checkpoint.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+```
+job_checkpoint(success=true, issue_key="...", pr_url="...", pr_number=123, branch_name="...", summary="...")
 ```
 
-**IMPORTANT: This does NOT terminate your session.** After running checkpoint:
+**IMPORTANT: This does NOT terminate your session.** After saving checkpoint:
 - Your session stays alive to receive updates from the issue tracker
 - If someone adds a comment, you'll see it as a [GITHUB UPDATE] message
 - You can continue iterating on the implementation based on feedback
@@ -159,13 +159,13 @@ You have access to Jira tools via MCP. **ALWAYS use these tools for Jira operati
 
 ## Job Checkpoint (After PR Created)
 
-When you've created the PR and completed initial work, run `send-checkpoint.sh` from the job directory:
+When you've created the PR and completed initial work, save a checkpoint using the MyCTOBot MCP tool:
 
-```bash
-../send-checkpoint.sh '{"success": true, "pr_url": "...", "summary": "..."}'
+```
+job_checkpoint(success=true, issue_key="{$issueKey}", pr_url="...", pr_number=123, branch_name="...", summary="...")
 ```
 
-**IMPORTANT: This does NOT terminate your session.** After running checkpoint:
+**IMPORTANT: This does NOT terminate your session.** After saving checkpoint:
 - Your session stays alive to receive updates from Jira
 - If someone adds a comment, you'll see it as a [JIRA UPDATE] message
 - You can continue iterating on the implementation based on feedback
@@ -347,11 +347,11 @@ When done:
 
 {$this->buildFinalSummaryInstructions()}
 
-1. **Save checkpoint** - Run send-checkpoint.sh:
-```bash
-../send-checkpoint.sh '{"success": true, "issue_key": "{$issueKey}", "pr_url": "https://github.com/owner/repo/pull/123", "pr_number": 123, "branch_name": "feature/issue-description", "files_changed": ["file1.js", "file2.js"], "summary": "Brief description of what was done", "verification_passed": true}'
+1. **Save checkpoint** - Use the MyCTOBot MCP tool:
 ```
-This script automatically saves result.json and posts checkpoint to MyCTOBot. Your session stays ALIVE to receive further updates.
+job_checkpoint(success=true, issue_key="{$issueKey}", pr_url="https://github.com/owner/repo/pull/123", pr_number=123, branch_name="feature/issue-description", files_changed=["file1.js", "file2.js"], summary="Brief description of what was done", verification_passed=true)
+```
+This saves your checkpoint to MyCTOBot. Your session stays ALIVE to receive further updates.
 
 {$this->buildMcpToolsSection()}
 
@@ -365,7 +365,7 @@ This script automatically saves result.json and posts checkpoint to MyCTOBot. Yo
 4. **Track iterations** - Stop after {$this->maxVerifyIterations} verify→fix loops.
 5. **Output JSON** - Final output must be valid JSON for parsing.
 6. **No emojis** - Do NOT use emojis in {$providerName} comments or any communication. Keep messages professional and plain text.
-7. **Save checkpoint via send-checkpoint.sh** - After posting to the issue tracker, run `../send-checkpoint.sh '{...}'` with your results JSON. This saves your progress but keeps the session ALIVE to receive more updates.
+7. **Save checkpoint via MCP** - After posting to the issue tracker, call `job_checkpoint(...)` with your results. This saves your progress but keeps the session ALIVE to receive more updates.
 
 ## Start Now
 

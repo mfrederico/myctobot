@@ -51,7 +51,7 @@
             "lib/PermissionCache.php",
             "lib/MarkdownParser.php",
             "lib/CachedDatabaseAdapter.php",
-            "lib/TenantResolver.php",
+            "lib/WorkspaceResolver.php",
             "lib/Bean.php"
         ]
     },

@@ -39,7 +39,7 @@ class TmuxManager {
     /**
      * Get domain identifier from config for session naming
      *
-     * Extracts just the tenant/subdomain part for shorter session names:
+     * Extracts just the workspace/subdomain part for shorter session names:
      * - footest4.myctobot.ai → footest4
      * - gwt.myctobot.ai → gwt
      * - myctobot.ai → default
@@ -50,7 +50,7 @@ class TmuxManager {
         $baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? 'localhost';
         $domainId = preg_replace('/^https?:\/\//', '', $baseUrl);
 
-        // Extract subdomain/tenant from full domain
+        // Extract subdomain/workspace from full domain
         // e.g., "footest4.myctobot.ai" → "footest4"
         // e.g., "myctobot.ai" → "default"
         $parts = explode('.', $domainId);

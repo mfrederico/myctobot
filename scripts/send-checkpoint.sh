@@ -48,7 +48,7 @@ PAYLOAD=$(cat <<EOF
 {
   "job_id": "$MYCTOBOT_JOB_ID",
   "member_id": ${MYCTOBOT_MEMBER_ID:-0},
-  "tenant": "${MYCTOBOT_WORKSPACE:-default}",
+  "workspace": "${MYCTOBOT_WORKSPACE:-default}",
   "status": "checkpoint",
   "result": $RESULT_JSON
 }

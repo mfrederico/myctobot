@@ -13,6 +13,8 @@ namespace app;
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
 use \app\Bean;
+use \app\services\ApiAuthService;
+use \app\WorkspaceResolver;
 use \Exception as Exception;
 
 class Ceodirective extends BaseControls\Control {
@@ -21,32 +23,6 @@ class Ceodirective extends BaseControls\Control {
      * Valid priority values for directives
      */
     private const VALID_PRIORITIES = ['high', 'medium', 'low'];
-
-    /**
-     * Authenticate via API key
-     * Returns member bean if valid, null otherwise
-     *
-     * @return \RedBeanPHP\OODBBean|null
-     */
-    private function authenticateApiKey() {
-        // Check X-API-Key header
-        $apiKey = $_SERVER['HTTP_X_API_KEY'] ?? '';
-        if (empty($apiKey)) {
-            // Check Authorization header (Bearer token)
-            $auth = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-            if (preg_match('/^Bearer\s+(.+)$/i', $auth, $matches)) {
-                $apiKey = $matches[1];
-            }
-        }
-
-        if (empty($apiKey)) {
-            return null;
-        }
-
-        // Look up member by API token in main database
-        $member = Bean::findOne('member', 'api_token = ? AND status = ?', [$apiKey, 'active']);
-        return $member ?: null;
-    }
 
     /**
      * Validate directive payload
@@ -110,13 +86,28 @@ class Ceodirective extends BaseControls\Control {
      * @param array $params Route parameters
      */
     public function receive($params = []) {
-        // Authenticate via API key
-        $member = $this->authenticateApiKey();
-        if (!$member) {
-            $this->logger->warning('CEO directive: unauthorized access attempt');
-            Flight::jsonError('Unauthorized - valid API key required', 401);
+        // Get workspace from header or query param
+        $workspace = $_SERVER['HTTP_X_WORKSPACE'] ?? $this->getParam('workspace') ?? $this->getParam('workspace');
+
+        if (empty($workspace)) {
+            Flight::jsonError('Workspace required (via X-Workspace header or ?workspace= param)', 400);
             return;
         }
+
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
+            return;
+        }
+
+        // Authenticate via ApiAuthService
+        $authResult = ApiAuthService::authenticate('ceodirective', 'receive');
+        if (!$authResult['success']) {
+            $this->logger->warning('CEO directive: unauthorized access attempt', ['error' => $authResult['error']]);
+            Flight::jsonError($authResult['error'], $authResult['code']);
+            return;
+        }
+        $member = $authResult['member'];
 
         $this->logger->info('CEO directive endpoint accessed', ['member_id' => $member->id]);
 
@@ -190,13 +181,28 @@ class Ceodirective extends BaseControls\Control {
      * @param array $params Route parameters (contains 'id' from URL)
      */
     public function get($params = []) {
-        // Authenticate via API key
-        $member = $this->authenticateApiKey();
-        if (!$member) {
-            $this->logger->warning('CEO directive get: unauthorized access attempt');
-            Flight::jsonError('Unauthorized - valid API key required', 401);
+        // Get workspace from header or query param
+        $workspace = $_SERVER['HTTP_X_WORKSPACE'] ?? $this->getParam('workspace') ?? $this->getParam('workspace');
+
+        if (empty($workspace)) {
+            Flight::jsonError('Workspace required (via X-Workspace header or ?workspace= param)', 400);
             return;
         }
+
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
+            return;
+        }
+
+        // Authenticate via ApiAuthService
+        $authResult = ApiAuthService::authenticate('ceodirective', 'get');
+        if (!$authResult['success']) {
+            $this->logger->warning('CEO directive get: unauthorized access attempt', ['error' => $authResult['error']]);
+            Flight::jsonError($authResult['error'], $authResult['code']);
+            return;
+        }
+        $member = $authResult['member'];
 
         // Get directive ID from route parameters
         $directiveId = (int) $this->opId();

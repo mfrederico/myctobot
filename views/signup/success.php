@@ -13,8 +13,8 @@
                 <div class="card-body p-4">
                     <div class="text-center mb-4">
                         <h5 class="text-muted mb-2">Your workspace URL:</h5>
-                        <a href="<?= htmlspecialchars($tenant['url']) ?>" class="h4 text-decoration-none" target="_blank">
-                            <?= htmlspecialchars($tenant['url']) ?>
+                        <a href="<?= htmlspecialchars($workspace['url']) ?>" class="h4 text-decoration-none" target="_blank">
+                            <?= htmlspecialchars($workspace['url']) ?>
                         </a>
                     </div>
 
@@ -36,7 +36,7 @@
                     </div>
 
                     <div class="d-grid">
-                        <a href="<?= htmlspecialchars($tenant['url']) ?>/auth/login" class="btn btn-primary btn-lg">
+                        <a href="<?= htmlspecialchars($workspace['url']) ?>/auth/login" class="btn btn-primary btn-lg">
                             Go to Your Workspace
                         </a>
                     </div>
@@ -50,7 +50,7 @@
                         Bookmark Your URL
                     </h6>
                     <p class="card-text small text-muted mb-0">
-                        Save <strong><?= htmlspecialchars($tenant['url']) ?></strong> to your bookmarks.
+                        Save <strong><?= htmlspecialchars($workspace['url']) ?></strong> to your bookmarks.
                         This is your team's private workspace URL.
                     </p>
                 </div>

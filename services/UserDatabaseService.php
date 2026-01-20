@@ -2,8 +2,8 @@
 /**
  * User Database Service
  *
- * Provides database operations for tenant-specific data.
- * All data is stored in a single MySQL database per tenant.
+ * Provides database operations for workspace-specific data.
+ * All data is stored in a single MySQL database per workspace.
  */
 
 namespace app\services;

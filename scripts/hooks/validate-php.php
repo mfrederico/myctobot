@@ -7,7 +7,7 @@
  *
  * SQL File Blocking:
  * - BLOCKS creation of .sql files
- * - TenantSchemaBuilder.php is the source of truth for schemas
+ * - WorkspaceSchemaBuilder.php is the source of truth for schemas
  * - Redirects to use the migration tool instead
  *
  * PHP Code Standards:
@@ -561,20 +561,20 @@ function findRawDatabaseSwitching(string $content, string $filePath): array
 
     // Check for raw R::addDatabase or R::selectDatabase
     if (preg_match('/R::addDatabase\s*\(/', $content)) {
-        $issues[] = "Raw R::addDatabase() detected. Use Bean::useDatabase() instead for tenant switching. "
-            . "See Webhook::switchToTenantForWebhook() for the established pattern.";
+        $issues[] = "Raw R::addDatabase() detected. Use Bean::useDatabase() instead for workspace switching. "
+            . "See Webhook::switchToworkspaceForWebhook() for the established pattern.";
     }
 
     if (preg_match('/R::selectDatabase\s*\(/', $content)) {
         $issues[] = "Raw R::selectDatabase() detected. Use Bean::useDatabase() or Bean::selectDatabase() instead. "
-            . "For tenant switching in controllers, use the switchToTenantForWebhook() pattern.";
+            . "For workspace switching in controllers, use the switchToworkspaceForWebhook() pattern.";
     }
 
     return $issues;
 }
 
 /**
- * Check for inline config parsing that should use TenantResolver
+ * Check for inline config parsing that should use WorkspaceResolver
  *
  * @param string $content PHP code to check
  * @param string $filePath File path being edited
@@ -584,8 +584,8 @@ function findInlineConfigParsing(string $content, string $filePath): array
 {
     $issues = [];
 
-    // Skip if this is TenantResolver, bootstrap, or a script
-    if (strpos($filePath, '/lib/TenantResolver.php') !== false
+    // Skip if this is WorkspaceResolver, bootstrap, or a script
+    if (strpos($filePath, '/lib/WorkspaceResolver.php') !== false
         || strpos($filePath, '/bootstrap.php') !== false
         || strpos($filePath, '/scripts/') !== false) {
         return [];
@@ -594,8 +594,8 @@ function findInlineConfigParsing(string $content, string $filePath): array
     // Check for inline parse_ini_file with config pattern in controllers
     if (strpos($filePath, '/controls/') !== false) {
         if (preg_match('/parse_ini_file\s*\([^)]*config[^)]*\.ini/', $content)) {
-            $issues[] = "Inline parse_ini_file() for tenant config in controller. "
-                . "Use TenantResolver::setTenant() or the switchToTenantForWebhook() pattern instead. "
+            $issues[] = "Inline parse_ini_file() for workspace config in controller. "
+                . "Use WorkspaceResolver::setWorkspace() or the switchToworkspaceForWebhook() pattern instead. "
                 . "See controls/Webhook.php or controls/Auth.php for examples.";
         }
     }
@@ -654,7 +654,7 @@ function validatePhpCode(string $content, string $filePath = ''): array
 
 /**
  * Check if Claude is trying to create/edit a SQL file
- * TenantSchemaBuilder.php is the source of truth for database schemas.
+ * WorkspaceSchemaBuilder.php is the source of truth for database schemas.
  *
  * @param string $filePath File path being written/edited
  * @return array|null Blocking response or null if not a SQL file
@@ -666,15 +666,15 @@ function checkSqlFileCreation(string $filePath): ?array
     }
 
     $feedback = "SQL FILE CREATION BLOCKED:\n\n";
-    $feedback .= "TenantSchemaBuilder.php is the SOURCE OF TRUTH for database schemas.\n\n";
+    $feedback .= "WorkspaceSchemaBuilder.php is the SOURCE OF TRUTH for database schemas.\n\n";
     $feedback .= "Instead of creating/editing SQL files, you should:\n";
-    $feedback .= "1. Add your table schema to services/TenantSchemaBuilder.php\n";
+    $feedback .= "1. Add your table schema to services/WorkspaceSchemaBuilder.php\n";
     $feedback .= "2. Use the migration tool to apply changes:\n";
-    $feedback .= "   php scripts/run-migration.php --migration=YourTable --tenant=footest4\n\n";
+    $feedback .= "   php scripts/run-migration.php --migration=YourTable --workspace=footest4\n\n";
     $feedback .= "See scripts/schema-dump.sh for migration tool usage.\n";
     $feedback .= "See CLAUDE.md for RedBeanPHP schema conventions.\n\n";
-    $feedback .= "Schema is defined in services/TenantSchemaBuilder.php (source of truth).\n";
-    $feedback .= "To dump current schema for reference, use: ./scripts/schema-dump.sh tenant";
+    $feedback .= "Schema is defined in services/WorkspaceSchemaBuilder.php (source of truth).\n";
+    $feedback .= "To dump current schema for reference, use: ./scripts/schema-dump.sh workspace";
 
     return [
         'decision' => 'block',
@@ -708,7 +708,7 @@ function main(): void
         // Get file path and content
         $filePath = $toolInput['file_path'] ?? '';
 
-        // Block SQL file creation - TenantSchemaBuilder is source of truth
+        // Block SQL file creation - WorkspaceSchemaBuilder is source of truth
         $sqlBlock = checkSqlFileCreation($filePath);
         if ($sqlBlock !== null) {
             echo json_encode($sqlBlock);

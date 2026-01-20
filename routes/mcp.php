@@ -13,13 +13,13 @@ use \Flight as Flight;
 // The workspace parameter is the domain ID from TmuxManager::getDomainId()
 // e.g., /mcp/gwt-myctobot-ai/jira
 Flight::route('POST|GET|OPTIONS /mcp/@workspace/jira', function($workspace) {
-    $controller = new \app\Mcp();
+    $controller = new \app\Mcpjira();
     $controller->jirawithworkspace($workspace);
 });
 
 // MCP Jira endpoint without workspace (uses Basic Auth for workspace identification)
 Flight::route('POST|GET|OPTIONS /mcp/jira', function() {
-    $controller = new \app\Mcp();
+    $controller = new \app\Mcpjira();
     $controller->jira();
 });
 

@@ -38,7 +38,7 @@ require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/JiraClient.php';
 require_once __DIR__ . '/../services/McpResponseTrait.php';
 
-class Mcp extends Control {
+class Mcpjira extends Control {
     use McpResponseTrait;
 
     private ?int $memberId = null;

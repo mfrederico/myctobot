@@ -295,21 +295,6 @@ class Api extends BaseControls\Control {
     }
 
     /**
-     * MCP JSON-RPC endpoint with embedded API key
-     * POST /api/mcp/workspace/apikey
-     *
-     * For Claude Code which doesn't send headers - API key is embedded in URL
-     */
-    public function mcpjsonrpcwithkey($workspace = null, $apikey = null) {
-        // Inject the API key from URL into $_GET so ApiAuthService can find it
-        if (!empty($apikey)) {
-            $_GET['key'] = $apikey;
-        }
-        // Delegate to main handler
-        return $this->mcpjsonrpc($workspace);
-    }
-
-    /**
      * MCP JSON-RPC endpoint
      * POST /api/mcp/workspace
      *
@@ -558,16 +543,10 @@ class Api extends BaseControls\Control {
         $context = json_decode($pipeline->default_context_json ?: '{}', true);
         $context = array_merge($context, $arguments);
 
-        // Add API key info (masked for security) to trigger data
-        // PipelineExecutor builds context from trigger_data_json, so MCP auth must be included there
-        $apiKey = $_GET['key'] ?? '';
+        // Mark as authenticated MCP request in trigger data
         $triggerData = $arguments;
-        if (!empty($apiKey)) {
-            $triggerData['mcp_key_preview'] = substr($apiKey, 0, 12) . '...' . substr($apiKey, -8);
-            $triggerData['mcp_authenticated'] = 'true';
-            $context['mcp_key_preview'] = $triggerData['mcp_key_preview'];
-            $context['mcp_authenticated'] = 'true';
-        }
+        $triggerData['mcp_authenticated'] = 'true';
+        $context['mcp_authenticated'] = 'true';
 
         $run->run_uid = $runUid;
         $run->pipelines = $pipeline;

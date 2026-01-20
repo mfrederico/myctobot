@@ -18,10 +18,8 @@ Flight::route('POST /api/mcp/@workspace/call', ['\app\Api', 'mcpcallwithworkspac
 
 // MCP JSON-RPC endpoint (for HTTP MCP server protocol)
 // This is the main endpoint Claude Code's MCP client connects to
+// Auth via Authorization: Bearer header or X-API-TOKEN header
 Flight::route('POST /api/mcp/@workspace', ['\app\Api', 'mcpjsonrpc']);
-
-// MCP JSON-RPC with embedded API key (for Claude Code which doesn't send headers)
-Flight::route('POST /api/mcp/@workspace/@apikey', ['\app\Api', 'mcpjsonrpcwithkey']);
 
 // MCP config endpoint - returns ready-to-use .mcp.json for an agent
 Flight::route('GET /api/mcp/@workspace/config/@agentId', ['\app\Api', 'mcpconfig']);

@@ -391,6 +391,7 @@ class Apikeys extends BaseControls\Control {
             'id' => $key->id,
             'name' => $key->name,
             'description' => $key->description,
+            'token' => $key->token,
             'token_preview' => substr($key->token, 0, 12) . '...',
             'scopes' => $scopes,
             'member_id' => $key->member_id,

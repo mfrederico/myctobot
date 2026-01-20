@@ -122,7 +122,7 @@
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
-                                <button type="button" class="btn btn-outline-success" onclick="showUseKeyModal(<?= $key['id'] ?>, '<?= htmlspecialchars($key['name'], ENT_QUOTES) ?>')" title="Show usage">
+                                <button type="button" class="btn btn-outline-success" onclick="showUseKeyModal(<?= $key['id'] ?>, '<?= htmlspecialchars($key['name'], ENT_QUOTES) ?>', '<?= htmlspecialchars($key['token'], ENT_QUOTES) ?>')" title="Show usage">
                                     <i class="bi bi-plug"></i>
                                 </button>
                                 <button type="button" class="btn btn-outline-primary" onclick="editKey(<?= $key['id'] ?>)" title="Edit">
@@ -325,19 +325,71 @@
     </div>
 </div>
 
+<!-- Edit Key Modal -->
+<div class="modal fade" id="editKeyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Edit API Key</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editKeyForm">
+                    <input type="hidden" id="editKeyId">
+                    <div class="mb-3">
+                        <label class="form-label">Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="editKeyName" name="name" required minlength="2" maxlength="100">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control" id="editKeyDescription" name="description">
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Scopes</label>
+                        <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                            <?php foreach ($availableScopes as $scope => $desc): ?>
+                            <div class="form-check">
+                                <input class="form-check-input edit-scope-checkbox" type="checkbox" value="<?= htmlspecialchars($scope) ?>" id="edit_scope_<?= md5($scope) ?>">
+                                <label class="form-check-label" for="edit_scope_<?= md5($scope) ?>">
+                                    <code><?= htmlspecialchars($scope) ?></code>
+                                    <small class="text-muted d-block"><?= htmlspecialchars($desc) ?></small>
+                                </label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="form-text">Select the permissions this key should have.</div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveKey()">
+                    <i class="bi bi-check-lg"></i> Save Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const baseUrl = '<?= rtrim(Flight::get('app.baseurl') ?: '', '/') ?>';
 const workspaceSlug = '<?= htmlspecialchars($_SESSION['workspace_slug'] ?? 'default') ?>';
 
 let currentKeyId = null;
-let createModal, tokenModal, useModal, regenerateModal;
+let createModal, tokenModal, useModal, regenerateModal, editModal;
+
+// Store key data for editing
+const keyData = <?= json_encode(array_column($keys ?? [], null, 'id')) ?>;
 
 document.addEventListener('DOMContentLoaded', function() {
     createModal = new bootstrap.Modal(document.getElementById('createKeyModal'));
     tokenModal = new bootstrap.Modal(document.getElementById('tokenModal'));
     useModal = new bootstrap.Modal(document.getElementById('useKeyModal'));
     regenerateModal = new bootstrap.Modal(document.getElementById('regenerateModal'));
+    editModal = new bootstrap.Modal(document.getElementById('editKeyModal'));
 });
 
 async function createKey() {
@@ -408,16 +460,14 @@ function copyToClipboard(elementId) {
     setTimeout(() => btn.innerHTML = original, 1500);
 }
 
-function showUseKeyModal(keyId, keyName) {
+function showUseKeyModal(keyId, keyName, token) {
     document.getElementById('useKeyName').textContent = keyName;
 
-    // Note: We don't have the full token here, just show examples
-    const exampleToken = 'tk_your_token_here';
     document.getElementById('curlExample').textContent =
-        `curl -X POST "${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}" \\\n  -H "X-API-TOKEN: ${exampleToken}"`;
+        `curl -X POST "${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}" \\\n  -H "X-API-TOKEN: ${token}"`;
 
     document.getElementById('webhookUrl').value =
-        `${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}?key=${exampleToken}`;
+        `${baseUrl}/pipein/${workspaceSlug}/{pipeline-slug}?key=${token}`;
 
     useModal.show();
 }
@@ -506,7 +556,70 @@ async function deleteKey(keyId, keyName) {
 }
 
 function editKey(keyId) {
-    // TODO: Implement edit modal
-    alert('Edit functionality coming soon. For now, delete and recreate the key.');
+    const key = keyData[keyId];
+    if (!key) {
+        alert('Key not found');
+        return;
+    }
+
+    currentKeyId = keyId;
+    document.getElementById('editKeyId').value = keyId;
+    document.getElementById('editKeyName').value = key.name;
+    document.getElementById('editKeyDescription').value = key.description || '';
+
+    // Uncheck all scopes first
+    document.querySelectorAll('.edit-scope-checkbox').forEach(cb => cb.checked = false);
+
+    // Check the scopes this key has
+    if (key.scopes && Array.isArray(key.scopes)) {
+        key.scopes.forEach(scope => {
+            const cb = document.querySelector(`.edit-scope-checkbox[value="${scope}"]`);
+            if (cb) cb.checked = true;
+        });
+    }
+
+    editModal.show();
+}
+
+async function saveKey() {
+    const keyId = document.getElementById('editKeyId').value;
+    const name = document.getElementById('editKeyName').value.trim();
+    if (!name) {
+        alert('Name is required');
+        return;
+    }
+
+    const scopes = [];
+    document.querySelectorAll('.edit-scope-checkbox:checked').forEach(cb => {
+        scopes.push(cb.value);
+    });
+
+    const data = {
+        name: name,
+        description: document.getElementById('editKeyDescription').value.trim(),
+        scopes: scopes
+    };
+
+    try {
+        const response = await fetch('/apikeys/update/' + keyId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({json: JSON.stringify(data), csrf_token: csrfToken})
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            editModal.hide();
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || result.message || 'Failed to update key'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
 }
 </script>

@@ -3,7 +3,7 @@
  * PipelineExecutor Service
  *
  * Executes pipeline runs by processing steps in sequence.
- * Handles step types: ai_agent, direct_exec, script, webhook_out, email_out, parser, wait, harvest
+ * Handles step types: ai_agent, direct_exec, script, webhook_out, email_out, parser, wait, harvest, mcp_call
  *
  * Usage:
  *   $executor = new PipelineExecutor($runId, $logger);
@@ -676,6 +676,12 @@ class PipelineExecutor {
             case 'harvest':
                 return $this->executeHarvest($config, $input);
 
+            case 'mcp_call':
+                return $this->executeMcpCall($config, $input, $timeout);
+
+            case 'schedule_task':
+                return $this->executeScheduleTask($config, $input);
+
             default:
                 return [
                     'success' => false,
@@ -701,8 +707,9 @@ class PipelineExecutor {
      */
     private function executeDirectExec(array $config, array $input, int $timeout): array {
         $command = $config['command'] ?? '';
-        $workingDir = $config['working_dir'] ?? '/tmp';
-        $executor = $config['executor'] ?? '/bin/bash -c';
+        // Use !empty() to handle both null and empty strings
+        $workingDir = !empty($config['working_dir']) ? $config['working_dir'] : '/tmp';
+        $executor = !empty($config['executor']) ? $config['executor'] : '/bin/bash -c';
         $workstationId = $config['workstation_id'] ?? null;
 
         if (empty($command)) {
@@ -725,6 +732,47 @@ class PipelineExecutor {
         // Substitute variables in command
         $command = $this->substituteVariables($command);
 
+        // Pre-flight checks for better error messages
+        $executorBinary = null;
+        $executorParts = [];
+        $commandParts = [];
+
+        if (!empty($executor)) {
+            $executorParts = preg_split('/\s+/', trim($executor));
+            $executorBinary = $executorParts[0];
+        } else {
+            $commandParts = preg_split('/\s+/', trim($command));
+            $executorBinary = $commandParts[0];
+        }
+
+        // Check if executor/command binary exists (only for local execution, not SSH)
+        $isRemoteExecution = str_starts_with($executorBinary, 'ssh');
+        if (!$isRemoteExecution) {
+            if (!file_exists($executorBinary)) {
+                // Try to find it in PATH using 'which'
+                $whichResult = trim(shell_exec("which " . escapeshellarg($executorBinary) . " 2>/dev/null") ?: '');
+                if (empty($whichResult)) {
+                    return [
+                        'success' => false,
+                        'error' => "Executor binary not found: '{$executorBinary}'. " .
+                                   "The file does not exist and is not in PATH. " .
+                                   "Full executor config: '{$executor}'. " .
+                                   "Command: '{$command}'. " .
+                                   "Working dir: '{$workingDir}'."
+                    ];
+                }
+            }
+        }
+
+        // Check if working directory exists
+        if (!is_dir($workingDir)) {
+            return [
+                'success' => false,
+                'error' => "Working directory does not exist: '{$workingDir}'. " .
+                           "Executor: '{$executor}'. Command: '{$command}'."
+            ];
+        }
+
         // Build the execution
         $descriptors = [
             0 => ['pipe', 'r'], // stdin
@@ -732,20 +780,47 @@ class PipelineExecutor {
             2 => ['pipe', 'w'], // stderr
         ];
 
+        // Clear any previous errors to get accurate error info
+        error_clear_last();
+
         // Execute: use executor prefix if configured, otherwise run command directly
         if (!empty($executor)) {
             // Parse executor into array parts (e.g., "/bin/bash -c" → ['/bin/bash', '-c'])
-            $executorParts = preg_split('/\s+/', trim($executor));
             $executorParts[] = $command;
-            $process = proc_open($executorParts, $descriptors, $pipes, $workingDir, null);
+            $process = @proc_open($executorParts, $descriptors, $pipes, $workingDir, null);
         } else {
             // Direct execution - split command into parts
-            $commandParts = preg_split('/\s+/', trim($command));
-            $process = proc_open($commandParts, $descriptors, $pipes, $workingDir, null);
+            $process = @proc_open($commandParts, $descriptors, $pipes, $workingDir, null);
         }
 
         if (!is_resource($process)) {
-            return ['success' => false, 'error' => 'Failed to start process'];
+            $lastError = error_get_last();
+            $errorMsg = $lastError['message'] ?? 'Unknown error';
+
+            // Build detailed diagnostic info
+            $diagnostics = [
+                'php_error' => $errorMsg,
+                'executor' => $executor,
+                'executor_binary' => $executorBinary,
+                'executor_exists' => file_exists($executorBinary) ? 'yes' : 'no',
+                'executor_executable' => is_executable($executorBinary) ? 'yes' : 'no',
+                'working_dir' => $workingDir,
+                'working_dir_exists' => is_dir($workingDir) ? 'yes' : 'no',
+                'command' => $command,
+                'full_exec_array' => !empty($executor) ? $executorParts : $commandParts
+            ];
+
+            $this->log('error', "proc_open failed", $diagnostics);
+
+            return [
+                'success' => false,
+                'error' => "Failed to start process: {$errorMsg}. " .
+                           "Executor: '{$executor}' (exists: " . ($diagnostics['executor_exists']) . ", " .
+                           "executable: " . ($diagnostics['executor_executable']) . "). " .
+                           "Working dir: '{$workingDir}' (exists: " . ($diagnostics['working_dir_exists']) . "). " .
+                           "Command: '{$command}'.",
+                'diagnostics' => $diagnostics
+            ];
         }
 
         // Write stdin if provided
@@ -1253,6 +1328,98 @@ class PipelineExecutor {
     }
 
     /**
+     * Execute a schedule_task step - creates a non-blocking scheduled task
+     *
+     * Unlike the 'wait' step which blocks with sleep(), this creates a database
+     * record that will be processed by cron-scheduled-tasks.php, allowing the
+     * pipeline to complete immediately.
+     *
+     * Config options:
+     *   task_type        - Type of task: 'revert_action', 'execute_pipeline', 'webhook_call', 'api_call'
+     *   delay_seconds    - Delay in seconds (static)
+     *   delay_expression - Expression like "{context.duration_hours} * 3600" (evaluated)
+     *   payload          - Task-specific data to store
+     *   revert_data      - Data needed to revert actions (optional)
+     */
+    private function executeScheduleTask(array $config, array $input): array {
+        $taskType = $config['task_type'] ?? 'revert_action';
+        $delaySeconds = $config['delay_seconds'] ?? 0;
+        $delayExpression = $config['delay_expression'] ?? null;
+
+        // Evaluate delay expression if provided
+        if ($delayExpression && $delaySeconds === 0) {
+            $delaySeconds = $this->evaluateDelayExpression($delayExpression);
+        }
+
+        if ($delaySeconds <= 0) {
+            return ['success' => false, 'error' => 'Invalid delay: must be positive'];
+        }
+
+        $scheduledAt = date('Y-m-d H:i:s', time() + $delaySeconds);
+
+        try {
+            // Create scheduled task record
+            $task = Bean::dispense('scheduledtasks');
+            $task->studioprojects_id = $this->context['_studio_project_id'] ?? null;
+            $task->pipelineruns_id = $this->runId;
+            $task->task_type = $taskType;
+            $task->scheduled_at = $scheduledAt;
+            $task->status = 'pending';
+            $task->payload_json = json_encode($config['payload'] ?? []);
+
+            // Store revert data - either from config or from input
+            $revertData = $config['revert_data'] ?? $input['_revert_state'] ?? [];
+            $task->revert_data_json = json_encode($revertData);
+
+            $task->retry_count = 0;
+            $task->max_retries = $config['max_retries'] ?? 3;
+            $task->created_at = date('Y-m-d H:i:s');
+            $task->updated_at = date('Y-m-d H:i:s');
+            Bean::store($task);
+
+            $this->log('info', "Scheduled task created: type={$taskType}, scheduled_at={$scheduledAt}, task_id={$task->id}");
+
+            return [
+                'success' => true,
+                'output' => [
+                    'task_id' => $task->id,
+                    'task_type' => $taskType,
+                    'scheduled_at' => $scheduledAt,
+                    'delay_seconds' => $delaySeconds
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "Failed to create scheduled task: " . $e->getMessage());
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Evaluate a delay expression like "{context.duration_hours} * 3600"
+     */
+    private function evaluateDelayExpression(string $expression): int {
+        // Substitute context variables
+        $substituted = $this->substituteVariables($expression);
+
+        // Simple evaluation - only allow numbers and basic math operators
+        $cleaned = preg_replace('/[^0-9+\-*\/\.\s]/', '', $substituted);
+
+        if (empty($cleaned)) {
+            return 0;
+        }
+
+        // Use eval safely - expression is sanitized to only numbers and operators
+        try {
+            $result = eval("return (int)($cleaned);");
+            return max(0, (int) $result);
+        } catch (\Throwable $e) {
+            $this->log('warning', "Failed to evaluate delay expression: {$expression}");
+            return 0;
+        }
+    }
+
+    /**
      * Prepare input for a step based on input_source configuration
      */
     private function prepareStepInput($step): array {
@@ -1380,11 +1547,15 @@ class PipelineExecutor {
     /**
      * Log a message
      */
-    private function log(string $level, string $message): void {
+    private function log(string $level, string $message, array $context = []): void {
+        // Always include run_id in context
+        $context['run_id'] = $this->runId;
+
         if ($this->logger) {
-            $this->logger->$level($message, ['run_id' => $this->runId]);
+            $this->logger->$level($message, $context);
         } else {
-            error_log("[Pipeline:{$this->runId}] [{$level}] {$message}");
+            $contextStr = !empty($context) ? ' ' . json_encode($context) : '';
+            error_log("[Pipeline:{$this->runId}] [{$level}] {$message}{$contextStr}");
         }
     }
 
@@ -1626,5 +1797,189 @@ class PipelineExecutor {
             'success' => $passed || $onIncomplete !== 'fail',
             'output' => $output
         ];
+    }
+
+    /**
+     * Execute an MCP tool call step
+     *
+     * Connects to an MCP server and calls a tool, allowing pipelines
+     * to consume tools from FastMCP or other MCP-compliant servers.
+     *
+     * Config options:
+     *   transport        - 'stdio' or 'http' (default: stdio)
+     *   command          - For stdio: command to start MCP server
+     *   url              - For http: URL of MCP server
+     *   mcp_server_id    - Load config from mcpservers table (alternative to command/url)
+     *   tool             - Name of the tool to call (required)
+     *   arguments        - Tool arguments (supports variable substitution)
+     *   working_dir      - Working directory for stdio (default: /tmp)
+     *   env              - Environment variables for stdio
+     *   list_tools_only  - If true, just list available tools and return
+     */
+    private function executeMcpCall(array $config, array $input, int $timeout): array {
+        require_once __DIR__ . '/McpClientService.php';
+
+        $transport = $config['transport'] ?? 'stdio';
+        $command = $config['command'] ?? '';
+        $url = $config['url'] ?? '';
+        $mcpServerId = $config['mcp_server_id'] ?? null;
+        $toolName = $config['tool'] ?? '';
+        $arguments = $config['arguments'] ?? [];
+        $workingDir = $config['working_dir'] ?? '/tmp';
+        $env = $config['env'] ?? null;
+        $listToolsOnly = $config['list_tools_only'] ?? false;
+
+        // If mcp_server_id is provided, load config from database
+        if (!empty($mcpServerId)) {
+            $serverConfig = Bean::load('mcpservers', $mcpServerId);
+            if ($serverConfig && $serverConfig->id) {
+                $transport = $serverConfig->server_type ?: 'stdio';
+
+                // Build command with args for stdio
+                if ($transport === 'stdio') {
+                    $command = $serverConfig->command ?: '';
+                    $args = json_decode($serverConfig->args_json ?: '[]', true);
+                    if (!empty($args)) {
+                        $command .= ' ' . implode(' ', array_map('escapeshellarg', $args));
+                    }
+                }
+
+                $url = $serverConfig->url ?: '';
+                $workingDir = '/tmp';
+
+                // Parse environment variables
+                if (!empty($serverConfig->env_json)) {
+                    $env = json_decode($serverConfig->env_json, true);
+                }
+
+                // Parse headers for http
+                if ($transport === 'http' && !empty($serverConfig->headers_json)) {
+                    $config['headers'] = json_decode($serverConfig->headers_json, true);
+                }
+            } else {
+                return ['success' => false, 'error' => "MCP server not found: {$mcpServerId}"];
+            }
+        }
+
+        // Validate configuration
+        if ($transport === 'stdio' && empty($command)) {
+            return ['success' => false, 'error' => 'Command required for stdio transport'];
+        }
+        if ($transport === 'http' && empty($url)) {
+            return ['success' => false, 'error' => 'URL required for http transport'];
+        }
+        if (!$listToolsOnly && empty($toolName)) {
+            return ['success' => false, 'error' => 'Tool name required'];
+        }
+
+        // Substitute variables in arguments
+        $processedArgs = [];
+        foreach ($arguments as $key => $value) {
+            if (is_string($value)) {
+                $processedArgs[$key] = $this->substituteVariables($value);
+            } else {
+                $processedArgs[$key] = $value;
+            }
+        }
+
+        // Also substitute variables in command if present
+        $command = $this->substituteVariables($command);
+        $url = $this->substituteVariables($url);
+
+        $this->log('info', "Connecting to MCP server", [
+            'transport' => $transport,
+            'command' => $command,
+            'url' => $url
+        ]);
+
+        $client = new McpClientService($this->logger);
+
+        try {
+            // Build connection config
+            $connectConfig = [];
+            if ($transport === 'stdio') {
+                $connectConfig = [
+                    'command' => $command,
+                    'working_dir' => $workingDir,
+                    'env' => $env
+                ];
+            } else {
+                $connectConfig = [
+                    'url' => $url,
+                    'headers' => $config['headers'] ?? []
+                ];
+            }
+
+            // Connect
+            if (!$client->connect($transport, $connectConfig)) {
+                return ['success' => false, 'error' => 'Failed to connect to MCP server'];
+            }
+
+            $serverInfo = $client->getServerInfo();
+            $tools = $client->listTools();
+
+            $this->log('info', "Connected to MCP server", [
+                'server' => $serverInfo['name'] ?? 'unknown',
+                'tools_count' => count($tools)
+            ]);
+
+            // If just listing tools, return the list
+            if ($listToolsOnly) {
+                $client->disconnect();
+                return [
+                    'success' => true,
+                    'output' => [
+                        'server_info' => $serverInfo,
+                        'tools' => $tools
+                    ]
+                ];
+            }
+
+            // Call the tool
+            $result = $client->callTool($toolName, $processedArgs);
+
+            $client->disconnect();
+
+            if (!$result['success']) {
+                return [
+                    'success' => false,
+                    'error' => $result['error'] ?? 'Tool call failed',
+                    'output' => $result
+                ];
+            }
+
+            // Try to parse result text as JSON
+            $parsed = null;
+            $text = $result['text'] ?? '';
+            if (!empty($text)) {
+                // Try to extract JSON from markdown code blocks
+                if (preg_match('/```json\s*([\s\S]*?)\s*```/', $text, $matches)) {
+                    $parsed = json_decode($matches[1], true);
+                } elseif (str_starts_with(trim($text), '{') || str_starts_with(trim($text), '[')) {
+                    $parsed = json_decode($text, true);
+                }
+            }
+
+            return [
+                'success' => true,
+                'output' => [
+                    'tool' => $toolName,
+                    'server_info' => $serverInfo,
+                    'content' => $result['content'] ?? [],
+                    'text' => $text,
+                    'parsed' => $parsed,
+                    'isError' => $result['isError'] ?? false
+                ],
+                'stdout' => $text
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "MCP call failed: " . $e->getMessage());
+            $client->disconnect();
+            return [
+                'success' => false,
+                'error' => "MCP exception: " . $e->getMessage()
+            ];
+        }
     }
 }

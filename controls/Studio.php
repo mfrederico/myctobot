@@ -1,0 +1,596 @@
+<?php
+/**
+ * Studio Controller
+ * AI-powered business orchestration platform
+ *
+ * Studio enables users to create complex, multi-system automations using
+ * natural language and wizard-driven templates. It builds on the pipeline
+ * infrastructure with temporal scheduling and AI-assisted generation.
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \app\Bean;
+use \Exception as Exception;
+
+class Studio extends BaseControls\Control {
+
+    /**
+     * Template categories
+     */
+    private const CATEGORIES = [
+        'ecommerce' => [
+            'label' => 'E-Commerce',
+            'description' => 'Shopify, inventory, pricing automations',
+            'icon' => 'bi-shop',
+            'color' => 'success'
+        ],
+        'marketing' => [
+            'label' => 'Marketing',
+            'description' => 'Social media, email campaigns, content',
+            'icon' => 'bi-megaphone',
+            'color' => 'info'
+        ],
+        'development' => [
+            'label' => 'Development',
+            'description' => 'CI/CD, deployments, code review',
+            'icon' => 'bi-code-slash',
+            'color' => 'primary'
+        ],
+        'reporting' => [
+            'label' => 'Reporting',
+            'description' => 'Analytics, dashboards, digests',
+            'icon' => 'bi-bar-chart',
+            'color' => 'warning'
+        ],
+        'custom' => [
+            'label' => 'Custom',
+            'description' => 'Build your own orchestration',
+            'icon' => 'bi-gear',
+            'color' => 'secondary'
+        ]
+    ];
+
+    /**
+     * Project statuses
+     */
+    private const STATUSES = [
+        'draft' => ['label' => 'Draft', 'color' => 'secondary', 'icon' => 'bi-pencil'],
+        'active' => ['label' => 'Active', 'color' => 'success', 'icon' => 'bi-play-circle'],
+        'paused' => ['label' => 'Paused', 'color' => 'warning', 'icon' => 'bi-pause-circle'],
+        'completed' => ['label' => 'Completed', 'color' => 'info', 'icon' => 'bi-check-circle'],
+        'failed' => ['label' => 'Failed', 'color' => 'danger', 'icon' => 'bi-x-circle']
+    ];
+
+    /**
+     * Studio dashboard - list projects and featured templates
+     */
+    public function index() {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+
+        // Get user's projects
+        $projects = Bean::find('studioprojects',
+            ' member_id = ? ORDER BY updated_at DESC ',
+            [$member->id]
+        );
+
+        $projectList = [];
+        foreach ($projects as $p) {
+            $template = $p->studiotemplates_id
+                ? Bean::load('studiotemplates', $p->studiotemplates_id)
+                : null;
+
+            $projectList[] = [
+                'id' => $p->id,
+                'name' => $p->name,
+                'slug' => $p->slug,
+                'status' => $p->status,
+                'status_info' => self::STATUSES[$p->status] ?? null,
+                'template_name' => $template ? $template->name : 'Custom',
+                'template_icon' => $template ? $template->icon : 'bi-gear',
+                'run_count' => $p->run_count ?? 0,
+                'last_run_at' => $p->last_run_at,
+                'next_run_at' => $p->next_run_at,
+                'created_at' => $p->created_at,
+                'updated_at' => $p->updated_at
+            ];
+        }
+
+        // Get featured templates
+        $templates = Bean::find('studiotemplates',
+            ' is_active = 1 ORDER BY name ASC LIMIT 6 '
+        );
+
+        $templateList = [];
+        foreach ($templates as $t) {
+            $templateList[] = $this->formatTemplate($t);
+        }
+
+        $this->viewData['title'] = 'Studio';
+        $this->viewData['projects'] = $projectList;
+        $this->viewData['templates'] = $templateList;
+        $this->viewData['categories'] = self::CATEGORIES;
+        $this->viewData['statuses'] = self::STATUSES;
+
+        $this->render('studio/index', $this->viewData);
+    }
+
+    /**
+     * Template gallery
+     */
+    public function templates() {
+        if (!$this->requireLogin()) return;
+
+        $category = $this->getParam('category');
+
+        $sql = ' is_active = 1 ';
+        $params = [];
+
+        if ($category && isset(self::CATEGORIES[$category])) {
+            $sql .= ' AND category = ? ';
+            $params[] = $category;
+        }
+
+        $sql .= ' ORDER BY name ASC ';
+
+        $templates = Bean::find('studiotemplates', $sql, $params);
+
+        $templateList = [];
+        foreach ($templates as $t) {
+            $templateList[] = $this->formatTemplate($t);
+        }
+
+        $this->viewData['title'] = 'Orchestration Templates';
+        $this->viewData['templates'] = $templateList;
+        $this->viewData['categories'] = self::CATEGORIES;
+        $this->viewData['selectedCategory'] = $category;
+
+        $this->render('studio/templates', $this->viewData);
+    }
+
+    /**
+     * View single template details
+     */
+    public function template($id) {
+        if (!$this->requireLogin()) return;
+
+        $template = Bean::load('studiotemplates', $id);
+        if (!$template->id) {
+            Flight::redirect('/studio/templates');
+            return;
+        }
+
+        $this->viewData['title'] = $template->name;
+        $this->viewData['template'] = $this->formatTemplate($template, true);
+        $this->viewData['categories'] = self::CATEGORIES;
+
+        $this->render('studio/template_detail', $this->viewData);
+    }
+
+    /**
+     * Start wizard for a template
+     */
+    public function wizard($templateId = null) {
+        if (!$this->requireLogin()) return;
+
+        $template = null;
+        $wizardConfig = [];
+
+        if ($templateId) {
+            $template = Bean::load('studiotemplates', $templateId);
+            if ($template->id) {
+                $wizardConfig = json_decode($template->wizard_config_json ?: '{}', true);
+            }
+        }
+
+        // If no template, use custom wizard
+        if (!$wizardConfig) {
+            $wizardConfig = $this->getCustomWizardConfig();
+        }
+
+        $this->viewData['title'] = $template ? "Create: {$template->name}" : 'Create Custom Orchestration';
+        $this->viewData['template'] = $template ? $this->formatTemplate($template) : null;
+        $this->viewData['wizardConfig'] = $wizardConfig;
+        $this->viewData['templateId'] = $templateId;
+
+        $this->render('studio/wizard', $this->viewData);
+    }
+
+    /**
+     * AJAX: Save wizard step and get next
+     */
+    public function wizardstep() {
+        if (!$this->requireLogin()) return;
+
+        $templateId = $this->getParam('template_id');
+        $stepId = $this->getParam('step_id');
+        $stepData = $this->getParam('data');
+        $projectId = $this->getParam('project_id');
+
+        try {
+            // Load or create project
+            if ($projectId) {
+                $project = Bean::load('studioprojects', $projectId);
+            } else {
+                $project = Bean::dispense('studioprojects');
+                $project->member_id = Flight::get('member')->id;
+                $project->studiotemplates_id = $templateId ?: null;
+                $project->status = 'draft';
+                $project->variables_json = '{}';
+                $project->created_at = date('Y-m-d H:i:s');
+            }
+
+            // Merge step data into variables
+            $variables = json_decode($project->variables_json ?: '{}', true);
+            if (is_array($stepData)) {
+                $variables = array_merge($variables, $stepData);
+            }
+            $project->variables_json = json_encode($variables);
+            $project->updated_at = date('Y-m-d H:i:s');
+
+            Bean::store($project);
+
+            Flight::jsonSuccess([
+                'project_id' => $project->id,
+                'variables' => $variables
+            ]);
+
+        } catch (Exception $e) {
+            Flight::jsonError($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * AJAX: AI assist for wizard field
+     */
+    public function aiassist() {
+        if (!$this->requireLogin()) return;
+
+        $fieldType = $this->getParam('field_type');
+        $context = $this->getParam('context');
+        $userInput = $this->getParam('input');
+
+        // TODO: Implement AI assistance using Anthropic API
+        // For now, return placeholder
+
+        Flight::jsonSuccess([
+            'suggestion' => "AI suggestion for: {$userInput}",
+            'options' => []
+        ]);
+    }
+
+    /**
+     * View project details and control center
+     */
+    public function project($id) {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+        $project = Bean::load('studioprojects', $id);
+
+        if (!$project->id || $project->member_id != $member->id) {
+            Flight::redirect('/studio');
+            return;
+        }
+
+        $template = $project->studiotemplates_id
+            ? Bean::load('studiotemplates', $project->studiotemplates_id)
+            : null;
+
+        // Get associated pipeline if exists
+        $pipeline = $project->pipelines_id
+            ? Bean::load('pipelines', $project->pipelines_id)
+            : null;
+
+        // Get recent runs
+        $runs = [];
+        if ($pipeline) {
+            $recentRuns = Bean::find('pipelineruns',
+                ' pipelines_id = ? ORDER BY created_at DESC LIMIT 10 ',
+                [$pipeline->id]
+            );
+            foreach ($recentRuns as $run) {
+                $runs[] = [
+                    'id' => $run->id,
+                    'run_uid' => $run->run_uid,
+                    'status' => $run->status,
+                    'trigger_source' => $run->trigger_source,
+                    'started_at' => $run->started_at,
+                    'completed_at' => $run->completed_at
+                ];
+            }
+        }
+
+        // Get scheduled tasks
+        $scheduledTasks = Bean::find('scheduledtasks',
+            ' studioprojects_id = ? ORDER BY scheduled_at ASC ',
+            [$project->id]
+        );
+
+        $tasks = [];
+        foreach ($scheduledTasks as $task) {
+            $tasks[] = [
+                'id' => $task->id,
+                'task_type' => $task->task_type,
+                'status' => $task->status,
+                'scheduled_at' => $task->scheduled_at,
+                'completed_at' => $task->completed_at
+            ];
+        }
+
+        $this->viewData['title'] = $project->name;
+        $this->viewData['project'] = [
+            'id' => $project->id,
+            'name' => $project->name,
+            'slug' => $project->slug,
+            'status' => $project->status,
+            'status_info' => self::STATUSES[$project->status] ?? null,
+            'variables' => json_decode($project->variables_json ?: '{}', true),
+            'schedule_config' => json_decode($project->schedule_config_json ?: '{}', true),
+            'run_count' => $project->run_count ?? 0,
+            'last_run_at' => $project->last_run_at,
+            'next_run_at' => $project->next_run_at,
+            'created_at' => $project->created_at
+        ];
+        $this->viewData['template'] = $template ? $this->formatTemplate($template) : null;
+        $this->viewData['pipeline'] = $pipeline;
+        $this->viewData['runs'] = $runs;
+        $this->viewData['scheduledTasks'] = $tasks;
+        $this->viewData['statuses'] = self::STATUSES;
+
+        $this->render('studio/project', $this->viewData);
+    }
+
+    /**
+     * Manually trigger a project
+     */
+    public function execute($id) {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+        $project = Bean::load('studioprojects', $id);
+
+        if (!$project->id || $project->member_id != $member->id) {
+            Flight::jsonError('Project not found', 404);
+            return;
+        }
+
+        if (!$project->pipelines_id) {
+            Flight::jsonError('Project has no generated pipeline', 400);
+            return;
+        }
+
+        try {
+            // Create pipeline run
+            $pipeline = Bean::load('pipelines', $project->pipelines_id);
+            $context = json_decode($project->variables_json ?: '{}', true);
+            $context['_studio_project_id'] = $project->id;
+
+            $run = Bean::dispense('pipelineruns');
+            $run->run_uid = 'run-' . bin2hex(random_bytes(8));
+            $run->pipelines_id = $pipeline->id;
+            $run->member_id = $member->id;
+            $run->trigger_source = 'studio';
+            $run->trigger_data_json = json_encode(['project_id' => $project->id]);
+            $run->status = 'pending';
+            $run->context_json = json_encode($context);
+            $run->created_at = date('Y-m-d H:i:s');
+            Bean::store($run);
+
+            // Spawn background execution
+            $projectDir = dirname(__DIR__);
+            $workspace = $_SESSION['workspace_slug'] ?? 'default';
+            $cmd = sprintf(
+                'php %s/scripts/runpipe.php --workspace=%s --run-id=%d > /dev/null 2>&1 &',
+                escapeshellarg($projectDir),
+                escapeshellarg($workspace),
+                $run->id
+            );
+            exec($cmd);
+
+            // Update project stats
+            $project->run_count = ($project->run_count ?? 0) + 1;
+            $project->last_run_at = date('Y-m-d H:i:s');
+            $project->updated_at = date('Y-m-d H:i:s');
+            Bean::store($project);
+
+            Flight::jsonSuccess([
+                'run_id' => $run->id,
+                'run_uid' => $run->run_uid
+            ], 'Pipeline triggered');
+
+        } catch (Exception $e) {
+            Flight::jsonError($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Pause a project
+     */
+    public function pause($id) {
+        if (!$this->requireLogin()) return;
+        $this->updateProjectStatus($id, 'paused');
+    }
+
+    /**
+     * Resume a project
+     */
+    public function resume($id) {
+        if (!$this->requireLogin()) return;
+        $this->updateProjectStatus($id, 'active');
+    }
+
+    /**
+     * Delete a project
+     */
+    public function delete($id) {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+        $project = Bean::load('studioprojects', $id);
+
+        if (!$project->id || $project->member_id != $member->id) {
+            Flight::jsonError('Project not found', 404);
+            return;
+        }
+
+        try {
+            // Cancel any pending scheduled tasks
+            $pendingTasks = Bean::find('scheduledtasks',
+                ' studioprojects_id = ? AND status = ? ',
+                [$project->id, 'pending']
+            );
+            foreach ($pendingTasks as $task) {
+                $task->status = 'cancelled';
+                $task->updated_at = date('Y-m-d H:i:s');
+                Bean::store($task);
+            }
+
+            // Delete project
+            Bean::trash($project);
+
+            Flight::jsonSuccess([], 'Project deleted');
+
+        } catch (Exception $e) {
+            Flight::jsonError($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get project run history
+     */
+    public function history($id) {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+        $project = Bean::load('studioprojects', $id);
+
+        if (!$project->id || $project->member_id != $member->id) {
+            Flight::redirect('/studio');
+            return;
+        }
+
+        $runs = [];
+        if ($project->pipelines_id) {
+            $allRuns = Bean::find('pipelineruns',
+                ' pipelines_id = ? ORDER BY created_at DESC ',
+                [$project->pipelines_id]
+            );
+            foreach ($allRuns as $run) {
+                $runs[] = [
+                    'id' => $run->id,
+                    'run_uid' => $run->run_uid,
+                    'status' => $run->status,
+                    'trigger_source' => $run->trigger_source,
+                    'steps_completed' => $run->steps_completed,
+                    'steps_total' => $run->steps_total,
+                    'error_message' => $run->error_message,
+                    'started_at' => $run->started_at,
+                    'completed_at' => $run->completed_at,
+                    'created_at' => $run->created_at
+                ];
+            }
+        }
+
+        $this->viewData['title'] = "History: {$project->name}";
+        $this->viewData['project'] = [
+            'id' => $project->id,
+            'name' => $project->name,
+            'slug' => $project->slug
+        ];
+        $this->viewData['runs'] = $runs;
+
+        $this->render('studio/history', $this->viewData);
+    }
+
+    // ========================================
+    // Private helpers
+    // ========================================
+
+    /**
+     * Format template for view
+     */
+    private function formatTemplate($template, $includeConfig = false): array {
+        $data = [
+            'id' => $template->id,
+            'name' => $template->name,
+            'slug' => $template->slug,
+            'category' => $template->category,
+            'category_info' => self::CATEGORIES[$template->category] ?? null,
+            'description' => $template->description,
+            'icon' => $template->icon ?: 'bi-lightning',
+            'color' => $template->color ?: 'primary',
+            'required_connections' => json_decode($template->required_connections_json ?: '[]', true),
+            'estimated_duration_minutes' => $template->estimated_duration_minutes,
+            'is_active' => (bool) $template->is_active
+        ];
+
+        if ($includeConfig) {
+            $data['wizard_config'] = json_decode($template->wizard_config_json ?: '{}', true);
+            $data['variables_schema'] = json_decode($template->variables_schema_json ?: '{}', true);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Get default wizard config for custom orchestrations
+     */
+    private function getCustomWizardConfig(): array {
+        return [
+            'steps' => [
+                [
+                    'id' => 'name',
+                    'title' => 'Name Your Orchestration',
+                    'type' => 'form',
+                    'fields' => [
+                        ['name' => 'name', 'type' => 'text', 'label' => 'Project Name', 'required' => true],
+                        ['name' => 'description', 'type' => 'textarea', 'label' => 'Description']
+                    ]
+                ],
+                [
+                    'id' => 'intent',
+                    'title' => 'What do you want to automate?',
+                    'type' => 'ai_assisted_text',
+                    'variable' => 'intent',
+                    'placeholder' => 'Describe what you want to happen...'
+                ],
+                [
+                    'id' => 'connections',
+                    'title' => 'Select Integrations',
+                    'type' => 'connection_picker',
+                    'multiple' => true,
+                    'variable' => 'connections'
+                ],
+                [
+                    'id' => 'review',
+                    'title' => 'Review & Create',
+                    'type' => 'summary',
+                    'show_preview' => true
+                ]
+            ]
+        ];
+    }
+
+    /**
+     * Update project status
+     */
+    private function updateProjectStatus($id, $status): void {
+        $member = Flight::get('member');
+        $project = Bean::load('studioprojects', $id);
+
+        if (!$project->id || $project->member_id != $member->id) {
+            Flight::jsonError('Project not found', 404);
+            return;
+        }
+
+        $project->status = $status;
+        $project->updated_at = date('Y-m-d H:i:s');
+        Bean::store($project);
+
+        Flight::jsonSuccess(['status' => $status], 'Project updated');
+    }
+}

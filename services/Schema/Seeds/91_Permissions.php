@@ -88,6 +88,18 @@ $permissions = [
     ['mcpservers', 'toggleshared', 100, 'Toggle shared status'],
     ['mcpservers', 'toggleactive', 100, 'Toggle active status'],
     ['mcpservers', 'test', 100, 'Test MCP server connection'],
+    ['studio', 'index', 100, 'Studio dashboard'],
+    ['studio', 'templates', 100, 'Browse studio templates'],
+    ['studio', 'template', 100, 'View template details'],
+    ['studio', 'wizard', 100, 'Studio wizard'],
+    ['studio', 'wizardstep', 100, 'Save wizard step'],
+    ['studio', 'aiassist', 100, 'AI wizard assistance'],
+    ['studio', 'project', 100, 'View studio project'],
+    ['studio', 'execute', 100, 'Execute studio project'],
+    ['studio', 'pause', 100, 'Pause studio project'],
+    ['studio', 'resume', 100, 'Resume studio project'],
+    ['studio', 'delete', 100, 'Delete studio project'],
+    ['studio', 'history', 100, 'View project history'],
 
     // Admin pages (level 50)
     ['admin', 'index', 50, 'Admin dashboard'],

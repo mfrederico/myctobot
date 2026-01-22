@@ -1,0 +1,21 @@
+<?php
+$bean = \RedBeanPHP\R::dispense('ctostories');
+$bean->ceodirectives = $directive;
+$bean->member = $member;
+$bean->boards = $board;
+$bean->repoconnections = $repo;
+$bean->name = 'Schema Story';
+$bean->description = 'Schema story description';
+$bean->status = 'pending';
+$bean->priority = 'normal';
+$bean->sequence = 1;
+$bean->acceptance_criteria = 'Schema acceptance criteria';
+$bean->implementation_notes = 'Schema implementation notes';
+$bean->jira_issue_key = 'SCHEMA-1';
+$bean->jira_issue_url = 'https://example.atlassian.net/browse/SCHEMA-1';
+$bean->started_at = date('Y-m-d H:i:s');
+$bean->completed_at = date('Y-m-d H:i:s');
+$bean->created_at = date('Y-m-d H:i:s');
+$bean->updated_at = date('Y-m-d H:i:s');
+\RedBeanPHP\R::store($bean);
+\RedBeanPHP\R::trash($bean);

@@ -689,6 +689,7 @@ class Admin extends Control {
 
         $this->viewData['title'] = 'Create Runner';
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
+        $this->viewData['mcpServers'] = $this->getMergedMcpServers();
         $this->render('admin/runner_form', $this->viewData);
     }
 
@@ -771,6 +772,7 @@ class Admin extends Control {
         $this->viewData['title'] = 'Edit Runner';
         $this->viewData['runner'] = $runner;
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
+        $this->viewData['mcpServers'] = $this->getMergedMcpServers();
         $this->render('admin/runner_form', $this->viewData);
     }
 
@@ -1681,6 +1683,126 @@ class Admin extends Control {
             'success' => true,
             'data' => \app\PluginRegistryCache::getStats()
         ]);
+    }
+
+    // ========================================
+    // MCP Server Helpers
+    // ========================================
+
+    /**
+     * Get built-in MCP servers that are always available
+     * These are merged with database servers for runner capabilities
+     *
+     * @return array Built-in server configurations
+     */
+    private function getBuiltinMcpServers(): array {
+        return [
+            [
+                'name' => 'jira',
+                'description' => 'Jira Integration (Connected Service)',
+                'server_type' => 'http',
+                'is_builtin' => true,
+                'is_required' => true,
+            ],
+            [
+                'name' => 'pipelines',
+                'description' => 'MyCTOBot Pipeline Tools',
+                'server_type' => 'http',
+                'is_builtin' => true,
+                'is_required' => true,
+            ],
+            [
+                'name' => 'playwright',
+                'description' => 'Playwright Browser Automation',
+                'server_type' => 'stdio',
+                'is_builtin' => true,
+                'is_required' => false,
+            ],
+            [
+                'name' => 'github',
+                'description' => 'GitHub API Integration',
+                'server_type' => 'stdio',
+                'is_builtin' => true,
+                'is_required' => false,
+            ],
+            [
+                'name' => 'fetch',
+                'description' => 'HTTP Fetch Capabilities',
+                'server_type' => 'stdio',
+                'is_builtin' => true,
+                'is_required' => false,
+            ],
+            [
+                'name' => 'filesystem',
+                'description' => 'Filesystem Access',
+                'server_type' => 'stdio',
+                'is_builtin' => true,
+                'is_required' => false,
+            ],
+            [
+                'name' => 'mantic',
+                'description' => 'Semantic Code Search',
+                'server_type' => 'stdio',
+                'is_builtin' => true,
+                'is_required' => false,
+            ],
+        ];
+    }
+
+    /**
+     * Get merged MCP servers for runner capabilities
+     * Combines database servers with built-in defaults, avoiding duplicates
+     *
+     * @return array Merged server list with is_builtin and is_required flags
+     */
+    private function getMergedMcpServers(): array {
+        // Get database servers
+        $dbServers = Bean::find('mcpservers', ' is_active = 1 ORDER BY name ');
+
+        // Convert to array format and add flags
+        $serverMap = [];
+        foreach ($dbServers as $server) {
+            $serverMap[$server->name] = [
+                'id' => $server->id,
+                'name' => $server->name,
+                'description' => $server->description ?: $server->name,
+                'server_type' => $server->server_type,
+                'is_builtin' => (bool) ($server->is_builtin ?? false),
+                'is_required' => (bool) ($server->is_required ?? false),
+                'is_db' => true,
+            ];
+        }
+
+        // Merge with built-in servers (built-in takes precedence for flags)
+        foreach ($this->getBuiltinMcpServers() as $builtin) {
+            $name = $builtin['name'];
+            if (isset($serverMap[$name])) {
+                // Update flags from built-in definition
+                $serverMap[$name]['is_builtin'] = true;
+                $serverMap[$name]['is_required'] = $builtin['is_required'];
+            } else {
+                // Add built-in server that's not in database
+                $serverMap[$name] = [
+                    'id' => null,
+                    'name' => $name,
+                    'description' => $builtin['description'],
+                    'server_type' => $builtin['server_type'],
+                    'is_builtin' => true,
+                    'is_required' => $builtin['is_required'],
+                    'is_db' => false,
+                ];
+            }
+        }
+
+        // Sort: required first, then alphabetical
+        uasort($serverMap, function($a, $b) {
+            if ($a['is_required'] !== $b['is_required']) {
+                return $b['is_required'] ? 1 : -1;
+            }
+            return strcasecmp($a['name'], $b['name']);
+        });
+
+        return array_values($serverMap);
     }
 
 }

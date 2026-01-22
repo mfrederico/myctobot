@@ -1,0 +1,21 @@
+<?php
+$repo = \RedBeanPHP\R::dispense('repoconnections');
+$repo->member = $member;
+$repo->created_by_member_id = $member;
+$repo->provider = 'github';
+$repo->repo_owner = 'schema-owner';
+$repo->repo_name = 'schema-repo';
+$repo->repo_full_name = 'schema-owner/schema-repo';
+$repo->slug = 'schema-repo';
+$repo->default_branch = 'main';
+$repo->clone_url = 'https://github.com/schema-owner/schema-repo.git';
+$repo->access_token = 'schema_access_token';
+$repo->enabled = true;
+$repo->issues_enabled = true;
+$repo->webhook_uid = 'schema_webhook_uid';
+$repo->webhook_secret = 'schema_webhook_secret';
+$repo->is_active = true;
+$repo->last_webhook_at = date('Y-m-d H:i:s');
+$repo->created_at = date('Y-m-d H:i:s');
+$repo->updated_at = date('Y-m-d H:i:s');
+\RedBeanPHP\R::store($repo);

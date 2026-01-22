@@ -243,31 +243,61 @@
                                     <?php
                                     $capabilities = isset($runner['capabilities'])
                                         ? (is_string($runner['capabilities']) ? json_decode($runner['capabilities'], true) : $runner['capabilities'])
-                                        : ['git', 'filesystem'];
-                                    $allCapabilities = [
-                                        'git' => 'Git Operations',
-                                        'filesystem' => 'Filesystem Access',
-                                        'github' => 'GitHub API',
-                                        'playwright' => 'Playwright Browser',
-                                        'postgres' => 'PostgreSQL',
-                                        'mysql' => 'MySQL/MariaDB',
-                                        'sqlite' => 'SQLite',
-                                        'fetch' => 'HTTP Fetch',
-                                        'puppeteer' => 'Puppeteer Browser',
-                                        'slack' => 'Slack Integration',
-                                        'jira' => 'Jira MCP Server'
-                                    ];
-                                    foreach ($allCapabilities as $cap => $label):
+                                        : [];
+                                    // For new runners, auto-select required servers
+                                    if (!isset($runner) && empty($capabilities)) {
+                                        $capabilities = [];
+                                        foreach ($mcpServers as $server) {
+                                            if (!empty($server['is_required'])) {
+                                                $capabilities[] = $server['name'];
+                                            }
+                                        }
+                                    }
+                                    if (!empty($mcpServers)):
+                                        foreach ($mcpServers as $server):
+                                            $serverName = $server['name'];
+                                            $serverDesc = $server['description'] ?? $serverName;
+                                            $isRequired = !empty($server['is_required']);
+                                            $isBuiltin = !empty($server['is_builtin']);
+                                            $isChecked = $isRequired || in_array($serverName, $capabilities ?? []);
                                     ?>
                                     <div class="col-md-4 col-6">
                                         <div class="form-check">
                                             <input class="form-check-input" type="checkbox"
-                                                   id="cap_<?= $cap ?>" name="capabilities[]" value="<?= $cap ?>"
-                                                   <?= in_array($cap, $capabilities ?? []) ? 'checked' : '' ?>>
-                                            <label class="form-check-label" for="cap_<?= $cap ?>"><?= $label ?></label>
+                                                   id="cap_<?= htmlspecialchars($serverName) ?>"
+                                                   name="capabilities[]"
+                                                   value="<?= htmlspecialchars($serverName) ?>"
+                                                   <?= $isChecked ? 'checked' : '' ?>
+                                                   <?= $isRequired ? 'disabled' : '' ?>>
+                                            <?php if ($isRequired): ?>
+                                            <!-- Hidden input to ensure required values are submitted -->
+                                            <input type="hidden" name="capabilities[]" value="<?= htmlspecialchars($serverName) ?>">
+                                            <?php endif; ?>
+                                            <label class="form-check-label" for="cap_<?= htmlspecialchars($serverName) ?>">
+                                                <?= htmlspecialchars($serverDesc) ?>
+                                                <?php if ($isRequired): ?>
+                                                <span class="badge bg-primary ms-1" title="Required - cannot be disabled">required</span>
+                                                <?php elseif ($isBuiltin): ?>
+                                                <span class="badge bg-secondary ms-1" title="Built-in MCP server">built-in</span>
+                                                <?php endif; ?>
+                                            </label>
                                         </div>
                                     </div>
-                                    <?php endforeach; ?>
+                                    <?php
+                                        endforeach;
+                                    else:
+                                    ?>
+                                    <div class="col-12">
+                                        <p class="text-muted mb-0">
+                                            No MCP servers configured.
+                                            <a href="/mcpservers">Add MCP servers</a> to enable capabilities.
+                                        </p>
+                                    </div>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="form-text mt-2">
+                                    <i class="bi bi-info-circle"></i> Required servers are always enabled for core functionality.
+                                    Built-in servers are pre-configured and don't require setup.
                                 </div>
                             </div>
                         </div>

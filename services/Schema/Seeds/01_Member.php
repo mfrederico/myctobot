@@ -1,0 +1,33 @@
+<?php
+$member = \RedBeanPHP\R::dispense('member');
+$member->email = 'schema@example.com';
+$member->username = 'schemauser';
+$member->password = str_repeat('x', 255);
+$member->display_name = 'Schema User';
+$member->level = 100;
+$member->status = 'active';
+$member->first_name = 'Schema';
+$member->last_name = 'User';
+$member->bio = 'Schema bio placeholder';
+$member->avatar_url = 'https://example.com/avatar.png';
+$member->timezone = 'America/New_York';
+$member->last_login = date('Y-m-d H:i:s');
+$member->login_count = 0;
+$member->failed_logins = 0;
+$member->lockout_until = null;
+$member->remember_token = 'schema_remember_token';
+$member->google_uid = 'schema_google_uid';
+$member->email_verified = true;
+$member->verification_token = 'schema_verification_token';
+$member->verified_at = date('Y-m-d H:i:s');
+$member->reset_token = 'schema_reset_token';
+$member->reset_expires = date('Y-m-d H:i:s');
+$member->invite_token = 'schema_invite_token';
+$member->invite_sent_at = date('Y-m-d H:i:s');
+$member->invite_expires_at = date('Y-m-d H:i:s');
+$member->invited_by = 0;
+$member->created_at = date('Y-m-d H:i:s');
+$member->updated_at = date('Y-m-d H:i:s');
+\RedBeanPHP\R::store($member);
+
+\RedBeanPHP\R::exec('ALTER TABLE `member` ADD UNIQUE INDEX IF NOT EXISTS `uk_email` (`email`)');

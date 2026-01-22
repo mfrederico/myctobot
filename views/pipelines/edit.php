@@ -126,6 +126,14 @@
                         <textarea class="form-control" name="description" rows="2"><?= htmlspecialchars($pipeline['description']) ?></textarea>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label">Columns (Stages)</label>
+                        <input type="text" class="form-control" name="columns"
+                               value="<?= htmlspecialchars(implode(', ', $pipeline['columns'] ?? [])) ?>"
+                               placeholder="Stage 1, Stage 2, Stage 3, Stage 4">
+                        <small class="text-muted">Comma-separated column names. Changes take effect after saving.</small>
+                    </div>
+
                     <div class="row">
                         <div class="col-md-6">
                             <div class="mb-3">
@@ -587,6 +595,81 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- MCP Call Config -->
+                        <div class="config-panel" id="config_mcp_call" style="display: none;">
+                            <div class="card bg-light mb-3">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">MCP Server</label>
+                                                <select class="form-select" name="config_mcp_server_id" onchange="onMcpServerChange(this)">
+                                                    <option value="">-- Inline Config (no server) --</option>
+                                                    <?php foreach ($mcpServers ?? [] as $server): ?>
+                                                    <option value="<?= $server['id'] ?>" data-type="<?= $server['server_type'] ?>">
+                                                        <?= htmlspecialchars($server['name']) ?> (<?= $server['server_type'] ?>)
+                                                    </option>
+                                                    <?php endforeach; ?>
+                                                </select>
+                                                <small class="text-muted">Select a configured MCP server or use inline config</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label class="form-label">Tool Name</label>
+                                                <input type="text" class="form-control font-monospace" name="config_mcp_tool" placeholder="echo">
+                                                <small class="text-muted">The tool to call on the MCP server</small>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div id="mcpInlineConfig">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Transport Type</label>
+                                                    <select class="form-select" name="config_mcp_transport" onchange="onMcpTransportChange(this)">
+                                                        <option value="stdio">stdio (subprocess)</option>
+                                                        <option value="http">HTTP/SSE</option>
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6" id="mcpCommandField">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Command</label>
+                                                    <input type="text" class="form-control font-monospace" name="config_mcp_command"
+                                                           placeholder="python scripts/test-mcp-server.py">
+                                                    <small class="text-muted">Command to start the MCP server</small>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6" id="mcpUrlField" style="display: none;">
+                                                <div class="mb-3">
+                                                    <label class="form-label">URL</label>
+                                                    <input type="text" class="form-control font-monospace" name="config_mcp_url"
+                                                           placeholder="http://localhost:8080/mcp">
+                                                    <small class="text-muted">MCP server endpoint URL</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">Arguments (JSON)</label>
+                                        <textarea class="form-control font-monospace" name="config_mcp_arguments" rows="3"
+                                                  placeholder='{"message": "{context.message}"}'></textarea>
+                                        <small class="text-muted">Tool arguments as JSON. Use <code>{context.key}</code> or <code>{step.output.key}</code> for variables</small>
+                                    </div>
+
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="config_mcp_list_tools_only" id="mcpListToolsOnly">
+                                        <label class="form-check-label" for="mcpListToolsOnly">
+                                            List Tools Only (don't call, just return available tools)
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Input Source -->
@@ -760,6 +843,20 @@ function onStepTypeChange(type) {
     if (panel) {
         panel.style.display = 'block';
     }
+}
+
+// MCP Call helpers
+function onMcpServerChange(select) {
+    const serverId = select.value;
+    const inlineConfig = document.getElementById('mcpInlineConfig');
+    // Show inline config only when no server is selected
+    inlineConfig.style.display = serverId ? 'none' : 'block';
+}
+
+function onMcpTransportChange(select) {
+    const transport = select.value;
+    document.getElementById('mcpCommandField').style.display = transport === 'stdio' ? 'block' : 'none';
+    document.getElementById('mcpUrlField').style.display = transport === 'http' ? 'block' : 'none';
 }
 
 function updateStepNameHint() {
@@ -956,6 +1053,19 @@ function populateConfig(type, config) {
             document.querySelector('[name="config_harvest_on_incomplete"]').value = config.on_incomplete || 'fail';
             document.querySelector('[name="config_harvest_template"]').value = config.template || '';
             break;
+        case 'mcp_call':
+            document.querySelector('[name="config_mcp_server_id"]').value = config.mcp_server_id || '';
+            document.querySelector('[name="config_mcp_tool"]').value = config.tool || '';
+            document.querySelector('[name="config_mcp_transport"]').value = config.transport || 'stdio';
+            document.querySelector('[name="config_mcp_command"]').value = config.command || '';
+            document.querySelector('[name="config_mcp_url"]').value = config.url || '';
+            document.querySelector('[name="config_mcp_arguments"]').value = config.arguments ? JSON.stringify(config.arguments, null, 2) : '';
+            document.getElementById('mcpListToolsOnly').checked = config.list_tools_only || false;
+            // Show/hide inline config based on server selection
+            onMcpServerChange(document.querySelector('[name="config_mcp_server_id"]'));
+            // Show/hide command/url based on transport
+            onMcpTransportChange(document.querySelector('[name="config_mcp_transport"]'));
+            break;
     }
 }
 
@@ -1015,6 +1125,21 @@ function buildConfig() {
                 policy: document.querySelector('[name="config_harvest_policy"]').value,
                 on_incomplete: document.querySelector('[name="config_harvest_on_incomplete"]').value,
                 template: document.querySelector('[name="config_harvest_template"]').value
+            };
+            break;
+        case 'mcp_call':
+            let mcpArgs = {};
+            try {
+                mcpArgs = JSON.parse(document.querySelector('[name="config_mcp_arguments"]').value || '{}');
+            } catch (e) {}
+            config = {
+                mcp_server_id: document.querySelector('[name="config_mcp_server_id"]').value,
+                tool: document.querySelector('[name="config_mcp_tool"]').value,
+                transport: document.querySelector('[name="config_mcp_transport"]').value,
+                command: document.querySelector('[name="config_mcp_command"]').value,
+                url: document.querySelector('[name="config_mcp_url"]').value,
+                arguments: mcpArgs,
+                list_tools_only: document.getElementById('mcpListToolsOnly').checked
             };
             break;
     }

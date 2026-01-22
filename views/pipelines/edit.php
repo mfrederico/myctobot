@@ -252,7 +252,11 @@
                                 <span class="column-name"><?= htmlspecialchars($colName) ?></span>
                             </th>
                             <?php endforeach; ?>
-                            <th style="width: 60px;"></th>
+                            <th style="width: 80px;" class="text-center align-middle">
+                                <button class="btn btn-sm btn-outline-primary" onclick="addColumn()" title="Add Column">
+                                    <i class="bi bi-plus-lg"></i>
+                                </button>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1245,6 +1249,41 @@ async function deleteStep() {
 
 function addRow() {
     location.reload(); // Simple approach - page will show new empty row
+}
+
+// Add a new column to the grid
+async function addColumn() {
+    const newName = prompt('Enter new column name:', 'New Stage');
+    if (!newName || !newName.trim()) return;
+
+    // Get current columns
+    const headers = document.querySelectorAll('.column-header .column-name');
+    const columns = Array.from(headers).map(h => h.textContent.trim());
+    columns.push(newName.trim());
+
+    // Save via API
+    try {
+        const data = new URLSearchParams();
+        data.append('columns', columns.join(', '));
+        data.append('csrf_token', csrfToken);
+
+        const response = await fetch('/pipelines/update/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: data.toString()
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to add column');
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
 }
 
 // Double-click column header to rename

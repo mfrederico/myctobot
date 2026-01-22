@@ -229,9 +229,14 @@
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-grid-3x3"></i> Pipeline Grid</span>
-            <button class="btn btn-sm btn-outline-primary" onclick="addRow()">
-                <i class="bi bi-plus-lg"></i> Add Row
-            </button>
+            <div>
+                <button class="btn btn-sm btn-outline-secondary me-2" onclick="trimGrid()" title="Remove empty rows and unused columns">
+                    <i class="bi bi-scissors"></i> Trim Grid
+                </button>
+                <button class="btn btn-sm btn-outline-primary" onclick="addRow()">
+                    <i class="bi bi-plus-lg"></i> Add Row
+                </button>
+            </div>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -240,8 +245,11 @@
                         <tr>
                             <th style="width: 60px;" class="text-center">#</th>
                             <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
-                            <th class="text-center" style="min-width: 200px;">
-                                <?= htmlspecialchars($colName) ?>
+                            <th class="text-center column-header" style="min-width: 200px; cursor: pointer;"
+                                data-col-index="<?= $colIndex ?>"
+                                ondblclick="renameColumn(<?= $colIndex ?>, this)"
+                                title="Double-click to rename">
+                                <span class="column-name"><?= htmlspecialchars($colName) ?></span>
                             </th>
                             <?php endforeach; ?>
                             <th style="width: 60px;"></th>
@@ -1237,6 +1245,141 @@ async function deleteStep() {
 
 function addRow() {
     location.reload(); // Simple approach - page will show new empty row
+}
+
+// Double-click column header to rename
+function renameColumn(colIndex, thElement) {
+    const nameSpan = thElement.querySelector('.column-name');
+    const currentName = nameSpan.textContent.trim();
+
+    // Create input field
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentName;
+    input.className = 'form-control form-control-sm text-center';
+    input.style.minWidth = '100px';
+
+    // Replace span with input
+    nameSpan.style.display = 'none';
+    thElement.appendChild(input);
+    input.focus();
+    input.select();
+
+    // Handle save on blur or enter
+    const saveRename = async () => {
+        const newName = input.value.trim();
+        if (newName && newName !== currentName) {
+            // Get current columns from all headers
+            const headers = document.querySelectorAll('.column-header .column-name');
+            const columns = Array.from(headers).map((h, i) =>
+                i === colIndex ? newName : h.textContent.trim()
+            );
+
+            // Save via API
+            try {
+                const data = new URLSearchParams();
+                data.append('columns', columns.join(', '));
+                data.append('csrf_token', csrfToken);
+
+                const response = await fetch('/pipelines/update/' + pipelineId, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-CSRF-Token': csrfToken
+                    },
+                    body: data.toString()
+                });
+
+                if (response.ok) {
+                    nameSpan.textContent = newName;
+                }
+            } catch (err) {
+                console.error('Failed to rename column:', err);
+            }
+        }
+
+        // Restore span
+        input.remove();
+        nameSpan.style.display = '';
+    };
+
+    input.addEventListener('blur', saveRename);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+        } else if (e.key === 'Escape') {
+            input.value = currentName; // Reset
+            input.blur();
+        }
+    });
+}
+
+// Trim unused rows and columns from grid
+async function trimGrid() {
+    // Find all steps to determine used rows/columns
+    const steps = document.querySelectorAll('[data-step-id]');
+    if (steps.length === 0) {
+        alert('No steps to trim around.');
+        return;
+    }
+
+    let minRow = Infinity, maxRow = -1;
+    let minCol = Infinity, maxCol = -1;
+
+    steps.forEach(step => {
+        const td = step.closest('td');
+        const tr = td.closest('tr');
+        const row = parseInt(tr.dataset.row);
+        const col = parseInt(td.dataset.col);
+
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
+    });
+
+    // Get current columns
+    const headers = document.querySelectorAll('.column-header .column-name');
+    const allColumns = Array.from(headers).map(h => h.textContent.trim());
+
+    // Trim to used columns (with 1 buffer on each side if possible)
+    const startCol = Math.max(0, minCol);
+    const endCol = Math.min(allColumns.length - 1, maxCol + 1); // +1 for one empty column after
+    const trimmedColumns = allColumns.slice(startCol, endCol + 1);
+
+    if (trimmedColumns.length === allColumns.length) {
+        alert('Grid is already optimized - no unused columns to trim.');
+        return;
+    }
+
+    if (!confirm(`Trim grid to ${trimmedColumns.length} columns (${trimmedColumns.join(', ')})?\n\nThis will remove ${allColumns.length - trimmedColumns.length} unused columns.`)) {
+        return;
+    }
+
+    // Save trimmed columns
+    try {
+        const data = new URLSearchParams();
+        data.append('columns', trimmedColumns.join(', '));
+        data.append('csrf_token', csrfToken);
+
+        const response = await fetch('/pipelines/update/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: data.toString()
+        });
+
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to trim grid');
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
 }
 
 function deleteRow(row) {

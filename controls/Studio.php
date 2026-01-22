@@ -69,7 +69,7 @@ class Studio extends BaseControls\Control {
     public function index() {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $member = Flight::getMember();
 
         // Get user's projects
         $projects = Bean::find('studioprojects',
@@ -154,9 +154,10 @@ class Studio extends BaseControls\Control {
     /**
      * View single template details
      */
-    public function template($id) {
+    public function template($params = []) {
         if (!$this->requireLogin()) return;
 
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
         $template = Bean::load('studiotemplates', $id);
         if (!$template->id) {
             Flight::redirect('/studio/templates');
@@ -173,8 +174,10 @@ class Studio extends BaseControls\Control {
     /**
      * Start wizard for a template
      */
-    public function wizard($templateId = null) {
+    public function wizard($params = []) {
         if (!$this->requireLogin()) return;
+
+        $templateId = (int) ($this->opId() ?? $this->getParam('template_id') ?? 0);
 
         $template = null;
         $wizardConfig = [];
@@ -216,7 +219,7 @@ class Studio extends BaseControls\Control {
                 $project = Bean::load('studioprojects', $projectId);
             } else {
                 $project = Bean::dispense('studioprojects');
-                $project->member_id = Flight::get('member')->id;
+                $project->member_id = Flight::getMember()->id;
                 $project->studiotemplates_id = $templateId ?: null;
                 $project->status = 'draft';
                 $project->variables_json = '{}';
@@ -268,7 +271,7 @@ class Studio extends BaseControls\Control {
     public function finalize() {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $member = Flight::getMember();
         $templateId = $this->getParam('template_id');
         $projectId = $this->getParam('project_id');
         $wizardData = $this->getParam('data');
@@ -344,10 +347,11 @@ class Studio extends BaseControls\Control {
     /**
      * View project details and control center
      */
-    public function project($id) {
+    public function project($params = []) {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        $member = Flight::getMember();
         $project = Bean::load('studioprojects', $id);
 
         if (!$project->id || $project->member_id != $member->id) {
@@ -426,10 +430,11 @@ class Studio extends BaseControls\Control {
     /**
      * Manually trigger a project
      */
-    public function execute($id) {
+    public function execute($params = []) {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        $member = Flight::getMember();
         $project = Bean::load('studioprojects', $id);
 
         if (!$project->id || $project->member_id != $member->id) {
@@ -495,26 +500,29 @@ class Studio extends BaseControls\Control {
     /**
      * Pause a project
      */
-    public function pause($id) {
+    public function pause($params = []) {
         if (!$this->requireLogin()) return;
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
         $this->updateProjectStatus($id, 'paused');
     }
 
     /**
      * Resume a project
      */
-    public function resume($id) {
+    public function resume($params = []) {
         if (!$this->requireLogin()) return;
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
         $this->updateProjectStatus($id, 'active');
     }
 
     /**
      * Delete a project
      */
-    public function delete($id) {
+    public function delete($params = []) {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        $member = Flight::getMember();
         $project = Bean::load('studioprojects', $id);
 
         if (!$project->id || $project->member_id != $member->id) {
@@ -547,10 +555,11 @@ class Studio extends BaseControls\Control {
     /**
      * Get project run history
      */
-    public function history($id) {
+    public function history($params = []) {
         if (!$this->requireLogin()) return;
 
-        $member = Flight::get('member');
+        $id = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        $member = Flight::getMember();
         $project = Bean::load('studioprojects', $id);
 
         if (!$project->id || $project->member_id != $member->id) {
@@ -664,7 +673,7 @@ class Studio extends BaseControls\Control {
      * Update project status
      */
     private function updateProjectStatus($id, $status): void {
-        $member = Flight::get('member');
+        $member = Flight::getMember();
         $project = Bean::load('studioprojects', $id);
 
         if (!$project->id || $project->member_id != $member->id) {

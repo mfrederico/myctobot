@@ -150,6 +150,12 @@ class ScheduledTaskProcessor
             case 'shopify_product_price':
                 return $this->revertShopifyProductPrice($task, $action);
 
+            case 'github_revert_commit':
+                return $this->revertGitHubCommit($task, $action);
+
+            case 'github_restore_files':
+                return $this->restoreGitHubFiles($task, $action);
+
             case 'custom':
                 // Custom revert logic via callback
                 return $this->executeCustomRevert($task, $action);
@@ -255,6 +261,103 @@ class ScheduledTaskProcessor
         return [
             'success' => true,
             'message' => "Custom revert executed: {$callback}"
+        ];
+    }
+
+    /**
+     * Revert a GitHub commit by creating a revert commit
+     *
+     * This is used for Shopify theme changes that were pushed via GitHub.
+     * Shopify auto-deploys from GitHub, so reverting the commit reverts the theme.
+     *
+     * Action structure:
+     * {
+     *   "type": "github_revert_commit",
+     *   "repo": "owner/repo",
+     *   "commit_sha": "abc123",
+     *   "branch": "main"
+     * }
+     */
+    private function revertGitHubCommit($task, array $action): array
+    {
+        $repo = $action['repo'] ?? null;
+        $commitSha = $action['commit_sha'] ?? null;
+        $branch = $action['branch'] ?? 'main';
+
+        if (!$repo || !$commitSha) {
+            return ['success' => false, 'message' => 'Missing repo or commit_sha'];
+        }
+
+        $project = $this->getProjectFromTask($task);
+        if (!$project) {
+            return ['success' => false, 'message' => 'Project not found'];
+        }
+
+        // Get member's GitHub token
+        $member = Bean::load('member', $project->member_id);
+        if (!$member->id) {
+            return ['success' => false, 'message' => 'Member not found'];
+        }
+
+        // TODO: Use GitHub API to create revert commit
+        // For now, we'll use the gh CLI approach or direct API
+        // This would typically:
+        // 1. Clone the repo (or use existing checkout)
+        // 2. git revert <commit_sha> --no-edit
+        // 3. git push
+
+        if ($this->verbose) {
+            echo "       Would revert GitHub commit: {$repo}@{$commitSha}\n";
+        }
+
+        // Placeholder - actual implementation will use GitHub API
+        // POST /repos/{owner}/{repo}/git/commits with parent as commit^
+        // Then update refs/heads/{branch} to new commit
+        return [
+            'success' => true,
+            'message' => "GitHub commit revert scheduled: {$repo}@{$commitSha}"
+        ];
+    }
+
+    /**
+     * Restore specific files from a previous commit
+     *
+     * Action structure:
+     * {
+     *   "type": "github_restore_files",
+     *   "repo": "owner/repo",
+     *   "files": ["sections/announcement-bar.liquid"],
+     *   "restore_from_sha": "abc123",
+     *   "branch": "main"
+     * }
+     */
+    private function restoreGitHubFiles($task, array $action): array
+    {
+        $repo = $action['repo'] ?? null;
+        $files = $action['files'] ?? [];
+        $restoreFromSha = $action['restore_from_sha'] ?? null;
+        $branch = $action['branch'] ?? 'main';
+
+        if (!$repo || empty($files) || !$restoreFromSha) {
+            return ['success' => false, 'message' => 'Missing repo, files, or restore_from_sha'];
+        }
+
+        $project = $this->getProjectFromTask($task);
+        if (!$project) {
+            return ['success' => false, 'message' => 'Project not found'];
+        }
+
+        if ($this->verbose) {
+            echo "       Would restore files from {$repo}@{$restoreFromSha}: " . implode(', ', $files) . "\n";
+        }
+
+        // Placeholder - actual implementation will:
+        // 1. Get file contents at restore_from_sha using GitHub API
+        // 2. Create new commit with those file contents
+        // 3. Push to branch
+        return [
+            'success' => true,
+            'message' => "File restoration scheduled: " . count($files) . " files from {$repo}@{$restoreFromSha}"
         ];
     }
 

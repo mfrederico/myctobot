@@ -329,13 +329,40 @@ async function nextStep() {
 async function createProject() {
     await saveStepData();
 
-    // TODO: Call API to generate pipeline from template
-    alert('Creating orchestration with data:\n' + JSON.stringify(wizardData, null, 2));
+    // Update button to show loading state
+    const btnCreate = document.getElementById('btnCreate');
+    const originalText = btnCreate.innerHTML;
+    btnCreate.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Creating...';
+    btnCreate.disabled = true;
 
-    if (projectId) {
-        window.location.href = '/studio/project/' + projectId;
-    } else {
-        window.location.href = '/studio';
+    try {
+        // Finalize the project by saving final step and setting name
+        const response = await fetch('/studio/finalize', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({
+                template_id: templateId,
+                project_id: projectId,
+                data: wizardData
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            window.location.href = '/studio/project/' + result.data.project_id;
+        } else {
+            alert('Error: ' + result.message);
+            btnCreate.innerHTML = originalText;
+            btnCreate.disabled = false;
+        }
+    } catch (err) {
+        alert('Error creating project: ' + err.message);
+        btnCreate.innerHTML = originalText;
+        btnCreate.disabled = false;
     }
 }
 

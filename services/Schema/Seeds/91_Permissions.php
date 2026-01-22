@@ -94,6 +94,7 @@ $permissions = [
     ['studio', 'wizard', 100, 'Studio wizard'],
     ['studio', 'wizardstep', 100, 'Save wizard step'],
     ['studio', 'aiassist', 100, 'AI wizard assistance'],
+    ['studio', 'finalize', 100, 'Finalize wizard and create project'],
     ['studio', 'project', 100, 'View studio project'],
     ['studio', 'execute', 100, 'Execute studio project'],
     ['studio', 'pause', 100, 'Pause studio project'],

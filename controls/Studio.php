@@ -263,6 +263,85 @@ class Studio extends BaseControls\Control {
     }
 
     /**
+     * AJAX: Finalize wizard and generate pipeline
+     */
+    public function finalize() {
+        if (!$this->requireLogin()) return;
+
+        $member = Flight::get('member');
+        $templateId = $this->getParam('template_id');
+        $projectId = $this->getParam('project_id');
+        $wizardData = $this->getParam('data');
+
+        try {
+            // Load or create project
+            if ($projectId) {
+                $project = Bean::load('studioprojects', $projectId);
+                if (!$project->id || $project->member_id != $member->id) {
+                    Flight::jsonError('Project not found', 404);
+                    return;
+                }
+            } else {
+                $project = Bean::dispense('studioprojects');
+                $project->member_id = $member->id;
+                $project->studiotemplates_id = $templateId ?: null;
+                $project->status = 'draft';
+                $project->created_at = date('Y-m-d H:i:s');
+            }
+
+            // Set project name from wizard data
+            $projectName = $wizardData['name'] ?? null;
+            if (!$projectName && $templateId) {
+                $template = Bean::load('studiotemplates', $templateId);
+                $projectName = $template->name . ' - ' . date('M j, Y');
+            }
+            $project->name = $projectName ?: 'Untitled Orchestration';
+            $project->slug = $this->generateProjectSlug($project->name);
+
+            // Store all wizard variables
+            $project->variables_json = json_encode($wizardData);
+            $project->updated_at = date('Y-m-d H:i:s');
+            Bean::store($project);
+
+            // Generate the pipeline
+            $genResult = $this->generateProjectPipeline($project);
+
+            if (!$genResult['success']) {
+                Flight::jsonError($genResult['error'] ?? 'Failed to generate pipeline', 500);
+                return;
+            }
+
+            Flight::jsonSuccess([
+                'project_id' => $project->id,
+                'pipeline_id' => $genResult['pipeline_id'],
+                'step_count' => $genResult['step_count'] ?? 0
+            ], 'Orchestration created successfully');
+
+        } catch (Exception $e) {
+            Flight::jsonError($e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Generate URL-safe slug for project
+     */
+    private function generateProjectSlug(string $name): string {
+        $slug = strtolower($name);
+        $slug = preg_replace('/[^a-z0-9]+/', '-', $slug);
+        $slug = trim($slug, '-');
+
+        // Ensure uniqueness
+        $originalSlug = $slug;
+        $counter = 1;
+        while (Bean::findOne('studioprojects', 'slug = ?', [$slug])) {
+            $slug = "{$originalSlug}-{$counter}";
+            $counter++;
+        }
+
+        return $slug;
+    }
+
+    /**
      * View project details and control center
      */
     public function project($id) {
@@ -358,9 +437,15 @@ class Studio extends BaseControls\Control {
             return;
         }
 
+        // Generate pipeline if not exists
         if (!$project->pipelines_id) {
-            Flight::jsonError('Project has no generated pipeline', 400);
-            return;
+            $genResult = $this->generateProjectPipeline($project);
+            if (!$genResult['success']) {
+                Flight::jsonError('Failed to generate pipeline: ' . ($genResult['error'] ?? 'Unknown error'), 400);
+                return;
+            }
+            // Reload project to get the pipeline_id
+            $project = Bean::load('studioprojects', $id);
         }
 
         try {
@@ -592,5 +677,50 @@ class Studio extends BaseControls\Control {
         Bean::store($project);
 
         Flight::jsonSuccess(['status' => $status], 'Project updated');
+    }
+
+    /**
+     * Generate pipeline from project's template and variables
+     */
+    private function generateProjectPipeline($project): array {
+        // Load the template
+        if (!$project->studiotemplates_id) {
+            return [
+                'success' => false,
+                'error' => 'Project has no template - custom orchestrations not yet supported'
+            ];
+        }
+
+        $template = Bean::load('studiotemplates', $project->studiotemplates_id);
+        if (!$template->id) {
+            return [
+                'success' => false,
+                'error' => 'Template not found'
+            ];
+        }
+
+        $variables = json_decode($project->variables_json ?: '{}', true);
+
+        // Load the generator service
+        require_once dirname(__DIR__) . '/services/StudioPipelineGenerator.php';
+
+        $generator = new \app\services\StudioPipelineGenerator($project->member_id);
+        $result = $generator->generate($template, $variables, $project->name);
+
+        if ($result['success']) {
+            // Update project with generated pipeline
+            $project->pipelines_id = $result['pipeline_id'];
+            $project->status = 'active';
+            $project->updated_at = date('Y-m-d H:i:s');
+            Bean::store($project);
+
+            Flight::get('log')->info('Generated pipeline for studio project', [
+                'project_id' => $project->id,
+                'pipeline_id' => $result['pipeline_id'],
+                'step_count' => $result['step_count'] ?? 0
+            ]);
+        }
+
+        return $result;
     }
 }

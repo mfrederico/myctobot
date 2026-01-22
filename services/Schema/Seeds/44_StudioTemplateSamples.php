@@ -8,14 +8,15 @@
 
 $templates = [
     // Flash Sale Orchestrator - The flagship template
+    // Theme updates go through GitHub (Shopify pulls from GitHub repo)
     [
         'name' => 'Flash Sale Orchestrator',
         'slug' => 'flash-sale',
         'category' => 'ecommerce',
-        'description' => 'Run a time-limited flash sale: discount products, update theme, announce on social, then automatically revert everything.',
+        'description' => 'Run a time-limited flash sale: discount products, update theme via GitHub, announce on social, then automatically revert everything.',
         'icon' => 'bi-lightning-charge-fill',
         'color' => 'warning',
-        'required_connections' => ['shopify'],
+        'required_connections' => ['shopify', 'github'],
         'estimated_duration_minutes' => 10,
         'wizard_config' => [
             'steps' => [
@@ -25,6 +26,15 @@ $templates = [
                     'type' => 'connection_picker',
                     'variable' => 'shopify_store',
                     'connection_type' => 'shopify',
+                    'multiple' => false
+                ],
+                [
+                    'id' => 'theme_repo',
+                    'title' => 'Theme Repository',
+                    'type' => 'connection_picker',
+                    'variable' => 'theme_repo',
+                    'connection_type' => 'github',
+                    'help_text' => 'Select the GitHub repository containing your Shopify theme (connected to Shopify GitHub integration).',
                     'multiple' => false
                 ],
                 [
@@ -68,7 +78,8 @@ $templates = [
                             'label' => 'Update Theme Banner',
                             'type' => 'select',
                             'options' => ['Yes', 'No'],
-                            'default' => 'Yes'
+                            'default' => 'Yes',
+                            'description' => 'Push announcement banner to theme via GitHub'
                         ]
                     ]
                 ],
@@ -92,21 +103,39 @@ $templates = [
             ]
         ],
         'pipeline_template' => [
+            'description' => 'Flash Sale: Shopify discounts + GitHub theme push + scheduled revert',
             'steps' => [
+                // Row 0: Query products and capture original state
                 ['row' => 0, 'type' => 'mcp_call', 'name' => 'Query Products', 'config' => ['server' => 'shopify', 'tool' => 'search_products', 'params' => ['criteria' => '{{product_criteria}}']]],
                 ['row' => 0, 'type' => 'parser', 'name' => 'Store Original State', 'config' => ['capture' => 'revert_data']],
-                ['row' => 1, 'type' => 'ai_agent', 'name' => 'Generate Sale Copy', 'config' => ['prompt' => 'Generate sale messaging based on: {{sale_message}}']],
-                ['row' => 2, 'type' => 'mcp_call', 'name' => 'Create Discounts', 'config' => ['server' => 'shopify', 'tool' => 'create_discount', 'params' => ['percent' => '{{discount_percent}}']]],
-                ['row' => 2, 'type' => 'mcp_call', 'name' => 'Update Theme Banner', 'config' => ['server' => 'shopify', 'tool' => 'update_theme_section', 'conditional' => '{{update_theme}} == "Yes"']],
-                ['row' => 3, 'type' => 'harvest', 'name' => 'Collect Changes', 'config' => []],
-                ['row' => 4, 'type' => 'schedule_task', 'name' => 'Schedule Revert', 'config' => ['task_type' => 'revert_action', 'delay_expression' => '{{duration_hours}} * 3600']],
-                ['row' => 5, 'type' => 'direct_exec', 'name' => 'Log Completion', 'config' => []]
+                // Row 1: AI generates sale copy and banner content
+                ['row' => 1, 'type' => 'ai_agent', 'name' => 'Generate Sale Copy', 'config' => ['prompt' => 'Generate sale messaging and announcement banner HTML based on: {{sale_message}}']],
+                // Row 2: Create discounts via Shopify API
+                ['row' => 2, 'type' => 'mcp_call', 'name' => 'Create Discounts', 'config' => ['server' => 'shopify', 'tool' => 'create_automatic_discount', 'params' => ['percent' => '{{discount_percent}}']]],
+                // Row 3: Clone theme repo, update banner, push to GitHub (Shopify auto-deploys)
+                ['row' => 3, 'type' => 'mcp_call', 'name' => 'Clone Theme Repo', 'config' => ['server' => 'github', 'tool' => 'clone_repo', 'params' => ['repo' => '{{theme_repo}}']], 'conditional' => '{{update_theme}} == "Yes"'],
+                ['row' => 4, 'type' => 'ai_agent', 'name' => 'Update Theme Files', 'config' => ['task' => 'update_announcement_bar', 'content' => '{{ai_banner_content}}'], 'conditional' => '{{update_theme}} == "Yes"'],
+                ['row' => 5, 'type' => 'mcp_call', 'name' => 'Commit & Push Theme', 'config' => ['server' => 'github', 'tool' => 'commit_and_push', 'params' => ['message' => 'Flash sale banner - auto-reverts in {{duration_hours}}h', 'branch' => 'main']], 'conditional' => '{{update_theme}} == "Yes"'],
+                // Row 6: Collect all changes for revert
+                ['row' => 6, 'type' => 'harvest', 'name' => 'Collect Changes', 'config' => ['include' => ['discount_id', 'theme_commit_sha', 'original_files']]],
+                // Row 7: Schedule automatic revert
+                ['row' => 7, 'type' => 'schedule_task', 'name' => 'Schedule Revert', 'config' => [
+                    'task_type' => 'revert_action',
+                    'delay_expression' => '{{duration_hours}} * 3600',
+                    'revert_actions' => [
+                        ['type' => 'shopify_discount', 'action' => 'delete'],
+                        ['type' => 'github_revert_commit', 'action' => 'revert', 'repo' => '{{theme_repo}}']
+                    ]
+                ]],
+                // Row 8: Log completion
+                ['row' => 8, 'type' => 'direct_exec', 'name' => 'Log Completion', 'config' => []]
             ]
         ],
         'variables_schema' => [
             'type' => 'object',
             'properties' => [
                 'shopify_store' => ['type' => 'string'],
+                'theme_repo' => ['type' => 'string', 'description' => 'GitHub repo for Shopify theme'],
                 'product_criteria' => ['type' => 'string'],
                 'discount_percent' => ['type' => 'integer', 'minimum' => 5, 'maximum' => 50],
                 'duration_hours' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 72],
@@ -269,24 +298,26 @@ $templates = [
         ]
     ],
 
-    // Shopify Theme Updates
+    // Shopify Theme Updates via GitHub
+    // Shopify themes are deployed from GitHub repos - changes push to GitHub, Shopify auto-deploys
     [
         'name' => 'Theme Customization',
         'slug' => 'shopify-themes',
         'category' => 'ecommerce',
-        'description' => 'AI-powered theme updates: describe changes in natural language, preview, then deploy to your store.',
+        'description' => 'AI-powered theme updates via GitHub: describe changes in natural language, create PR for review, then merge to deploy.',
         'icon' => 'bi-palette',
         'color' => 'success',
-        'required_connections' => ['shopify'],
+        'required_connections' => ['github'],
         'estimated_duration_minutes' => 8,
         'wizard_config' => [
             'steps' => [
                 [
-                    'id' => 'store',
-                    'title' => 'Select Store',
+                    'id' => 'theme_repo',
+                    'title' => 'Theme Repository',
                     'type' => 'connection_picker',
-                    'variable' => 'shopify_store',
-                    'connection_type' => 'shopify'
+                    'variable' => 'theme_repo',
+                    'connection_type' => 'github',
+                    'help_text' => 'Select the GitHub repository containing your Shopify theme.'
                 ],
                 [
                     'id' => 'changes',
@@ -297,7 +328,8 @@ $templates = [
                     'examples' => [
                         'Add a countdown timer to the homepage hero section',
                         'Change the product page layout to show larger images',
-                        'Add a loyalty points display to product cards'
+                        'Add a loyalty points display to product cards',
+                        'Update the announcement bar to show free shipping threshold'
                     ]
                 ],
                 [
@@ -306,18 +338,19 @@ $templates = [
                     'type' => 'form',
                     'fields' => [
                         [
-                            'name' => 'preview_first',
-                            'label' => 'Preview Before Deploy',
+                            'name' => 'create_pr',
+                            'label' => 'Create Pull Request',
                             'type' => 'select',
-                            'options' => ['Yes', 'No'],
-                            'default' => 'Yes'
+                            'options' => ['Yes - Review before deploy', 'No - Push directly to main'],
+                            'default' => 'Yes - Review before deploy',
+                            'description' => 'PRs let you review changes before they go live'
                         ],
                         [
-                            'name' => 'backup_theme',
-                            'label' => 'Backup Current Theme',
-                            'type' => 'select',
-                            'options' => ['Yes', 'No'],
-                            'default' => 'Yes'
+                            'name' => 'branch_name',
+                            'label' => 'Branch Name',
+                            'type' => 'text',
+                            'default' => 'theme-update',
+                            'description' => 'Branch name for the changes (ignored if pushing directly)'
                         ]
                     ]
                 ],
@@ -329,21 +362,32 @@ $templates = [
             ]
         ],
         'pipeline_template' => [
+            'description' => 'Theme changes via GitHub: clone, AI edits, commit, PR/push',
             'steps' => [
-                ['row' => 0, 'type' => 'mcp_call', 'name' => 'Fetch Theme', 'config' => ['server' => 'shopify', 'tool' => 'get_theme']],
-                ['row' => 1, 'type' => 'ai_agent', 'name' => 'Generate Changes', 'config' => ['changes' => '{{theme_changes}}']],
-                ['row' => 2, 'type' => 'mcp_call', 'name' => 'Backup Theme', 'config' => ['server' => 'shopify', 'tool' => 'backup_theme', 'conditional' => '{{backup_theme}} == "Yes"']],
-                ['row' => 3, 'type' => 'mcp_call', 'name' => 'Deploy Changes', 'config' => ['server' => 'shopify', 'tool' => 'update_theme']]
+                // Row 0: Clone theme repo
+                ['row' => 0, 'type' => 'mcp_call', 'name' => 'Clone Theme Repo', 'config' => ['server' => 'github', 'tool' => 'clone_repo', 'params' => ['repo' => '{{theme_repo}}']]],
+                // Row 1: Create branch if using PR workflow
+                ['row' => 1, 'type' => 'mcp_call', 'name' => 'Create Branch', 'config' => ['server' => 'github', 'tool' => 'create_branch', 'params' => ['branch' => '{{branch_name}}']], 'conditional' => '{{create_pr}} contains "Yes"'],
+                // Row 2: AI analyzes theme and generates changes
+                ['row' => 2, 'type' => 'ai_agent', 'name' => 'Analyze Theme Structure', 'config' => ['task' => 'analyze_shopify_theme']],
+                ['row' => 3, 'type' => 'ai_agent', 'name' => 'Generate Changes', 'config' => ['task' => 'implement_theme_changes', 'changes' => '{{theme_changes}}']],
+                // Row 4: Commit and push
+                ['row' => 4, 'type' => 'mcp_call', 'name' => 'Commit Changes', 'config' => ['server' => 'github', 'tool' => 'commit_and_push', 'params' => ['message' => 'Theme update: {{theme_changes}}']]],
+                // Row 5: Create PR if requested
+                ['row' => 5, 'type' => 'mcp_call', 'name' => 'Create Pull Request', 'config' => ['server' => 'github', 'tool' => 'create_pull_request', 'params' => ['title' => 'Theme Update', 'body' => '{{theme_changes}}']], 'conditional' => '{{create_pr}} contains "Yes"'],
+                // Row 6: Log completion
+                ['row' => 6, 'type' => 'direct_exec', 'name' => 'Log Completion', 'config' => []]
             ]
         ],
         'variables_schema' => [
             'type' => 'object',
             'properties' => [
-                'shopify_store' => ['type' => 'string'],
+                'theme_repo' => ['type' => 'string', 'description' => 'GitHub repo for Shopify theme'],
                 'theme_changes' => ['type' => 'string'],
-                'preview_first' => ['type' => 'string'],
-                'backup_theme' => ['type' => 'string']
-            ]
+                'create_pr' => ['type' => 'string'],
+                'branch_name' => ['type' => 'string', 'default' => 'theme-update']
+            ],
+            'required' => ['theme_repo', 'theme_changes']
         ]
     ],
 

@@ -27,8 +27,8 @@ $blockedPatterns = [
     // Clearing all caches without diagnosis
     [
         'pattern' => '/\brm\s+-rf?\s+.*\/(cache|tmp|var\/cache)\b/i',
-        'reason' => 'Cache purge attempted',
-        'suggestion' => 'Check log/app-*.log first to understand the error before clearing caches.'
+        'reason' => 'Manual cache purge attempted',
+        'suggestion' => 'Use php scripts/resetcache.php instead of manual rm commands.'
     ],
     // Git pull on production as a "fix"
     [
@@ -91,6 +91,9 @@ foreach ($blockedPatterns as $blocked) {
         $message .= "1. Have you checked log/app-*.log for the actual error?\n";
         $message .= "2. Does the log show a deployment/server issue, or an application bug?\n";
         $message .= "3. What is the EXACT error message from the logs?\n\n";
+        $message .= "Standard troubleshooting tools:\n";
+        $message .= "- Check logs: tail -50 log/app-*.log | grep -i error\n";
+        $message .= "- Reset cache: php scripts/resetcache.php\n\n";
         $message .= "Suggestion: {$blocked['suggestion']}\n\n";
         $message .= "If you've confirmed via logs that this action is necessary, ";
         $message .= "explain the log evidence to the user first.";

@@ -18,6 +18,11 @@
             "type": "command",
             "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/validate-git-commit.php",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/enforce-troubleshooting.php",
+            "timeout": 5
           }
         ]
       }

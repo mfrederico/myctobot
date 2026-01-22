@@ -127,6 +127,18 @@ $permissions = [
 ];
 
 foreach ($permissions as $perm) {
+    // Check if permission already exists (idempotent)
+    $existing = \RedBeanPHP\R::findOne('authcontrol', 'control = ? AND method = ?', [$perm[0], $perm[1]]);
+    if ($existing) {
+        // Optionally update level/description if changed
+        if ($existing->level != $perm[2] || $existing->description != $perm[3]) {
+            $existing->level = $perm[2];
+            $existing->description = $perm[3];
+            \RedBeanPHP\R::store($existing);
+        }
+        continue;
+    }
+
     $bean = \RedBeanPHP\R::dispense('authcontrol');
     $bean->control = $perm[0];
     $bean->method = $perm[1];

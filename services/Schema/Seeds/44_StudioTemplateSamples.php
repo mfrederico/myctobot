@@ -471,9 +471,20 @@ $templates = [
     ]
 ];
 
-// Insert templates
+// Insert templates (idempotent - check by slug)
 foreach ($templates as $tpl) {
-    $bean = \RedBeanPHP\R::dispense('studiotemplates');
+    // Check if template already exists by slug
+    $existing = \RedBeanPHP\R::findOne('studiotemplates', 'slug = ?', [$tpl['slug']]);
+
+    if ($existing) {
+        // Update existing template with new data
+        $bean = $existing;
+    } else {
+        // Create new template
+        $bean = \RedBeanPHP\R::dispense('studiotemplates');
+        $bean->created_at = date('Y-m-d H:i:s');
+    }
+
     $bean->name = $tpl['name'];
     $bean->slug = $tpl['slug'];
     $bean->category = $tpl['category'];
@@ -486,7 +497,6 @@ foreach ($templates as $tpl) {
     $bean->variables_schema_json = json_encode($tpl['variables_schema']);
     $bean->estimated_duration_minutes = $tpl['estimated_duration_minutes'];
     $bean->is_active = 1;
-    $bean->created_at = date('Y-m-d H:i:s');
     $bean->updated_at = date('Y-m-d H:i:s');
     \RedBeanPHP\R::store($bean);
 }

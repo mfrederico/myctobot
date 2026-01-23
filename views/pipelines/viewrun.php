@@ -266,6 +266,71 @@
     </div>
 </div>
 
+<!-- Output Mapping Modal (Interactive Mode) -->
+<div class="modal fade" id="mappingModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-warning-subtle">
+                <h5 class="modal-title">
+                    <i class="bi bi-pause-circle"></i>
+                    Pipeline Paused - Map Output Fields
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <!-- Left: Step Output (JSON Tree) -->
+                    <div class="col-md-6">
+                        <h6><i class="bi bi-braces"></i> Step Output</h6>
+                        <p class="small text-muted">Click a field to add it to mappings</p>
+                        <div id="jsonTreeContainer" class="border rounded p-2 bg-light" style="max-height: 400px; overflow: auto;">
+                            <div class="text-center py-4">
+                                <div class="spinner-border spinner-border-sm text-primary"></div>
+                                <span class="ms-2">Loading output...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Right: Mappings -->
+                    <div class="col-md-6">
+                        <h6><i class="bi bi-arrow-right-circle"></i> Field Mappings</h6>
+                        <p class="small text-muted">Map output fields to context variables for the next step</p>
+
+                        <div id="mappingsList" class="mb-3">
+                            <!-- Dynamically added mappings -->
+                        </div>
+
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addMappingRow()">
+                            <i class="bi bi-plus-lg"></i> Add Mapping
+                        </button>
+
+                        <div class="border-top pt-3">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="checkbox" id="passthroughCheck">
+                                <label class="form-check-label" for="passthroughCheck">
+                                    <strong>Passthrough</strong> - Merge entire output into context
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="saveMappingsCheck">
+                                <label class="form-check-label" for="saveMappingsCheck">
+                                    <strong>Save mappings</strong> - Auto-apply these mappings in future runs
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="cancelMapping()">
+                    <i class="bi bi-x-lg"></i> Cancel Run
+                </button>
+                <button type="button" class="btn btn-primary" onclick="submitMappings()">
+                    <i class="bi bi-play-fill"></i> Continue Pipeline
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
 .step-run-cell {
     cursor: pointer;
@@ -276,31 +341,109 @@
     transform: translateY(-2px);
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
+
+/* JSON Tree Styles */
+.json-tree {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.json-tree ul {
+    list-style: none;
+    padding-left: 1.5em;
+    margin: 0;
+}
+.json-tree > ul {
+    padding-left: 0;
+}
+.json-key {
+    color: #881391;
+    font-weight: 500;
+}
+.json-value {
+    color: #0b7285;
+}
+.json-value.string { color: #0a6640; }
+.json-value.number { color: #d9480f; }
+.json-value.boolean { color: #5c7cfa; }
+.json-value.null { color: #868e96; }
+.json-clickable {
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+.json-clickable:hover {
+    background: #e8f4f8;
+}
+.json-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: inline-block;
+    width: 16px;
+    text-align: center;
+    color: #868e96;
+}
+.json-toggle:hover {
+    color: #228be6;
+}
+
+/* Mapping row */
+.mapping-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+}
+.mapping-row input {
+    flex: 1;
+}
+.mapping-row .source-field {
+    background: #e8f4f8;
+}
 </style>
 
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const runId = <?= $run['id'] ?>;
-const runStatus = '<?= $run['status'] ?>';
+let currentRunStatus = '<?= $run['status'] ?>';
 let pollInterval = null;
+let mappingModalInstance = null;
+let currentPausedStepOutput = null;
 
-// Poll for updates if running
-if (runStatus === 'running' || runStatus === 'pending') {
+// Poll for updates if running or paused
+if (currentRunStatus === 'running' || currentRunStatus === 'pending' || currentRunStatus === 'paused') {
+    // Check immediately for paused state
+    if (currentRunStatus === 'paused') {
+        checkInteractiveStatus();
+    }
     pollInterval = setInterval(pollStatus, 3000);
 }
 
 async function pollStatus() {
     try {
-        const response = await fetch('/pipelines/runstatus/' + runId);
+        // Use interactivestatus endpoint for better pause detection
+        const response = await fetch('/pipelines/interactivestatus/' + runId);
         const data = await response.json();
 
         if (data.success) {
             const run = data.data.run;
 
-            // Update status if changed
-            if (run.status !== runStatus) {
-                location.reload();
+            // Handle paused state - show mapping modal
+            if (run.status === 'paused' && data.data.paused_at_step) {
+                clearInterval(pollInterval);
+                showMappingModal(data.data.paused_at_step, data.data.step_output, data.data.saved_mappings);
                 return;
+            }
+
+            // Update status if changed
+            if (run.status !== currentRunStatus) {
+                if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+                    clearInterval(pollInterval);
+                    location.reload();
+                    return;
+                }
+                currentRunStatus = run.status;
             }
 
             // Update progress
@@ -350,6 +493,199 @@ async function pollStatus() {
         }
     } catch (err) {
         console.error('Poll error:', err);
+    }
+}
+
+// Check for interactive status on page load (for paused runs)
+async function checkInteractiveStatus() {
+    try {
+        const response = await fetch('/pipelines/interactivestatus/' + runId);
+        const data = await response.json();
+
+        if (data.success && data.data.run.status === 'paused' && data.data.paused_at_step) {
+            showMappingModal(data.data.paused_at_step, data.data.step_output, data.data.saved_mappings);
+        }
+    } catch (err) {
+        console.error('Check interactive status error:', err);
+    }
+}
+
+function showMappingModal(pausedStep, stepOutput, savedMappings) {
+    currentPausedStepOutput = stepOutput;
+
+    // Update modal title with step name
+    const modalTitle = document.querySelector('#mappingModal .modal-title');
+    modalTitle.innerHTML = `<i class="bi bi-pause-circle"></i> Paused at: <code>${escapeHtml(pausedStep.step_name)}</code> - Map Output Fields`;
+
+    // Render JSON tree
+    const treeContainer = document.getElementById('jsonTreeContainer');
+    treeContainer.innerHTML = renderJsonTree(stepOutput, '');
+
+    // Clear and populate mappings list
+    const mappingsList = document.getElementById('mappingsList');
+    mappingsList.innerHTML = '';
+
+    if (savedMappings && savedMappings.length > 0) {
+        savedMappings.forEach(m => addMappingRow(m.source, m.target));
+    }
+
+    // Show modal
+    mappingModalInstance = new bootstrap.Modal(document.getElementById('mappingModal'));
+    mappingModalInstance.show();
+}
+
+function renderJsonTree(obj, path, depth = 0) {
+    if (obj === null) {
+        return `<span class="json-value null">null</span>`;
+    }
+    if (typeof obj === 'boolean') {
+        return `<span class="json-value boolean">${obj}</span>`;
+    }
+    if (typeof obj === 'number') {
+        return `<span class="json-value number">${obj}</span>`;
+    }
+    if (typeof obj === 'string') {
+        // Truncate long strings
+        const display = obj.length > 100 ? obj.substring(0, 100) + '...' : obj;
+        return `<span class="json-value string json-clickable" onclick="selectJsonPath('${escapeAttr(path)}')" title="Click to map this field">"${escapeHtml(display)}"</span>`;
+    }
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) return '<span class="json-value">[]</span>';
+
+        let html = '<ul>';
+        obj.forEach((item, index) => {
+            const itemPath = path ? `${path}.${index}` : `${index}`;
+            html += `<li>
+                <span class="json-toggle" onclick="toggleJsonNode(this)">▼</span>
+                <span class="json-key">[${index}]</span>: ${renderJsonTree(item, itemPath, depth + 1)}
+            </li>`;
+        });
+        html += '</ul>';
+        return html;
+    }
+    if (typeof obj === 'object') {
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '<span class="json-value">{}</span>';
+
+        let html = '<ul>';
+        keys.forEach(key => {
+            const keyPath = path ? `${path}.${key}` : key;
+            const value = obj[key];
+            const isExpandable = typeof value === 'object' && value !== null;
+
+            html += `<li>`;
+            if (isExpandable) {
+                html += `<span class="json-toggle" onclick="toggleJsonNode(this)">▼</span>`;
+            } else {
+                html += `<span class="json-toggle"></span>`;
+            }
+            html += `<span class="json-key json-clickable" onclick="selectJsonPath('${escapeAttr(keyPath)}')" title="Click to map: ${escapeAttr(keyPath)}">"${escapeHtml(key)}"</span>: `;
+            html += renderJsonTree(value, keyPath, depth + 1);
+            html += `</li>`;
+        });
+        html += '</ul>';
+        return `<div class="json-tree">${html}</div>`;
+    }
+    return String(obj);
+}
+
+function toggleJsonNode(toggle) {
+    const li = toggle.parentElement;
+    const ul = li.querySelector('ul');
+    if (ul) {
+        if (ul.style.display === 'none') {
+            ul.style.display = '';
+            toggle.textContent = '▼';
+        } else {
+            ul.style.display = 'none';
+            toggle.textContent = '▶';
+        }
+    }
+}
+
+function selectJsonPath(path) {
+    addMappingRow(path, '');
+}
+
+function addMappingRow(source = '', target = '') {
+    const mappingsList = document.getElementById('mappingsList');
+
+    const row = document.createElement('div');
+    row.className = 'mapping-row';
+    row.innerHTML = `
+        <input type="text" class="form-control form-control-sm source-field" placeholder="source.path" value="${escapeAttr(source)}" readonly>
+        <i class="bi bi-arrow-right text-muted"></i>
+        <input type="text" class="form-control form-control-sm target-field" placeholder="variable_name" value="${escapeAttr(target)}">
+        <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.parentElement.remove()">
+            <i class="bi bi-trash"></i>
+        </button>
+    `;
+
+    mappingsList.appendChild(row);
+
+    // Focus the target input
+    row.querySelector('.target-field').focus();
+}
+
+function getMappings() {
+    const mappings = [];
+    document.querySelectorAll('.mapping-row').forEach(row => {
+        const source = row.querySelector('.source-field').value.trim();
+        const target = row.querySelector('.target-field').value.trim();
+        if (source && target) {
+            mappings.push({ source, target });
+        }
+    });
+    return mappings;
+}
+
+async function submitMappings() {
+    const mappings = getMappings();
+    const passthrough = document.getElementById('passthroughCheck').checked;
+    const saveMappings = document.getElementById('saveMappingsCheck').checked;
+
+    try {
+        const response = await fetch('/pipelines/submitmappings/' + runId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                mappings: JSON.stringify(mappings),
+                passthrough: passthrough ? '1' : '0',
+                save_mappings: saveMappings ? '1' : '0'
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Close modal and resume polling
+            if (mappingModalInstance) {
+                mappingModalInstance.hide();
+            }
+
+            // Reload page to see updated state
+            location.reload();
+        } else {
+            alert('Error: ' + (result.error || 'Failed to submit mappings'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+async function cancelMapping() {
+    if (!confirm('Are you sure you want to cancel this run?')) {
+        return;
+    }
+
+    await cancelRun();
+
+    if (mappingModalInstance) {
+        mappingModalInstance.hide();
     }
 }
 
@@ -411,6 +747,20 @@ function showStepDetail(stepRunId) {
                 <strong>Error:</strong> ${escapeHtml(step.error_message)}
             </div>
         `;
+
+        // Show input when there's an error (helpful for debugging jq, parsers, etc.)
+        if (step.input && Object.keys(step.input).length > 0) {
+            // Check if input has stdin (raw input) or is an object
+            const inputDisplay = step.input.stdin
+                ? step.input.stdin
+                : JSON.stringify(step.input, null, 2);
+            html += `
+                <div class="mb-3">
+                    <strong>Input (STDIN):</strong>
+                    <pre class="bg-warning-subtle text-dark p-2 rounded" style="max-height: 200px; overflow: auto;">${escapeHtml(inputDisplay)}</pre>
+                </div>
+            `;
+        }
     }
 
     if (step.exit_code !== null) {
@@ -470,6 +820,11 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function escapeAttr(text) {
+    if (!text) return '';
+    return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 async function cancelRun() {

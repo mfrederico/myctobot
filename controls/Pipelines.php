@@ -15,63 +15,12 @@ use \Flight as Flight;
 use \app\Bean;
 use \app\WorkspaceResolver;
 use \app\services\ApiAuthService;
+use \app\services\StepTypeRegistry;
 use \Exception as Exception;
 
-class Pipelines extends BaseControls\Control {
+require_once __DIR__ . '/../services/StepTypeRegistry.php';
 
-    /**
-     * Available step types
-     */
-    private const STEP_TYPES = [
-        'ai_agent' => [
-            'label' => 'AI Agent',
-            'description' => 'Run an AI agent (impl, verify, fix, or custom)',
-            'icon' => 'bi-robot',
-            'color' => 'primary'
-        ],
-        'script' => [
-            'label' => 'Script',
-            'description' => 'Pull and execute a script from a repo',
-            'icon' => 'bi-file-code',
-            'color' => 'info'
-        ],
-        'direct_exec' => [
-            'label' => 'Shell Command',
-            'description' => 'Execute a shell command with stdin/stdout',
-            'icon' => 'bi-terminal',
-            'color' => 'dark'
-        ],
-        'parser' => [
-            'label' => 'Parser',
-            'description' => 'Transform data (jq, php, custom)',
-            'icon' => 'bi-braces',
-            'color' => 'warning'
-        ],
-        'webhook_out' => [
-            'label' => 'Webhook',
-            'description' => 'POST to an external service',
-            'icon' => 'bi-send',
-            'color' => 'success'
-        ],
-        'wait' => [
-            'label' => 'Wait',
-            'description' => 'Wait for external event or approval',
-            'icon' => 'bi-hourglass-split',
-            'color' => 'secondary'
-        ],
-        'harvest' => [
-            'label' => 'Harvest',
-            'description' => 'Gather results from parallel rows',
-            'icon' => 'bi-collection',
-            'color' => 'success'
-        ],
-        'mcp_call' => [
-            'label' => 'MCP Call',
-            'description' => 'Call a tool on an external MCP server',
-            'icon' => 'bi-plug',
-            'color' => 'purple'
-        ]
-    ];
+class Pipelines extends BaseControls\Control {
 
     /**
      * Available trigger types
@@ -276,7 +225,7 @@ class Pipelines extends BaseControls\Control {
                 'step_name' => $step->step_name,
                 'label' => $step->label,
                 'step_type' => $step->step_type,
-                'type_info' => self::STEP_TYPES[$step->step_type] ?? null,
+                'type_info' => StepTypeRegistry::get($step->step_type),
                 'config' => json_decode($step->config_json ?: '{}', true),
                 'input_source' => $step->input_source,
                 'input_config' => json_decode($step->input_config_json ?: '{}', true),
@@ -349,13 +298,27 @@ class Pipelines extends BaseControls\Control {
             ];
         }
 
-        // Build webhook URL for this pipeline
-        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
-        $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
-        $webhookUrl = "{$baseUrl}/pipein/{$workspaceSlug}/{$pipeline->slug}";
+        // Get available Shopify connections for shopify_graphql step type
+        $shopifyConnections = Bean::find('shopifyconnections',
+            ' enabled = 1 AND (created_by_member_id = ? OR shared = 1) ORDER BY shop_name ASC ',
+            [$this->member->id]
+        );
 
-        // Build MCP tool URL for this pipeline
-        $mcpToolsUrl = "{$baseUrl}/pipelines/mcp/tools/{$workspaceSlug}";
+        // Build webhook URL for this pipeline
+        // If using subdomain routing, workspace is in subdomain, not path
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+        $subdomainWorkspace = $_SERVER['WORKSPACE'] ?? null;
+        $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
+
+        if ($subdomainWorkspace) {
+            // Subdomain routing: https://gwt.myctobot.ai/pipein/{slug}
+            $webhookUrl = "https://{$subdomainWorkspace}.myctobot.ai/pipein/{$pipeline->slug}";
+            $mcpToolsUrl = "https://{$subdomainWorkspace}.myctobot.ai/pipelines/mcp/tools";
+        } else {
+            // Path routing: https://myctobot.ai/pipein/{workspace}/{slug}
+            $webhookUrl = "{$baseUrl}/pipein/{$workspaceSlug}/{$pipeline->slug}";
+            $mcpToolsUrl = "{$baseUrl}/pipelines/mcp/tools/{$workspaceSlug}";
+        }
 
         $this->viewData['title'] = 'Edit Pipeline: ' . $pipeline->name;
         $this->viewData['pipeline'] = [
@@ -377,13 +340,15 @@ class Pipelines extends BaseControls\Control {
         $this->viewData['workspaceSlug'] = $workspaceSlug;
         $this->viewData['stepGrid'] = $stepGrid;
         $this->viewData['maxRow'] = $maxRow;
-        $this->viewData['stepTypes'] = self::STEP_TYPES;
+        $this->viewData['stepTypes'] = StepTypeRegistry::getAll();
+        $this->viewData['stepTypesGrouped'] = StepTypeRegistry::getAll(true);
         $this->viewData['triggerTypes'] = self::TRIGGER_TYPES;
         $this->viewData['agents'] = $agentList;
         $this->viewData['repos'] = $repoList;
         $this->viewData['runners'] = $runnerList;
         $this->viewData['workstations'] = $workstationList;
         $this->viewData['mcpServers'] = $mcpServerList;
+        $this->viewData['shopifyConnections'] = $shopifyConnections;
         $this->viewData['webhookUrl'] = $webhookUrl;
 
         $this->render('pipelines/edit', $this->viewData);
@@ -569,7 +534,7 @@ class Pipelines extends BaseControls\Control {
         }
 
         // Validate step type
-        if (!isset(self::STEP_TYPES[$stepType])) {
+        if (!StepTypeRegistry::get($stepType)) {
             Flight::jsonError('Invalid step type', 400);
             return;
         }
@@ -668,6 +633,232 @@ class Pipelines extends BaseControls\Control {
         Bean::trash($step);
 
         Flight::jsonSuccess(['message' => 'Step deleted']);
+    }
+
+    /**
+     * Move a step to a new row/col position
+     * If target cell is occupied, swap positions
+     */
+    public function movestep($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $stepId = (int) $this->getParam('step_id', 0);
+        $targetRow = (int) $this->getParam('target_row', 0);
+        $targetCol = (int) $this->getParam('target_col', 0);
+
+        $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
+        if (!$pipeline) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        $step = Bean::findOne('pipelinesteps', 'id = ? AND pipelines_id = ?', [$stepId, $pipelineId]);
+        if (!$step) {
+            Flight::jsonError('Step not found', 404);
+            return;
+        }
+
+        $sourceRow = $step->row;
+        $sourceCol = $step->col;
+
+        // Check if target cell is occupied
+        $targetStep = Bean::findOne('pipelinesteps',
+            'pipelines_id = ? AND row = ? AND col = ? AND id != ?',
+            [$pipelineId, $targetRow, $targetCol, $stepId]
+        );
+
+        if ($targetStep) {
+            // Swap positions
+            $targetStep->row = $sourceRow;
+            $targetStep->col = $sourceCol;
+            $targetStep->sequence = ($sourceRow * 100) + $sourceCol;
+            $targetStep->updated_at = date('Y-m-d H:i:s');
+            Bean::store($targetStep);
+        }
+
+        // Move the dragged step
+        $step->row = $targetRow;
+        $step->col = $targetCol;
+        $step->sequence = ($targetRow * 100) + $targetCol;
+        $step->updated_at = date('Y-m-d H:i:s');
+        Bean::store($step);
+
+        // Update pipeline timestamp
+        $pipeline->updated_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        Flight::jsonSuccess([
+            'message' => $targetStep ? 'Steps swapped' : 'Step moved',
+            'swapped' => (bool) $targetStep,
+            'step_id' => $stepId,
+            'new_row' => $targetRow,
+            'new_col' => $targetCol
+        ]);
+    }
+
+    /**
+     * Toggle all steps in a row (enable/disable)
+     */
+    public function togglerow($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $row = (int) $this->getParam('row', 0);
+        $enable = filter_var($this->getParam('enable', true), FILTER_VALIDATE_BOOLEAN);
+
+        $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
+        if (!$pipeline) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        // Find all steps in this row
+        $steps = Bean::find('pipelinesteps', 'pipelines_id = ? AND row = ?', [$pipelineId, $row]);
+
+        if (empty($steps)) {
+            Flight::jsonError('No steps found in this row', 404);
+            return;
+        }
+
+        $count = 0;
+        foreach ($steps as $step) {
+            $step->is_active = $enable ? 1 : 0;
+            $step->updated_at = date('Y-m-d H:i:s');
+            Bean::store($step);
+            $count++;
+        }
+
+        // Update pipeline timestamp
+        $pipeline->updated_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        Flight::jsonSuccess([
+            'message' => sprintf('%d steps %s', $count, $enable ? 'enabled' : 'disabled'),
+            'row' => $row,
+            'enabled' => $enable,
+            'count' => $count
+        ]);
+    }
+
+    /**
+     * Test a shell command (AJAX)
+     * Executes the command locally and returns output
+     */
+    public function testcommand($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+        $command = trim($input['command'] ?? '');
+        $executor = trim($input['executor'] ?? '/bin/bash -c');
+        $workingDir = trim($input['working_dir'] ?? '/tmp');
+
+        if (empty($command)) {
+            Flight::jsonError('No command specified', 400);
+            return;
+        }
+
+        // Security: limit command length and timeout
+        if (strlen($command) > 10000) {
+            Flight::jsonError('Command too long', 400);
+            return;
+        }
+
+        // Build the full command
+        if (!empty($executor)) {
+            $fullCommand = $executor . ' ' . escapeshellarg($command);
+        } else {
+            $fullCommand = $command;
+        }
+
+        // Change to working directory
+        $originalDir = getcwd();
+        if (!empty($workingDir) && is_dir($workingDir)) {
+            chdir($workingDir);
+        }
+
+        try {
+            // Execute with timeout (5 seconds for test)
+            $descriptors = [
+                0 => ['pipe', 'r'],  // stdin
+                1 => ['pipe', 'w'],  // stdout
+                2 => ['pipe', 'w'],  // stderr
+            ];
+
+            $process = proc_open($fullCommand, $descriptors, $pipes);
+
+            if (!is_resource($process)) {
+                Flight::jsonError('Failed to start command', 500);
+                return;
+            }
+
+            // Close stdin
+            fclose($pipes[0]);
+
+            // Set non-blocking and read with timeout
+            stream_set_blocking($pipes[1], false);
+            stream_set_blocking($pipes[2], false);
+
+            $stdout = '';
+            $stderr = '';
+            $timeout = 5; // 5 seconds
+            $startTime = time();
+
+            while (true) {
+                $status = proc_get_status($process);
+                if (!$status['running']) {
+                    break;
+                }
+                if (time() - $startTime > $timeout) {
+                    proc_terminate($process, 9);
+                    Flight::json([
+                        'success' => false,
+                        'error' => 'Command timed out (5 second limit)',
+                        'output' => $stdout . $stderr
+                    ]);
+                    return;
+                }
+                $stdout .= stream_get_contents($pipes[1]);
+                $stderr .= stream_get_contents($pipes[2]);
+                usleep(10000); // 10ms
+            }
+
+            // Read any remaining output
+            $stdout .= stream_get_contents($pipes[1]);
+            $stderr .= stream_get_contents($pipes[2]);
+
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+
+            $exitCode = proc_close($process);
+
+            $output = trim($stdout);
+            if (!empty($stderr)) {
+                $output .= ($output ? "\n\n" : '') . "STDERR:\n" . trim($stderr);
+            }
+
+            Flight::json([
+                'success' => $exitCode === 0,
+                'exit_code' => $exitCode,
+                'output' => $output ?: '(no output)',
+                'error' => $exitCode !== 0 ? "Command exited with code {$exitCode}" : null
+            ]);
+
+        } finally {
+            chdir($originalDir);
+        }
     }
 
     /**
@@ -1466,6 +1657,382 @@ class Pipelines extends BaseControls\Control {
                 'completed_at' => $run->completed_at
             ],
             'steps' => $stepStatuses
+        ]);
+    }
+
+    // =========================================================================
+    // Interactive/Debug Mode (Pause and Map)
+    // =========================================================================
+
+    /**
+     * Trigger an interactive/debug run that pauses after each step
+     *
+     * POST /pipelines/triggerinteractive/{pipeline_id}
+     *
+     * In interactive mode, the pipeline pauses after each step completes,
+     * allowing the user to view the output and map fields to variables
+     * before continuing to the next step.
+     */
+    public function triggerinteractive($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $contextJson = $this->getParam('context', '{}');
+
+        $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
+        if (!$pipeline) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        if (!$pipeline->is_active) {
+            Flight::jsonError('Pipeline is not active', 400);
+            return;
+        }
+
+        // Parse context
+        $triggerData = json_decode($contextJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $triggerData = [];
+        }
+
+        // Count steps
+        $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+        if ($stepCount === 0) {
+            Flight::jsonError('Pipeline has no active steps', 400);
+            return;
+        }
+
+        // Create run with interactive mode enabled
+        $runUid = 'run-' . bin2hex(random_bytes(8));
+
+        $run = Bean::dispense('pipelineruns');
+        $run->run_uid = $runUid;
+        $run->pipelines = $pipeline;
+        $run->member = $this->member;
+        $run->trigger_source = 'interactive';
+        $run->trigger_data_json = json_encode($triggerData);
+        $run->status = 'pending';
+        $run->context_json = $pipeline->default_context_json ?: '{}';
+        $run->steps_total = $stepCount;
+        $run->steps_completed = 0;
+        $run->progress_percent = 0;
+        $run->interactive_mode = 1;  // Enable interactive mode
+        $run->created_at = date('Y-m-d H:i:s');
+        $run->updated_at = date('Y-m-d H:i:s');
+
+        $runId = Bean::store($run);
+
+        // Update pipeline stats
+        $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+        $pipeline->last_run_at = date('Y-m-d H:i:s');
+        Bean::store($pipeline);
+
+        // Spawn background execution
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+        $scriptPath = __DIR__ . '/../scripts/runpipe.php';
+        $cmd = sprintf(
+            'php %s --workspace=%s --run-id=%d > /dev/null 2>&1 &',
+            escapeshellarg($scriptPath),
+            escapeshellarg($workspaceSlug),
+            $runId
+        );
+        exec($cmd);
+
+        Flight::jsonSuccess([
+            'run_id' => $runId,
+            'run_uid' => $runUid,
+            'interactive_mode' => true,
+            'message' => 'Interactive pipeline run started'
+        ]);
+    }
+
+    /**
+     * Submit user mappings for a paused interactive run
+     *
+     * POST /pipelines/submitmappings/{run_id}
+     *
+     * Body:
+     *   mappings: [{"source": "data.field", "target": "variable_name"}, ...]
+     *   passthrough: bool (if true, merge entire output into context)
+     *   save_mappings: bool (if true, save mappings to step for future runs)
+     *
+     * After submitting, the pipeline resumes execution from the next step.
+     */
+    public function submitmappings($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Verify ownership (user who started the run or admin)
+        $isOwner = ($run->member_id == $this->member->id);
+        $isAdmin = Flight::hasLevel(LEVELS['ADMIN'] ?? 50);
+
+        if (!$isOwner && !$isAdmin) {
+            Flight::jsonError('Not authorized to resume this run', 403);
+            return;
+        }
+
+        // Verify run is paused
+        if ($run->status !== 'paused') {
+            Flight::jsonError('Run is not paused (status: ' . $run->status . ')', 400);
+            return;
+        }
+
+        // Get mappings from request
+        $mappingsJson = $this->getParam('mappings', '[]');
+        $mappings = json_decode($mappingsJson, true);
+        if (!is_array($mappings)) {
+            $mappings = [];
+        }
+
+        $passthrough = (bool) $this->getParam('passthrough', false);
+        $saveMappings = (bool) $this->getParam('save_mappings', false);
+
+        // Resume the pipeline
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+        $executor = new \app\services\PipelineExecutor($runId);
+
+        try {
+            $success = $executor->resume($mappings, $passthrough, $saveMappings);
+
+            // Reload run to get current state
+            $run = Bean::load('pipelineruns', $runId);
+
+            Flight::jsonSuccess([
+                'resumed' => true,
+                'status' => $run->status,
+                'message' => $run->status === 'paused'
+                    ? 'Mappings applied, waiting for next step'
+                    : 'Pipeline resumed'
+            ]);
+
+        } catch (\Exception $e) {
+            Flight::jsonError('Resume failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get extended status for an interactive run
+     *
+     * GET /pipelines/interactivestatus/{run_id}
+     *
+     * Returns additional info for paused runs:
+     *   - The step that's awaiting input
+     *   - The step's full output (for mapping UI)
+     *   - Any saved mappings for the step
+     */
+    public function interactivestatus($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Get latest step run statuses
+        $stepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? ORDER BY row ASC, col ASC ',
+            [$run->id]
+        );
+
+        $stepStatuses = [];
+        $awaitingStep = null;
+        $awaitingStepOutput = null;
+        $savedMappings = null;
+
+        foreach ($stepRuns as $sr) {
+            $stepStatuses[$sr->step_name] = [
+                'status' => $sr->status,
+                'row' => (int) $sr->row,
+                'col' => (int) $sr->col,
+                'duration_ms' => $sr->duration_ms,
+                'error_message' => $sr->error_message,
+                'awaiting_input' => (bool) $sr->awaiting_input
+            ];
+
+            // If this step is awaiting input, get its full output
+            if ($sr->awaiting_input) {
+                $awaitingStep = [
+                    'id' => $sr->id,
+                    'step_name' => $sr->step_name,
+                    'row' => (int) $sr->row,
+                    'col' => (int) $sr->col,
+                    'pipelinesteps_id' => $sr->pipelinesteps_id
+                ];
+                $awaitingStepOutput = json_decode($sr->output_json ?: '{}', true);
+
+                // Check for saved mappings on the step definition
+                $stepDef = Bean::load('pipelinesteps', $sr->pipelinesteps_id);
+                if ($stepDef && $stepDef->output_mappings_json) {
+                    $savedMappings = json_decode($stepDef->output_mappings_json, true);
+                }
+            }
+        }
+
+        $result = [
+            'run' => [
+                'id' => $run->id,
+                'status' => $run->status,
+                'current_step_name' => $run->current_step_name,
+                'progress_percent' => $run->progress_percent,
+                'steps_completed' => $run->steps_completed,
+                'steps_total' => $run->steps_total,
+                'error_message' => $run->error_message,
+                'completed_at' => $run->completed_at,
+                'interactive_mode' => (bool) $run->interactive_mode
+            ],
+            'steps' => $stepStatuses
+        ];
+
+        // Add pause/mapping info if run is paused
+        if ($run->status === 'paused' && $awaitingStep) {
+            $result['paused_at_step'] = $awaitingStep;
+            $result['step_output'] = $awaitingStepOutput;
+            if ($savedMappings) {
+                $result['saved_mappings'] = $savedMappings;
+            }
+        }
+
+        Flight::jsonSuccess($result);
+    }
+
+    /**
+     * Get available variables for a step at a given position
+     * Returns variables from previous steps and pipeline context
+     */
+    public function getstepvariables($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $row = (int) $this->getParam('row', 0);
+        $col = (int) $this->getParam('col', 0);
+        $stepId = (int) $this->getParam('step_id', 0);
+
+        $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
+        if (!$pipeline) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        $variables = [
+            'context' => [],
+            'previous_steps' => [],
+            'builtins' => []
+        ];
+
+        // 1. Built-in context variables always available
+        $variables['builtins'] = [
+            ['name' => 'run_id', 'type' => 'integer', 'description' => 'Current run ID'],
+            ['name' => 'run_uid', 'type' => 'string', 'description' => 'Unique run identifier'],
+            ['name' => 'run_directory', 'type' => 'string', 'description' => 'File storage directory for this run'],
+            ['name' => 'pipeline_name', 'type' => 'string', 'description' => 'Pipeline name'],
+            ['name' => 'pipeline_slug', 'type' => 'string', 'description' => 'Pipeline slug'],
+            ['name' => 'started_at', 'type' => 'datetime', 'description' => 'Run start time'],
+            ['name' => 'trigger_source', 'type' => 'string', 'description' => 'What triggered the run'],
+        ];
+
+        // 2. Pipeline input schema variables (if exposed as MCP tool or has defaults)
+        if ($pipeline->input_schema_json) {
+            $schema = json_decode($pipeline->input_schema_json, true);
+            if ($schema && isset($schema['properties'])) {
+                foreach ($schema['properties'] as $propName => $propDef) {
+                    $variables['context'][] = [
+                        'name' => $propName,
+                        'type' => $propDef['type'] ?? 'string',
+                        'description' => $propDef['description'] ?? 'Input parameter',
+                        'required' => in_array($propName, $schema['required'] ?? [])
+                    ];
+                }
+            }
+        }
+
+        // 3. Get all steps that execute before this position
+        // Steps are ordered by row first, then col. Previous steps are those with:
+        // - Lower row number, OR
+        // - Same row but lower column number
+        $allSteps = Bean::find('pipelinesteps',
+            ' pipelines_id = ? ORDER BY row ASC, col ASC ',
+            [$pipelineId]
+        );
+
+        foreach ($allSteps as $step) {
+            // Skip the step we're currently editing
+            if ($step->id == $stepId) continue;
+
+            // Check if this step comes before our position
+            $stepRow = (int) $step->row;
+            $stepCol = (int) $step->col;
+
+            $isBefore = ($stepRow < $row) || ($stepRow === $row && $stepCol < $col);
+            if (!$isBefore) continue;
+
+            $stepVars = [
+                'step_name' => $step->step_name,
+                'label' => $step->label ?: $step->step_name,
+                'row' => $stepRow,
+                'col' => $stepCol,
+                'variables' => []
+            ];
+
+            // Add standard output reference
+            $stepVars['variables'][] = [
+                'path' => $step->step_name . '.output',
+                'type' => 'object',
+                'description' => 'Full output object from this step'
+            ];
+            $stepVars['variables'][] = [
+                'path' => $step->step_name . '.stdout',
+                'type' => 'string',
+                'description' => 'Raw stdout from this step'
+            ];
+            $stepVars['variables'][] = [
+                'path' => $step->step_name . '.status',
+                'type' => 'string',
+                'description' => 'Step status (completed, failed)'
+            ];
+
+            // If step has saved output_mappings_json, show those mapped variables
+            // Mapped variables are added to context and can be accessed as {variable_name}
+            if ($step->output_mappings_json) {
+                $mappings = json_decode($step->output_mappings_json, true);
+                if ($mappings && is_array($mappings)) {
+                    foreach ($mappings as $mapping) {
+                        if (isset($mapping['target'])) {
+                            $stepVars['variables'][] = [
+                                'path' => $mapping['target'],
+                                'type' => 'mapped',
+                                'description' => 'Mapped from ' . $step->step_name . '.' . ($mapping['source'] ?? 'output'),
+                                'source' => $mapping['source'] ?? null
+                            ];
+                        }
+                    }
+                }
+            }
+
+            $variables['previous_steps'][] = $stepVars;
+        }
+
+        Flight::jsonSuccess([
+            'variables' => $variables,
+            'position' => ['row' => $row, 'col' => $col]
         ]);
     }
 

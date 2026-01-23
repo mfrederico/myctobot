@@ -120,8 +120,9 @@ class MailgunService {
      * @param string $markdownContent Markdown content to convert and send
      * @param string $to Primary recipient email
      * @param string|null $cc Comma-separated CC recipients (optional)
+     * @param array $attachments Array of file paths to attach
      */
-    public function sendMarkdownEmail(string $subject, string $markdownContent, string $to, ?string $cc = null): bool {
+    public function sendMarkdownEmail(string $subject, string $markdownContent, string $to, ?string $cc = null, array $attachments = []): bool {
         if (!$this->enabled) {
             return false;
         }
@@ -132,7 +133,7 @@ class MailgunService {
 
         $html = $this->markdownToHtml($markdownContent);
 
-        return $this->send($to, $subject, $html, $markdownContent, $cc);
+        return $this->send($to, $subject, $html, $markdownContent, $cc, $attachments);
     }
 
     /**
@@ -143,13 +144,19 @@ class MailgunService {
      * @param string $html HTML content
      * @param string|null $text Plain text content (optional)
      * @param string|null $cc Comma-separated CC recipients (optional)
+     * @param array $attachments Array of file paths to attach
      */
-    public function send(string $to, string $subject, string $html, ?string $text = null, ?string $cc = null): bool {
+    public function send(string $to, string $subject, string $html, ?string $text = null, ?string $cc = null, array $attachments = []): bool {
         if (!$this->enabled || !$this->client) {
             return false;
         }
 
         $from = "{$this->fromName} <{$this->fromEmail}>";
+
+        // If we have attachments, use multipart form data
+        if (!empty($attachments)) {
+            return $this->sendWithAttachments($to, $subject, $html, $text, $cc, $attachments, $from);
+        }
 
         $formParams = [
             'from' => $from,
@@ -166,6 +173,46 @@ class MailgunService {
 
         $response = $this->client->post("{$this->domain}/messages", [
             'form_params' => $formParams,
+        ]);
+
+        return $response->getStatusCode() === 200;
+    }
+
+    /**
+     * Send an email with attachments using multipart form data
+     */
+    private function sendWithAttachments(string $to, string $subject, string $html, ?string $text, ?string $cc, array $attachments, string $from): bool {
+        $multipart = [
+            ['name' => 'from', 'contents' => $from],
+            ['name' => 'to', 'contents' => $to],
+            ['name' => 'subject', 'contents' => $subject],
+            ['name' => 'html', 'contents' => $this->wrapHtml($html)],
+            ['name' => 'text', 'contents' => $text ?? strip_tags($html)],
+        ];
+
+        if (!empty($cc)) {
+            $multipart[] = ['name' => 'cc', 'contents' => $cc];
+        }
+
+        // Add attachments
+        foreach ($attachments as $filePath) {
+            if (!file_exists($filePath)) {
+                continue;
+            }
+
+            $filename = basename($filePath);
+            $mimeType = mime_content_type($filePath) ?: 'application/octet-stream';
+
+            $multipart[] = [
+                'name' => 'attachment',
+                'contents' => fopen($filePath, 'r'),
+                'filename' => $filename,
+                'headers' => ['Content-Type' => $mimeType]
+            ];
+        }
+
+        $response = $this->client->post("{$this->domain}/messages", [
+            'multipart' => $multipart,
         ]);
 
         return $response->getStatusCode() === 200;

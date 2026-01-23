@@ -16,6 +16,28 @@ use \app\Bean;
 use \RedBeanPHP\R as R;
 use \app\services\AnthropicKeyService;
 
+/**
+ * Exception thrown when a pipeline pauses for user input in interactive mode
+ */
+class PipelinePausedException extends \Exception {
+    private $stepRunId;
+    private $stepOutput;
+
+    public function __construct(int $stepRunId, array $stepOutput = [], string $message = 'Pipeline paused for user input') {
+        parent::__construct($message);
+        $this->stepRunId = $stepRunId;
+        $this->stepOutput = $stepOutput;
+    }
+
+    public function getStepRunId(): int {
+        return $this->stepRunId;
+    }
+
+    public function getStepOutput(): array {
+        return $this->stepOutput;
+    }
+}
+
 class PipelineExecutor {
 
     private int $runId;
@@ -34,9 +56,397 @@ class PipelineExecutor {
     private array $stepsByPosition = [];  // "row.col" => step
     private array $stepsByName = [];      // "step_name" => step
 
+    // Interactive mode - pause after each step for user mapping
+    private bool $interactiveMode = false;
+    private ?int $resumeFromStepIndex = null;  // When resuming, start from this step index
+
+    // File storage for run outputs (images, CSVs, binary files, etc.)
+    private ?string $runDirectory = null;
+    private const RUN_FILES_BASE = '/tmp/pipeline-runs';
+
     public function __construct(int $runId, $logger = null) {
         $this->runId = $runId;
         $this->logger = $logger;
+    }
+
+    /**
+     * Get the directory for this run's file outputs
+     * Creates the directory if it doesn't exist
+     *
+     * @return string Absolute path to run directory
+     */
+    public function getRunDirectory(): string {
+        if ($this->runDirectory === null) {
+            // Load run to get the UID
+            if (!$this->run) {
+                $this->run = Bean::load('pipelineruns', $this->runId);
+            }
+
+            $runUid = $this->run->run_uid ?? "run-{$this->runId}";
+            $this->runDirectory = self::RUN_FILES_BASE . '/' . $runUid;
+
+            // Create directory if it doesn't exist
+            if (!is_dir($this->runDirectory)) {
+                mkdir($this->runDirectory, 0755, true);
+            }
+        }
+
+        return $this->runDirectory;
+    }
+
+    /**
+     * Write content to a file in the run directory
+     *
+     * @param string $filename Filename (will be placed in run directory)
+     * @param string $content File content (can be binary)
+     * @return string Full path to the written file
+     */
+    public function writeRunFile(string $filename, string $content): string {
+        $dir = $this->getRunDirectory();
+        $filePath = $dir . '/' . $filename;
+
+        // Ensure subdirectories exist if filename contains path
+        $fileDir = dirname($filePath);
+        if (!is_dir($fileDir)) {
+            mkdir($fileDir, 0755, true);
+        }
+
+        file_put_contents($filePath, $content);
+        return $filePath;
+    }
+
+    /**
+     * Get list of files in the run directory
+     *
+     * @return array List of file paths
+     */
+    public function getRunFiles(): array {
+        $dir = $this->getRunDirectory();
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $files = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $files[] = $file->getPathname();
+            }
+        }
+
+        return $files;
+    }
+
+    /**
+     * Clean up run directory (call after run completes if cleanup is desired)
+     *
+     * @param bool $force Force cleanup even if files exist
+     * @return bool Success
+     */
+    public function cleanupRunDirectory(bool $force = false): bool {
+        $dir = $this->getRunDirectory();
+        if (!is_dir($dir)) {
+            return true;
+        }
+
+        // Remove all files recursively
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isDir()) {
+                rmdir($file->getPathname());
+            } else {
+                unlink($file->getPathname());
+            }
+        }
+
+        return rmdir($dir);
+    }
+
+    /**
+     * Check if this run is in interactive mode
+     */
+    public function isInteractiveMode(): bool {
+        return $this->interactiveMode;
+    }
+
+    /**
+     * Resume a paused interactive run after user submits mappings
+     *
+     * @param array $mappings User's field mappings: [['source' => 'data.field', 'target' => 'var_name'], ...]
+     * @param bool $passthrough If true, merge entire output into context
+     * @param bool $saveMappings If true, save mappings to step definition for future runs
+     * @return bool Success
+     */
+    public function resume(array $mappings = [], bool $passthrough = false, bool $saveMappings = false): bool {
+        try {
+            // Load run and pipeline
+            $this->run = Bean::load('pipelineruns', $this->runId);
+            if (!$this->run->id) {
+                throw new \Exception("Run not found: {$this->runId}");
+            }
+
+            // Verify run is in paused state
+            if ($this->run->status !== 'paused') {
+                throw new \Exception("Run is not paused (status: {$this->run->status})");
+            }
+
+            $this->pipeline = Bean::load('pipelines', $this->run->pipelines_id);
+            if (!$this->pipeline->id) {
+                throw new \Exception("Pipeline not found for run: {$this->runId}");
+            }
+
+            // Find the step run that's awaiting input
+            $awaitingStepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                [$this->run->id]
+            );
+
+            if (!$awaitingStepRun) {
+                throw new \Exception("No step awaiting input found");
+            }
+
+            // Load context from run
+            $this->context = json_decode($this->run->context_json ?: '{}', true);
+
+            // Apply user mappings to context
+            $stepOutput = json_decode($awaitingStepRun->output_json ?: '{}', true);
+            $this->applyUserMappings($stepOutput, $mappings, $passthrough);
+
+            // Store user mappings on the step run record
+            $awaitingStepRun->user_mappings_json = json_encode($mappings);
+            $awaitingStepRun->passthrough = $passthrough ? 1 : 0;
+            $awaitingStepRun->awaiting_input = 0;
+            $awaitingStepRun->updated_at = date('Y-m-d H:i:s');
+            Bean::store($awaitingStepRun);
+
+            // If save mappings requested, save to step definition for auto-apply in future runs
+            if ($saveMappings && count($mappings) > 0) {
+                $stepDef = Bean::load('pipelinesteps', $awaitingStepRun->pipelinesteps_id);
+                if ($stepDef->id) {
+                    $stepDef->output_mappings_json = json_encode($mappings);
+                    $stepDef->auto_passthrough = $passthrough ? 1 : 0;
+                    $stepDef->updated_at = date('Y-m-d H:i:s');
+                    Bean::store($stepDef);
+                }
+            }
+
+            // Update context on run
+            $this->run->context_json = json_encode($this->context);
+            $this->run->status = 'running';
+            $this->run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($this->run);
+
+            // Find which step to resume from (next step after the paused one)
+            $this->loadStepLookups();
+            $stepsArray = array_values($this->steps);
+
+            // Find index of paused step
+            $pausedStepIndex = null;
+            foreach ($stepsArray as $idx => $step) {
+                if ($step->id == $awaitingStepRun->pipelinesteps_id) {
+                    $pausedStepIndex = $idx;
+                    break;
+                }
+            }
+
+            if ($pausedStepIndex === null) {
+                throw new \Exception("Could not find paused step in step list");
+            }
+
+            // Store the paused step's output for reference by other steps
+            $pausedStep = $stepsArray[$pausedStepIndex];
+            $this->stepOutputs[$pausedStep->step_name] = $stepOutput;
+
+            // Load outputs from all completed steps before the paused one
+            $this->loadCompletedStepOutputs();
+
+            // Resume from next step
+            $this->resumeFromStepIndex = $pausedStepIndex + 1;
+            $this->interactiveMode = (bool) $this->run->interactive_mode;
+
+            $this->log('info', "Resuming pipeline from step index {$this->resumeFromStepIndex}");
+
+            // Continue execution
+            $this->executeSteps();
+
+            return true;
+
+        } catch (PipelinePausedException $e) {
+            // Another step needs user input - this is expected in interactive mode
+            $this->log('info', "Pipeline paused again at step run " . $e->getStepRunId());
+            return true;
+
+        } catch (\Exception $e) {
+            $this->log('error', "Resume failed: " . $e->getMessage());
+            $this->completeRun('failed', $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Apply user mappings to context
+     *
+     * @param array $stepOutput The step's output data
+     * @param array $mappings Array of ['source' => 'path.to.field', 'target' => 'variable_name']
+     * @param bool $passthrough If true, merge entire output into context
+     */
+    private function applyUserMappings(array $stepOutput, array $mappings, bool $passthrough): void {
+        // Passthrough: merge entire output into context
+        if ($passthrough) {
+            $this->context = array_merge($this->context, $stepOutput);
+            $this->log('info', "Applied passthrough - merged " . count($stepOutput) . " keys into context");
+        }
+
+        // Apply individual mappings
+        foreach ($mappings as $mapping) {
+            $source = $mapping['source'] ?? '';
+            $target = $mapping['target'] ?? '';
+
+            if (empty($source) || empty($target)) {
+                continue;
+            }
+
+            // Get value from step output using dot notation
+            $value = $this->getNestedValue($stepOutput, $source);
+
+            if ($value !== null) {
+                // Set in context (supports dot notation for nested targets)
+                $this->setNestedValue($this->context, $target, $value);
+                $this->log('info', "Mapped {$source} => {$target}");
+            }
+        }
+    }
+
+    /**
+     * Set a nested value in an array using dot notation
+     */
+    private function setNestedValue(array &$data, string $path, $value): void {
+        $keys = explode('.', $path);
+        $current = &$data;
+
+        foreach ($keys as $i => $key) {
+            if ($i === count($keys) - 1) {
+                $current[$key] = $value;
+            } else {
+                if (!isset($current[$key]) || !is_array($current[$key])) {
+                    $current[$key] = [];
+                }
+                $current = &$current[$key];
+            }
+        }
+    }
+
+    /**
+     * Check if pipeline should pause after a step (interactive mode)
+     */
+    private function shouldPauseAfterStep($step): bool {
+        if (!$this->interactiveMode) {
+            return false;
+        }
+
+        // Check if step has saved mappings that should auto-apply
+        $stepDef = Bean::load('pipelinesteps', $step->id);
+        if ($stepDef->output_mappings_json) {
+            $savedMappings = json_decode($stepDef->output_mappings_json, true);
+            if (!empty($savedMappings)) {
+                // Has saved mappings - auto-apply them instead of pausing
+                return false;
+            }
+        }
+
+        // Pause for user input
+        return true;
+    }
+
+    /**
+     * Pause the pipeline for user input
+     *
+     * @throws PipelinePausedException
+     */
+    private function pauseForInput($step, $stepRun, array $stepOutput): void {
+        $this->log('info', "Pausing for user input at step: {$step->step_name}");
+
+        // Mark step run as awaiting input
+        $stepRun->awaiting_input = 1;
+        $stepRun->updated_at = date('Y-m-d H:i:s');
+        Bean::store($stepRun);
+
+        // Mark run as paused
+        $this->run->status = 'paused';
+        $this->run->context_json = json_encode($this->context);
+        $this->run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($this->run);
+
+        throw new PipelinePausedException($stepRun->id, $stepOutput);
+    }
+
+    /**
+     * Auto-apply saved mappings from step definition
+     */
+    private function autoApplySavedMappings($step, array $stepOutput): void {
+        $stepDef = Bean::load('pipelinesteps', $step->id);
+        if (!$stepDef->output_mappings_json) {
+            return;
+        }
+
+        $savedMappings = json_decode($stepDef->output_mappings_json, true);
+        if (empty($savedMappings)) {
+            return;
+        }
+
+        $passthrough = (bool) $stepDef->auto_passthrough;
+
+        $this->log('info', "Auto-applying saved mappings for step: {$step->step_name}");
+        $this->applyUserMappings($stepOutput, $savedMappings, $passthrough);
+    }
+
+    /**
+     * Load step lookups (for resume)
+     */
+    private function loadStepLookups(): void {
+        // Load column names from pipeline
+        $columns = json_decode($this->pipeline->columns_json ?: '[]', true);
+        foreach ($columns as $index => $name) {
+            $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $name));
+            $this->columnNames[$index] = $slug;
+            $this->columnIndices[$slug] = $index;
+        }
+
+        // Load steps ordered by sequence
+        $this->steps = Bean::find('pipelinesteps',
+            ' pipelines_id = ? AND is_active = 1 ORDER BY sequence ASC ',
+            [$this->pipeline->id]
+        );
+
+        // Build step lookup maps
+        foreach ($this->steps as $step) {
+            $row = (int) $step->row;
+            $col = (int) $step->col;
+            $this->stepsByPosition["{$row}.{$col}"] = $step;
+            $this->stepsByName[$step->step_name] = $step;
+        }
+    }
+
+    /**
+     * Load outputs from completed step runs (for resume)
+     */
+    private function loadCompletedStepOutputs(): void {
+        $completedStepRuns = Bean::find('pipelinestepruns',
+            ' pipelineruns_id = ? AND status = ? ORDER BY id ASC ',
+            [$this->run->id, 'success']
+        );
+
+        foreach ($completedStepRuns as $sr) {
+            $output = json_decode($sr->output_json ?: '{}', true);
+            $this->stepOutputs[$sr->step_name] = $output;
+        }
     }
 
     /**
@@ -61,37 +471,33 @@ class PipelineExecutor {
                 return false;
             }
 
-            // Load column names from pipeline
-            $columns = json_decode($this->pipeline->columns_json ?: '[]', true);
-            foreach ($columns as $index => $name) {
-                $slug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $name));
-                $this->columnNames[$index] = $slug;
-                $this->columnIndices[$slug] = $index;
+            // Check for interactive mode
+            $this->interactiveMode = (bool) ($this->run->interactive_mode ?? false);
+            if ($this->interactiveMode) {
+                $this->log('info', "Running in interactive mode");
             }
 
-            // Load steps ordered by sequence
-            $this->steps = Bean::find('pipelinesteps',
-                ' pipelines_id = ? AND is_active = 1 ORDER BY sequence ASC ',
-                [$this->pipeline->id]
-            );
+            // Load step lookups (column names, steps, etc.)
+            $this->loadStepLookups();
 
             if (empty($this->steps)) {
                 $this->completeRun('completed', 'No active steps to execute');
                 return true;
             }
 
-            // Build step lookup maps
-            foreach ($this->steps as $step) {
-                $row = (int) $step->row;
-                $col = (int) $step->col;
-                $this->stepsByPosition["{$row}.{$col}"] = $step;
-                $this->stepsByName[$step->step_name] = $step;
-            }
-
             // Initialize context from pipeline defaults and trigger data
             $defaultContext = json_decode($this->pipeline->default_context_json ?: '{}', true);
             $triggerData = json_decode($this->run->trigger_data_json ?: '{}', true);
             $this->context = array_merge($defaultContext, $triggerData);
+
+            // Add built-in context variables
+            $this->context['run_id'] = $this->run->id;
+            $this->context['run_uid'] = $this->run->run_uid;
+            $this->context['run_directory'] = $this->getRunDirectory();
+            $this->context['pipeline_name'] = $this->pipeline->name;
+            $this->context['pipeline_slug'] = $this->pipeline->slug;
+            $this->context['started_at'] = date('Y-m-d H:i:s');
+            $this->context['trigger_source'] = $this->run->trigger_source;
 
             // Update run status
             $this->run->status = 'running';
@@ -106,6 +512,11 @@ class PipelineExecutor {
             // Execute steps
             $this->executeSteps();
 
+            return true;
+
+        } catch (PipelinePausedException $e) {
+            // Pipeline paused for user input - this is expected in interactive mode
+            $this->log('info', "Pipeline paused at step run " . $e->getStepRunId());
             return true;
 
         } catch (\Exception $e) {
@@ -151,12 +562,22 @@ class PipelineExecutor {
      *   - handoff:pipeline.step: Hand off to another pipeline and exit
      */
     private function executeSteps(): void {
-        $completedCount = 0;
+        // When resuming, start from the resume index
+        $startIndex = $this->resumeFromStepIndex ?? 0;
+
+        // Calculate completed count from already-completed steps
+        $completedCount = Bean::count('pipelinestepruns',
+            ' pipelineruns_id = ? AND status IN (?, ?, ?) ',
+            [$this->run->id, 'success', 'skipped', 'failure']
+        );
+
         $maxIterations = count($this->steps) * 3;  // Safety limit
         $iterations = 0;
 
         $stepsArray = array_values($this->steps);
-        $currentIndex = 0;
+        $currentIndex = $startIndex;
+
+        $this->log('info', "Starting execution from step index {$currentIndex}, already completed: {$completedCount}");
 
         while ($currentIndex < count($stepsArray) && $iterations < $maxIterations) {
             $iterations++;
@@ -573,6 +994,8 @@ class PipelineExecutor {
 
     /**
      * Execute a step with retry logic
+     *
+     * @throws PipelinePausedException When in interactive mode and step needs user mapping
      */
     private function executeStepWithRetries($step, $stepRun): bool {
         $maxRetries = $step->retry_count ?? 0;
@@ -601,8 +1024,26 @@ class PipelineExecutor {
             $stepRun->duration_ms = (int) (($endTime - $startTime) * 1000);
 
             if ($result['success']) {
+                // Ensure stepOutput is always an array (some step types may return strings)
+                $stepOutput = $result['output'] ?? [];
+                if (!is_array($stepOutput)) {
+                    $stepOutput = ['raw' => $stepOutput];
+                }
+
+                // Always include stdout/stderr in output for variable substitution
+                // This allows {step.stdout} and {step.stderr} to work
+                if (isset($result['stdout'])) {
+                    $stepOutput['stdout'] = $result['stdout'];
+                }
+                if (isset($result['stderr'])) {
+                    $stepOutput['stderr'] = $result['stderr'];
+                }
+                if (isset($result['exit_code'])) {
+                    $stepOutput['exit_code'] = $result['exit_code'];
+                }
+
                 $stepRun->status = 'success';
-                $stepRun->output_json = json_encode($result['output'] ?? []);
+                $stepRun->output_json = json_encode($stepOutput);
                 $stepRun->stdout = $result['stdout'] ?? null;
                 $stepRun->stderr = $result['stderr'] ?? null;
                 $stepRun->exit_code = $result['exit_code'] ?? null;
@@ -611,11 +1052,20 @@ class PipelineExecutor {
                 Bean::store($stepRun);
 
                 // Store output for reference by other steps
-                $this->stepOutputs[$step->step_name] = $result['output'] ?? [];
+                $this->stepOutputs[$step->step_name] = $stepOutput;
 
                 // Merge output into context if configured
-                if (!empty($result['output'])) {
-                    $this->context[$step->step_name] = $result['output'];
+                if (!empty($stepOutput)) {
+                    $this->context[$step->step_name] = $stepOutput;
+                }
+
+                // Interactive mode: check if we should pause for user mapping
+                if ($this->shouldPauseAfterStep($step)) {
+                    // Pause for user input - throws PipelinePausedException
+                    $this->pauseForInput($step, $stepRun, $stepOutput);
+                } else {
+                    // Auto-apply saved mappings (works in both normal and interactive mode)
+                    $this->autoApplySavedMappings($step, $stepOutput);
                 }
 
                 return true;
@@ -681,6 +1131,15 @@ class PipelineExecutor {
 
             case 'schedule_task':
                 return $this->executeScheduleTask($config, $input);
+
+            case 'shopify_graphql':
+                return $this->executeShopifyGraphql($config, $input, $timeout);
+
+            case 'mailgun':
+                return $this->executeMailgun($config, $input);
+
+            case 'file_write':
+                return $this->executeFileWrite($config, $input);
 
             default:
                 return [
@@ -1479,13 +1938,13 @@ class PipelineExecutor {
      * Supports: {context.key}, {step_name.output.key}, {step_name.stdout}
      */
     private function substituteVariables(string $template): string {
-        // Replace context variables
+        // Replace context variables {context.xxx}
         $template = preg_replace_callback('/\{context\.([^}]+)\}/', function($matches) {
             $key = $matches[1];
             return $this->getNestedValue($this->context, $key) ?? '';
         }, $template);
 
-        // Replace step output variables
+        // Replace step output variables {step_name.xxx}
         $template = preg_replace_callback('/\{([a-z_][a-z0-9_]*)\.([^}]+)\}/', function($matches) {
             $stepName = $matches[1];
             $path = $matches[2];
@@ -1495,6 +1954,18 @@ class PipelineExecutor {
             }
 
             return $this->getNestedValue($this->stepOutputs[$stepName], $path) ?? '';
+        }, $template);
+
+        // Replace simple variables {xxx} - look up directly in context
+        // This handles mapped variables like {shopify_store} without requiring context. prefix
+        $template = preg_replace_callback('/\{([a-z_][a-z0-9_]*)\}/', function($matches) {
+            $key = $matches[1];
+            // First check if it's a direct context key
+            if (isset($this->context[$key])) {
+                $value = $this->context[$key];
+                return is_array($value) ? json_encode($value) : $value;
+            }
+            return '';
         }, $template);
 
         return $template;
@@ -1981,5 +2452,461 @@ class PipelineExecutor {
                 'error' => "MCP exception: " . $e->getMessage()
             ];
         }
+    }
+
+    /**
+     * Execute a Shopify GraphQL query
+     *
+     * Config options:
+     *   connection_id  - Shopify connection ID from shopifyconnections table (required)
+     *   query          - GraphQL query string (required)
+     *   variables      - Variables for the query (optional, object/array)
+     *
+     * Example config:
+     *   {
+     *     "connection_id": "{context.shop_id}",
+     *     "query": "query getProducts($first: Int!) { products(first: $first) { edges { node { id title } } } }",
+     *     "variables": { "first": 10 }
+     *   }
+     */
+    private function executeShopifyGraphql(array $config, array $input, int $timeout): array {
+        require_once __DIR__ . '/ShopifyClient.php';
+
+        $connectionId = $config['connection_id'] ?? null;
+        $query = $config['query'] ?? '';
+        $variables = $config['variables'] ?? [];
+
+        // Substitute variables in connection_id (might come from context)
+        if (is_string($connectionId)) {
+            $connectionId = $this->substituteVariables($connectionId);
+            $connectionId = is_numeric($connectionId) ? (int)$connectionId : null;
+        }
+
+        if (empty($connectionId)) {
+            return ['success' => false, 'error' => 'Shopify connection_id is required'];
+        }
+
+        if (empty($query)) {
+            return ['success' => false, 'error' => 'GraphQL query is required'];
+        }
+
+        // Substitute variables in query (allows dynamic queries)
+        $query = $this->substituteVariables($query);
+
+        // Substitute variables in GraphQL variables (allows context values)
+        $processedVariables = [];
+        foreach ($variables as $key => $value) {
+            if (is_string($value)) {
+                $substituted = $this->substituteVariables($value);
+                // Try to convert to appropriate type
+                if (is_numeric($substituted) && !str_contains($substituted, '.')) {
+                    $processedVariables[$key] = (int)$substituted;
+                } elseif (is_numeric($substituted)) {
+                    $processedVariables[$key] = (float)$substituted;
+                } elseif ($substituted === 'true') {
+                    $processedVariables[$key] = true;
+                } elseif ($substituted === 'false') {
+                    $processedVariables[$key] = false;
+                } else {
+                    $processedVariables[$key] = $substituted;
+                }
+            } else {
+                $processedVariables[$key] = $value;
+            }
+        }
+
+        $this->log('info', "Executing Shopify GraphQL", [
+            'connection_id' => $connectionId,
+            'query_length' => strlen($query),
+            'variables' => array_keys($processedVariables)
+        ]);
+
+        try {
+            $client = new ShopifyClient($connectionId);
+
+            if (!$client->isConnected()) {
+                return [
+                    'success' => false,
+                    'error' => "Shopify connection {$connectionId} not found or invalid"
+                ];
+            }
+
+            $result = $client->graphql($query, $processedVariables);
+
+            $this->log('info', "Shopify GraphQL completed", [
+                'success' => $result['success'],
+                'has_errors' => !empty($result['errors'])
+            ]);
+
+            if (!$result['success']) {
+                $errorMessages = [];
+                foreach ($result['errors'] as $error) {
+                    $errorMessages[] = $error['message'] ?? 'Unknown error';
+                }
+                return [
+                    'success' => false,
+                    'error' => 'GraphQL errors: ' . implode('; ', $errorMessages),
+                    'output' => [
+                        'data' => $result['data'],
+                        'errors' => $result['errors'],
+                        'extensions' => $result['extensions']
+                    ]
+                ];
+            }
+
+            return [
+                'success' => true,
+                'output' => [
+                    'data' => $result['data'],
+                    'extensions' => $result['extensions'],
+                    'shop' => $client->getShop()
+                ],
+                'stdout' => json_encode($result['data'], JSON_PRETTY_PRINT)
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "Shopify GraphQL failed: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => "Shopify GraphQL exception: " . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Execute a Mailgun email step
+     *
+     * Config options:
+     *   to           - Recipient email (required). Supports variable substitution.
+     *   cc           - CC recipients (optional)
+     *   subject      - Email subject (required). Supports variable substitution.
+     *   body         - Email body content (required). Supports variable substitution.
+     *   content_type - Content type: 'markdown' (default), 'html', or 'text'
+     */
+    private function executeMailgun(array $config, array $input): array {
+        $to = $this->substituteVariables($config['to'] ?? '', $input);
+        $cc = $this->substituteVariables($config['cc'] ?? '', $input);
+        $subject = $this->substituteVariables($config['subject'] ?? '', $input);
+        $body = $this->substituteVariables($config['body'] ?? '', $input);
+        $contentType = !empty($config['content_type']) ? $config['content_type'] : 'markdown';
+
+        // Parse explicit attachments field
+        $attachments = $this->parseMailgunAttachments($config['attachments'] ?? '', $input);
+
+        // Also extract inline @/path/to/file references from body and add as attachments
+        $body = $this->extractInlineAttachments($body, $attachments);
+
+        if (empty($to)) {
+            return [
+                'success' => false,
+                'error' => 'Mailgun: No recipient (to) specified'
+            ];
+        }
+
+        if (empty($subject)) {
+            return [
+                'success' => false,
+                'error' => 'Mailgun: No subject specified'
+            ];
+        }
+
+        if (empty($body)) {
+            return [
+                'success' => false,
+                'error' => 'Mailgun: No body content specified'
+            ];
+        }
+
+        $this->log('info', "Sending email via Mailgun", [
+            'to' => $to,
+            'cc' => $cc ?: '(none)',
+            'subject' => $subject,
+            'content_type' => $contentType,
+            'attachments' => count($attachments) . ' file(s)'
+        ]);
+
+        try {
+            require_once __DIR__ . '/MailgunService.php';
+            $mailgun = new MailgunService();
+
+            if (!$mailgun->isEnabled()) {
+                return [
+                    'success' => false,
+                    'error' => 'Mailgun is not configured. Please configure it in workspace settings.'
+                ];
+            }
+
+            $success = false;
+            $ccArg = !empty($cc) ? $cc : null;
+
+            if ($contentType === 'markdown') {
+                $success = $mailgun->sendMarkdownEmail($subject, $body, $to, $ccArg, $attachments);
+            } elseif ($contentType === 'html') {
+                $success = $mailgun->send($to, $subject, $body, strip_tags($body), $ccArg, $attachments);
+            } else {
+                // Plain text - wrap in basic HTML
+                $htmlBody = '<pre style="font-family: sans-serif; white-space: pre-wrap;">' . htmlspecialchars($body) . '</pre>';
+                $success = $mailgun->send($to, $subject, $htmlBody, $body, $ccArg, $attachments);
+            }
+
+            if ($success) {
+                $this->log('info', "Email sent successfully", ['to' => $to, 'attachments' => $attachments]);
+                return [
+                    'success' => true,
+                    'output' => [
+                        'sent' => true,
+                        'to' => $to,
+                        'cc' => $cc,
+                        'subject' => $subject,
+                        'attachments' => array_map('basename', $attachments)
+                    ],
+                    'stdout' => "Email sent to {$to}" . (count($attachments) ? " with " . count($attachments) . " attachment(s)" : "")
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'error' => 'Mailgun: Failed to send email'
+                ];
+            }
+
+        } catch (\Exception $e) {
+            $this->log('error', "Mailgun failed: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => "Mailgun exception: " . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Parse Mailgun attachments config into array of file paths
+     *
+     * Supports:
+     *   @{step_name.file}     - Reference to file from a file_write step
+     *   @{context.path}       - Path from context variable
+     *   @/absolute/path.pdf   - Absolute file path
+     *
+     * @param string $attachmentsConfig Raw attachments config (one per line)
+     * @param array $input Input context for variable substitution
+     * @return array Array of resolved, existing file paths
+     */
+    private function parseMailgunAttachments(string $attachmentsConfig, array $input): array {
+        if (empty(trim($attachmentsConfig))) {
+            return [];
+        }
+
+        $attachments = [];
+        $lines = preg_split('/[\r\n]+/', $attachmentsConfig);
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line)) {
+                continue;
+            }
+
+            // Remove @ prefix if present
+            if (str_starts_with($line, '@')) {
+                $line = substr($line, 1);
+            }
+
+            // Substitute variables
+            $filePath = $this->substituteVariables($line, $input);
+
+            // Validate file exists
+            if (!empty($filePath) && file_exists($filePath) && is_file($filePath)) {
+                $attachments[] = $filePath;
+                $this->log('debug', "Mailgun attachment resolved", ['path' => $filePath]);
+            } else {
+                $this->log('warning', "Mailgun attachment not found", ['path' => $filePath, 'original' => $line]);
+            }
+        }
+
+        return $attachments;
+    }
+
+    /**
+     * Extract inline @/path/to/file references from text and add to attachments
+     *
+     * Scans text for patterns like @/tmp/file.txt or @/path/to/file.pdf,
+     * adds valid files to the attachments array, and removes them from the text.
+     *
+     * @param string $text The text to scan (e.g., email body)
+     * @param array &$attachments Reference to attachments array to add to
+     * @return string The text with @/path references removed
+     */
+    private function extractInlineAttachments(string $text, array &$attachments): string {
+        // Match @/path/to/file patterns (absolute paths starting with /)
+        // Supports paths with alphanumeric, dash, underscore, dot, and directory separators
+        $pattern = '/@(\/[a-zA-Z0-9._\/-]+\.[a-zA-Z0-9]+)/';
+
+        $text = preg_replace_callback($pattern, function ($matches) use (&$attachments) {
+            $filePath = $matches[1];
+
+            if (file_exists($filePath) && is_file($filePath)) {
+                $attachments[] = $filePath;
+                $this->log('debug', "Inline attachment extracted from body", ['path' => $filePath]);
+                // Remove the @/path from the text (replace with empty or filename)
+                return ''; // Remove completely
+            }
+
+            // File doesn't exist, leave the text as-is but log warning
+            $this->log('warning', "Inline attachment path not found", ['path' => $filePath]);
+            return $matches[0]; // Keep original text
+        }, $text);
+
+        // Clean up any resulting double newlines or trailing whitespace
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
+        $text = trim($text);
+
+        return $text;
+    }
+
+    /**
+     * Execute a file write step
+     *
+     * Writes content to a file in the run directory.
+     *
+     * Config options:
+     *   filename      - Output filename (supports variable substitution)
+     *   source        - Content source: 'template', 'stdin', 'step_output', 'base64'
+     *   content       - Template content (for source='template')
+     *   source_step   - Step name to get content from (for source='step_output')
+     *   source_field  - Field path within step output (for source='step_output')
+     *   base64_var    - Variable containing base64 content (for source='base64')
+     *   content_type  - MIME type (optional)
+     *   append        - Append to file instead of overwrite (default: false)
+     */
+    private function executeFileWrite(array $config, array $input): array {
+        $filename = $this->substituteVariables($config['filename'] ?? 'output.txt');
+        $source = $config['source'] ?? 'template';
+        $append = (bool) ($config['append'] ?? false);
+        $contentType = $config['content_type'] ?? '';
+
+        // Determine content based on source type
+        $content = '';
+
+        switch ($source) {
+            case 'template':
+                // Template with variable substitution
+                $template = $config['content'] ?? '';
+                $content = $this->substituteVariables($template);
+                break;
+
+            case 'stdin':
+                // Use stdin from input - check multiple sources:
+                // 1. Explicit stdin if set
+                // 2. Previous step's stdout (last step in stepOutputs)
+                $content = $input['stdin'] ?? null;
+
+                if ($content === null && !empty($this->stepOutputs)) {
+                    // Get the most recently completed step's stdout
+                    $lastStepName = array_key_last($this->stepOutputs);
+                    $lastStep = $this->stepOutputs[$lastStepName];
+                    $content = $lastStep['stdout'] ?? ($lastStep['raw'] ?? '');
+                    $this->log('debug', "file_write stdin: using {$lastStepName}.stdout");
+                }
+
+                $content = $content ?? '';
+                if (is_array($content)) {
+                    $content = json_encode($content, JSON_PRETTY_PRINT);
+                }
+                break;
+
+            case 'step_output':
+                // Get content from specific step output
+                $sourceStep = $config['source_step'] ?? '';
+                $sourceField = $config['source_field'] ?? 'stdout';
+
+                if (empty($sourceStep)) {
+                    return ['success' => false, 'error' => 'Source step name required for step_output mode'];
+                }
+
+                if (!isset($this->stepOutputs[$sourceStep])) {
+                    return ['success' => false, 'error' => "Step output not found: {$sourceStep}"];
+                }
+
+                $stepData = $this->stepOutputs[$sourceStep];
+                $content = $this->getNestedValue($stepData, $sourceField) ?? '';
+
+                if (is_array($content)) {
+                    $content = json_encode($content, JSON_PRETTY_PRINT);
+                }
+                break;
+
+            case 'base64':
+                // Decode base64 content
+                $base64Var = $config['base64_var'] ?? '';
+                $base64Content = $this->substituteVariables($base64Var);
+                $content = base64_decode($base64Content);
+
+                if ($content === false) {
+                    return ['success' => false, 'error' => 'Invalid base64 content'];
+                }
+                break;
+
+            default:
+                return ['success' => false, 'error' => "Unknown content source: {$source}"];
+        }
+
+        // Sanitize filename (prevent directory traversal)
+        $filename = basename($filename);
+        if (empty($filename)) {
+            $filename = 'output.txt';
+        }
+
+        try {
+            // Write to run directory
+            $filePath = $this->writeRunFile($filename, $content);
+
+            $this->log('info', "File written: {$filePath}", [
+                'filename' => $filename,
+                'size' => strlen($content),
+                'source' => $source,
+                'content_type' => $contentType
+            ]);
+
+            return [
+                'success' => true,
+                'output' => [
+                    'file' => $filePath,
+                    'filename' => $filename,
+                    'size' => strlen($content),
+                    'content_type' => $contentType ?: $this->guessContentType($filename)
+                ],
+                'stdout' => $filePath
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "File write failed: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => "File write failed: " . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Guess content type from filename extension
+     */
+    private function guessContentType(string $filename): string {
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+
+        $types = [
+            'txt' => 'text/plain',
+            'csv' => 'text/csv',
+            'json' => 'application/json',
+            'xml' => 'application/xml',
+            'html' => 'text/html',
+            'png' => 'image/png',
+            'jpg' => 'image/jpeg',
+            'jpeg' => 'image/jpeg',
+            'gif' => 'image/gif',
+            'pdf' => 'application/pdf',
+            'zip' => 'application/zip',
+            'mp4' => 'video/mp4',
+            'mp3' => 'audio/mpeg',
+        ];
+
+        return $types[$ext] ?? 'application/octet-stream';
     }
 }

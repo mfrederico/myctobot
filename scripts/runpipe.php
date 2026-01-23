@@ -16,6 +16,9 @@
  * # Resume/execute an existing run:
  * php scripts/runpipe.php --workspace=gwt --run-id=456
  *
+ * # Resume a paused interactive run with mappings:
+ * php scripts/runpipe.php --workspace=gwt --run-id=456 --resume --mappings='[{"source":"data.id","target":"item_id"}]'
+ *
  * # With context data:
  * php scripts/runpipe.php --workspace=gwt --pipeline=my-pipeline --context='{"key":"value"}'
  *
@@ -25,6 +28,10 @@
  *   --pipeline      Pipeline slug to run
  *   --pipeline-id   Pipeline ID to run (alternative to slug)
  *   --run-id        Existing run ID to execute (skips creating new run)
+ *   --resume        Resume a paused interactive run (requires --run-id)
+ *   --mappings      JSON array of field mappings for resume (optional)
+ *   --passthrough   Pass entire output to context (for resume)
+ *   --save-mappings Save mappings to step definition for future runs
  *   --context       JSON context data to pass to pipeline
  *   --verbose       Show detailed output
  *   --help          Show this help message
@@ -43,6 +50,10 @@ $options = getopt('', [
     'pipeline:',
     'pipeline-id:',
     'run-id:',
+    'resume',
+    'mappings:',
+    'passthrough',
+    'save-mappings',
     'context:',
     'verbose',
     'help'
@@ -57,6 +68,10 @@ if (isset($options['help'])) {
     echo "  --pipeline      Pipeline slug to run\n";
     echo "  --pipeline-id   Pipeline ID to run (alternative to slug)\n";
     echo "  --run-id        Existing run ID to execute\n";
+    echo "  --resume        Resume a paused interactive run\n";
+    echo "  --mappings      JSON array of field mappings for resume\n";
+    echo "  --passthrough   Pass entire output to context (for resume)\n";
+    echo "  --save-mappings Save mappings to step definition for future runs\n";
     echo "  --context       JSON context data\n";
     echo "  --verbose       Show detailed output\n";
     echo "  --help          Show this help message\n\n";
@@ -64,6 +79,7 @@ if (isset($options['help'])) {
     echo "  php scripts/runpipe.php --workspace=gwt --pipeline=deploy-staging\n";
     echo "  php scripts/runpipe.php --workspace=gwt --pipeline=ci --context='{\"branch\":\"main\"}'\n";
     echo "  php scripts/runpipe.php --workspace=gwt --run-id=123\n";
+    echo "  php scripts/runpipe.php --workspace=gwt --run-id=123 --resume --passthrough\n";
     exit(0);
 }
 
@@ -72,6 +88,10 @@ $workspace = $options['workspace'] ?? null;
 $pipelineSlug = $options['pipeline'] ?? null;
 $pipelineId = $options['pipeline-id'] ?? null;
 $runId = $options['run-id'] ?? null;
+$isResume = isset($options['resume']);
+$mappingsJson = $options['mappings'] ?? '[]';
+$passthrough = isset($options['passthrough']);
+$saveMappings = isset($options['save-mappings']);
 $contextJson = $options['context'] ?? '{}';
 
 if ($verbose) {
@@ -131,9 +151,51 @@ try {
         exit(1);
     }
 
-    // If run-id provided, execute that run directly
+    // If run-id provided, execute or resume that run
     if (!empty($runId)) {
         $runId = (int) $runId;
+
+        // Resume mode: resume a paused interactive run
+        if ($isResume) {
+            if ($verbose) {
+                echo "Resuming paused run ID: {$runId}\n";
+            }
+
+            // Parse mappings
+            $mappings = json_decode($mappingsJson, true);
+            if (!is_array($mappings)) {
+                $mappings = [];
+            }
+
+            if ($verbose) {
+                echo "Mappings: " . json_encode($mappings) . "\n";
+                echo "Passthrough: " . ($passthrough ? 'yes' : 'no') . "\n";
+                echo "Save mappings: " . ($saveMappings ? 'yes' : 'no') . "\n";
+            }
+
+            $executor = new PipelineExecutor($runId);
+            $success = $executor->resume($mappings, $passthrough, $saveMappings);
+
+            // Check final status
+            $run = Bean::load('pipelineruns', $runId);
+
+            if ($verbose) {
+                echo "Run status after resume: {$run->status}\n";
+            }
+
+            if ($run->status === 'paused') {
+                echo "Pipeline paused again (awaiting next mapping)\n";
+                exit(0);  // Successful pause
+            } elseif ($run->status === 'completed') {
+                echo "Pipeline run {$runId} completed\n";
+                exit(0);
+            } else {
+                echo "Pipeline run {$runId} ended with status: {$run->status}\n";
+                exit($run->status === 'failed' ? 1 : 0);
+            }
+        }
+
+        // Normal execution mode
         if ($verbose) {
             echo "Executing existing run ID: {$runId}\n";
         }
@@ -141,7 +203,13 @@ try {
         $executor = new PipelineExecutor($runId);
         $success = $executor->execute();
 
-        if ($success) {
+        // Check final status (may be paused in interactive mode)
+        $run = Bean::load('pipelineruns', $runId);
+
+        if ($run->status === 'paused') {
+            echo "Pipeline paused (awaiting user input)\n";
+            exit(0);  // Successful pause
+        } elseif ($success) {
             echo "Pipeline run {$runId} completed\n";
             exit(0);
         } else {

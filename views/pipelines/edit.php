@@ -17,9 +17,28 @@
             <a href="/pipelines/runs/<?= $pipeline['id'] ?>" class="btn btn-outline-secondary me-2">
                 <i class="bi bi-list-task"></i> View Runs
             </a>
-            <button class="btn btn-success" onclick="triggerPipeline()">
-                <i class="bi bi-play-fill"></i> Run Pipeline
-            </button>
+            <div class="btn-group">
+                <button class="btn btn-success" onclick="triggerPipeline()">
+                    <i class="bi bi-play-fill"></i> Run Pipeline
+                </button>
+                <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                    <span class="visually-hidden">Toggle Dropdown</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="triggerPipeline(); return false;">
+                            <i class="bi bi-play-fill text-success"></i> Run Pipeline
+                        </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                        <a class="dropdown-item" href="#" onclick="triggerInteractive(); return false;">
+                            <i class="bi bi-bug text-warning"></i> Interactive/Debug Run
+                            <small class="d-block text-muted">Pause after each step to map output fields</small>
+                        </a>
+                    </li>
+                </ul>
+            </div>
             <?php endif; ?>
         </div>
     </div>
@@ -260,18 +279,28 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <?php for ($row = 0; $row <= max($maxRow, 0); $row++): ?>
-                        <tr data-row="<?= $row ?>">
+                        <?php for ($row = 0; $row <= max($maxRow, 0); $row++):
+                            // Check if all steps in this row are inactive
+                            $rowSteps = array_filter($stepGrid[$row] ?? [], fn($s) => isset($s['id']));
+                            $rowActive = empty($rowSteps) || array_reduce($rowSteps, fn($carry, $s) => $carry || $s['is_active'], false);
+                        ?>
+                        <tr data-row="<?= $row ?>" class="<?= !$rowActive ? 'row-disabled' : '' ?>">
                             <td class="text-center text-muted align-middle"><?= $row + 1 ?></td>
                             <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
-                            <td class="p-2" data-col="<?= $colIndex ?>">
+                            <td class="p-2 drop-zone" data-row="<?= $row ?>" data-col="<?= $colIndex ?>"
+                                ondragover="handleDragOver(event)" ondrop="handleDrop(event, <?= $row ?>, <?= $colIndex ?>)"
+                                ondragleave="handleDragLeave(event)">
                                 <?php if (isset($stepGrid[$row][$colIndex])): ?>
                                     <?php $step = $stepGrid[$row][$colIndex]; ?>
                                     <div class="step-cell bg-<?= $step['type_info']['color'] ?? 'secondary' ?>-subtle border border-<?= $step['type_info']['color'] ?? 'secondary' ?> rounded p-2 <?= !$step['is_active'] ? 'opacity-50' : '' ?>"
                                          data-step-id="<?= $step['id'] ?>"
+                                         draggable="true"
+                                         ondragstart="handleDragStart(event, <?= $step['id'] ?>, <?= $row ?>, <?= $colIndex ?>)"
+                                         ondragend="handleDragEnd(event)"
                                          onclick="editStep(<?= $step['id'] ?>, <?= $row ?>, <?= $colIndex ?>)">
                                         <div class="d-flex align-items-center mb-1">
-                                            <i class="bi <?= $step['type_info']['icon'] ?? 'bi-square' ?> me-2"></i>
+                                            <i class="bi bi-grip-vertical drag-handle me-1 text-muted"></i>
+                                            <i class="bi <?= $step['type_info']['icon'] ?? 'bi-square' ?> me-1"></i>
                                             <strong class="small"><?= htmlspecialchars($step['label']) ?></strong>
                                         </div>
                                         <code class="small text-muted"><?= htmlspecialchars($step['step_name']) ?></code>
@@ -294,9 +323,16 @@
                             </td>
                             <?php endforeach; ?>
                             <td class="text-center align-middle">
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteRow(<?= $row ?>)" title="Delete Row">
-                                    <i class="bi bi-trash"></i>
-                                </button>
+                                <div class="btn-group-vertical btn-group-sm">
+                                    <button class="btn btn-outline-<?= $rowActive ? 'warning' : 'success' ?>"
+                                            onclick="toggleRow(<?= $row ?>, <?= $rowActive ? 'false' : 'true' ?>)"
+                                            title="<?= $rowActive ? 'Disable Row' : 'Enable Row' ?>">
+                                        <i class="bi bi-<?= $rowActive ? 'pause-circle' : 'play-circle' ?>"></i>
+                                    </button>
+                                    <button class="btn btn-outline-danger" onclick="deleteRow(<?= $row ?>)" title="Delete Row">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
                             </td>
                         </tr>
                         <?php endfor; ?>
@@ -345,343 +381,49 @@
 
                     <div class="mb-3">
                         <label class="form-label">Step Type</label>
-                        <div class="row g-2">
-                            <?php foreach ($stepTypes as $type => $info): ?>
-                            <div class="col-md-4">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="step_type" id="type_<?= $type ?>"
-                                           value="<?= $type ?>" onchange="onStepTypeChange('<?= $type ?>')">
-                                    <label class="form-check-label" for="type_<?= $type ?>">
-                                        <i class="bi <?= $info['icon'] ?> text-<?= $info['color'] ?>"></i>
-                                        <?= $info['label'] ?>
-                                        <small class="d-block text-muted"><?= $info['description'] ?></small>
-                                    </label>
+                        <div class="accordion accordion-flush" id="stepTypeAccordion">
+                            <?php $catIndex = 0; foreach ($stepTypesGrouped as $catKey => $category): $catIndex++; ?>
+                            <div class="accordion-item">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button <?= $catIndex > 1 ? 'collapsed' : '' ?> py-2" type="button"
+                                            data-bs-toggle="collapse" data-bs-target="#stepCat_<?= $catKey ?>">
+                                        <i class="bi <?= $category['icon'] ?> me-2"></i>
+                                        <strong><?= $category['label'] ?></strong>
+                                        <span class="badge bg-secondary ms-2"><?= count($category['types']) ?></span>
+                                    </button>
+                                </h2>
+                                <div id="stepCat_<?= $catKey ?>" class="accordion-collapse collapse <?= $catIndex === 1 ? 'show' : '' ?>"
+                                     data-bs-parent="#stepTypeAccordion">
+                                    <div class="accordion-body py-2">
+                                        <div class="row g-2">
+                                            <?php foreach ($category['types'] as $type => $info): ?>
+                                            <div class="col-md-6">
+                                                <div class="form-check step-type-option" onclick="selectStepType('<?= $type ?>')">
+                                                    <input class="form-check-input" type="radio" name="step_type" id="type_<?= $type ?>"
+                                                           value="<?= $type ?>" onchange="onStepTypeChange('<?= $type ?>')">
+                                                    <label class="form-check-label w-100 cursor-pointer" for="type_<?= $type ?>">
+                                                        <i class="bi <?= $info['icon'] ?> text-<?= $info['color'] ?>"></i>
+                                                        <?= $info['label'] ?>
+                                                        <small class="d-block text-muted"><?= $info['description'] ?></small>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <?php endforeach; ?>
                         </div>
                     </div>
 
-                    <!-- Type-specific config panels -->
+                    <!-- Type-specific config panels (auto-discovered) -->
                     <div id="configPanels">
-                        <!-- AI Agent Config -->
-                        <div class="config-panel" id="config_ai_agent" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Agent</label>
-                                                <select class="form-select" name="config_agent_id">
-                                                    <option value="">Select an agent...</option>
-                                                    <?php foreach ($agents as $agent): ?>
-                                                    <option value="<?= $agent['id'] ?>"><?= htmlspecialchars($agent['name']) ?></option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Runner</label>
-                                                <select class="form-select" name="config_runner_id">
-                                                    <option value="">Default / Auto</option>
-                                                    <?php foreach ($runners as $runner): ?>
-                                                    <option value="<?= $runner['id'] ?>"><?= htmlspecialchars($runner['name']) ?> (<?= $runner['host'] ?>)</option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-0">
-                                        <label class="form-label">Prompt Template</label>
-                                        <textarea class="form-control font-monospace" name="config_prompt" rows="3"
-                                                  placeholder="Execute the task. Context: {context.issue_key}"></textarea>
-                                        <small class="text-muted">Use <code>{context.key}</code> or <code>{step_name.output.key}</code> for variables</small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Direct Exec Config -->
-                        <div class="config-panel" id="config_direct_exec" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label class="form-label">Command / Code</label>
-                                        <textarea class="form-control font-monospace" name="config_command" rows="3"
-                                                  placeholder="echo 'Hello World'"></textarea>
-                                        <small class="text-muted">Use <code>{context.key}</code> or <code>{step_name.output.key}</code> for variables</small>
-                                    </div>
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Executor</label>
-                                                <input type="text" class="form-control font-monospace" name="config_executor"
-                                                       placeholder="/bin/bash -c" list="executorOptions">
-                                                <datalist id="executorOptions">
-                                                    <option value="/bin/bash -c">Bash shell</option>
-                                                    <option value="/bin/zsh -c">Zsh shell</option>
-                                                    <option value="/bin/sh -c">POSIX shell</option>
-                                                    <option value="/usr/bin/python3 -c">Python code</option>
-                                                    <option value="/usr/bin/php -r">PHP code</option>
-                                                    <option value="node -e">Node.js code</option>
-                                                    <option value="">Direct (no wrapper)</option>
-                                                </datalist>
-                                                <small class="text-muted">How to run the command. Default: <code>/bin/bash -c</code></small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Workstation (SSH)</label>
-                                                <select class="form-select" name="config_workstation_id">
-                                                    <option value="">Local execution</option>
-                                                    <?php foreach ($workstations ?? [] as $ws): ?>
-                                                    <option value="<?= $ws['id'] ?>"><?= htmlspecialchars($ws['name']) ?> (<?= $ws['ssh_user'] ?>@<?= $ws['ssh_host'] ?><?= $ws['ssh_port'] != 22 ? ':' . $ws['ssh_port'] : '' ?>)</option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                                <small class="text-muted">Run on remote server via SSH</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-0">
-                                        <label class="form-label">Working Directory</label>
-                                        <input type="text" class="form-control" name="config_working_dir" placeholder="/tmp">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Script Config -->
-                        <div class="config-panel" id="config_script" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Repository</label>
-                                                <select class="form-select" name="config_repo_id">
-                                                    <option value="">Select a repository...</option>
-                                                    <?php foreach ($repos as $repo): ?>
-                                                    <option value="<?= $repo['id'] ?>"><?= htmlspecialchars($repo['name']) ?></option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Script Path</label>
-                                                <input type="text" class="form-control" name="config_script_path" placeholder="scripts/deploy.sh">
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-0">
-                                        <label class="form-label">Arguments</label>
-                                        <input type="text" class="form-control" name="config_script_args" placeholder="--env=staging">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Webhook Out Config -->
-                        <div class="config-panel" id="config_webhook_out" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="mb-3">
-                                        <label class="form-label">URL</label>
-                                        <input type="url" class="form-control" name="config_webhook_url" placeholder="https://api.example.com/webhook">
-                                    </div>
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Method</label>
-                                                <select class="form-select" name="config_webhook_method">
-                                                    <option value="POST">POST</option>
-                                                    <option value="PUT">PUT</option>
-                                                    <option value="PATCH">PATCH</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Headers (JSON)</label>
-                                                <input type="text" class="form-control font-monospace" name="config_webhook_headers"
-                                                       placeholder='{"Authorization": "Bearer ..."}'>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-0">
-                                        <label class="form-label">Body Template (JSON)</label>
-                                        <textarea class="form-control font-monospace" name="config_webhook_body" rows="3"
-                                                  placeholder='{"status": "{prev.output.status}"}'></textarea>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Parser Config -->
-                        <div class="config-panel" id="config_parser" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-4">
-                                            <div class="mb-3">
-                                                <label class="form-label">Parser Type</label>
-                                                <select class="form-select" name="config_parser_type">
-                                                    <option value="jq">jq (JSON)</option>
-                                                    <option value="php">PHP</option>
-                                                    <option value="regex">Regex</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-8">
-                                            <div class="mb-3">
-                                                <label class="form-label">Expression</label>
-                                                <input type="text" class="form-control font-monospace" name="config_parser_expression"
-                                                       placeholder=".data.items[]">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Wait Config -->
-                        <div class="config-panel" id="config_wait" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Wait Type</label>
-                                                <select class="form-select" name="config_wait_type">
-                                                    <option value="delay">Delay (seconds)</option>
-                                                    <option value="approval">Manual Approval</option>
-                                                    <option value="webhook">Wait for Webhook</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Duration (seconds)</label>
-                                                <input type="number" class="form-control" name="config_wait_duration" value="60" min="1">
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Harvest Config -->
-                        <div class="config-panel" id="config_harvest" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Harvest Policy</label>
-                                                <select class="form-select" name="config_harvest_policy">
-                                                    <option value="all_required">All Required - fail if any failed</option>
-                                                    <option value="any_success">Any Success - pass if at least one succeeded</option>
-                                                    <option value="best_effort">Best Effort - always pass, collect results</option>
-                                                </select>
-                                                <small class="text-muted">How to handle incomplete/failed parallel rows</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">On Incomplete</label>
-                                                <select class="form-select" name="config_harvest_on_incomplete">
-                                                    <option value="fail">Fail Pipeline</option>
-                                                    <option value="continue">Continue with Partial Results</option>
-                                                    <option value="goto">Goto Error Handler</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="mb-3">
-                                        <label class="form-label">Output Template (optional, jq expression)</label>
-                                        <textarea class="form-control font-monospace" name="config_harvest_template" rows="3"
-                                                  placeholder='{"artifacts": [.[] | select(.status == "success") | .output]}'></textarea>
-                                        <small class="text-muted">Leave empty for default structure. Use jq to reshape harvested results.</small>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- MCP Call Config -->
-                        <div class="config-panel" id="config_mcp_call" style="display: none;">
-                            <div class="card bg-light mb-3">
-                                <div class="card-body">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">MCP Server</label>
-                                                <select class="form-select" name="config_mcp_server_id" onchange="onMcpServerChange(this)">
-                                                    <option value="">-- Inline Config (no server) --</option>
-                                                    <?php foreach ($mcpServers ?? [] as $server): ?>
-                                                    <option value="<?= $server['id'] ?>" data-type="<?= $server['server_type'] ?>">
-                                                        <?= htmlspecialchars($server['name']) ?> (<?= $server['server_type'] ?>)
-                                                    </option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                                <small class="text-muted">Select a configured MCP server or use inline config</small>
-                                            </div>
-                                        </div>
-                                        <div class="col-md-6">
-                                            <div class="mb-3">
-                                                <label class="form-label">Tool Name</label>
-                                                <input type="text" class="form-control font-monospace" name="config_mcp_tool" placeholder="echo">
-                                                <small class="text-muted">The tool to call on the MCP server</small>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div id="mcpInlineConfig">
-                                        <div class="row">
-                                            <div class="col-md-6">
-                                                <div class="mb-3">
-                                                    <label class="form-label">Transport Type</label>
-                                                    <select class="form-select" name="config_mcp_transport" onchange="onMcpTransportChange(this)">
-                                                        <option value="stdio">stdio (subprocess)</option>
-                                                        <option value="http">HTTP/SSE</option>
-                                                    </select>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6" id="mcpCommandField">
-                                                <div class="mb-3">
-                                                    <label class="form-label">Command</label>
-                                                    <input type="text" class="form-control font-monospace" name="config_mcp_command"
-                                                           placeholder="python scripts/test-mcp-server.py">
-                                                    <small class="text-muted">Command to start the MCP server</small>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6" id="mcpUrlField" style="display: none;">
-                                                <div class="mb-3">
-                                                    <label class="form-label">URL</label>
-                                                    <input type="text" class="form-control font-monospace" name="config_mcp_url"
-                                                           placeholder="http://localhost:8080/mcp">
-                                                    <small class="text-muted">MCP server endpoint URL</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label">Arguments (JSON)</label>
-                                        <textarea class="form-control font-monospace" name="config_mcp_arguments" rows="3"
-                                                  placeholder='{"message": "{context.message}"}'></textarea>
-                                        <small class="text-muted">Tool arguments as JSON. Use <code>{context.key}</code> or <code>{step.output.key}</code> for variables</small>
-                                    </div>
-
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" name="config_mcp_list_tools_only" id="mcpListToolsOnly">
-                                        <label class="form-check-label" for="mcpListToolsOnly">
-                                            List Tools Only (don't call, just return available tools)
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                        <?php foreach ($stepTypes as $type => $info): ?>
+                        <?php if (isset($info['partial_path']) && file_exists($info['partial_path'])): ?>
+                        <?php include $info['partial_path']; ?>
+                        <?php endif; ?>
+                        <?php endforeach; ?>
                     </div>
 
                     <!-- Input Source -->
@@ -698,6 +440,63 @@
                         <label class="form-label">Get From Step</label>
                         <input type="text" class="form-control" name="input_getfrom_step" placeholder="checkout_code">
                         <small class="text-muted">Reference another step's output</small>
+                    </div>
+
+                    <!-- Variable Browser -->
+                    <div class="card bg-light mb-3" id="variableBrowserCard">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center"
+                             data-bs-toggle="collapse" data-bs-target="#variableBrowserPanel"
+                             style="cursor: pointer;" role="button">
+                            <span>
+                                <i class="bi bi-braces"></i> Variable Browser
+                                <span class="badge bg-secondary ms-1" id="variableCount">0</span>
+                            </span>
+                            <i class="bi bi-chevron-down" id="variableBrowserChevron"></i>
+                        </div>
+                        <div class="collapse" id="variableBrowserPanel">
+                            <div class="card-body py-2">
+                                <p class="small text-muted mb-2">
+                                    Click a variable to insert <code>{variable}</code> at cursor, or right-click to copy.
+                                </p>
+
+                                <!-- Built-in Variables -->
+                                <div class="mb-2" id="builtinVarsSection" style="display: none;">
+                                    <strong class="small text-muted">Built-in Context</strong>
+                                    <div class="d-flex flex-wrap gap-1 mt-1" id="builtinVarsList"></div>
+                                </div>
+
+                                <!-- Pipeline Input Variables -->
+                                <div class="mb-2" id="contextVarsSection" style="display: none;">
+                                    <strong class="small text-muted">Pipeline Input</strong>
+                                    <div class="d-flex flex-wrap gap-1 mt-1" id="contextVarsList"></div>
+                                </div>
+
+                                <!-- Previous Step Variables -->
+                                <div id="stepVarsSection" style="display: none;">
+                                    <div class="d-flex align-items-center mb-1">
+                                        <strong class="small text-muted">From Previous Steps</strong>
+                                        <i class="bi bi-question-circle ms-1 text-muted"
+                                           style="cursor: help; font-size: 0.75rem;"
+                                           data-bs-toggle="popover"
+                                           data-bs-trigger="hover focus"
+                                           data-bs-html="true"
+                                           data-bs-content="<strong>.stdout</strong> = Raw text output from the command<br><br><strong>.output</strong> = Parsed/structured data (JSON object)<br><br><strong>.output.field</strong> = Access specific fields from structured output<br><br><em>Example:</em> A shell command's stdout is the raw text, while a Shopify step's output contains parsed data like <code>output.data.shop.name</code>"></i>
+                                    </div>
+                                    <div id="stepVarsList" class="mt-1"></div>
+                                </div>
+
+                                <!-- Loading state -->
+                                <div id="variablesLoading" class="text-center py-2">
+                                    <span class="spinner-border spinner-border-sm"></span>
+                                    <span class="small text-muted ms-1">Loading variables...</span>
+                                </div>
+
+                                <!-- Empty state -->
+                                <div id="variablesEmpty" class="text-center py-2 text-muted small" style="display: none;">
+                                    <i class="bi bi-info-circle"></i> No previous steps - this is the first step.
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Flow Control -->
@@ -788,7 +587,7 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-play-fill"></i> Run Pipeline</h5>
+                <h5 class="modal-title" id="triggerModalLabel"><i class="bi bi-play-fill"></i> Run Pipeline</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -800,7 +599,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-success" onclick="confirmTrigger()">
+                <button type="button" class="btn btn-success" id="triggerModalSubmit" onclick="confirmTrigger()">
                     <i class="bi bi-play-fill"></i> Run
                 </button>
             </div>
@@ -809,6 +608,14 @@
 </div>
 
 <style>
+/* Make placeholders lighter so they don't look like real content */
+#stepModal input::placeholder,
+#stepModal textarea::placeholder,
+#stepModal select::placeholder {
+    color: #adb5bd !important;
+    opacity: 1;
+    font-style: italic;
+}
 .step-cell {
     cursor: pointer;
     transition: all 0.2s;
@@ -828,6 +635,143 @@
 .border-dashed {
     border-style: dashed !important;
 }
+/* Drag and Drop */
+.step-cell[draggable="true"] {
+    cursor: grab;
+}
+.step-cell[draggable="true"]:active {
+    cursor: grabbing;
+}
+.step-cell.dragging {
+    opacity: 0.4;
+    transform: scale(0.95);
+}
+.drop-zone.drag-over {
+    background: #cfe2ff !important;
+}
+.drop-zone.drag-over .step-cell-empty {
+    border-color: #0d6efd !important;
+    background: transparent;
+}
+.drag-handle {
+    cursor: grab;
+    opacity: 0.4;
+}
+.step-cell:hover .drag-handle {
+    opacity: 1;
+}
+/* Row disabled state */
+tr.row-disabled {
+    background: #f8f9fa;
+}
+tr.row-disabled .step-cell {
+    opacity: 0.35;
+}
+tr.row-disabled td:first-child {
+    text-decoration: line-through;
+}
+/* Step type accordion */
+.step-type-option {
+    padding: 8px 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    transition: all 0.15s;
+    cursor: pointer;
+    position: relative;
+}
+.step-type-option:hover {
+    background: #f8f9fa;
+    border-color: #6c757d;
+}
+.step-type-option.selected {
+    background: #e7f1ff;
+    border-color: #0d6efd;
+}
+.step-type-option.selected::after {
+    content: '\f26b';
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    color: #0d6efd;
+    font-size: 0.9rem;
+}
+.step-type-option .form-check-input {
+    display: none;
+}
+.cursor-pointer {
+    cursor: pointer;
+}
+#stepTypeAccordion .accordion-button {
+    background: #f8f9fa;
+}
+#stepTypeAccordion .accordion-button:not(.collapsed) {
+    background: #e7f1ff;
+    color: #0a58ca;
+}
+/* Variable Browser */
+.variable-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    font-size: 0.75rem;
+    font-family: monospace;
+    background: #fff;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+.variable-chip:hover {
+    background: #e7f1ff;
+    border-color: #0d6efd;
+    color: #0d6efd;
+}
+.variable-chip.mapped {
+    background: #d1e7dd;
+    border-color: #198754;
+}
+.variable-chip.mapped:hover {
+    background: #badbcc;
+}
+.variable-chip .bi {
+    font-size: 0.65rem;
+    margin-right: 3px;
+    opacity: 0.6;
+}
+.step-vars-group {
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: #fff;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+}
+.step-vars-group .step-name {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #6c757d;
+    margin-bottom: 4px;
+}
+.step-vars-group .step-vars {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+#variableBrowserPanel.show ~ .card-header #variableBrowserChevron {
+    transform: rotate(180deg);
+}
+.variable-tooltip {
+    position: absolute;
+    z-index: 1070;
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    background: #212529;
+    color: #fff;
+    border-radius: 4px;
+    max-width: 250px;
+    pointer-events: none;
+}
 </style>
 
 <script>
@@ -838,11 +782,25 @@ let stepModal = null;
 document.addEventListener('DOMContentLoaded', function() {
     stepModal = new bootstrap.Modal(document.getElementById('stepModal'));
 
+    // Initialize Bootstrap popovers
+    document.querySelectorAll('[data-bs-toggle="popover"]').forEach(el => {
+        new bootstrap.Popover(el);
+    });
+
     // Input source change handler
     document.getElementById('inputSource').addEventListener('change', function() {
         document.getElementById('getfromConfig').style.display = this.value === 'getfrom' ? 'block' : 'none';
     });
 });
+
+// Select step type (helper for clicking the option div)
+function selectStepType(type) {
+    const radio = document.getElementById('type_' + type);
+    if (radio) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change'));
+    }
+}
 
 function onStepTypeChange(type) {
     // Hide all config panels
@@ -854,6 +812,15 @@ function onStepTypeChange(type) {
     const panel = document.getElementById('config_' + type);
     if (panel) {
         panel.style.display = 'block';
+    }
+
+    // Highlight selected option
+    document.querySelectorAll('.step-type-option').forEach(opt => {
+        opt.classList.remove('selected');
+    });
+    const selectedOption = document.querySelector('.step-type-option:has(#type_' + type + ')');
+    if (selectedOption) {
+        selectedOption.classList.add('selected');
     }
 }
 
@@ -871,10 +838,362 @@ function onMcpTransportChange(select) {
     document.getElementById('mcpUrlField').style.display = transport === 'http' ? 'block' : 'none';
 }
 
+// Shell Command test
+async function testShellCommand() {
+    const command = document.querySelector('[name="config_command"]').value.trim();
+    const executor = document.querySelector('[name="config_executor"]').value.trim() || '/bin/bash -c';
+    const workingDir = document.querySelector('[name="config_working_dir"]').value.trim() || '/tmp';
+
+    if (!command) {
+        alert('Please enter a command to test');
+        return;
+    }
+
+    const btn = document.getElementById('testShellCommandBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Running...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch('/pipelines/testcommand', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ command, executor, working_dir: workingDir })
+        });
+
+        const result = await response.json();
+        const resultDiv = document.getElementById('shellCommandResult');
+        const resultContent = document.getElementById('shellCommandResultContent');
+
+        if (result.success) {
+            resultContent.textContent = result.output || '(no output)';
+            resultContent.className = '';
+        } else {
+            resultContent.textContent = 'Error: ' + (result.error || result.message || 'Command failed') +
+                (result.output ? '\n\nOutput:\n' + result.output : '');
+            resultContent.className = 'text-danger';
+        }
+
+        resultDiv.style.display = 'block';
+    } catch (err) {
+        alert('Error: ' + err.message);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+// Mailgun helpers
+function onMailgunContentTypeChange(select) {
+    // Could show/hide formatting hints based on content type
+}
+
+const mailgunTemplates = {
+    pipeline_success: {
+        subject: 'Pipeline Success: {context.pipeline_name}',
+        body: `# Pipeline Completed Successfully
+
+**Pipeline:** {context.pipeline_name}
+**Run ID:** {context.run_id}
+**Completed:** {context.completed_at}
+
+## Summary
+The pipeline has completed all steps successfully.
+
+---
+*Sent by MyCTOBot Pipelines*`
+    },
+    pipeline_failure: {
+        subject: 'Pipeline Failed: {context.pipeline_name}',
+        body: `# Pipeline Failed
+
+**Pipeline:** {context.pipeline_name}
+**Run ID:** {context.run_id}
+**Failed At:** {context.failed_at}
+
+## Error Details
+**Step:** {context.failed_step}
+**Error:** {context.error_message}
+
+---
+*Sent by MyCTOBot Pipelines*`
+    },
+    step_output: {
+        subject: 'Step Output: {prev.step_name}',
+        body: `# Step Output Report
+
+**Step:** {prev.step_name}
+**Status:** {prev.status}
+
+## Output
+\`\`\`
+{prev.output}
+\`\`\`
+
+---
+*Sent by MyCTOBot Pipelines*`
+    },
+    simple_notification: {
+        subject: '{context.subject}',
+        body: `{context.message}`
+    }
+};
+
+function applyMailgunTemplate(templateName) {
+    if (!templateName) return;
+
+    const template = mailgunTemplates[templateName];
+    if (!template) return;
+
+    document.querySelector('[name="config_mailgun_subject"]').value = template.subject;
+    document.querySelector('[name="config_mailgun_body"]').value = template.body;
+}
+
+function sanitizeStepName(input) {
+    // Replace spaces with underscores, remove invalid chars, lowercase
+    // Must match backend: ^[a-z][a-z0-9_]*$
+    let sanitized = input
+        .toLowerCase()
+        .replace(/\s+/g, '_')           // spaces to underscores
+        .replace(/[^a-z0-9_]/g, '');    // remove invalid chars
+
+    // If starts with number or underscore, prefix with 'step_'
+    if (sanitized && !/^[a-z]/.test(sanitized)) {
+        sanitized = 'step_' + sanitized;
+    }
+    return sanitized;
+}
+
 function updateStepNameHint() {
-    const stepName = document.getElementById('stepName').value.trim();
+    const input = document.getElementById('stepName');
+    const cursorPos = input.selectionStart;
+    const originalLen = input.value.length;
+
+    // Sanitize the value
+    input.value = sanitizeStepName(input.value);
+
+    // Restore cursor position (adjusted for any removed chars)
+    const newLen = input.value.length;
+    const newPos = Math.max(0, cursorPos - (originalLen - newLen));
+    input.setSelectionRange(newPos, newPos);
+
+    // Update hint
     const hint = document.getElementById('stepNameHint');
-    hint.textContent = stepName || 'step_name';
+    hint.textContent = input.value || 'step_name';
+}
+
+// =========================================================================
+// Variable Browser
+// =========================================================================
+
+let lastFocusedField = null;
+let availableVariables = null;
+
+// Track the last focused text input/textarea in the modal
+document.addEventListener('DOMContentLoaded', function() {
+    const stepModalEl = document.getElementById('stepModal');
+    if (stepModalEl) {
+        stepModalEl.addEventListener('focusin', function(e) {
+            if (e.target.tagName === 'INPUT' && e.target.type === 'text' ||
+                e.target.tagName === 'TEXTAREA') {
+                lastFocusedField = e.target;
+            }
+        });
+    }
+});
+
+async function loadStepVariables(row, col, stepId = 0) {
+    const loading = document.getElementById('variablesLoading');
+    const empty = document.getElementById('variablesEmpty');
+    const builtinSection = document.getElementById('builtinVarsSection');
+    const contextSection = document.getElementById('contextVarsSection');
+    const stepSection = document.getElementById('stepVarsSection');
+    const countBadge = document.getElementById('variableCount');
+
+    // Reset
+    loading.style.display = 'block';
+    empty.style.display = 'none';
+    builtinSection.style.display = 'none';
+    contextSection.style.display = 'none';
+    stepSection.style.display = 'none';
+    countBadge.textContent = '0';
+
+    try {
+        const response = await fetch(`/pipelines/getstepvariables/${pipelineId}?row=${row}&col=${col}&step_id=${stepId}`);
+        const result = await response.json();
+
+        loading.style.display = 'none';
+
+        if (!result.success) {
+            empty.textContent = 'Error loading variables';
+            empty.style.display = 'block';
+            return;
+        }
+
+        availableVariables = result.data.variables;
+        let totalCount = 0;
+
+        // Render built-in variables
+        if (availableVariables.builtins && availableVariables.builtins.length > 0) {
+            const list = document.getElementById('builtinVarsList');
+            list.innerHTML = '';
+            availableVariables.builtins.forEach(v => {
+                list.appendChild(createVariableChip('context.' + v.name, v.description, 'builtin'));
+                totalCount++;
+            });
+            builtinSection.style.display = 'block';
+        }
+
+        // Render pipeline context variables
+        if (availableVariables.context && availableVariables.context.length > 0) {
+            const list = document.getElementById('contextVarsList');
+            list.innerHTML = '';
+            availableVariables.context.forEach(v => {
+                const label = v.required ? v.name + '*' : v.name;
+                list.appendChild(createVariableChip('context.' + v.name, v.description, 'context'));
+                totalCount++;
+            });
+            contextSection.style.display = 'block';
+        }
+
+        // Render previous step variables
+        if (availableVariables.previous_steps && availableVariables.previous_steps.length > 0) {
+            const container = document.getElementById('stepVarsList');
+            container.innerHTML = '';
+
+            availableVariables.previous_steps.forEach(step => {
+                const group = document.createElement('div');
+                group.className = 'step-vars-group';
+
+                const nameEl = document.createElement('div');
+                nameEl.className = 'step-name';
+                nameEl.innerHTML = `<i class="bi bi-arrow-right-short"></i> ${step.label} <code class="small">${step.step_name}</code>`;
+                group.appendChild(nameEl);
+
+                const varsEl = document.createElement('div');
+                varsEl.className = 'step-vars';
+
+                step.variables.forEach(v => {
+                    const chipType = v.type === 'mapped' ? 'mapped' : 'step';
+                    varsEl.appendChild(createVariableChip(v.path, v.description, chipType));
+                    totalCount++;
+                });
+
+                group.appendChild(varsEl);
+                container.appendChild(group);
+            });
+            stepSection.style.display = 'block';
+        }
+
+        countBadge.textContent = totalCount;
+
+        // Show empty state if no variables
+        if (totalCount === 0) {
+            empty.style.display = 'block';
+        }
+
+    } catch (err) {
+        loading.style.display = 'none';
+        empty.textContent = 'Failed to load variables';
+        empty.style.display = 'block';
+        console.error('Error loading variables:', err);
+    }
+}
+
+function createVariableChip(path, description, type) {
+    const chip = document.createElement('span');
+    chip.className = 'variable-chip' + (type === 'mapped' ? ' mapped' : '');
+    chip.title = description || path;
+
+    // Icon based on type
+    let icon = 'bi-braces';
+    if (type === 'builtin') icon = 'bi-gear';
+    else if (type === 'context') icon = 'bi-box-arrow-in-right';
+    else if (type === 'mapped') icon = 'bi-link-45deg';
+    else if (type === 'step') icon = 'bi-arrow-right';
+
+    chip.innerHTML = `<i class="bi ${icon}"></i>{${path}}`;
+
+    // Left click - insert into field
+    chip.addEventListener('click', function(e) {
+        e.preventDefault();
+        insertVariable(path);
+    });
+
+    // Right click - copy to clipboard
+    chip.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        copyVariable(path, chip);
+    });
+
+    return chip;
+}
+
+function insertVariable(path) {
+    const varText = '{' + path + '}';
+
+    if (lastFocusedField) {
+        const field = lastFocusedField;
+        const start = field.selectionStart;
+        const end = field.selectionEnd;
+        const text = field.value;
+
+        // Insert at cursor position
+        field.value = text.substring(0, start) + varText + text.substring(end);
+
+        // Move cursor after inserted text
+        const newPos = start + varText.length;
+        field.setSelectionRange(newPos, newPos);
+        field.focus();
+
+        // Trigger input event for any listeners
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+
+        showToast('Inserted: ' + varText, 'success');
+    } else {
+        // No field focused - copy to clipboard instead
+        copyVariable(path, null);
+    }
+}
+
+function copyVariable(path, chipElement) {
+    const varText = '{' + path + '}';
+
+    navigator.clipboard.writeText(varText).then(() => {
+        showToast('Copied: ' + varText, 'info');
+
+        // Visual feedback on chip
+        if (chipElement) {
+            const originalBg = chipElement.style.background;
+            chipElement.style.background = '#d1e7dd';
+            setTimeout(() => {
+                chipElement.style.background = originalBg;
+            }, 300);
+        }
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        // Fallback - show in prompt
+        prompt('Copy this variable:', varText);
+    });
+}
+
+function showToast(message, type = 'info') {
+    // Create a simple toast notification
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'success' ? 'success' : 'info'} position-fixed`;
+    toast.style.cssText = 'bottom: 20px; right: 20px; z-index: 9999; padding: 8px 16px; font-size: 0.875rem; animation: fadeIn 0.2s;';
+    toast.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : 'clipboard'}"></i> ${message}`;
+
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s';
+        setTimeout(() => toast.remove(), 300);
+    }, 1500);
 }
 
 function onFlowControlChange(which) {
@@ -974,6 +1293,10 @@ function addStep(row, col) {
     setFlowControlValue('failure', 'exit');
     // Reset step name hint
     updateStepNameHint();
+    // Reset last focused field
+    lastFocusedField = null;
+    // Load available variables for this position
+    loadStepVariables(row, col, 0);
     stepModal.show();
 }
 
@@ -983,6 +1306,10 @@ function editStep(stepId, row, col) {
     document.getElementById('stepRow').value = row;
     document.getElementById('stepCol').value = col;
     document.getElementById('deleteStepBtn').style.display = 'block';
+    // Reset last focused field
+    lastFocusedField = null;
+    // Load available variables for this position
+    loadStepVariables(row, col, stepId);
 
     // Fetch step data
     fetch('/pipelines/getstep/' + pipelineId + '?step_id=' + stepId)
@@ -1078,6 +1405,34 @@ function populateConfig(type, config) {
             // Show/hide command/url based on transport
             onMcpTransportChange(document.querySelector('[name="config_mcp_transport"]'));
             break;
+        case 'shopify_graphql':
+            document.querySelector('[name="config_shopify_connection_id"]').value = config.connection_id || '';
+            document.querySelector('[name="config_shopify_query"]').value = config.query || '';
+            document.querySelector('[name="config_shopify_variables"]').value = config.variables ? JSON.stringify(config.variables, null, 2) : '';
+            break;
+        case 'mailgun':
+            document.querySelector('[name="config_mailgun_to"]').value = config.to || '';
+            document.querySelector('[name="config_mailgun_cc"]').value = config.cc || '';
+            document.querySelector('[name="config_mailgun_subject"]').value = config.subject || '';
+            document.querySelector('[name="config_mailgun_content_type"]').value = config.content_type || 'markdown';
+            document.querySelector('[name="config_mailgun_body"]').value = config.body || '';
+            document.querySelector('[name="config_mailgun_attachments"]').value = config.attachments || '';
+            break;
+        case 'file_write':
+            document.querySelector('[name="config_file_filename"]').value = config.filename || '';
+            document.querySelector('[name="config_file_source"]').value = config.source || 'template';
+            document.querySelector('[name="config_file_content"]').value = config.content || '';
+            document.querySelector('[name="config_file_source_step"]').value = config.source_step || '';
+            document.querySelector('[name="config_file_source_field"]').value = config.source_field || 'stdout';
+            document.querySelector('[name="config_file_base64_var"]').value = config.base64_var || '';
+            document.querySelector('[name="config_file_content_type"]').value = config.content_type || '';
+            document.querySelector('[name="config_file_append"]').checked = config.append || false;
+            // Toggle visibility based on source
+            const srcSelect = document.querySelector('[name="config_file_source"]');
+            if (srcSelect && typeof toggleFileContentSource === 'function') {
+                toggleFileContentSource(srcSelect);
+            }
+            break;
     }
 }
 
@@ -1154,6 +1509,39 @@ function buildConfig() {
                 list_tools_only: document.getElementById('mcpListToolsOnly').checked
             };
             break;
+        case 'shopify_graphql':
+            let shopifyVars = {};
+            try {
+                shopifyVars = JSON.parse(document.querySelector('[name="config_shopify_variables"]').value || '{}');
+            } catch (e) {}
+            config = {
+                connection_id: document.querySelector('[name="config_shopify_connection_id"]').value,
+                query: document.querySelector('[name="config_shopify_query"]').value,
+                variables: shopifyVars
+            };
+            break;
+        case 'mailgun':
+            config = {
+                to: document.querySelector('[name="config_mailgun_to"]').value,
+                cc: document.querySelector('[name="config_mailgun_cc"]').value,
+                subject: document.querySelector('[name="config_mailgun_subject"]').value,
+                content_type: document.querySelector('[name="config_mailgun_content_type"]').value,
+                body: document.querySelector('[name="config_mailgun_body"]').value,
+                attachments: document.querySelector('[name="config_mailgun_attachments"]').value
+            };
+            break;
+        case 'file_write':
+            config = {
+                filename: document.querySelector('[name="config_file_filename"]').value,
+                source: document.querySelector('[name="config_file_source"]').value,
+                content: document.querySelector('[name="config_file_content"]').value,
+                source_step: document.querySelector('[name="config_file_source_step"]').value,
+                source_field: document.querySelector('[name="config_file_source_field"]').value,
+                base64_var: document.querySelector('[name="config_file_base64_var"]').value,
+                content_type: document.querySelector('[name="config_file_content_type"]').value,
+                append: document.querySelector('[name="config_file_append"]').checked
+            };
+            break;
     }
 
     return config;
@@ -1210,7 +1598,7 @@ async function saveStep() {
             stepModal.hide();
             location.reload();
         } else {
-            alert('Error: ' + (result.error || 'Failed to save step'));
+            alert('Error: ' + (result.message || result.error || 'Failed to save step'));
         }
     } catch (err) {
         alert('Error: ' + err.message);
@@ -1248,7 +1636,46 @@ async function deleteStep() {
 }
 
 function addRow() {
-    location.reload(); // Simple approach - page will show new empty row
+    const tbody = document.querySelector('#pipelineGrid tbody');
+    const rows = tbody.querySelectorAll('tr[data-row]');
+    const newRowNum = rows.length; // 0-indexed, so length is the next row
+
+    // Count columns from header
+    const columnCount = document.querySelectorAll('.column-header').length;
+
+    // Build new row HTML
+    let rowHtml = `<tr data-row="${newRowNum}">`;
+    rowHtml += `<td class="text-center text-muted align-middle">${newRowNum + 1}</td>`;
+
+    for (let col = 0; col < columnCount; col++) {
+        rowHtml += `
+            <td class="p-2 drop-zone" data-row="${newRowNum}" data-col="${col}"
+                ondragover="handleDragOver(event)" ondrop="handleDrop(event, ${newRowNum}, ${col})"
+                ondragleave="handleDragLeave(event)">
+                <div class="step-cell-empty border border-dashed rounded p-3 text-center text-muted"
+                     onclick="addStep(${newRowNum}, ${col})"
+                     style="cursor: pointer; min-height: 80px;">
+                    <i class="bi bi-plus-lg"></i>
+                    <div class="small">Add Step</div>
+                </div>
+            </td>`;
+    }
+
+    // Add row controls
+    rowHtml += `
+        <td class="text-center align-middle">
+            <div class="btn-group-vertical btn-group-sm">
+                <button class="btn btn-outline-warning" onclick="toggleRow(${newRowNum}, false)" title="Disable Row">
+                    <i class="bi bi-pause-circle"></i>
+                </button>
+                <button class="btn btn-outline-danger" onclick="deleteRow(${newRowNum})" title="Delete Row">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </td>`;
+    rowHtml += '</tr>';
+
+    tbody.insertAdjacentHTML('beforeend', rowHtml);
 }
 
 // Add a new column to the grid
@@ -1363,17 +1790,11 @@ async function trimGrid() {
         return;
     }
 
-    let minRow = Infinity, maxRow = -1;
     let minCol = Infinity, maxCol = -1;
 
     steps.forEach(step => {
         const td = step.closest('td');
-        const tr = td.closest('tr');
-        const row = parseInt(tr.dataset.row);
         const col = parseInt(td.dataset.col);
-
-        minRow = Math.min(minRow, row);
-        maxRow = Math.max(maxRow, row);
         minCol = Math.min(minCol, col);
         maxCol = Math.max(maxCol, col);
     });
@@ -1382,22 +1803,62 @@ async function trimGrid() {
     const headers = document.querySelectorAll('.column-header .column-name');
     const allColumns = Array.from(headers).map(h => h.textContent.trim());
 
-    // Trim to used columns (with 1 buffer on each side if possible)
-    const startCol = Math.max(0, minCol);
-    const endCol = Math.min(allColumns.length - 1, maxCol + 1); // +1 for one empty column after
+    // Calculate what to trim
+    // startCol = first used column (trim everything before)
+    // endCol = last used column + 1 buffer (trim everything after)
+    const startCol = minCol;
+    const endCol = Math.min(allColumns.length - 1, maxCol + 1);
     const trimmedColumns = allColumns.slice(startCol, endCol + 1);
 
-    if (trimmedColumns.length === allColumns.length) {
+    if (trimmedColumns.length === allColumns.length && startCol === 0) {
         alert('Grid is already optimized - no unused columns to trim.');
         return;
     }
 
-    if (!confirm(`Trim grid to ${trimmedColumns.length} columns (${trimmedColumns.join(', ')})?\n\nThis will remove ${allColumns.length - trimmedColumns.length} unused columns.`)) {
+    // Build info message
+    let message = `Trim grid to ${trimmedColumns.length} columns (${trimmedColumns.join(', ')})?`;
+    if (startCol > 0) {
+        message += `\n\nThis will remove ${startCol} column(s) from the beginning and shift all steps left.`;
+    }
+    const trailingRemoved = allColumns.length - (endCol + 1);
+    if (trailingRemoved > 0) {
+        message += `\n\nThis will remove ${trailingRemoved} trailing column(s).`;
+    }
+
+    if (!confirm(message)) {
         return;
     }
 
-    // Save trimmed columns
     try {
+        // If trimming from the left, we need to update step positions first
+        if (startCol > 0) {
+            // Move each step's column position
+            for (const step of steps) {
+                const td = step.closest('td');
+                const stepId = step.dataset.stepId;
+                const oldCol = parseInt(td.dataset.col);
+                const newCol = oldCol - startCol;
+                const row = parseInt(td.closest('tr').dataset.row);
+
+                const response = await fetch('/pipelines/movestep/' + pipelineId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        csrf_token: csrfToken,
+                        step_id: stepId,
+                        target_row: row,
+                        target_col: newCol
+                    })
+                });
+
+                if (!response.ok) {
+                    alert('Failed to relocate step ' + stepId);
+                    return;
+                }
+            }
+        }
+
+        // Now save the trimmed columns
         const data = new URLSearchParams();
         data.append('columns', trimmedColumns.join(', '));
         data.append('csrf_token', csrfToken);
@@ -1421,9 +1882,151 @@ async function trimGrid() {
     }
 }
 
-function deleteRow(row) {
-    // TODO: Implement row deletion (delete all steps in row)
-    alert('Delete row ' + row + ' - not yet implemented');
+async function deleteRow(row) {
+    // Find all steps in this row
+    const rowElement = document.querySelector(`tr[data-row="${row}"]`);
+    if (!rowElement) return;
+
+    const stepCells = rowElement.querySelectorAll('[data-step-id]');
+    const stepCount = stepCells.length;
+
+    if (stepCount === 0) {
+        // No steps in row - just remove the visual row (it will come back on reload if needed)
+        rowElement.remove();
+        return;
+    }
+
+    if (!confirm(`Delete all ${stepCount} step(s) in row ${row + 1}?`)) {
+        return;
+    }
+
+    // Delete each step
+    for (const cell of stepCells) {
+        const stepId = cell.dataset.stepId;
+        try {
+            await fetch('/pipelines/deletestep/' + pipelineId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    csrf_token: csrfToken,
+                    step_id: stepId
+                })
+            });
+        } catch (err) {
+            console.error('Failed to delete step', stepId, err);
+        }
+    }
+
+    location.reload();
+}
+
+// =========================================================================
+// Drag and Drop
+// =========================================================================
+
+let draggedStepId = null;
+let draggedFromRow = null;
+let draggedFromCol = null;
+
+function handleDragStart(event, stepId, row, col) {
+    draggedStepId = stepId;
+    draggedFromRow = row;
+    draggedFromCol = col;
+    event.target.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', stepId);
+}
+
+function handleDragEnd(event) {
+    event.target.classList.remove('dragging');
+    draggedStepId = null;
+    draggedFromRow = null;
+    draggedFromCol = null;
+    // Remove all drag-over highlights
+    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+}
+
+function handleDragOver(event) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    event.currentTarget.classList.add('drag-over');
+}
+
+function handleDragLeave(event) {
+    event.currentTarget.classList.remove('drag-over');
+}
+
+async function handleDrop(event, targetRow, targetCol) {
+    event.preventDefault();
+    event.currentTarget.classList.remove('drag-over');
+
+    if (!draggedStepId) return;
+
+    // Don't do anything if dropped on same cell
+    if (targetRow === draggedFromRow && targetCol === draggedFromCol) return;
+
+    // Check if target cell already has a step
+    const targetCell = event.currentTarget;
+    const existingStep = targetCell.querySelector('.step-cell[data-step-id]');
+    if (existingStep) {
+        if (!confirm('This cell already has a step. Swap positions?')) {
+            return;
+        }
+    }
+
+    try {
+        const response = await fetch('/pipelines/movestep/' + pipelineId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: draggedStepId,
+                target_row: targetRow,
+                target_col: targetCol
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Failed to move step: ' + (result.message || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error moving step: ' + err.message);
+    }
+}
+
+// =========================================================================
+// Row Toggle (Enable/Disable)
+// =========================================================================
+
+async function toggleRow(row, enable) {
+    const action = enable ? 'enable' : 'disable';
+    if (!confirm(`${enable ? 'Enable' : 'Disable'} all steps in row ${row + 1}?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/pipelines/togglerow/' + pipelineId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                row: row,
+                enable: enable ? '1' : '0'
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            location.reload();
+        } else {
+            alert('Failed to ' + action + ' row: ' + (result.message || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
 }
 
 // MCP Tool exposure functions
@@ -1488,6 +2091,10 @@ async function saveSettings() {
 
 function triggerPipeline() {
     document.getElementById('triggerContext').value = '';
+    // Reset modal to normal state
+    document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-play-fill"></i> Run Pipeline';
+    document.getElementById('triggerModalSubmit').onclick = confirmTrigger;
+    document.getElementById('triggerModalSubmit').innerHTML = '<i class="bi bi-play-fill"></i> Run';
     new bootstrap.Modal(document.getElementById('triggerModal')).show();
 }
 
@@ -1516,6 +2123,40 @@ async function confirmTrigger() {
     }
 }
 
+function triggerInteractive() {
+    // Show same modal but with interactive label
+    document.getElementById('triggerContext').value = '';
+    document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-bug"></i> Interactive/Debug Run';
+    document.getElementById('triggerModalSubmit').onclick = confirmTriggerInteractive;
+    document.getElementById('triggerModalSubmit').innerHTML = '<i class="bi bi-play-fill"></i> Start Interactive Run';
+    new bootstrap.Modal(document.getElementById('triggerModal')).show();
+}
+
+async function confirmTriggerInteractive() {
+    const context = document.getElementById('triggerContext').value || '{}';
+
+    try {
+        const response = await fetch('/pipelines/triggerinteractive/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&context=' + encodeURIComponent(context)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            window.location.href = '/pipelines/viewrun/' + result.data.run_id;
+        } else {
+            alert('Error: ' + (result.error || 'Failed to start interactive run'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
 function copyToClipboard(elementId) {
     const el = document.getElementById(elementId);
     el.select();
@@ -1531,6 +2172,261 @@ function copyToClipboard(elementId) {
         btn.classList.remove('btn-success');
         btn.classList.add('btn-outline-secondary');
     }, 1500);
+}
+
+// Test Shopify GraphQL query
+async function testShopifyQuery() {
+    const connectionId = document.querySelector('[name="config_shopify_connection_id"]').value;
+    const query = document.querySelector('[name="config_shopify_query"]').value;
+    const variablesRaw = document.querySelector('[name="config_shopify_variables"]').value;
+
+    if (!connectionId) {
+        alert('Please select a Shopify connection first');
+        return;
+    }
+
+    if (!query.trim()) {
+        alert('Please enter a GraphQL query');
+        return;
+    }
+
+    let variables = {};
+    if (variablesRaw.trim()) {
+        try {
+            variables = JSON.parse(variablesRaw);
+        } catch (e) {
+            alert('Invalid JSON in variables field: ' + e.message);
+            return;
+        }
+    }
+
+    const btn = document.getElementById('testShopifyQueryBtn');
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Testing...';
+
+    const resultDiv = document.getElementById('shopifyQueryResult');
+    const resultContent = document.getElementById('shopifyQueryResultContent');
+
+    try {
+        const response = await fetch('/shopify/testquery', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({
+                csrf_token: csrfToken,
+                connection_id: connectionId,
+                query: query,
+                variables: variables
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            resultContent.textContent = JSON.stringify(result.data, null, 2);
+            resultContent.className = '';
+        } else {
+            resultContent.textContent = 'Error: ' + (result.error || 'Unknown error') +
+                (result.errors ? '\n\nGraphQL Errors:\n' + JSON.stringify(result.errors, null, 2) : '');
+            resultContent.className = 'text-danger';
+        }
+
+        resultDiv.style.display = 'block';
+    } catch (err) {
+        resultContent.textContent = 'Request failed: ' + err.message;
+        resultContent.className = 'text-danger';
+        resultDiv.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+// Shopify GraphQL Query Templates
+const shopifyQueryTemplates = {
+    shop_info: {
+        query: `{
+  shop {
+    name
+    email
+    myshopifyDomain
+    plan {
+      displayName
+    }
+    currencyCode
+    timezoneAbbreviation
+  }
+}`,
+        variables: {}
+    },
+    list_products: {
+        query: `query getProducts($first: Int!, $query: String) {
+  products(first: $first, query: $query) {
+    edges {
+      node {
+        id
+        title
+        handle
+        status
+        totalInventory
+        priceRangeV2 {
+          minVariantPrice {
+            amount
+            currencyCode
+          }
+        }
+        featuredImage {
+          url
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}`,
+        variables: { first: 10, query: null }
+    },
+    get_product: {
+        query: `query getProductByHandle($handle: String!) {
+  productByHandle(handle: $handle) {
+    id
+    title
+    description
+    handle
+    status
+    totalInventory
+    variants(first: 10) {
+      edges {
+        node {
+          id
+          title
+          sku
+          price
+          inventoryQuantity
+        }
+      }
+    }
+    metafields(first: 10) {
+      edges {
+        node {
+          namespace
+          key
+          value
+          type
+        }
+      }
+    }
+  }
+}`,
+        variables: { handle: "example-product" }
+    },
+    list_orders: {
+        query: `query getOrders($first: Int!, $query: String) {
+  orders(first: $first, query: $query, sortKey: CREATED_AT, reverse: true) {
+    edges {
+      node {
+        id
+        name
+        createdAt
+        displayFinancialStatus
+        displayFulfillmentStatus
+        totalPriceSet {
+          shopMoney {
+            amount
+            currencyCode
+          }
+        }
+        customer {
+          displayName
+          email
+        }
+        lineItems(first: 5) {
+          edges {
+            node {
+              title
+              quantity
+            }
+          }
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}`,
+        variables: { first: 10, query: null }
+    },
+    get_customer: {
+        query: `query getCustomer($id: ID!) {
+  customer(id: $id) {
+    id
+    displayName
+    email
+    phone
+    createdAt
+    numberOfOrders
+    amountSpent {
+      amount
+      currencyCode
+    }
+    defaultAddress {
+      address1
+      city
+      province
+      country
+      zip
+    }
+    orders(first: 5, sortKey: CREATED_AT, reverse: true) {
+      edges {
+        node {
+          id
+          name
+          createdAt
+          totalPriceSet {
+            shopMoney {
+              amount
+            }
+          }
+        }
+      }
+    }
+    metafields(first: 10) {
+      edges {
+        node {
+          namespace
+          key
+          value
+        }
+      }
+    }
+  }
+}`,
+        variables: { id: "gid://shopify/Customer/123456789" }
+    }
+};
+
+function applyShopifyQueryTemplate(templateName) {
+    if (!templateName) return;
+
+    const template = shopifyQueryTemplates[templateName];
+    if (!template) return;
+
+    document.querySelector('[name="config_shopify_query"]').value = template.query.trim();
+    document.querySelector('[name="config_shopify_variables"]').value =
+        Object.keys(template.variables).length > 0
+            ? JSON.stringify(template.variables, null, 2)
+            : '';
+
+    // Reset the template selector after applying (so user knows it's now custom)
+    // Uncomment if you want this behavior:
+    // document.getElementById('shopifyQueryTemplate').value = '';
 }
 </script>
 <?php endif; ?>

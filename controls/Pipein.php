@@ -26,21 +26,36 @@ class Pipein extends BaseControls\Control {
 
     /**
      * Main webhook endpoint
-     * Route: /pipein/workspace/{slug}
+     * Supports both routing styles:
+     * - Subdomain: /pipein/{slug} (workspace from subdomain)
+     * - Path: /pipein/{workspace}/{slug} (workspace from path)
      *
-     * Example: POST /pipein/gwt/my-deploy-pipeline
+     * Example: POST https://gwt.myctobot.ai/pipein/my-deploy-pipeline
+     * Example: POST https://myctobot.ai/pipein/gwt/my-deploy-pipeline
      */
     public function index($params = []) {
-        // Parse URL parts: /pipein/workspace/{slug}
         $pathParts = $this->parsePath();
 
-        if (count($pathParts) < 2) {
-            $this->errorResponse(400, 'Invalid URL format. Expected: /pipein/workspace/{pipeline_slug}');
-            return;
-        }
+        // Check if workspace is in subdomain (e.g., gwt.myctobot.ai)
+        $subdomainWorkspace = $_SERVER['WORKSPACE'] ?? null;
 
-        $workspace = $pathParts[0];
-        $pipelineSlug = $pathParts[1];
+        if ($subdomainWorkspace) {
+            // Subdomain routing: /pipein/{slug}
+            if (count($pathParts) < 1) {
+                $this->errorResponse(400, 'Invalid URL format. Expected: /pipein/{pipeline_slug}');
+                return;
+            }
+            $workspace = $subdomainWorkspace;
+            $pipelineSlug = $pathParts[0];
+        } else {
+            // Path routing: /pipein/{workspace}/{slug}
+            if (count($pathParts) < 2) {
+                $this->errorResponse(400, 'Invalid URL format. Expected: /pipein/{workspace}/{pipeline_slug}');
+                return;
+            }
+            $workspace = $pathParts[0];
+            $pipelineSlug = $pathParts[1];
+        }
 
         // Switch to workspace database
         if (!WorkspaceResolver::switchDatabase($workspace)) {

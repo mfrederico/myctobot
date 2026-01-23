@@ -1852,8 +1852,8 @@ class PipelineExecutor {
                     $env = json_decode($serverConfig->env_json, true);
                 }
 
-                // Parse headers for http
-                if ($transport === 'http' && !empty($serverConfig->headers_json)) {
+                // Parse headers for http/sse
+                if (in_array($transport, ['http', 'sse']) && !empty($serverConfig->headers_json)) {
                     $config['headers'] = json_decode($serverConfig->headers_json, true);
                 }
             } else {
@@ -1865,8 +1865,8 @@ class PipelineExecutor {
         if ($transport === 'stdio' && empty($command)) {
             return ['success' => false, 'error' => 'Command required for stdio transport'];
         }
-        if ($transport === 'http' && empty($url)) {
-            return ['success' => false, 'error' => 'URL required for http transport'];
+        if (in_array($transport, ['http', 'sse']) && empty($url)) {
+            return ['success' => false, 'error' => 'URL required for ' . $transport . ' transport'];
         }
         if (!$listToolsOnly && empty($toolName)) {
             return ['success' => false, 'error' => 'Tool name required'];

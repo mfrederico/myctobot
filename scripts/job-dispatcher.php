@@ -901,7 +901,18 @@ if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
             }
         }
 
-        if ($serverType === 'http') {
+        if ($serverType === 'sse') {
+            // SSE transport - for remote MCP servers via Server-Sent Events
+            $serverUrl = $server['url'] ?? '';
+            // Substitute placeholders in URL
+            $serverUrl = str_replace('${WORKSPACE}', $workspace ?? 'default', $serverUrl);
+            $serverUrl = str_replace('${MYCTOBOT_API_KEY}', $member->api_token ?? '', $serverUrl);
+
+            $mcpServers->$serverName = (object) [
+                'url' => $serverUrl,
+                'transport' => 'sse'
+            ];
+        } elseif ($serverType === 'http') {
             // Substitute placeholders in headers
             $serverHeaders = $server['headers'] ?? [];
             foreach ($serverHeaders as $key => $value) {
@@ -1293,7 +1304,7 @@ do_cleanup() {
     echo "=== Session Cleanup ==="
 
     # Remove job labels via API
-    cleanup_labels
+    # cleanup_labels
 
     # Update AOE session status
     aoe_session_cleanup $?
@@ -1365,7 +1376,7 @@ echo ""
 
 # Claude handles Jira/GitHub updates via MCP tools (job_complete, add_comment)
 # Remove job labels via API
-cleanup_labels
+# cleanup_labels
 
 # Cleanup orphaned Playwright processes (PPID=1 means parent died)
 echo "Cleaning up orphaned Playwright processes..."

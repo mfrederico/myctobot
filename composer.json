@@ -18,11 +18,12 @@
     ],
     "require": {
         "php": ">=8.1",
-        "myctobot/aoe-php": "@dev",
+        "eislambey/eventsource": "^0.1.0",
         "flightphp/core": "^3.0",
         "gabordemooij/redbean": "dev-master",
         "guzzlehttp/guzzle": "^7.10",
         "monolog/monolog": "^3.5",
+        "myctobot/aoe-php": "@dev",
         "nesbot/carbon": "^3.1",
         "stripe/stripe-php": "^19.0",
         "vlucas/phpdotenv": "^5.5"

@@ -4,6 +4,20 @@ $presets = $presets ?? [];
 ?>
 
 <div class="container py-4">
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link active" href="/mcpservers">
+                <i class="bi bi-plug"></i> MCP Servers
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" href="/agents">
+                <i class="bi bi-robot"></i> Agents
+            </a>
+        </li>
+    </ul>
+
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2 mb-0">
             <i class="bi bi-plug"></i> MCP Server Library
@@ -39,14 +53,29 @@ $presets = $presets ?? [];
             <div class="card h-100">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span>
-                        <i class="bi bi-<?= $server['server_type'] === 'stdio' ? 'terminal' : 'globe' ?>"></i>
+                        <?php
+                        $typeIcon = match($server['server_type']) {
+                            'stdio' => 'terminal',
+                            'sse' => 'broadcast',
+                            default => 'globe'
+                        };
+                        $typeBadgeClass = match($server['server_type']) {
+                            'stdio' => 'info',
+                            'sse' => 'success',
+                            default => 'warning'
+                        };
+                        ?>
+                        <i class="bi bi-<?= $typeIcon ?>"></i>
                         <strong><?= htmlspecialchars($server['name']) ?></strong>
                     </span>
                     <div>
-                        <?php if ($server['is_shared']): ?>
-                        <span class="badge bg-success" title="Shared with workspace"><i class="bi bi-people"></i></span>
+                        <?php if (!$server['is_active']): ?>
+                        <span class="badge bg-secondary" title="Inactive - not available in pipelines"><i class="bi bi-pause-circle"></i></span>
                         <?php endif; ?>
-                        <span class="badge bg-<?= $server['server_type'] === 'stdio' ? 'info' : 'warning' ?>">
+                        <?php if ($server['is_shared']): ?>
+                        <span class="badge bg-primary" title="Shared with workspace"><i class="bi bi-people"></i></span>
+                        <?php endif; ?>
+                        <span class="badge bg-<?= $typeBadgeClass ?>">
                             <?= strtoupper($server['server_type']) ?>
                         </span>
                     </div>
@@ -74,11 +103,14 @@ $presets = $presets ?? [];
                 </div>
                 <div class="card-footer bg-transparent">
                     <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">
-                            <?= $server['is_own'] ? 'Created by you' : 'Shared' ?>
-                        </small>
+                        <button type="button" class="btn btn-sm btn-outline-success" onclick="testConnection(<?= $server['id'] ?>, '<?= htmlspecialchars($server['name'], ENT_QUOTES) ?>')" title="Test Connection">
+                            <i class="bi bi-plug"></i> Test
+                        </button>
                         <?php if ($server['is_own']): ?>
                         <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-<?= $server['is_active'] ? 'warning' : 'success' ?>" onclick="toggleActive(<?= $server['id'] ?>)" title="<?= $server['is_active'] ? 'Deactivate' : 'Activate' ?>">
+                                <i class="bi bi-<?= $server['is_active'] ? 'pause-circle' : 'play-circle' ?>"></i>
+                            </button>
                             <button type="button" class="btn btn-outline-secondary" onclick="toggleShared(<?= $server['id'] ?>)" title="<?= $server['is_shared'] ? 'Make Private' : 'Share with Workspace' ?>">
                                 <i class="bi bi-<?= $server['is_shared'] ? 'lock' : 'people' ?>"></i>
                             </button>
@@ -120,6 +152,7 @@ $presets = $presets ?? [];
                             <div class="col-md-4">
                                 <?php
                                 $icons = [
+                                    'myctobot-gateway' => 'cloud-arrow-up',
                                     'pipelines' => 'diagram-3',
                                     'github' => 'github',
                                     'fetch' => 'cloud-download',
@@ -130,7 +163,7 @@ $presets = $presets ?? [];
                                     'mantic' => 'search'
                                 ];
                                 $icon = $icons[$key] ?? 'plug';
-                                $btnClass = $key === 'pipelines' ? 'btn-outline-primary' : 'btn-outline-secondary';
+                                $btnClass = $key === 'myctobot-gateway' ? 'btn-primary' : ($key === 'pipelines' ? 'btn-outline-primary' : 'btn-outline-secondary');
                                 ?>
                                 <button type="button" class="btn <?= $btnClass ?> w-100" onclick="loadPreset('<?= $key ?>')">
                                     <i class="bi bi-<?= $icon ?>"></i>
@@ -158,20 +191,25 @@ $presets = $presets ?? [];
                         <div class="btn-group w-100" role="group">
                             <input type="radio" class="btn-check" name="server_type" id="typeStdio" value="stdio" checked onchange="toggleTypeFields()">
                             <label class="btn btn-outline-primary" for="typeStdio">
-                                <i class="bi bi-terminal"></i> STDIO (Local Process)
+                                <i class="bi bi-terminal"></i> STDIO
                             </label>
                             <input type="radio" class="btn-check" name="server_type" id="typeHttp" value="http" onchange="toggleTypeFields()">
                             <label class="btn btn-outline-primary" for="typeHttp">
-                                <i class="bi bi-globe"></i> HTTP (Remote Server)
+                                <i class="bi bi-globe"></i> HTTP
+                            </label>
+                            <input type="radio" class="btn-check" name="server_type" id="typeSse" value="sse" onchange="toggleTypeFields()">
+                            <label class="btn btn-outline-primary" for="typeSse">
+                                <i class="bi bi-broadcast"></i> SSE
                             </label>
                         </div>
+                        <div class="form-text">STDIO for local processes, HTTP/SSE for remote servers</div>
                     </div>
 
                     <!-- STDIO Fields -->
                     <div id="stdioFields">
                         <div class="mb-3">
                             <label class="form-label fw-bold">Command <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="serverCommand" name="command" placeholder="e.g., npx, uvx, node">
+                            <input type="text" class="form-control" id="serverCommand" name="command" placeholder="e.g., php, npx, node">
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold">Arguments</label>
@@ -212,11 +250,55 @@ $presets = $presets ?? [];
     </div>
 </div>
 
+<!-- Test Connection Modal -->
+<div class="modal fade" id="testResultModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plug"></i> <span id="testServerName">Connection Test</span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="testLoading" class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Testing connection...</span>
+                    </div>
+                    <p class="mt-2">Connecting to MCP server...</p>
+                </div>
+                <div id="testResults" style="display: none;">
+                    <div id="testSuccess" class="alert alert-success" style="display: none;">
+                        <i class="bi bi-check-circle"></i> <strong>Connection successful!</strong>
+                    </div>
+                    <div id="testError" class="alert alert-danger" style="display: none;">
+                        <i class="bi bi-x-circle"></i> <strong>Connection failed:</strong> <span id="testErrorMsg"></span>
+                    </div>
+
+                    <div id="serverInfoSection" style="display: none;">
+                        <h6><i class="bi bi-info-circle"></i> Server Info</h6>
+                        <table class="table table-sm">
+                            <tr><th>Name</th><td id="infoServerName">-</td></tr>
+                            <tr><th>Version</th><td id="infoServerVersion">-</td></tr>
+                        </table>
+                    </div>
+
+                    <div id="toolsSection" style="display: none;">
+                        <h6><i class="bi bi-tools"></i> Available Tools (<span id="toolsCount">0</span>)</h6>
+                        <div id="toolsList" class="list-group list-group-flush" style="max-height: 300px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 const presets = <?= json_encode($presets) ?>;
 let editingServerId = null;
 
-// Toggle STDIO/HTTP fields
+// Toggle STDIO/HTTP/SSE fields
 function toggleTypeFields() {
     const isStdio = document.getElementById('typeStdio').checked;
     document.getElementById('stdioFields').style.display = isStdio ? 'block' : 'none';
@@ -235,6 +317,10 @@ function loadPreset(presetName) {
         document.getElementById('typeStdio').checked = true;
         document.getElementById('serverCommand').value = preset.command || '';
         document.getElementById('serverArgs').value = (preset.args || []).join(', ');
+    } else if (preset.server_type === 'sse') {
+        document.getElementById('typeSse').checked = true;
+        document.getElementById('serverUrl').value = preset.url || '';
+        document.getElementById('serverHeaders').value = JSON.stringify(preset.headers || {}, null, 2);
     } else {
         document.getElementById('typeHttp').checked = true;
         document.getElementById('serverUrl').value = preset.url || '';
@@ -292,7 +378,7 @@ function editServer(serverId) {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                const server = data.data.find(s => s.id === serverId);
+                const server = data.data.find(s => s.id == serverId);
                 if (server) {
                     editingServerId = serverId;
                     document.getElementById('serverId').value = serverId;
@@ -303,6 +389,10 @@ function editServer(serverId) {
                         document.getElementById('typeStdio').checked = true;
                         document.getElementById('serverCommand').value = server.command || '';
                         document.getElementById('serverArgs').value = (server.args || []).join(', ');
+                    } else if (server.server_type === 'sse') {
+                        document.getElementById('typeSse').checked = true;
+                        document.getElementById('serverUrl').value = server.url || '';
+                        document.getElementById('serverHeaders').value = JSON.stringify(server.headers || {}, null, 2);
                     } else {
                         document.getElementById('typeHttp').checked = true;
                         document.getElementById('serverUrl').value = server.url || '';
@@ -332,6 +422,7 @@ function editServer(serverId) {
 function saveServer() {
     const form = document.getElementById('serverForm');
     const isStdio = document.getElementById('typeStdio').checked;
+    const isSse = document.getElementById('typeSse').checked;
 
     // Collect env vars
     const envVars = {};
@@ -341,11 +432,15 @@ function saveServer() {
         if (key) envVars[key] = value;
     });
 
+    let serverType = 'http';
+    if (isStdio) serverType = 'stdio';
+    else if (isSse) serverType = 'sse';
+
     const data = {
         csrf_token: form.csrf_token.value,
         name: document.getElementById('serverName').value,
         description: document.getElementById('serverDescription').value,
-        server_type: isStdio ? 'stdio' : 'http',
+        server_type: serverType,
         env: JSON.stringify(envVars)
     };
 
@@ -410,6 +505,23 @@ function toggleShared(serverId) {
     });
 }
 
+// Toggle active status
+function toggleActive(serverId) {
+    fetch(`/mcpservers/toggleactive/${serverId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({csrf_token: '<?= Flight::csrf()->getToken() ?>'})
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            location.reload();
+        } else {
+            alert(result.message || 'Error updating active status');
+        }
+    });
+}
+
 // Escape HTML
 function escapeHtml(str) {
     if (!str) return '';
@@ -420,4 +532,73 @@ function escapeHtml(str) {
 
 // Reset form when modal closes
 document.getElementById('addServerModal').addEventListener('hidden.bs.modal', resetForm);
+
+// Test connection
+function testConnection(serverId, serverName) {
+    const modal = new bootstrap.Modal(document.getElementById('testResultModal'));
+
+    // Reset modal state
+    document.getElementById('testServerName').textContent = serverName;
+    document.getElementById('testLoading').style.display = 'block';
+    document.getElementById('testResults').style.display = 'none';
+    document.getElementById('testSuccess').style.display = 'none';
+    document.getElementById('testError').style.display = 'none';
+    document.getElementById('serverInfoSection').style.display = 'none';
+    document.getElementById('toolsSection').style.display = 'none';
+
+    modal.show();
+
+    fetch(`/mcpservers/test/${serverId}`)
+        .then(r => r.json())
+        .then(result => {
+            document.getElementById('testLoading').style.display = 'none';
+            document.getElementById('testResults').style.display = 'block';
+
+            if (result.success) {
+                document.getElementById('testSuccess').style.display = 'block';
+
+                // Server info
+                const serverInfo = result.data.server_info || {};
+                if (serverInfo.name || serverInfo.version) {
+                    document.getElementById('serverInfoSection').style.display = 'block';
+                    document.getElementById('infoServerName').textContent = serverInfo.name || '-';
+                    document.getElementById('infoServerVersion').textContent = serverInfo.version || '-';
+                }
+
+                // Tools
+                const tools = result.data.tools || [];
+                if (tools.length > 0) {
+                    document.getElementById('toolsSection').style.display = 'block';
+                    document.getElementById('toolsCount').textContent = tools.length;
+
+                    const toolsList = document.getElementById('toolsList');
+                    toolsList.innerHTML = '';
+
+                    tools.forEach(tool => {
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item';
+                        item.innerHTML = `
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <strong class="text-primary">${escapeHtml(tool.name)}</strong>
+                                    ${tool.description ? `<p class="mb-0 small text-muted">${escapeHtml(tool.description)}</p>` : ''}
+                                </div>
+                            </div>
+                            ${tool.inputSchema ? `<details class="mt-1"><summary class="small text-muted">Parameters</summary><pre class="small bg-light p-2 mt-1 mb-0">${escapeHtml(JSON.stringify(tool.inputSchema.properties || {}, null, 2))}</pre></details>` : ''}
+                        `;
+                        toolsList.appendChild(item);
+                    });
+                }
+            } else {
+                document.getElementById('testError').style.display = 'block';
+                document.getElementById('testErrorMsg').textContent = result.message || 'Unknown error';
+            }
+        })
+        .catch(err => {
+            document.getElementById('testLoading').style.display = 'none';
+            document.getElementById('testResults').style.display = 'block';
+            document.getElementById('testError').style.display = 'block';
+            document.getElementById('testErrorMsg').textContent = err.message || 'Network error';
+        });
+}
 </script>

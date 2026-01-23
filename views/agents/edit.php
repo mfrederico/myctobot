@@ -864,6 +864,11 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         <label class="form-label fw-bold">Quick Add from Templates</label>
                         <div class="row g-2">
                             <div class="col-md-4">
+                                <button type="button" class="btn btn-primary w-100" onclick="loadMcpPreset('myctobot-gateway')">
+                                    <i class="bi bi-cloud-arrow-up"></i> MyCTOBot Gateway
+                                </button>
+                            </div>
+                            <div class="col-md-4">
                                 <button type="button" class="btn btn-outline-primary w-100" onclick="loadMcpPreset('pipelines')">
                                     <i class="bi bi-diagram-3"></i> Pipelines
                                 </button>
@@ -920,20 +925,25 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         <div class="btn-group w-100" role="group">
                             <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeStdio" value="stdio" checked onchange="toggleMcpTypeFields()">
                             <label class="btn btn-outline-primary" for="mcpTypeStdio">
-                                <i class="bi bi-terminal"></i> STDIO (Local Process)
+                                <i class="bi bi-terminal"></i> STDIO
                             </label>
                             <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeHttp" value="http" onchange="toggleMcpTypeFields()">
                             <label class="btn btn-outline-primary" for="mcpTypeHttp">
-                                <i class="bi bi-globe"></i> HTTP (Remote Server)
+                                <i class="bi bi-globe"></i> HTTP
+                            </label>
+                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeSse" value="sse" onchange="toggleMcpTypeFields()">
+                            <label class="btn btn-outline-primary" for="mcpTypeSse">
+                                <i class="bi bi-broadcast"></i> SSE
                             </label>
                         </div>
+                        <div class="form-text">STDIO for local processes, HTTP/SSE for remote servers</div>
                     </div>
 
                     <!-- STDIO Fields -->
                     <div id="stdioFields">
                         <div class="mb-3">
                             <label class="form-label fw-bold">Command <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="mcpCommand" placeholder="e.g., npx, uvx, node">
+                            <input type="text" class="form-control" id="mcpCommand" placeholder="e.g., php, npx, node">
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-bold">Arguments</label>
@@ -963,6 +973,17 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                         <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="addEnvVarRow()">
                             <i class="bi bi-plus"></i> Add Environment Variable
                         </button>
+                    </div>
+
+                    <!-- Save to Library Option -->
+                    <div class="mb-3 p-3 bg-light rounded">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="saveToLibrary" checked>
+                            <label class="form-check-label fw-bold" for="saveToLibrary">
+                                <i class="bi bi-collection"></i> Save to Server Library
+                            </label>
+                            <div class="form-text">Save this server to your library so it can be reused across agents</div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1006,6 +1027,12 @@ function updateLinkedServers() {
 
 // Preset templates
 const mcpPresets = {
+    'myctobot-gateway': {
+        name: "myctobot",
+        type: "sse",
+        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/mcp/sse?workspace=<?= htmlspecialchars($workspaceSlug) ?>&token=<?= htmlspecialchars($workspaceApiKey ?? '') ?>",
+        description: "MyCTOBot Gateway (Jira, GitHub, Shopify tools) - Use this for remote agents"
+    },
     pipelines: {
         name: "pipelines",
         type: "http",
@@ -1086,9 +1113,8 @@ function renderMcpServerList() {
         html += '<h6 class="text-muted mb-3"><i class="bi bi-link-45deg"></i> Linked from Library</h6>';
         html += '<div class="row g-3 mb-4">';
         linkedMcpServers.forEach((server) => {
-            const isStdio = server.server_type === 'stdio';
-            const typeIcon = isStdio ? 'bi-terminal' : 'bi-globe';
-            const typeBadge = isStdio ? 'bg-info' : 'bg-warning';
+            const typeIcon = server.server_type === 'stdio' ? 'bi-terminal' : (server.server_type === 'sse' ? 'bi-broadcast' : 'bi-globe');
+            const typeBadge = server.server_type === 'stdio' ? 'bg-info' : (server.server_type === 'sse' ? 'bg-success' : 'bg-warning');
 
             html += `
             <div class="col-md-6">
@@ -1118,9 +1144,8 @@ function renderMcpServerList() {
         }
         html += '<div class="row g-3">';
         mcpServers.forEach((server, index) => {
-            const isStdio = server.type === 'stdio';
-            const typeIcon = isStdio ? 'bi-terminal' : 'bi-globe';
-            const typeBadge = isStdio ? 'bg-info' : 'bg-warning';
+            const typeIcon = server.type === 'stdio' ? 'bi-terminal' : (server.type === 'sse' ? 'bi-broadcast' : 'bi-globe');
+            const typeBadge = server.type === 'stdio' ? 'bg-info' : (server.type === 'sse' ? 'bg-success' : 'bg-warning');
 
             html += `
             <div class="col-md-6">
@@ -1208,6 +1233,10 @@ function loadMcpPreset(presetName) {
         document.getElementById('mcpTypeStdio').checked = true;
         document.getElementById('mcpCommand').value = preset.command || '';
         document.getElementById('mcpArgs').value = (preset.args || []).join(', ');
+    } else if (preset.type === 'sse') {
+        document.getElementById('mcpTypeSse').checked = true;
+        document.getElementById('mcpUrl').value = preset.url || '';
+        document.getElementById('mcpHeaders').value = JSON.stringify(preset.headers || {}, null, 2);
     } else {
         document.getElementById('mcpTypeHttp').checked = true;
         document.getElementById('mcpUrl').value = preset.url || '';
@@ -1253,15 +1282,20 @@ function addMcpServer() {
         return;
     }
 
-    // Check for duplicate names
+    // Check for duplicate names in inline servers
     if (mcpServers.some(s => s.name === name)) {
         alert('A server with this name already exists');
         return;
     }
 
     const isStdio = document.getElementById('mcpTypeStdio').checked;
+    const isSse = document.getElementById('mcpTypeSse').checked;
 
-    let server = { name, type: isStdio ? 'stdio' : 'http' };
+    let serverType = 'http';
+    if (isStdio) serverType = 'stdio';
+    else if (isSse) serverType = 'sse';
+
+    let server = { name, type: serverType };
 
     if (isStdio) {
         const command = document.getElementById('mcpCommand').value.trim();
@@ -1278,7 +1312,7 @@ function addMcpServer() {
     } else {
         const url = document.getElementById('mcpUrl').value.trim();
         if (!url) {
-            alert('URL is required for HTTP servers');
+            alert('URL is required for ' + serverType.toUpperCase() + ' servers');
             return;
         }
         server.url = url;
@@ -1308,12 +1342,58 @@ function addMcpServer() {
         server.env = env;
     }
 
-    mcpServers.push(server);
-    renderMcpServerList();
+    const saveToLibrary = document.getElementById('saveToLibrary').checked;
 
-    // Close modal and reset form
-    bootstrap.Modal.getInstance(document.getElementById('addMcpModal')).hide();
-    resetMcpModal();
+    if (saveToLibrary) {
+        // Save to library via API and link to agent
+        saveServerToLibrary(server);
+    } else {
+        // Add as inline server (legacy)
+        mcpServers.push(server);
+        renderMcpServerList();
+
+        // Close modal and reset form
+        bootstrap.Modal.getInstance(document.getElementById('addMcpModal')).hide();
+        resetMcpModal();
+    }
+}
+
+// Save server to library and link to this agent
+function saveServerToLibrary(server) {
+    const data = {
+        csrf_token: '<?= Flight::csrf()->getToken() ?>',
+        name: server.name,
+        description: server.description || '',
+        server_type: server.type,
+        env: JSON.stringify(server.env || {})
+    };
+
+    if (server.type === 'stdio') {
+        data.command = server.command;
+        data.args = (server.args || []).join(', ');
+    } else {
+        data.url = server.url;
+        data.headers = JSON.stringify(server.headers || {});
+    }
+
+    fetch('/mcpservers/store', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams(data)
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            // Reload page to show new server in library
+            alert('Server saved to library! The page will reload to show the new server.');
+            window.location.reload();
+        } else {
+            alert(result.message || 'Error saving server to library');
+        }
+    })
+    .catch(err => {
+        alert('Error saving server: ' + err.message);
+    });
 }
 
 // Remove MCP server
@@ -1333,6 +1413,7 @@ function resetMcpModal() {
     document.getElementById('mcpUrl').value = '';
     document.getElementById('mcpHeaders').value = '';
     document.getElementById('envVarList').innerHTML = '';
+    document.getElementById('saveToLibrary').checked = true;
     toggleMcpTypeFields();
 }
 

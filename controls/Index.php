@@ -8,6 +8,7 @@ namespace app;
 
 use \Flight as Flight;
 use \RedBeanPHP\R as R;
+use app\services\PricingService;
 
 class Index extends BaseControls\Control {
     
@@ -26,9 +27,21 @@ class Index extends BaseControls\Control {
         // On workspace sites, show normal homepage
         $googleEnabled = !empty(Flight::get('social.google_client_id'));
 
+        // Load pricing data for product cards
+        try {
+            $allProducts = PricingService::getAllProducts();
+            $trialDays = PricingService::getTrialDays();
+        } catch (\Exception $e) {
+            Flight::get('log')->error("Failed to load pricing: " . $e->getMessage());
+            $allProducts = [];
+            $trialDays = 14;
+        }
+
         $this->render('index/index', [
             'title' => 'MyCTOBot - AI Sprint Digests',
-            'googleEnabled' => $googleEnabled
+            'googleEnabled' => $googleEnabled,
+            'allProducts' => $allProducts,
+            'trialDays' => $trialDays
         ]);
     }
     

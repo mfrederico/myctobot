@@ -64,6 +64,12 @@ class Pipelines extends BaseControls\Control {
             'description' => 'Gather results from parallel rows',
             'icon' => 'bi-collection',
             'color' => 'success'
+        ],
+        'mcp_call' => [
+            'label' => 'MCP Call',
+            'description' => 'Call a tool on an external MCP server',
+            'icon' => 'bi-plug',
+            'color' => 'purple'
         ]
     ];
 
@@ -327,6 +333,22 @@ class Pipelines extends BaseControls\Control {
             }
         }
 
+        // Get available MCP servers for mcp_call step type
+        // Use same logic as Mcpservers controller: own servers + shared servers, must be active
+        $mcpServers = Bean::find('mcpservers',
+            ' is_active = 1 AND (member_id = ? OR is_shared = 1) ORDER BY name ASC ',
+            [$this->member->id]
+        );
+        $mcpServerList = [];
+        foreach ($mcpServers as $server) {
+            $mcpServerList[] = [
+                'id' => $server->id,
+                'name' => $server->name,
+                'description' => $server->description,
+                'server_type' => $server->server_type
+            ];
+        }
+
         // Build webhook URL for this pipeline
         $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
         $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
@@ -361,6 +383,7 @@ class Pipelines extends BaseControls\Control {
         $this->viewData['repos'] = $repoList;
         $this->viewData['runners'] = $runnerList;
         $this->viewData['workstations'] = $workstationList;
+        $this->viewData['mcpServers'] = $mcpServerList;
         $this->viewData['webhookUrl'] = $webhookUrl;
 
         $this->render('pipelines/edit', $this->viewData);

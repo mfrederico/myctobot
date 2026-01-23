@@ -112,6 +112,7 @@ class PermissionCache {
             'signup::pending',
             'signup::verify',
             'signup::resend',
+            'landing::*',           // All landing pages are public
         ];
 
         $key = "{$control}::{$method}";

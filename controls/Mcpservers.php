@@ -291,6 +291,39 @@ class Mcpservers extends BaseControls\Control {
     }
 
     /**
+     * Toggle active status
+     */
+    public function toggleactive($params = []) {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid CSRF token', 403);
+            return;
+        }
+
+        $serverId = (int) ($this->opId() ?? $params[0] ?? 0);
+        $server = Bean::load('mcpservers', $serverId);
+
+        if (!$server->id) {
+            Flight::jsonError('Server not found', 404);
+            return;
+        }
+
+        // Only owner can toggle active status
+        if ($server->member_id != $this->member->id) {
+            Flight::jsonError('Only the owner can change active status', 403);
+            return;
+        }
+
+        $server->is_active = $server->is_active ? 0 : 1;
+        $server->updated_at = date('Y-m-d H:i:s');
+        Bean::store($server);
+
+        $status = $server->is_active ? 'active' : 'inactive';
+        Flight::jsonSuccess($this->formatServer($server), "Server is now $status");
+    }
+
+    /**
      * Link server to agent (many-to-many)
      */
     public function linkagent($params = []) {
@@ -355,6 +388,193 @@ class Mcpservers extends BaseControls\Control {
     }
 
     /**
+     * Test connection to an MCP server
+     * Returns server info and available tools
+     */
+    public function test($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $serverId = (int) ($this->opId() ?? $params[0] ?? 0);
+        $server = Bean::load('mcpservers', $serverId);
+
+        if (!$server->id) {
+            Flight::jsonError('Server not found', 404);
+            return;
+        }
+
+        // Check access to server
+        if ($server->member_id != $this->member->id && !$server->is_shared) {
+            Flight::jsonError('Access denied to this server', 403);
+            return;
+        }
+
+        require_once __DIR__ . '/../services/McpClientService.php';
+
+        $client = new \app\services\McpClientService(Flight::get('log'));
+
+        try {
+            // Build connection config
+            $transport = $server->server_type ?: 'stdio';
+            $config = [];
+
+            if ($transport === 'stdio') {
+                // Build command with args
+                $command = $server->command;
+                $args = json_decode($server->args_json ?: '[]', true);
+                if (!empty($args)) {
+                    $command .= ' ' . implode(' ', array_map('escapeshellarg', $args));
+                }
+
+                $config = [
+                    'command' => $command,
+                    'working_dir' => '/tmp',
+                    'env' => json_decode($server->env_json ?: '{}', true)
+                ];
+            } else {
+                $config = [
+                    'url' => $server->url,
+                    'headers' => json_decode($server->headers_json ?: '{}', true)
+                ];
+            }
+
+            if (!$client->connect($transport, $config)) {
+                // Update server status
+                $server->last_error = 'Failed to connect';
+                $server->last_error_at = date('Y-m-d H:i:s');
+                Bean::store($server);
+
+                Flight::jsonError('Failed to connect to MCP server', 500);
+                return;
+            }
+
+            $serverInfo = $client->getServerInfo();
+            $tools = $client->listTools();
+            $capabilities = $client->getCapabilities();
+
+            $client->disconnect();
+
+            // Update server with cached info
+            $server->server_name = $serverInfo['name'] ?? null;
+            $server->server_version = $serverInfo['version'] ?? null;
+            $server->tools_json = json_encode($tools);
+            $server->capabilities_json = json_encode($capabilities);
+            $server->last_connected_at = date('Y-m-d H:i:s');
+            $server->last_error = null;
+            $server->last_error_at = null;
+            Bean::store($server);
+
+            Flight::jsonSuccess([
+                'server_info' => $serverInfo,
+                'capabilities' => $capabilities,
+                'tools' => $tools,
+                'tools_count' => count($tools)
+            ], 'Connection successful');
+
+        } catch (\Exception $e) {
+            $client->disconnect();
+
+            // Update server status
+            $server->last_error = $e->getMessage();
+            $server->last_error_at = date('Y-m-d H:i:s');
+            Bean::store($server);
+
+            Flight::jsonError('Connection failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Call a tool on an MCP server (for testing)
+     */
+    public function calltool($params = []) {
+        if (!$this->requireLogin()) return;
+
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid CSRF token', 403);
+            return;
+        }
+
+        $serverId = (int) ($this->opId() ?? $params[0] ?? 0);
+        $server = Bean::load('mcpservers', $serverId);
+
+        if (!$server->id) {
+            Flight::jsonError('Server not found', 404);
+            return;
+        }
+
+        // Check access to server
+        if ($server->member_id != $this->member->id && !$server->is_shared) {
+            Flight::jsonError('Access denied to this server', 403);
+            return;
+        }
+
+        $toolName = $this->getParam('tool');
+        $arguments = $this->getParam('arguments');
+
+        if (empty($toolName)) {
+            Flight::jsonError('Tool name is required', 400);
+            return;
+        }
+
+        // Parse arguments if string
+        if (is_string($arguments)) {
+            $arguments = json_decode($arguments, true) ?: [];
+        }
+
+        require_once __DIR__ . '/../services/McpClientService.php';
+
+        $client = new \app\services\McpClientService(Flight::get('log'));
+
+        try {
+            // Build connection config
+            $transport = $server->server_type ?: 'stdio';
+            $config = [];
+
+            if ($transport === 'stdio') {
+                $command = $server->command;
+                $args = json_decode($server->args_json ?: '[]', true);
+                if (!empty($args)) {
+                    $command .= ' ' . implode(' ', array_map('escapeshellarg', $args));
+                }
+
+                $config = [
+                    'command' => $command,
+                    'working_dir' => '/tmp',
+                    'env' => json_decode($server->env_json ?: '{}', true)
+                ];
+            } else {
+                $config = [
+                    'url' => $server->url,
+                    'headers' => json_decode($server->headers_json ?: '{}', true)
+                ];
+            }
+
+            if (!$client->connect($transport, $config)) {
+                Flight::jsonError('Failed to connect to MCP server', 500);
+                return;
+            }
+
+            $result = $client->callTool($toolName, $arguments);
+
+            $client->disconnect();
+
+            if (!$result['success']) {
+                Flight::jsonError($result['error'] ?? 'Tool call failed', 400);
+                return;
+            }
+
+            Flight::jsonSuccess([
+                'tool' => $toolName,
+                'arguments' => $arguments,
+                'result' => $result
+            ], 'Tool executed successfully');
+
+        } catch (\Exception $e) {
+            $client->disconnect();
+            Flight::jsonError('Tool call failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * Format server bean for JSON response
      */
     private function formatServer($server): array {
@@ -387,22 +607,36 @@ class Mcpservers extends BaseControls\Control {
             $baseUrl = preg_replace('/^http:/', 'https:', $baseUrl);
         }
 
-        // Get API key from workspace config
-        $workspaceApiKey = '';
-        $configFile = BASE_PATH . '/conf/config.' . $workspaceSlug . '.ini';
-        if (file_exists($configFile)) {
-            $workspaceConfig = parse_ini_file($configFile, true);
-            $workspaceApiKey = $workspaceConfig['api']['api_key'] ?? '';
+        // Try to find an existing API key with mcp:* scope for this member
+        $mcpApiKey = '';
+        if ($this->member) {
+            $apiKey = Bean::findOne('apikeys',
+                ' member_id = ? AND is_active = 1 AND (scopes_json LIKE ? OR scopes_json LIKE ?)',
+                [$this->member->id, '%"mcp:%', '%"*:*"%']
+            );
+            if ($apiKey) {
+                $mcpApiKey = $apiKey->token;
+            }
         }
 
         return [
+            'myctobot-gateway' => [
+                'name' => 'myctobot',
+                'description' => 'MyCTOBot Gateway (Jira, GitHub, Shopify tools) - Use this for remote agents',
+                'server_type' => 'sse',
+                'url' => "{$baseUrl}/mcp/sse?workspace={$workspaceSlug}&token=" . ($mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE'),
+                'headers' => [],
+                'env' => [],
+                'note' => $mcpApiKey ? 'SSE endpoint for remote agents - includes jira_*, github_*, shopify_* tools' : 'Create an API key at /apikeys with mcp:* scope'
+            ],
             'pipelines' => [
                 'name' => 'pipelines',
                 'description' => 'MyCTOBot Pipeline Tools',
                 'server_type' => 'http',
-                'url' => "{$baseUrl}/pipelines/mcp/tools/{$workspaceSlug}",
-                'headers' => ['X-API-TOKEN' => $workspaceApiKey],
-                'env' => []
+                'url' => "{$baseUrl}/mcp/{$workspaceSlug}/pipelines",
+                'headers' => ['X-API-TOKEN' => $mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE'],
+                'env' => [],
+                'note' => $mcpApiKey ? '' : 'Create an API key at /apikeys with mcp:* scope'
             ],
             'github' => [
                 'name' => 'github',

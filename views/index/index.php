@@ -1,39 +1,50 @@
 <?php
 // Centralized pricing from config
-$proMonthlyPrice = \app\services\SubscriptionService::getProMonthlyPrice();
-$proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
+use app\services\PricingService;
+
+// Get all product pricing for the product cards
+$allPricing = $allProducts ?? PricingService::getAllProducts();
+$trialDays = $trialDays ?? PricingService::getTrialDays();
+
+// Pro pricing for the main pricing section (backwards compatibility)
+$proMonthlyPrice = $allPricing['ai-developer']['pro_monthly'] ?? 500;
+$proYearlyPrice = $allPricing['ai-developer']['pro_yearly'] ?? 4800;
 ?>
 <!-- Hero Section -->
 <div class="bg-dark text-white py-5" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
     <div class="container">
         <div class="row align-items-center py-4">
             <div class="col-lg-7">
-                <span class="badge bg-primary mb-3">End-to-End AI Development</span>
-                <h1 class="display-4 fw-bold mb-4">From Idea to Production<br><span class="text-primary">with AI That Follows Your Rules</span></h1>
+                <span class="badge bg-primary mb-3">AI-Powered Development Platform</span>
+                <h1 class="display-4 fw-bold mb-4">Your AI Development Team<br><span class="text-primary">That Never Sleeps</span></h1>
                 <p class="lead mb-4 text-light opacity-75">
-                    MyCTOBot is a complete AI development platform that transforms your ideas into working code&mdash;within the guardrails you define. Connect your infrastructure, set your guidelines, and let AI handle the implementation.
+                    MyCTOBot is the complete AI development platform. From automated code implementation to intelligent code reviews, from workflow pipelines to legacy modernization&mdash;we've got your development needs covered.
                 </p>
                 <div class="d-flex flex-wrap gap-3 mb-4">
                     <div class="d-flex align-items-center">
-                        <i class="bi bi-shield-check text-success me-2"></i>
-                        <span class="small">Security-First Architecture</span>
+                        <i class="bi bi-robot text-primary me-2"></i>
+                        <span class="small">AI Developer Agents</span>
                     </div>
                     <div class="d-flex align-items-center">
-                        <i class="bi bi-git text-info me-2"></i>
-                        <span class="small">GitHub & Jira Integration</span>
+                        <i class="bi bi-diagram-3 text-info me-2"></i>
+                        <span class="small">Smart Pipelines</span>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <i class="bi bi-code-square text-success me-2"></i>
+                        <span class="small">Code Review AI</span>
                     </div>
                     <div class="d-flex align-items-center">
                         <i class="bi bi-shop text-warning me-2"></i>
-                        <span class="small">Shopify Ready</span>
+                        <span class="small">Shopify Themes</span>
                     </div>
                 </div>
                 <div class="d-grid gap-2 d-md-flex">
                     <?php if (\app\WorkspaceResolver::isDefault()): ?>
                         <a href="/signup" class="btn btn-primary btn-lg">
-                            <i class="bi bi-play-fill"></i> Start Building
+                            <i class="bi bi-play-fill"></i> Start Free Trial
                         </a>
-                        <a href="#how-it-works" class="btn btn-outline-light btn-lg">
-                            See How It Works
+                        <a href="#products" class="btn btn-outline-light btn-lg">
+                            Explore Products
                         </a>
                     <?php elseif (!$isLoggedIn): ?>
                         <a href="/auth/login" class="btn btn-primary btn-lg">Sign In</a>
@@ -44,22 +55,235 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
             </div>
             <div class="col-lg-5 text-center d-none d-lg-block">
                 <div class="position-relative">
-                    <div class="card bg-dark border-secondary shadow-lg" style="transform: rotate(-3deg);">
-                        <div class="card-header bg-secondary bg-opacity-25 border-secondary py-2">
+                    <!-- Stacked cards showing different products -->
+                    <div class="card bg-dark border-secondary shadow-lg position-absolute" style="transform: rotate(6deg); top: 20px; right: 0; width: 90%; opacity: 0.7;">
+                        <div class="card-body py-3 px-4">
+                            <small class="text-success"><i class="bi bi-check-circle me-1"></i> Code Review Complete</small>
+                        </div>
+                    </div>
+                    <div class="card bg-dark border-secondary shadow-lg position-absolute" style="transform: rotate(3deg); top: 10px; right: 10px; width: 90%; opacity: 0.85;">
+                        <div class="card-body py-3 px-4">
+                            <small class="text-info"><i class="bi bi-diagram-3 me-1"></i> Pipeline Running...</small>
+                        </div>
+                    </div>
+                    <div class="card bg-dark border-primary shadow-lg" style="position: relative; z-index: 10;">
+                        <div class="card-header bg-primary bg-opacity-25 border-primary py-2">
                             <div class="d-flex align-items-center">
                                 <span class="text-danger me-2">&#9679;</span>
                                 <span class="text-warning me-2">&#9679;</span>
                                 <span class="text-success me-2">&#9679;</span>
-                                <span class="text-muted small ms-2">CEO Directive</span>
+                                <span class="text-muted small ms-2">AI Developer</span>
                             </div>
                         </div>
                         <div class="card-body text-start" style="font-family: monospace; font-size: 0.8rem;">
-                            <p class="text-info mb-1"># Build a plugin marketplace</p>
-                            <p class="text-light mb-2">Create a system where users can browse, install, and manage plugins from multiple repositories...</p>
-                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> 6 epics created</p>
-                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> 24 stories generated</p>
-                            <p class="text-primary mb-0"><i class="bi bi-play-circle"></i> AI implementing...</p>
+                            <p class="text-info mb-1"># Jira: SHOP-1234 ai-dev</p>
+                            <p class="text-light mb-2">Add loyalty points display to product cards...</p>
+                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> Branch created</p>
+                            <p class="text-success mb-0"><i class="bi bi-check-circle"></i> 3 files modified</p>
+                            <p class="text-primary mb-0"><i class="bi bi-git"></i> PR ready for review</p>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Products Section -->
+<div class="py-5" id="products">
+    <div class="container">
+        <div class="text-center mb-5">
+            <span class="badge bg-primary mb-3">Our Products</span>
+            <h2 class="mb-3">Everything You Need to Ship Faster</h2>
+            <p class="lead text-muted">Five powerful products, one platform. Choose what you need or use them all together.</p>
+        </div>
+
+        <div class="row g-4">
+            <!-- AI Developer -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-0 hover-lift">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);">
+                                <i class="bi bi-robot text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">AI Developer</h5>
+                                <small class="text-muted">Label tickets, get PRs</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            Label any Jira ticket with <code>ai-dev</code> and wake up to a pull request. AI that understands your codebase and follows your CLAUDE.md standards.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Automatic PR creation</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Follows your coding standards</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Jira & GitHub integration</li>
+                        </ul>
+                        <a href="/landing/aideveloper" class="btn btn-outline-primary btn-sm">
+                            Learn More <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= $allPricing['ai-developer']['starter_monthly_formatted'] ?? '$150' ?>/mo</strong></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Pipelines -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-0 hover-lift">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                                <i class="bi bi-diagram-3 text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">AI Pipelines</h5>
+                                <small class="text-muted">Automation with AI</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            Build powerful automation workflows with AI agents, shell commands, and webhooks. Like Zapier, but for developers who need AI and code execution.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Visual pipeline builder</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>AI agent steps</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Webhook triggers</li>
+                        </ul>
+                        <a href="/landing/pipelines" class="btn btn-outline-success btn-sm">
+                            Learn More <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= $allPricing['pipelines']['starter_monthly_formatted'] ?? '$79' ?>/mo</strong></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Code Review -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-0 hover-lift">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+                                <i class="bi bi-code-square text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">AI Code Review</h5>
+                                <small class="text-muted">Every PR reviewed</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            AI-powered code review that catches bugs, security issues, and style violations before they reach production. Automated PR comments in minutes.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Security vulnerability detection</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Style enforcement</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Inline PR comments</li>
+                        </ul>
+                        <a href="/landing/codereview" class="btn btn-outline-primary btn-sm">
+                            Learn More <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= $allPricing['code-review']['starter_monthly_formatted'] ?? '$49' ?>/mo</strong></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PHP Modernization -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-0 hover-lift">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);">
+                                <i class="bi bi-filetype-php text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">PHP Modernization</h5>
+                                <small class="text-muted">Upgrade to PHP 8.x</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            AI-powered PHP upgrades that modernize your legacy codebase. Add type hints, update deprecated functions, and adopt modern patterns automatically.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>PHP 8.x compatibility</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Type safety upgrades</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Modern pattern adoption</li>
+                        </ul>
+                        <a href="/landing/phpmodernization" class="btn btn-outline-secondary btn-sm">
+                            Learn More <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= $allPricing['php-modernization']['small_project_formatted'] ?? '$2,500' ?></strong> per project</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Shopify Theme Factory -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow-sm border-0 hover-lift">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #95bf47 0%, #5e8e3e 100%);">
+                                <i class="bi bi-shop text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Shopify Themes</h5>
+                                <small class="text-muted">Email to theme</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            Email your design requirements and receive a production-ready Shopify theme. Liquid templates, dynamic sections, and metafield support included.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Custom Liquid templates</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Dynamic sections</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Mobile-first design</li>
+                        </ul>
+                        <a href="/landing/shopifythemes" class="btn btn-outline-success btn-sm">
+                            Learn More <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= $allPricing['shopify-themes']['starter_theme_formatted'] ?? '$5,000' ?></strong> per theme</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Enterprise Platform -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card h-100 shadow border-primary hover-lift">
+                    <div class="card-header bg-primary text-white py-2 text-center">
+                        <small class="fw-semibold">FULL PLATFORM</small>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="rounded-circle d-flex align-items-center justify-content-center me-3" style="width: 56px; height: 56px; background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);">
+                                <i class="bi bi-building text-white" style="font-size: 1.5rem;"></i>
+                            </div>
+                            <div>
+                                <h5 class="mb-0">Enterprise</h5>
+                                <small class="text-muted">Everything included</small>
+                            </div>
+                        </div>
+                        <p class="text-muted mb-3">
+                            Full platform access with all products, dedicated workstations, custom integrations, priority support, and SLA guarantees.
+                        </p>
+                        <ul class="list-unstyled small text-muted mb-3">
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>All products included</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Dedicated infrastructure</li>
+                            <li class="mb-1"><i class="bi bi-check text-success me-2"></i>Priority support & SLA</li>
+                        </ul>
+                        <a href="/contact" class="btn btn-primary btn-sm">
+                            Contact Sales <i class="bi bi-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="card-footer bg-transparent border-0 px-4 pb-4">
+                        <small class="text-muted">Starting at <strong class="text-dark"><?= isset($allPricing['enterprise']['monthly']) ? '$' . number_format($allPricing['enterprise']['monthly']) : '$10,000' ?>/mo</strong></small>
                     </div>
                 </div>
             </div>
@@ -249,34 +473,6 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
 /services  - Business logic</pre>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Shopify Highlight Section -->
-<div class="py-5" style="background: linear-gradient(135deg, #95bf47 0%, #5e8e3e 100%);">
-    <div class="container">
-        <div class="row align-items-center">
-            <div class="col-lg-6 text-white">
-                <span class="badge bg-dark mb-3">E-Commerce Ready</span>
-                <h2 class="mb-4">Build Shopify Apps with AI</h2>
-                <p class="lead mb-4" style="opacity: 0.9;">
-                    MyCTOBot understands Shopify's ecosystem. Build themes, apps, and integrations
-                    with AI that knows Liquid templates, Admin API, and Storefront patterns.
-                </p>
-                <ul class="list-unstyled mb-4">
-                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Theme customization & sections</li>
-                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Custom app development</li>
-                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Webhook integrations</li>
-                    <li class="mb-2"><i class="bi bi-check2-circle me-2"></i> Metafield management</li>
-                </ul>
-                <a href="/shopify" class="btn btn-light btn-lg">
-                    <i class="bi bi-shop"></i> Explore Shopify Features
-                </a>
-            </div>
-            <div class="col-lg-6 d-none d-lg-block text-center">
-                <i class="bi bi-shop-window" style="font-size: 15rem; opacity: 0.2; color: white;"></i>
             </div>
         </div>
     </div>
@@ -510,7 +706,7 @@ $proYearlyPrice = \app\services\SubscriptionService::getProYearlyPrice();
                             <li class="mb-2"><i class="bi bi-check text-success me-2"></i> Priority support</li>
                         </ul>
                         <?php if (\app\WorkspaceResolver::isDefault()): ?>
-                        <a href="/signup" class="btn btn-primary w-100">Start 14-Day Trial</a>
+                        <a href="/signup" class="btn btn-primary w-100">Start <?= $trialDays ?>-Day Trial</a>
                         <?php endif; ?>
                     </div>
                 </div>

@@ -123,3 +123,35 @@ footer {
         display: none !important;
     }
 }
+
+/* Product card hover lift effect */
+.hover-lift {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-8px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.12);
+}
+
+/* Homepage product cards - prevent double animation */
+#products .card.hover-lift:hover {
+    transform: translateY(-8px);
+}
+
+/* Gradient icon backgrounds */
+.gradient-primary {
+    background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+}
+
+.gradient-success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.gradient-info {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.gradient-shopify {
+    background: linear-gradient(135deg, #95bf47 0%, #5e8e3e 100%);
+}

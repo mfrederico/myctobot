@@ -1,12 +1,23 @@
 <div class="container py-4">
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link" href="/mcpservers">
+                <i class="bi bi-plug"></i> MCP Servers
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link active" href="/agents">
+                <i class="bi bi-robot"></i> Agents
+            </a>
+        </li>
+    </ul>
+
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2 mb-0">
             <i class="bi bi-robot"></i> AI Agent Profiles
         </h1>
         <div>
-            <a href="/mcpservers" class="btn btn-outline-info me-2" title="Manage reusable MCP server configurations">
-                <i class="bi bi-plug"></i> MCP Server Library
-            </a>
             <a href="/admin/runners" class="btn btn-outline-secondary me-2">
                 <i class="bi bi-arrow-left"></i> Back to Runners
             </a>

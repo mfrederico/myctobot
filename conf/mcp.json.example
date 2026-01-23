@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "myctobot": {
+      "url": "http://localhost:8003/sse?workspace=YOUR_WORKSPACE&token=YOUR_TK_TOKEN",
+      "transport": "sse"
+    }
+  }
+}

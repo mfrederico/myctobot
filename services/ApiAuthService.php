@@ -278,7 +278,7 @@ class ApiAuthService {
 
     /**
      * Validate a token without requiring controller/method context.
-     * Used by external services (fastmcphp gateway) to validate API keys.
+     * Used by external services to validate API keys.
      *
      * @param string $token The API token to validate
      * @param string $requiredScope Optional scope pattern to check (e.g., 'mcp', 'mcp:*')

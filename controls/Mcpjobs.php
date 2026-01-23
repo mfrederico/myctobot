@@ -4,6 +4,7 @@
  *
  * Provides MCP tools for AI Dev runners to report job status back to the orchestrator.
  * This allows Claude Code sessions to signal completion without needing to exit.
+ * Workspace is determined from subdomain (e.g., gwt.myctobot.ai).
  *
  * Tools:
  *   - job_complete: Mark job as complete with results (PR URL, files changed, etc.)
@@ -15,7 +16,7 @@
  *     "mcpServers": {
  *       "myctobot": {
  *         "type": "http",
- *         "url": "https://myctobot.ai/mcp/workspace/jobs",
+ *         "url": "https://gwt.myctobot.ai/mcp/jobs",
  *         "headers": {
  *           "Authorization": "Bearer {api_key}"
  *         }
@@ -48,28 +49,35 @@ class Mcpjobs extends Control {
 
     public function __construct() {
         $this->logger = Flight::get('log');
-    }
-
-    /**
-     * Workspace-aware MCP Jobs endpoint
-     * POST /mcp/{workspace}/jobs
-     *
-     * @param string $workspace Workspace slug from the URL
-     */
-    public function handlewithworkspace(string $workspace) {
-        $this->workspace = $workspace;
-        $this->logger->debug('MCP Jobs request', ['workspace' => $workspace]);
-
-        // Load workspace config and switch database context
-        $this->loadWorkspaceDatabase($workspace);
-
-        $this->handle();
+        // Workspace from subdomain - set by front controller in public/index.php
+        $this->workspace = $_SERVER['WORKSPACE'] ?? null;
     }
 
     /**
      * Main MCP endpoint handler
+     * POST /mcp/jobs
+     * Workspace is determined from subdomain: https://{workspace}.myctobot.ai/mcp/jobs
      */
-    public function handle() {
+    public function index() {
+        // Require workspace from subdomain
+        if (empty($this->workspace)) {
+            header('Content-Type: application/json');
+            http_response_code(400);
+            echo json_encode([
+                'jsonrpc' => '2.0',
+                'id' => null,
+                'error' => [
+                    'code' => -32600,
+                    'message' => 'Workspace required. Use https://{workspace}.myctobot.ai/mcp/jobs'
+                ]
+            ]);
+            return;
+        }
+
+        $this->logger->debug('MCP Jobs request', ['workspace' => $this->workspace]);
+
+        // Load workspace config and switch database context
+        $this->loadWorkspaceDatabase($this->workspace);
         // Set CORS headers
         header('Access-Control-Allow-Origin: *');
         header('Access-Control-Allow-Methods: POST, GET, OPTIONS');

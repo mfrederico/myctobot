@@ -5,16 +5,17 @@
  * Implements Streamable HTTP transport for MCP servers.
  * This allows Claude Code to connect via HTTP instead of stdio,
  * providing persistent connections through nginx/PHP-FPM.
+ * Workspace is determined from subdomain (e.g., gwt.myctobot.ai).
  *
  * Usage in Claude Code:
- *   claude mcp add --transport http jira https://myctobot.ai/mcp/jira
+ *   claude mcp add --transport http jira https://gwt.myctobot.ai/mcp/jira
  *
  * Or in .mcp.json:
  *   {
  *     "mcpServers": {
  *       "jira": {
  *         "type": "http",
- *         "url": "https://myctobot.ai/mcp/jira",
+ *         "url": "https://gwt.myctobot.ai/mcp/jira",
  *         "headers": {
  *           "X-MCP-Member-ID": "3",
  *           "X-MCP-Cloud-ID": "xxx"
@@ -33,6 +34,7 @@ use \app\services\ImageService;
 use app\BaseControls\Control;
 use app\services\JiraClient;
 use app\services\McpResponseTrait;
+use app\WorkspaceResolver;
 
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/../services/JiraClient.php';
@@ -49,59 +51,46 @@ class Mcpjira extends Control {
     public function __construct() {
         // Don't call parent - MCP requests don't have sessions
         $this->logger = Flight::get('log');
-    }
-
-    /**
-     * workspace-aware MCP endpoint - handles JSON-RPC requests with workspace context
-     * POST /mcp/workspace/jira
-     *
-     * The workspace parameter is the domain ID (e.g., gwt-myctobot-ai)
-     * This allows using a fixed URL regardless of which subdomain is active.
-     *
-     * @param string $workspace Domain ID from the URL
-     */
-    public function jirawithworkspace(string $workspace) {
-        // Store workspace for agent name lookup and logging
-        $this->workspace = $workspace;
-        $this->logger->debug('MCP Jira request with workspace', ['workspace' => $workspace]);
-
-        // Load workspace config and switch database context
-        $configFile = "conf/config.{$workspace}.ini";
-        if (file_exists($configFile)) {
-            $workspaceConfig = parse_ini_file($configFile, true);
-            if ($workspaceConfig && !empty($workspaceConfig['database'])) {
-                // Switch to workspace database for token lookup
-                $dbConfig = $workspaceConfig['database'];
-                $type = $dbConfig['type'] ?? 'mysql';
-                if ($type === 'sqlite') {
-                    $dbPath = $dbConfig['path'] ?? "database/{$workspace}.sqlite";
-                    $dsn = "sqlite:{$dbPath}";
-                    Bean::useDatabase($workspace, $dsn);
-                } else {
-                    $host = $dbConfig['host'] ?? 'localhost';
-                    $port = $dbConfig['port'] ?? 3306;
-                    $name = $dbConfig['name'] ?? $workspace;
-                    $user = $dbConfig['user'] ?? 'root';
-                    $pass = $dbConfig['pass'] ?? '';
-                    $dsn = "{$type}:host={$host};port={$port};dbname={$name}";
-                    Bean::useDatabase($workspace, $dsn, $user, $pass);
-                }
-                $this->logger->debug('MCP switched to workspace database', ['workspace' => $workspace]);
-            }
-        }
-
-        // Call the main jira handler
-        $this->jira(['workspace' => $workspace]);
+        // Workspace from subdomain - set by front controller in public/index.php
+        $this->workspace = $_SERVER['WORKSPACE'] ?? null;
     }
 
     /**
      * Main MCP endpoint - handles all JSON-RPC requests
      * POST /mcp/jira
+     * Workspace is determined from subdomain: https://{workspace}.myctobot.ai/mcp/jira
      */
-    public function jira($params = []) {
-        // Store workspace if passed from jirawithworkspace
-        if (!empty($params['workspace']) && !$this->workspace) {
-            $this->workspace = $params['workspace'];
+    public function index() {
+        // Require workspace from subdomain
+        if (empty($this->workspace)) {
+            header('Content-Type: application/json');
+            http_response_code(400);
+            echo json_encode([
+                'jsonrpc' => '2.0',
+                'id' => null,
+                'error' => [
+                    'code' => -32600,
+                    'message' => 'Workspace required. Use https://{workspace}.myctobot.ai/mcp/jira'
+                ]
+            ]);
+            return;
+        }
+
+        $this->logger->debug('MCP Jira request', ['workspace' => $this->workspace]);
+
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($this->workspace)) {
+            header('Content-Type: application/json');
+            http_response_code(400);
+            echo json_encode([
+                'jsonrpc' => '2.0',
+                'id' => null,
+                'error' => [
+                    'code' => -32600,
+                    'message' => "Invalid workspace: {$this->workspace}"
+                ]
+            ]);
+            return;
         }
 
         // Set CORS headers for MCP clients

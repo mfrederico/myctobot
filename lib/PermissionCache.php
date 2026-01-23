@@ -113,6 +113,7 @@ class PermissionCache {
             'signup::verify',
             'signup::resend',
             'landing::*',           // All landing pages are public
+            'mcp::*',               // MCP Gateway - uses Bearer token auth
         ];
 
         $key = "{$control}::{$method}";

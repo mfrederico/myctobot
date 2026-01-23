@@ -547,7 +547,6 @@ BASH;
      */
     private function generateMcpJson(object $job): string {
         $workspace = $job->workspace_slug ?? 'default';
-        $baseUrl = Flight::get('app.baseurl') ?: 'https://myctobot.ai';
 
         // Get member ID and cloud ID from job or related data
         $memberId = $job->member_id ?? 0;
@@ -559,11 +558,12 @@ BASH;
             $cloudId = $token->cloud_uid;
         }
 
+        // Use subdomain-based URL pattern: https://{workspace}.myctobot.ai/mcp/jira
         $config = [
             'mcpServers' => [
                 'jira' => [
                     'type' => 'http',
-                    'url' => "{$baseUrl}/mcp/{$workspace}/jira",
+                    'url' => "https://{$workspace}.myctobot.ai/mcp/jira",
                     'headers' => [
                         'X-MCP-Member-ID' => (string)$memberId,
                         'X-MCP-Cloud-ID' => $cloudId,

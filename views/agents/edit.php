@@ -1029,15 +1029,16 @@ function updateLinkedServers() {
 const mcpPresets = {
     'myctobot-gateway': {
         name: "myctobot",
-        type: "sse",
-        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/mcp/sse?workspace=<?= htmlspecialchars($workspaceSlug) ?>&token=<?= htmlspecialchars($workspaceApiKey ?? '') ?>",
+        type: "http",
+        url: "https://<?= htmlspecialchars($workspaceSlug) ?>.myctobot.ai/mcp",
+        headers: {"Authorization": "Bearer <?= htmlspecialchars($workspaceApiKey ?? '') ?>"},
         description: "MyCTOBot Gateway (Jira, GitHub, Shopify tools) - Use this for remote agents"
     },
     pipelines: {
         name: "pipelines",
         type: "http",
-        url: "<?= htmlspecialchars($apiBaseUrl ?? (Flight::get('app.baseurl') ?: 'https://myctobot.ai')) ?>/pipelines/mcp/tools/<?= htmlspecialchars($workspaceSlug) ?>",
-        headers: {"X-API-TOKEN": "<?= htmlspecialchars($workspaceApiKey ?? '') ?>"}
+        url: "https://<?= htmlspecialchars($workspaceSlug) ?>.myctobot.ai/mcp/pipelines",
+        headers: {"Authorization": "Bearer <?= htmlspecialchars($workspaceApiKey ?? '') ?>"}
     },
     github: {
         name: "github",
@@ -2038,10 +2039,9 @@ $mcpConfigJson = [
     'mcpServers' => [
         $serverName => [
             'type' => 'http',
-            'url' => ($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default'),
+            'url' => 'https://' . ($workspaceSlug ?? 'default') . '.myctobot.ai/mcp',
             'headers' => [
-                'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                'X-Workspace' => ($workspaceSlug ?? 'default')
+                'Authorization' => 'Bearer ${MYCTOBOT_API_KEY}'
             ]
         ]
     ]
@@ -2291,20 +2291,21 @@ function updateMcpConfig() {
     const toolName = document.getElementById('mcp_tool_name')?.value || '';
     const agentName = '<?= addslashes($agentName) ?>';
     const workspaceSlug = '<?= addslashes($workspaceSlug ?? 'default') ?>';
-    const mcpApiUrl = '<?= addslashes($mcpApiUrl ?? 'https://myctobot.ai/api/mcp/default') ?>';
 
     // Derive server name from tool name or agent name
     const serverName = toolName || agentName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+    // Use subdomain-based URL pattern
+    const mcpUrl = `https://${workspaceSlug}.myctobot.ai/mcp`;
 
     const config = {
         mcpServers: {}
     };
     config.mcpServers[serverName] = {
         type: 'http',
-        url: mcpApiUrl,
+        url: mcpUrl,
         headers: {
-            'X-API-Key': '${MYCTOBOT_API_KEY}',
-            'X-Workspace': workspaceSlug
+            'Authorization': 'Bearer ${MYCTOBOT_API_KEY}'
         }
     };
 

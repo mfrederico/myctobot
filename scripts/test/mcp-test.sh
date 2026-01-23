@@ -10,8 +10,8 @@
 #   ./scripts/mcp-test.sh tools/list
 #
 
-# Configuration
-MCP_URL="${MCP_URL:-https://myctobot.ai/mcp/gwt/jira}"
+# Configuration - uses subdomain-based URL pattern
+MCP_URL="${MCP_URL:-https://gwt.myctobot.ai/mcp/jira}"
 MEMBER_ID="${MCP_MEMBER_ID:-3}"
 CLOUD_ID="${MCP_CLOUD_ID:-cb1fabf7-9018-49bb-90c7-afa23343dbe5}"
 
@@ -39,7 +39,7 @@ if [ -z "$TOOL_NAME" ]; then
     echo "  $0 tools/list"
     echo ""
     echo "Environment variables:"
-    echo "  MCP_URL       - MCP endpoint URL (default: $MCP_URL)"
+    echo "  MCP_URL       - MCP endpoint URL (default: https://gwt.myctobot.ai/mcp/jira)"
     echo "  MCP_MEMBER_ID - Member ID (default: $MEMBER_ID)"
     echo "  MCP_CLOUD_ID  - Jira Cloud ID (default: $CLOUD_ID)"
     exit 1

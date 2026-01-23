@@ -54,6 +54,14 @@ if (php_sapi_name() === 'cli' && $argc > 1) {
     $configFile = 'conf/config.ini';
 }
 
+// Extract workspace from subdomain and set in $_SERVER for global access
+// e.g., gwt.myctobot.ai -> 'gwt', myctobot.ai -> null
+if (php_sapi_name() !== 'cli') {
+    $host = $_SERVER['HTTP_HOST'] ?? '';
+    $parts = explode('.', $host);
+    $_SERVER['WORKSPACE'] = (count($parts) >= 3) ? $parts[0] : null;
+}
+
 // Load bootstrap
 require_once BASE_PATH . '/bootstrap.php';
 

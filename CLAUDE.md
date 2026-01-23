@@ -1,5 +1,17 @@
 # Tiknix Development Standards
 
+## RULE #1: CHECK THE LOGS FIRST
+
+**When something isn't working, ALWAYS check the logs BEFORE trying fixes.**
+
+```bash
+tail -50 log/app-$(date +%Y-%m-%d).log
+```
+
+The logs will tell you exactly what's wrong. Don't guess. Don't try random fixes. Read the error message first.
+
+---
+
 This project uses FlightPHP and RedBeanPHP. You MUST follow these conventions strictly.
 
 ## RedBeanPHP Rules (CRITICAL)
@@ -296,10 +308,121 @@ class Mycontroller extends BaseControls\Control {
 }
 ```
 
+### DefaultRoute Auto-Routing (CRITICAL - NO EXPLICIT ROUTES NEEDED)
+
+**The DefaultRoute handler automatically manages routing, auth, and permissions.**
+Do NOT create explicit route files in `routes/` unless absolutely necessary.
+
+**How it works:**
+1. URL `/controller/method` → `controls/Controller.php` → `method()`
+2. DefaultRoute handles authentication and permission checks via `authcontrol` table
+3. All HTTP methods (GET, POST, OPTIONS, PUT, DELETE) route to the same method
+4. The method decides what to do based on `$_SERVER['REQUEST_METHOD']`
+
+**Example - Sub-endpoint delegation (lazy loading pattern):**
+
+For URLs like `/mcp/jira`, `/mcp/jobs`, `/mcp/pipelines`:
+
+```php
+// controls/Mcp.php - ONE controller handles all /mcp/* routes
+class Mcp extends Control {
+
+    // /mcp -> index()
+    public function index() {
+        // Main endpoint logic
+    }
+
+    // /mcp/jira -> jira() - lazy loads Mcpjira controller
+    public function jira(): void {
+        $controller = new Mcpjira();
+        $controller->index();
+    }
+
+    // /mcp/jobs -> jobs() - lazy loads Mcpjobs controller
+    public function jobs(): void {
+        $controller = new Mcpjobs();
+        $controller->index();
+    }
+
+    // /mcp/pipelines -> pipelines() - lazy loads Mcppipelines controller
+    public function pipelines(): void {
+        $controller = new Mcppipelines();
+        $controller->index();
+    }
+}
+```
+
+**Benefits of this pattern:**
+- Reduces number of route files (often zero needed)
+- Lazy/opportunistic loading - only instantiate what's needed
+- Sandboxes related endpoints under one controller
+- DefaultRoute handles auth/permissions automatically
+- Cleaner URL structure
+
+**NEVER do this:**
+```php
+// routes/mcp.php - DON'T create explicit routes!
+Flight::route('POST /mcp/jira', function() {
+    $controller = new \app\Mcpjira();
+    $controller->index();
+});
+```
+
 **Best Practice:**
 - Controller class names: all lowercase, no hyphens (e.g., `Pluginsources`, `Knowledgebase`)
 - Public method names: all lowercase (e.g., `index()`, `store()`, `delete()`)
 - Internal methods: use CamelCase for implicit protection (e.g., `processData()`, `validateInput()`)
+
+### Workspace from Subdomain (SIMPLE PATTERN)
+
+The front controller (`public/index.php`) extracts workspace from subdomain:
+
+```php
+// gwt.myctobot.ai -> 'gwt'
+// myctobot.ai -> null
+$_SERVER['WORKSPACE'] = (count($parts) >= 3) ? $parts[0] : null;
+```
+
+**In any controller, just use:**
+```php
+$this->workspace = $_SERVER['WORKSPACE'] ?? null;
+```
+
+That's it. Don't extract it yourself. Don't check headers. It's already set.
+
+### MCP Endpoints (WORKING PATTERNS)
+
+MCP uses JSON-RPC 2.0 over HTTP. Here's what ACTUALLY WORKS:
+
+**Working .mcp.json for AI Dev jobs:**
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "type": "http",
+      "url": "https://gwt.myctobot.ai/mcp/jira",
+      "headers": {
+        "Authorization": "Basic BASE64(memberId:cloudId)",
+        "X-MCP-Agent-Name": "AgentName"
+      }
+    },
+    "myctobot": {
+      "type": "http",
+      "url": "https://gwt.myctobot.ai/mcp/jobs",
+      "headers": {
+        "Authorization": "Basic BASE64(memberId:jobId)"
+      }
+    }
+  }
+}
+```
+
+**Auth patterns that work:**
+- `/mcp/jira` - Basic auth: `base64(memberId:cloudId)`
+- `/mcp/jobs` - Basic auth: `base64(memberId:jobId)`
+- `/mcp/pipelines` - Bearer token: `tk_xxx`
+
+**Don't overcomplicate.** Copy working patterns from `scripts/job-dispatcher.php`.
 
 ### Response Methods
 
@@ -325,6 +448,48 @@ LEVELS['PUBLIC'] = 101  // Not logged in (guest)
 ```
 
 Lower number = higher privilege. Check with `Flight::hasLevel(LEVELS['ADMIN'])`.
+
+### Stateless API Controllers
+
+For API endpoints without sessions (webhooks, MCP, external APIs):
+
+```php
+class Myapi extends Control {
+    private ?int $memberId = null;
+    private ?string $workspace = null;
+    protected $logger;
+
+    public function __construct() {
+        // DON'T call parent - no session/CSRF for stateless requests
+        $this->logger = Flight::get('log');
+        $this->workspace = $_SERVER['WORKSPACE'] ?? null;  // Already set by front controller
+    }
+
+    public function index() {
+        // Switch to workspace database
+        WorkspaceResolver::switchDatabase($this->workspace);
+
+        // Authenticate (choose one pattern):
+        // Bearer token: ApiAuthService::authenticate('scope', 'action')
+        // Basic auth: base64_decode + validate memberId:secretId
+
+        // Handle request...
+    }
+}
+```
+
+**When to use this pattern:**
+- External API endpoints (called by other services)
+- Webhook receivers
+- MCP/JSON-RPC endpoints
+- Any endpoint using Bearer token instead of session cookies
+
+**Key differences from session-based controllers:**
+- Don't call `parent::__construct()` - no session, no CSRF, no menu loading
+- Extract workspace from subdomain (gwt.myctobot.ai → gwt)
+- Use `WorkspaceResolver::switchDatabase()` to switch DB
+- Use `ApiAuthService::authenticate()` for Bearer token auth
+- No `$this->member` - use `$authResult['member']` instead
 
 ## File Structure
 

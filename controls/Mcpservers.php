@@ -619,22 +619,25 @@ class Mcpservers extends BaseControls\Control {
             }
         }
 
+        // Use subdomain-based URL pattern: https://{workspace}.myctobot.ai/mcp/...
+        $subdomainUrl = "https://{$workspaceSlug}.myctobot.ai";
+
         return [
             'myctobot-gateway' => [
                 'name' => 'myctobot',
                 'description' => 'MyCTOBot Gateway (Jira, GitHub, Shopify tools) - Use this for remote agents',
-                'server_type' => 'sse',
-                'url' => "{$baseUrl}/mcp/sse?workspace={$workspaceSlug}&token=" . ($mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE'),
-                'headers' => [],
+                'server_type' => 'http',
+                'url' => "{$subdomainUrl}/mcp",
+                'headers' => ['Authorization' => 'Bearer ' . ($mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE')],
                 'env' => [],
-                'note' => $mcpApiKey ? 'SSE endpoint for remote agents - includes jira_*, github_*, shopify_* tools' : 'Create an API key at /apikeys with mcp:* scope'
+                'note' => $mcpApiKey ? 'HTTP endpoint for remote agents - includes jira_*, github_*, shopify_* tools' : 'Create an API key at /apikeys with mcp:* scope'
             ],
             'pipelines' => [
                 'name' => 'pipelines',
                 'description' => 'MyCTOBot Pipeline Tools',
                 'server_type' => 'http',
-                'url' => "{$baseUrl}/mcp/{$workspaceSlug}/pipelines",
-                'headers' => ['X-API-TOKEN' => $mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE'],
+                'url' => "{$subdomainUrl}/mcp/pipelines",
+                'headers' => ['Authorization' => 'Bearer ' . ($mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE')],
                 'env' => [],
                 'note' => $mcpApiKey ? '' : 'Create an API key at /apikeys with mcp:* scope'
             ],

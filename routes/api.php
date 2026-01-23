@@ -12,7 +12,7 @@ Flight::route('GET /api/mcp/tools', ['\app\Api', 'mcptools']);
 Flight::route('POST /api/mcp/call', ['\app\Api', 'mcpcall']);
 
 // MCP API endpoints (workspace-specific - REST style for agent tools)
-// Note: MCP JSON-RPC servers are in routes/mcp.php (e.g., /mcp/workspace/pipelines)
+// Note: MCP JSON-RPC servers use subdomain routing (e.g., https://gwt.myctobot.ai/mcp/pipelines)
 Flight::route('GET /api/mcp/@workspace/tools', ['\app\Api', 'mcptoolswithworkspace']);
 Flight::route('POST /api/mcp/@workspace/call', ['\app\Api', 'mcpcallwithworkspace']);
 
@@ -28,7 +28,7 @@ Flight::route('GET /api/health', function() {
     Flight::jsonSuccess(['status' => 'ok', 'timestamp' => date('c')]);
 });
 
-// Auth validation endpoint - used by external services (fastmcphp gateway) to validate API keys
+// Auth validation endpoint - used by external services to validate API keys
 Flight::route('POST /api/auth/validate', ['\app\Api', 'validate']);
 
 // Workstations/Runners endpoint - list active workstations for job execution

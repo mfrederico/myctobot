@@ -4,13 +4,14 @@
  *
  * Provides MCP tools for executing pipelines from Claude Code.
  * Pipelines with expose_as_tool=1 are exposed as myctobot_{slug} tools.
+ * Workspace is determined from subdomain (e.g., gwt.myctobot.ai).
  *
  * Usage in .mcp.json:
  *   {
  *     "mcpServers": {
  *       "pipelines": {
  *         "type": "http",
- *         "url": "https://myctobot.ai/mcp/gwt/pipelines",
+ *         "url": "https://gwt.myctobot.ai/mcp/pipelines",
  *         "headers": {
  *           "Authorization": "Bearer {api_key}"
  *         }
@@ -40,25 +41,25 @@ class Mcppipelines extends Control {
     public function __construct() {
         // Don't call parent - MCP requests don't have sessions
         $this->logger = Flight::get('log');
+        // Workspace from subdomain - set by front controller in public/index.php
+        $this->workspace = $_SERVER['WORKSPACE'] ?? null;
     }
 
     /**
      * MCP JSON-RPC endpoint for pipelines
-     * POST /mcp/{workspace}/pipelines
-     *
-     * @param string $workspace Workspace slug from URL
+     * POST /mcp/pipelines
+     * Workspace is determined from subdomain: https://{workspace}.myctobot.ai/mcp/pipelines
      */
-    public function index(string $workspace = null) {
-        $this->workspace = $workspace;
-
-        if (empty($workspace)) {
-            $this->sendJsonRpcError(-32600, 'Workspace required in URL', null);
+    public function index() {
+        // Require workspace from subdomain
+        if (empty($this->workspace)) {
+            $this->sendJsonRpcError(-32600, 'Workspace required. Use https://{workspace}.myctobot.ai/mcp/pipelines', null);
             return;
         }
 
         // Switch to workspace database
-        if (!WorkspaceResolver::switchDatabase($workspace)) {
-            $this->sendJsonRpcError(-32600, "Invalid workspace: {$workspace}", null);
+        if (!WorkspaceResolver::switchDatabase($this->workspace)) {
+            $this->sendJsonRpcError(-32600, "Invalid workspace: {$this->workspace}", null);
             return;
         }
 
@@ -75,7 +76,7 @@ class Mcppipelines extends Control {
         $params = $request['params'] ?? [];
         $id = $request['id'] ?? null;
 
-        $this->logger->debug("MCP Pipelines: method={$method}, workspace={$workspace}");
+        $this->logger->debug("MCP Pipelines: method={$method}, workspace={$this->workspace}");
 
         // Handle methods
         switch ($method) {

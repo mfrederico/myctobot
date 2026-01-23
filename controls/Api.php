@@ -264,7 +264,7 @@ class Api extends BaseControls\Control {
     }
 
     /**
-     * Validate an API token for external services (fastmcphp gateway)
+     * Validate an API token for external services
      * POST /api/auth/validate
      *
      * Required params: token, workspace
@@ -421,16 +421,16 @@ class Api extends BaseControls\Control {
         }
 
         // Build the MCP server configuration
+        // Use subdomain-based URL pattern: https://{workspace}.myctobot.ai/mcp
         $serverName = $agent->mcp_tool_name ?: strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $agent->name));
 
         $mcpConfig = [
             'mcpServers' => [
                 $serverName => [
                     'type' => 'http',
-                    'url' => "{$baseUrl}/api/mcp/{$urlWorkspace}",
+                    'url' => "https://{$urlWorkspace}.myctobot.ai/mcp",
                     'headers' => [
-                        'X-API-Key' => '${MYCTOBOT_API_KEY}',
-                        'X-Workspace' => $urlWorkspace
+                        'Authorization' => 'Bearer ${MYCTOBOT_API_KEY}'
                     ]
                 ]
             ],

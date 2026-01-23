@@ -8,19 +8,26 @@
       "command": "node",
       "args": ["/home/mfrederico/development/Mantic.sh/dist/mcp-server.js"]
     },
-    "ollama_worker": {
-      "type": "http",
-      "url": "https://myctobot.ai/api/mcp/footest4",
-      "headers": {
-        "X-API-Key": "test_api_key_footest4_mcp_tools_2026",
-        "X-Workspace": "footest4"
-      }
-    },
     "gwt_pipelines": {
       "type": "http",
-      "url": "https://myctobot.ai/mcp/gwt/pipelines",
+      "url": "https://gwt.myctobot.ai/mcp/pipelines",
       "headers": {
         "Authorization": "Bearer tk_947d25ebeb61542303969a451105e3363c551992306495b9966d9dbe7c5309c1"
+      }
+    },
+    "myctobot_gateway": {
+      "type": "http",
+      "url": "https://gwt.myctobot.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer tk_144be87145df697789786e9f5a3bdf4370adb0f904fb06aab8b4e4fc7e6ec8df"
+      }
+    },
+    "jira": {
+      "type": "http",
+      "url": "https://gwt.myctobot.ai/mcp/jira",
+      "headers": {
+        "Authorization": "Basic MTpjYjFmYWJmNy05MDE4LTQ5YmItOTBjNy1hZmEyMzM0M2RiZTU=",
+        "X-MCP-Agent-Name": "Dev"
       }
     }
   }

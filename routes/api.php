@@ -28,6 +28,9 @@ Flight::route('GET /api/health', function() {
     Flight::jsonSuccess(['status' => 'ok', 'timestamp' => date('c')]);
 });
 
+// Auth validation endpoint - used by external services (fastmcphp gateway) to validate API keys
+Flight::route('POST /api/auth/validate', ['\app\Api', 'validate']);
+
 // Workstations/Runners endpoint - list active workstations for job execution
 // Requires workspace in URL and API key from workspace's config [api].api_key
 Flight::route('GET /api/workstations/@workspace', ['\app\Api', 'workstations']);

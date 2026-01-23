@@ -264,6 +264,53 @@ class Api extends BaseControls\Control {
     }
 
     /**
+     * Validate an API token for external services (fastmcphp gateway)
+     * POST /api/auth/validate
+     *
+     * Required params: token, workspace
+     * Returns: member info, scopes, connections for MCP tools
+     */
+    public function validate() {
+        $token = $this->getParam('token');
+        $workspace = $this->getParam('workspace') ?? 'default';
+
+        if (empty($token)) {
+            Flight::jsonError('Token required', 400);
+            return;
+        }
+
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError("Invalid workspace: {$workspace}", 400);
+            return;
+        }
+
+        // Validate token with MCP scope requirement
+        $result = ApiAuthService::validateToken($token, 'mcp');
+        if (!$result['success']) {
+            Flight::jsonError($result['error'], $result['code'] ?? 401);
+            return;
+        }
+
+        $member = $result['member'];
+        $apiKey = $result['apikey'];
+
+        // Get member's service connections via model method
+        $connections = $member->getConnections();
+
+        Flight::jsonSuccess([
+            'valid' => true,
+            'member_id' => (int) $member->id,
+            'member_email' => $member->email,
+            'member_name' => $member->username ?? $member->display_name ?? $member->email,
+            'level' => (int) ($member->level ?? 100),
+            'scopes' => json_decode($apiKey->scopes_json ?? '[]', true),
+            'workspace' => $workspace,
+            'connections' => $connections,
+        ]);
+    }
+
+    /**
      * List active workstations/runners
      * GET /api/workstations/@workspace
      */

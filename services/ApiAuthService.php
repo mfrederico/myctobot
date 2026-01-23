@@ -246,7 +246,8 @@ class ApiAuthService {
      */
     public static function getAvailableScopes(): array {
         $scopes = [
-            '*:*' => 'Full access (all controllers and methods)'
+            '*:*' => 'Full access (all controllers and methods)',
+            'mcp:*' => 'MCP Gateway access (all MCP tools and servers)'
         ];
 
         // Get all permissions from authcontrol
@@ -273,6 +274,51 @@ class ApiAuthService {
         }
 
         return $scopes;
+    }
+
+    /**
+     * Validate a token without requiring controller/method context.
+     * Used by external services (fastmcphp gateway) to validate API keys.
+     *
+     * @param string $token The API token to validate
+     * @param string $requiredScope Optional scope pattern to check (e.g., 'mcp', 'mcp:*')
+     * @return array ['success' => bool, 'member' => ?object, 'apikey' => ?object, 'error' => ?string, 'code' => ?int]
+     */
+    public static function validateToken(string $token, string $requiredScope = '*'): array {
+        $fail = fn($msg, $code = 401) => ['success' => false, 'member' => null, 'apikey' => null, 'error' => $msg, 'code' => $code];
+
+        if (!str_starts_with($token, 'tk_')) {
+            return $fail('Invalid API key format.');
+        }
+
+        $apiKey = Bean::findOne('apikeys', 'token = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at > NOW())', [$token]);
+        if (!$apiKey) {
+            return $fail('Invalid or expired API key.');
+        }
+
+        $member = Bean::load('member', $apiKey->member_id);
+        if (!$member->id || (isset($member->is_active) && !$member->is_active)) {
+            return $fail('Member not found or disabled.');
+        }
+
+        // Check scope if required (e.g., 'mcp' matches mcp:*, mcp:pipelines, etc.)
+        if ($requiredScope !== '*') {
+            $scopes = json_decode($apiKey->scopes_json ?: '[]', true) ?: [];
+            $hasAccess = false;
+            foreach ($scopes as $scope) {
+                if ($scope === '*:*' || $scope === '*' ||
+                    $scope === "{$requiredScope}:*" ||
+                    str_starts_with($scope, "{$requiredScope}:")) {
+                    $hasAccess = true;
+                    break;
+                }
+            }
+            if (!$hasAccess) {
+                return $fail("API key missing scope: {$requiredScope}:*", 403);
+            }
+        }
+
+        return ['success' => true, 'member' => $member, 'apikey' => $apiKey, 'error' => null, 'code' => null];
     }
 
     /**

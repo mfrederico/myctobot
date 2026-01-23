@@ -76,4 +76,83 @@ class Model_Member extends \RedBeanPHP\SimpleModel {
     public function getSubscription(): ?array {
         return SubscriptionService::getSubscription();
     }
+
+    /**
+     * Get member's service connections (Jira, GitHub, Shopify, etc.)
+     * Includes both member-owned and shared workspace connections.
+     * Extensible - add new services as integrations are added.
+     *
+     * Note: Some tables use `is_shared`, others use `shared` - handle both.
+     * TODO: Consider refactoring tables to use consistent `is_shared` column.
+     *
+     * @return array Service connection status and metadata
+     */
+    public function getConnections(): array {
+        $memberId = $this->bean->id;
+        $connections = [];
+
+        // Jira/Atlassian - uses is_shared
+        $atlassian = \app\Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
+        if ($atlassian && $atlassian->cloud_uid) {
+            $connections['jira'] = [
+                'connected' => true,
+                'cloud_uid' => $atlassian->cloud_uid,
+                'is_shared' => (bool) ($atlassian->is_shared ?? false),
+            ];
+        }
+
+        // GitHub - uses is_shared
+        $github = \app\Bean::findOne('githubtoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
+        if ($github && $github->access_token) {
+            $connections['github'] = [
+                'connected' => true,
+                'username' => $github->username ?? null,
+                'is_shared' => (bool) ($github->is_shared ?? false),
+            ];
+        }
+
+        // Shopify - uses `shared` (not is_shared)
+        $shopify = \app\Bean::find('shopifyconnections', '(member_id = ? OR shared = 1) AND is_active = 1', [$memberId]);
+        if (!empty($shopify)) {
+            $stores = [];
+            foreach ($shopify as $conn) {
+                $stores[] = [
+                    'id' => (int) $conn->id,
+                    'shop' => $conn->shop_domain,
+                    'is_shared' => (bool) ($conn->shared ?? false),
+                ];
+            }
+            $connections['shopify'] = ['connected' => true, 'stores' => $stores];
+        }
+
+        // Anthropic API Keys - uses `shared` (not is_shared)
+        $anthropic = \app\Bean::find('anthropickeys', '(created_by_member_id = ? OR shared = 1)', [$memberId]);
+        if (!empty($anthropic)) {
+            $keys = [];
+            foreach ($anthropic as $key) {
+                $keys[] = [
+                    'id' => (int) $key->id,
+                    'name' => $key->name ?? 'Unnamed',
+                    'is_shared' => (bool) ($key->shared ?? false),
+                ];
+            }
+            $connections['anthropic'] = ['connected' => true, 'keys' => $keys];
+        }
+
+        // Repo Connections - no sharing column currently (member-owned only)
+        $repos = \app\Bean::find('repoconnections', 'member_id = ? AND enabled = 1', [$memberId]);
+        if (!empty($repos)) {
+            $repoList = [];
+            foreach ($repos as $repo) {
+                $repoList[] = [
+                    'id' => (int) $repo->id,
+                    'provider' => $repo->provider ?? 'github',
+                    'repo' => ($repo->repo_owner ?? '') . '/' . ($repo->repo_name ?? ''),
+                ];
+            }
+            $connections['repos'] = ['connected' => true, 'repos' => $repoList];
+        }
+
+        return $connections;
+    }
 }

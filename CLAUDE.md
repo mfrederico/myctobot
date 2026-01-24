@@ -502,6 +502,95 @@ class Myapi extends Control {
 /conf           - Configuration files
 ```
 
+## Creating New Models/Controllers/Views (MANDATORY)
+
+**ALWAYS use the scaffolding CLI tool when creating new database models, controllers, or views.**
+
+NEVER manually create `Model_*`, controller, or view files. The scaffolding tool ensures:
+- Correct FUSE model hooks (dispense, update, afterUpdate, delete)
+- Proper RedBeanPHP naming conventions
+- Consistent controller patterns (CRUD or API)
+- Bootstrap 5 form components with proper widgets
+- Automatic timestamp fields (created_at, updated_at)
+
+### Scaffolding Commands
+
+```bash
+# List existing tables and their relationships (always run first to understand structure)
+php scripts/clitool.php --workspace={workspace} --list
+
+# Interactive wizard for new models (PREFERRED for new entities)
+php scripts/clitool.php --workspace={workspace} --wizard
+
+# Scaffold from existing database table
+php scripts/clitool.php --workspace={workspace} --scaffold --bean={tablename} --type={crud|api|both}
+
+# Dry-run to preview without creating files
+php scripts/clitool.php --workspace={workspace} --wizard --dry-run
+```
+
+### Field Definition Syntax
+
+When using the wizard, define fields with this format: `field_name:type[:options]`
+
+**Types:** `string`, `text`, `int`, `float`, `bool`, `datetime`, `date`, `json`, `enum`
+
+**Options:** `required`, `unique`, `default=VALUE`, `widget=NAME`
+
+**Examples:**
+```
+name:string:required
+email:string:required,unique
+description:text
+price:float:required
+is_active:bool:default=true
+status:enum=pending|active|archived:required
+integration_type:enum=jira|github|shopify:default=jira
+appointment:datetime:widget=fancyDateSelector
+metadata:json
+```
+
+### Relationship Types
+
+The wizard supports these RedBeanPHP relationship types:
+- **has-many** (ownBeanList) - Parent owns many children
+- **has-one** (ownBeanList) - Parent owns one child
+- **many-to-many** (sharedBeanList) - Bidirectional relationship
+- **belongs-to** (parent) - Child belongs to parent
+
+### Controller Types
+
+- **CRUD** - Session-based controller with Bootstrap views (web UI)
+- **API** - Stateless JSON endpoints (for external/MCP access)
+- **BOTH** - Generates both CRUD and API controllers
+- **NONE** - Model only, no controller
+
+### Permission Levels
+
+The wizard automatically creates `authcontrol` entries. Choose the appropriate level:
+
+| Level | Value | Description |
+|-------|-------|-------------|
+| PUBLIC | 101 | Anyone can access, no login required |
+| MEMBER | 100 | Logged-in users only (Recommended default) |
+| ADMIN | 50 | Administrators only |
+| ROOT | 1 | Super admin only |
+| SKIP | - | Don't create authcontrol (manual setup later) |
+
+### After Scaffolding
+
+1. Review generated files in `/models`, `/controls`, `/views`
+2. Test the new endpoint at `https://{workspace}.myctobot.ai/{beanname}`
+3. (Optional) Adjust permission level in `authcontrol` table if needed
+
+### Custom Widgets
+
+The scaffolding system supports custom field widgets. To create a new widget:
+1. Create template at `lib/Scaffold/Templates/fields/{widgetname}.php`
+2. Reference it in field definition: `fieldname:datetime:widget={widgetname}`
+
+Available widgets: `text`, `textarea`, `number`, `checkbox`, `email`, `password`, `datetime`, `date`, `json`, `select`, `enum`, `url`, `fancyDateSelector`
+
 ## Shard Infrastructure
 
 Shards are remote servers that run AI Developer jobs (Claude Code CLI).
@@ -724,9 +813,144 @@ The webhook controller will:
 3. Change: `https://myctobot.ai/webhook/jira`
 4. To: `https://myctobot.ai/webhook/jira/your-workspace-slug`
 
+## Pipeline Step Types
+
+Pipelines support the following step types:
+
+| Step Type | Description | Key Config Options |
+|-----------|-------------|-------------------|
+| `direct_exec` | Run shell command | `command`, `executor`, `working_dir`, `workstation_id` |
+| `script` | Run repository script | `repo_id`, `script_path`, `args` |
+| `ai_agent` | Call Claude API | `prompt`, `system_prompt`, `model`, `max_tokens` |
+| `webhook_out` | POST to external URL | `url`, `method`, `headers`, `body` |
+| `email_out` | Send email via Mailgun | `to`, `subject`, `body`, `template` |
+| `parser` | Transform data (jq/regex) | `parser_type`, `expression` |
+| `wait` | Blocking delay | `wait_type`, `duration` |
+| `harvest` | Gather parallel results | `policy`, `on_incomplete`, `template` |
+| `mcp_call` | Call external MCP tool | `transport`, `url`, `tool`, `arguments` |
+| `schedule_task` | Non-blocking scheduled action | `task_type`, `delay_seconds`, `payload` |
+| `shopify_graphql` | Shopify Admin GraphQL | `connection_id`, `query`, `variables` |
+
+### Shopify GraphQL Step
+
+Execute GraphQL queries against connected Shopify stores:
+
+```json
+{
+  "step_type": "shopify_graphql",
+  "config_json": {
+    "connection_id": "{context.shop_connection_id}",
+    "query": "query getProducts($first: Int!) { products(first: $first) { edges { node { id title handle priceRange { minVariantPrice { amount } } } } } }",
+    "variables": { "first": 10 }
+  }
+}
+```
+
+**Config Options:**
+- `connection_id` - ID from `shopifyconnections` table (supports variable substitution)
+- `query` - GraphQL query string
+- `variables` - Variables object for the query (values support substitution)
+
+**Output:**
+```json
+{
+  "success": true,
+  "output": {
+    "data": { "products": { "edges": [...] } },
+    "extensions": { "cost": {...} },
+    "shop": "mystore.myshopify.com"
+  }
+}
+```
+
+### Variable Substitution in Steps
+
+All step configs support variable substitution:
+- `{context.key}` - Access context variables
+- `{step_name.output.key}` - Access previous step output (nested with dots)
+- `{step_name.stdout}` - Get raw stdout from step
+
+## Shopify Integration
+
+Shopify connections are managed via `/shopify` UI. Credentials stored encrypted in `shopifyconnections` table.
+
+### ShopifyClient Service
+
+```php
+use app\services\ShopifyClient;
+
+// Load by connection ID (preferred)
+$client = new ShopifyClient($connectionId);
+
+// Check connection
+if (!$client->isConnected()) {
+    throw new Exception('Not connected');
+}
+
+// Execute GraphQL query
+$result = $client->graphql($query, $variables);
+if ($result['success']) {
+    $data = $result['data'];
+}
+
+// Theme operations
+$themes = $client->getThemes();
+$devTheme = $client->getOrCreateDevTheme('SSI-1234', 'Fix header');
+$client->updateThemeAsset($themeId, 'assets/custom.css', $cssContent);
+```
+
+### Shopify GraphQL Examples
+
+**Get products:**
+```graphql
+query getProducts($first: Int!) {
+  products(first: $first) {
+    edges {
+      node {
+        id
+        title
+        handle
+        status
+        totalInventory
+        priceRange {
+          minVariantPrice { amount currencyCode }
+        }
+      }
+    }
+  }
+}
+```
+
+**Get orders:**
+```graphql
+query getOrders($first: Int!) {
+  orders(first: $first) {
+    edges {
+      node {
+        id
+        name
+        totalPriceSet { shopMoney { amount } }
+        customer { displayName email }
+      }
+    }
+  }
+}
+```
+
+**Update product:**
+```graphql
+mutation updateProduct($input: ProductInput!) {
+  productUpdate(input: $input) {
+    product { id title }
+    userErrors { field message }
+  }
+}
+```
+
 ## See Also
 
 - `REDBEAN_README.md` - Detailed RedBeanPHP reference
 - `FLIGHTPHP_README.md` - Detailed FlightPHP reference
 - https://redbeanphp.com/ - Official RedBeanPHP documentation
 - `docs/AGENT_ARCHITECTURE.md` - Full agent architecture documentation
+- https://shopify.dev/docs/api/admin-graphql - Shopify Admin GraphQL API

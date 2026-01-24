@@ -256,6 +256,63 @@ class ShopifyClient {
     }
 
     /**
+     * Execute a GraphQL query against the Shopify Admin API
+     *
+     * @param string $query GraphQL query string
+     * @param array $variables Optional variables for the query
+     * @return array Response with 'data', 'errors', 'extensions'
+     * @throws Exception If not connected or request fails
+     */
+    public function graphql(string $query, array $variables = []): array {
+        if (!$this->isConnected()) {
+            throw new Exception('Not connected to Shopify');
+        }
+
+        $payload = ['query' => $query];
+        if (!empty($variables)) {
+            $payload['variables'] = $variables;
+        }
+
+        $response = $this->httpClient->post(
+            "https://{$this->shop}/admin/api/" . self::API_VERSION . "/graphql.json",
+            [
+                'headers' => [
+                    'X-Shopify-Access-Token' => $this->accessToken,
+                    'Content-Type' => 'application/json'
+                ],
+                'json' => $payload
+            ]
+        );
+
+        $statusCode = $response->getStatusCode();
+        $body = $response->getBody()->getContents();
+        $data = json_decode($body, true);
+
+        if ($statusCode !== 200) {
+            $errorMessage = $data['errors'][0]['message'] ?? "HTTP {$statusCode}";
+            throw new Exception("GraphQL request failed: {$errorMessage}");
+        }
+
+        // Check for GraphQL-level errors
+        if (!empty($data['errors'])) {
+            // Return the full response so caller can handle errors
+            return [
+                'success' => false,
+                'data' => $data['data'] ?? null,
+                'errors' => $data['errors'],
+                'extensions' => $data['extensions'] ?? null
+            ];
+        }
+
+        return [
+            'success' => true,
+            'data' => $data['data'] ?? null,
+            'errors' => null,
+            'extensions' => $data['extensions'] ?? null
+        ];
+    }
+
+    /**
      * Get shop information from Shopify API
      *
      * @return array Shop info

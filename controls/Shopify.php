@@ -345,4 +345,83 @@ class Shopify extends BaseControls\Control {
             $this->json(['success' => false, 'message' => $e->getMessage(), 'themes' => []]);
         }
     }
+
+    /**
+     * Test a GraphQL query against a Shopify store (AJAX)
+     * Used by pipeline editor to validate queries before saving
+     */
+    public function testquery($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        // Accept JSON body
+        $input = json_decode(file_get_contents('php://input'), true);
+        if (!$input) {
+            // Fall back to form data
+            $input = [
+                'connection_id' => $this->getParam('connection_id'),
+                'query' => $this->getParam('query'),
+                'variables' => $this->getParam('variables')
+            ];
+        }
+
+        $connectionId = $input['connection_id'] ?? null;
+        $query = $input['query'] ?? '';
+        $variables = $input['variables'] ?? [];
+
+        if (empty($connectionId)) {
+            $this->json(['success' => false, 'error' => 'No connection specified']);
+            return;
+        }
+
+        if (empty(trim($query))) {
+            $this->json(['success' => false, 'error' => 'No query provided']);
+            return;
+        }
+
+        // Ensure variables is an array
+        if (is_string($variables)) {
+            $variables = json_decode($variables, true) ?? [];
+        }
+
+        try {
+            // Verify user has access to this connection
+            $conn = ShopifyClient::getConnection((int)$connectionId);
+            if (!$conn) {
+                $this->json(['success' => false, 'error' => 'Connection not found']);
+                return;
+            }
+
+            // Check access: owner or shared connection
+            if ($conn->created_by_member_id != $this->member->id && !$conn->shared) {
+                $this->json(['success' => false, 'error' => 'Access denied to this connection']);
+                return;
+            }
+
+            $client = new ShopifyClient((int)$connectionId);
+            $result = $client->graphql($query, $variables);
+
+            // Check for GraphQL errors in the response
+            if (isset($result['errors']) && !empty($result['errors'])) {
+                $this->json([
+                    'success' => false,
+                    'error' => 'GraphQL query returned errors',
+                    'errors' => $result['errors'],
+                    'data' => $result['data'] ?? null
+                ]);
+                return;
+            }
+
+            $this->json([
+                'success' => true,
+                'data' => $result['data'] ?? $result
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Shopify GraphQL test query failed', [
+                'connection_id' => $connectionId,
+                'error' => $e->getMessage()
+            ]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
 }

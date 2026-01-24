@@ -28,6 +28,9 @@ class Context {
     /** @var string Controller type: crud, api, both, none */
     public string $controllerType = 'crud';
 
+    /** @var int|null Permission level for authcontrol (null = skip) */
+    public ?int $permissionLevel = null;
+
     /** @var string Base directory of the project */
     public string $baseDir;
 

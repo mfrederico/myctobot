@@ -51,6 +51,11 @@ class WizardCommand {
         // Step 5: Controller type
         $ctx->controllerType = $this->selectControllerType();
 
+        // Step 6: Permission level (only if controller is being created)
+        if ($ctx->controllerType !== 'none') {
+            $ctx->permissionLevel = $this->selectPermissionLevel();
+        }
+
         // Summary
         $this->printSummary($ctx);
 
@@ -249,6 +254,44 @@ class WizardCommand {
     }
 
     /**
+     * Select permission level for authcontrol
+     */
+    private function selectPermissionLevel(): ?int {
+        echo "\n─── Step 6: Permission Level ──────────────────────────────────────\n";
+        echo "Who can access this endpoint?\n";
+        echo "  1. PUBLIC (101) - Anyone, no login required\n";
+        echo "  2. MEMBER (100) - Logged-in users (Recommended)\n";
+        echo "  3. ADMIN  (50)  - Administrators only\n";
+        echo "  4. ROOT   (1)   - Super admin only\n";
+        echo "  5. SKIP        - Don't create authcontrol entry\n";
+
+        $choice = $this->prompt("Choose (1-5)", "2");
+
+        return match($choice) {
+            '1' => 101,  // PUBLIC
+            '2' => 100,  // MEMBER
+            '3' => 50,   // ADMIN
+            '4' => 1,    // ROOT
+            '5' => null, // SKIP
+            default => 100
+        };
+    }
+
+    /**
+     * Get permission level name
+     */
+    private function getPermissionName(?int $level): string {
+        return match($level) {
+            101 => 'PUBLIC',
+            100 => 'MEMBER',
+            50 => 'ADMIN',
+            1 => 'ROOT',
+            null => 'SKIP',
+            default => "LEVEL {$level}"
+        };
+    }
+
+    /**
      * Print summary before generation
      */
     private function printSummary(Context $ctx): void {
@@ -259,6 +302,9 @@ class WizardCommand {
         echo "Relationships: " . count($ctx->relationships) . "\n";
         echo "Methods: " . count($ctx->methods) . "\n";
         echo "Controller: " . strtoupper($ctx->controllerType) . "\n";
+        if ($ctx->controllerType !== 'none') {
+            echo "Permission: " . $this->getPermissionName($ctx->permissionLevel) . "\n";
+        }
     }
 
     /**
@@ -284,24 +330,80 @@ class WizardCommand {
                 break;
             // 'none' - only model
         }
+
+        // Insert authcontrol entry if permission level is set
+        if ($ctx->permissionLevel !== null && $ctx->controllerType !== 'none') {
+            $this->insertAuthControl($ctx);
+        }
+    }
+
+    /**
+     * Insert authcontrol record for the new endpoint
+     */
+    private function insertAuthControl(Context $ctx): void {
+        $route = $ctx->beanName;
+        $level = $ctx->permissionLevel;
+
+        if ($this->manager->isDryRun()) {
+            echo "[DRY-RUN] Would insert authcontrol: route='{$route}', level={$level} ({$this->getPermissionName($level)})\n";
+            return;
+        }
+
+        try {
+            // Check if entry already exists
+            $existing = \app\Bean::findOne('authcontrol', 'route = ?', [$route]);
+            if ($existing) {
+                echo "⚠ Authcontrol entry for '{$route}' already exists (level: {$existing->level})\n";
+                return;
+            }
+
+            // Insert new entry
+            $auth = \app\Bean::dispense('authcontrol');
+            $auth->route = $route;
+            $auth->level = $level;
+            \app\Bean::store($auth);
+
+            echo "✓ Authcontrol: {$route} → {$this->getPermissionName($level)} ({$level})\n";
+
+            // Also add API route if 'both' controller type
+            if ($ctx->controllerType === 'both') {
+                $apiRoute = $route . 'api';
+                $existingApi = \app\Bean::findOne('authcontrol', 'route = ?', [$apiRoute]);
+                if (!$existingApi) {
+                    $authApi = \app\Bean::dispense('authcontrol');
+                    $authApi->route = $apiRoute;
+                    $authApi->level = $level;
+                    \app\Bean::store($authApi);
+                    echo "✓ Authcontrol: {$apiRoute} → {$this->getPermissionName($level)} ({$level})\n";
+                }
+            }
+        } catch (\Exception $e) {
+            echo "⚠ Could not insert authcontrol: " . $e->getMessage() . "\n";
+        }
     }
 
     /**
      * Print next steps after generation
      */
     private function printNextSteps(Context $ctx): void {
-        echo "\n✓ Files generated successfully!\n";
+        echo "\n✓ Generation complete!\n";
         echo "\nNext steps:\n";
         echo "  1. Review generated files\n";
-        echo "  2. Add auth control entry:\n";
-        echo "     INSERT INTO authcontrol (route, level) VALUES ('{$ctx->beanName}', 100);\n";
 
+        $step = 2;
         if ($ctx->controllerType !== 'none' && $ctx->controllerType !== 'api') {
-            echo "  3. Test: https://yoursite.myctobot.ai/{$ctx->beanName}\n";
+            echo "  {$step}. Test: https://yoursite.myctobot.ai/{$ctx->beanName}\n";
+            $step++;
         }
 
         if ($ctx->controllerType === 'api' || $ctx->controllerType === 'both') {
-            echo "  3. API endpoint: /{$ctx->beanName}api\n";
+            echo "  {$step}. API endpoint: /{$ctx->beanName}api\n";
+            $step++;
+        }
+
+        if ($ctx->permissionLevel === null && $ctx->controllerType !== 'none') {
+            echo "  {$step}. Add auth control entry (you skipped this):\n";
+            echo "     INSERT INTO authcontrol (route, level) VALUES ('{$ctx->beanName}', 100);\n";
         }
     }
 

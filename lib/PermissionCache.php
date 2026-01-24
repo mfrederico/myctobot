@@ -377,6 +377,21 @@ class PermissionCache {
         }
 
         try {
+            // Check if permission already exists
+            $existing = Bean::findOne('authcontrol', 'LOWER(control) = ? AND LOWER(method) = ?', [
+                strtolower($control), strtolower($method)
+            ]);
+
+            if ($existing) {
+                // Permission exists, just add to local cache
+                $key = strtolower("{$control}::{$method}");
+                if (self::$localCache !== null) {
+                    self::$localCache[$key] = (int)$existing->level;
+                }
+                Flight::get('log')->debug("PermissionCache: Permission already exists for {$control}->{$method}");
+                return true;
+            }
+
             // Use logged-in user's level if available, otherwise default to MEMBER level
             // This ensures auto-generated routes require at least the access level of the first user to access them
             $userLevel = LEVELS['MEMBER']; // Default to member level (100)

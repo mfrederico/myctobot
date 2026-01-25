@@ -168,9 +168,10 @@ class Jobexecutor extends BaseControls\Control {
             // Use job-prepared files if available (from job-dispatcher.php),
             // otherwise fall back to agent's stored config
             $claudeMd = $job->claude_md ?: $agent->claude_md;
+            // Don't use associative arrays for mcp_config - preserves {} vs [] distinction
             $mcpConfig = $job->mcp_config_json
-                ? json_decode($job->mcp_config_json, true)
-                : json_decode($agent->mcp_config ?: '{}', true);
+                ? json_decode($job->mcp_config_json)
+                : json_decode($agent->mcp_config ?: '{}');
 
             $response['agent'] = [
                 'id' => (int) $agent->id,

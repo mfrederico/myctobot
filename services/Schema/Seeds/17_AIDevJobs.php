@@ -41,6 +41,11 @@ $bean->token_expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
 $bean->phase = 'setup';
 $bean->summary = 'Schema placeholder summary';
 $bean->prompt = 'Schema placeholder prompt';
+$bean->claude_md = 'Schema placeholder claude.md content';
+$bean->mcp_config_json = '{"mcpServers":{}}';
+$bean->env_script = '#!/bin/bash\n# Schema placeholder env script';
+$bean->aiagents_id = null;
+$bean->delay = 0;
 \RedBeanPHP\R::store($bean);
 \RedBeanPHP\R::trash($bean);
 
@@ -48,4 +53,5 @@ $bean->prompt = 'Schema placeholder prompt';
 \RedBeanPHP\R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `clarification_questions` JSON');
 \RedBeanPHP\R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `files_changed` JSON');
 \RedBeanPHP\R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `playwright_results` JSON');
+\RedBeanPHP\R::exec('ALTER TABLE `aidevjobs` MODIFY COLUMN `mcp_config_json` JSON');
 \RedBeanPHP\R::exec('ALTER TABLE `aidevjobs` ADD UNIQUE INDEX IF NOT EXISTS `uk_job_uid` (`job_uid`)');

@@ -1771,10 +1771,13 @@ class AIDevJobService {
      * Get board's AI Developer status settings
      *
      * @param int $memberId Member ID
-     * @param int $boardId Board ID
+     * @param int|null $boardId Board ID (optional for repo-triggered jobs)
      * @return array Status settings (working, pr_created, clarification, failed)
      */
-    public function getBoardStatusSettings(int $memberId, int $boardId): array {
+    public function getBoardStatusSettings(int $memberId, ?int $boardId): array {
+        if (!$boardId) {
+            return [];
+        }
         $board = Bean::load('boards', $boardId);
         if (!$board || !$board->id) {
             return [];
@@ -1794,10 +1797,10 @@ class AIDevJobService {
      * @param int $memberId Member ID
      * @param string $cloudId Cloud ID
      * @param string $issueKey Issue key
-     * @param int $boardId Board ID
+     * @param int|null $boardId Board ID (optional for repo-triggered jobs)
      * @param string $projectType Project source type: 'jira', 'github', 'monday', 'zoho'
      */
-    public function onJobStarted(int $memberId, string $cloudId, string $issueKey, int $boardId, string $projectType = self::PROJECT_TYPE_JIRA): void {
+    public function onJobStarted(int $memberId, string $cloudId, string $issueKey, ?int $boardId, string $projectType = self::PROJECT_TYPE_JIRA): void {
         $this->logger->info('onJobStarted called', [
             'member_id' => $memberId,
             'cloud_uid' => $cloudId,

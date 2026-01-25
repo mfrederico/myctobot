@@ -736,7 +736,8 @@ $orchestrator = new \app\services\AIDevAgentOrchestrator(
     $shopifyConfig,
     $existingBranch,
     $urlsToCheck,
-    $provider                     // jira or github
+    $provider,                    // jira or github
+    $agentConfig['name'] ?? 'AI Developer'  // agent name
 );
 
 // Build prompt - always use orchestrator pattern for better verification
@@ -981,8 +982,9 @@ if (!is_dir($claudeSettingsDir)) {
     mkdir($claudeSettingsDir, 0755, true);
 }
 
-// Start with attribution (always included)
+// Start with attribution and MCP settings (always included)
 $claudeSettings = [
+    'enableAllProjectMcpServers' => true,  // Required to load .mcp.json servers
     'attribution' => [
         'commit' => "Generated with MyCTOBOT.ai\n\nCo-Authored-By: claude",
         'pr' => ''
@@ -1551,7 +1553,7 @@ if ($useJobExecutor) {
             'Accept: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'workspace' => $workspaceSlug,
+            'tenant' => $workspaceSlug,
             'job_uid' => $jobId,
             'callback_url' => $callbackUrl,
         ]),

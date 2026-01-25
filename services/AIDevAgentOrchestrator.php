@@ -22,6 +22,7 @@ class AIDevAgentOrchestrator {
     private ?string $existingBranch;
     private array $urls;
     private string $provider;  // 'jira' or 'github'
+    private string $agentName;  // Agent identity name
 
     /**
      * Create orchestrator for a ticket
@@ -36,6 +37,7 @@ class AIDevAgentOrchestrator {
      * @param string|null $existingBranch Existing branch name for branch affinity
      * @param array $urls URLs found in ticket to check
      * @param string $provider Issue provider: 'jira' or 'github'
+     * @param string $agentName Agent identity name (e.g., "Smith", "Neo")
      */
     public function __construct(
         array $ticket,
@@ -46,7 +48,8 @@ class AIDevAgentOrchestrator {
         array $shopify = [],
         ?string $existingBranch = null,
         array $urls = [],
-        string $provider = 'jira'
+        string $provider = 'jira',
+        string $agentName = 'AI Developer'
     ) {
         $this->ticket = $ticket;
         $this->repo = $repo;
@@ -57,6 +60,7 @@ class AIDevAgentOrchestrator {
         $this->existingBranch = $existingBranch;
         $this->urls = $urls;
         $this->provider = $provider;
+        $this->agentName = $agentName;
     }
 
     /**
@@ -254,10 +258,12 @@ SECTION;
         $ticketLabel = $this->getTicketLabel();
         $clarificationInstructions = $this->buildClarificationInstructions();
 
+        $agentName = $this->agentName;
+
         return <<<PROMPT
 # AI Developer Orchestrator
 
-You are orchestrating the implementation and verification of {$ticketLabel} **{$issueKey}**.
+You are an AI Developer named **{$agentName}**. You are orchestrating the implementation and verification of {$ticketLabel} **{$issueKey}**.
 
 ## Ticket Information
 

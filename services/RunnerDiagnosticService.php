@@ -322,28 +322,73 @@ class RunnerDiagnosticService {
     }
 
     /**
-     * Check MCP Jira server exists on remote
+     * Check MCP Jira server is reachable via HTTP
+     * Tests connectivity from the runner to the centralized MCP endpoint
+     * If member has Jira credentials, performs authenticated test
      */
     private function checkMCPServer(): void {
-        // Check multiple possible paths for the MCP server script
-        $paths = [
-            '/var/www/myctobot/scripts/mcp-jira-server.php',           // Production
-            '/var/www/html/default/myctobot/scripts/mcp-jira-server.php', // Runner servers
-            '/home/mfrederico/development/myctobot/scripts/mcp-jira-server.php', // Local dev
-        ];
+        // Get workspace from runner config or session
+        $workspace = $this->runner['workspace'] ?? $_SESSION['workspace_slug'] ?? null;
 
-        $checkCmd = '';
-        foreach ($paths as $path) {
-            $checkCmd .= "test -f {$path} && php -l {$path} 2>/dev/null | grep -q 'No syntax errors' && echo 'MCP_OK:{$path}' && exit 0; ";
+        if (!$workspace) {
+            $this->results['checks']['mcp_server'] = [
+                'name' => 'MCP Jira Server',
+                'passed' => false,
+                'output' => 'No workspace configured',
+                'time_ms' => 0,
+                'details' => 'Runner has no workspace configured. Set workspace in runner settings.'
+            ];
+            return;
         }
-        $checkCmd .= "echo 'MCP_MISSING'";
 
-        $result = $this->sshExec($checkCmd);
+        // Construct MCP endpoint URL
+        $mcpUrl = "https://{$workspace}.myctobot.ai/mcp/jira";
 
-        $passed = strpos($result['output'], 'MCP_OK') !== false;
-        $foundPath = '';
-        if ($passed && preg_match('/MCP_OK:(.+)/', $result['output'], $matches)) {
-            $foundPath = $matches[1];
+        // Try to get member credentials for authenticated test
+        $memberId = $_SESSION['member_id'] ?? null;
+        $cloudId = null;
+        $authHeader = '';
+
+        if ($memberId) {
+            // Look up member's Jira cloud ID from atlassiantoken table
+            $token = \app\Bean::findOne('atlassiantoken', 'member_id = ?', [$memberId]);
+            if ($token && !empty($token->cloud_uid)) {
+                $cloudId = $token->cloud_uid;
+                // Build Basic auth header: base64(memberId:cloudId)
+                $authCredentials = base64_encode("{$memberId}:{$cloudId}");
+                $authHeader = "-H 'Authorization: Basic {$authCredentials}'";
+            }
+        }
+
+        // Test HTTP connectivity from the runner using curl
+        // If we have auth credentials, do an authenticated request
+        $curlCmd = sprintf(
+            'curl -s -o /dev/null -w "%%{http_code}" --connect-timeout 10 -X POST %s -H "Content-Type: application/json" -d \'{"jsonrpc":"2.0","method":"tools/list","id":1}\' %s 2>/dev/null || echo "CURL_FAILED"',
+            $authHeader,
+            escapeshellarg($mcpUrl)
+        );
+
+        $result = $this->sshExec($curlCmd);
+
+        $httpCode = trim($result['output']);
+        $isAuthenticated = !empty($authHeader);
+
+        // Determine pass/fail based on whether we sent auth
+        if ($isAuthenticated) {
+            // With auth, we expect 200 for success
+            $passed = $httpCode === '200';
+            $details = $passed
+                ? "MCP server authenticated successfully at {$mcpUrl}"
+                : ($httpCode === '401'
+                    ? "MCP server reachable but auth failed (HTTP 401). Check Jira connection."
+                    : "MCP server returned HTTP {$httpCode}");
+        } else {
+            // Without auth, any HTTP response means server is reachable
+            // 401 = server exists but needs auth (expected)
+            $passed = is_numeric($httpCode) && (int)$httpCode >= 200 && (int)$httpCode < 600;
+            $details = $passed
+                ? "MCP server reachable at {$mcpUrl} (HTTP {$httpCode}, no Jira credentials to test auth)"
+                : "Cannot reach MCP server at {$mcpUrl}. Response: {$httpCode}";
         }
 
         $this->results['checks']['mcp_server'] = [
@@ -351,9 +396,7 @@ class RunnerDiagnosticService {
             'passed' => $passed,
             'output' => $result['output'],
             'time_ms' => $result['time_ms'],
-            'details' => $passed
-                ? 'MCP server found at ' . $foundPath
-                : 'MCP server not found. Run sync-to-runners.sh to deploy.'
+            'details' => $details
         ];
     }
 
@@ -441,7 +484,7 @@ class RunnerDiagnosticService {
                     $commands[] = 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs';
                     break;
                 case 'mcp_server':
-                    $commands[] = '# Run sync-to-runners.sh from control interface';
+                    $commands[] = '# Verify network connectivity to MCP endpoint and check runner workspace config';
                     break;
             }
         }

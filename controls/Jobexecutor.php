@@ -22,17 +22,19 @@ class Jobexecutor extends BaseControls\Control {
      * Returns job details if valid.
      *
      * Expected input: { "workspace": "gwt", "job_uid": "abc123..." }
+     * Also accepts "tenant" as alias for "workspace" (job-executor compatibility)
      */
     public function validate() {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input || empty($input['workspace']) || empty($input['job_uid'])) {
-            Flight::jsonError('Missing workspace or job_uid', 400);
+        // Accept both "workspace" and "tenant" for compatibility
+        $workspace = $input['workspace'] ?? $input['tenant'] ?? null;
+        $jobUid = $input['job_uid'] ?? null;
+
+        if (!$input || empty($workspace) || empty($jobUid)) {
+            Flight::jsonError('Missing workspace/tenant or job_uid', 400);
             return;
         }
-
-        $workspace = $input['workspace'];
-        $jobUid = $input['job_uid'];
 
         Flight::get('log')->info('Job validation request (PONG)', [
             'workspace' => $workspace,
@@ -195,17 +197,19 @@ class Jobexecutor extends BaseControls\Control {
      * Job-executor reports status updates.
      *
      * Expected input: { "workspace": "gwt", "job_uid": "abc123...", "status": "running", "phase": "executing" }
+     * Also accepts "tenant" as alias for "workspace" (job-executor compatibility)
      */
     public function status() {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        if (!$input || empty($input['workspace']) || empty($input['job_uid'])) {
-            Flight::jsonError('Missing workspace or job_uid', 400);
+        // Accept both "workspace" and "tenant" for compatibility
+        $workspace = $input['workspace'] ?? $input['tenant'] ?? null;
+        $jobUid = $input['job_uid'] ?? null;
+
+        if (!$input || empty($workspace) || empty($jobUid)) {
+            Flight::jsonError('Missing workspace/tenant or job_uid', 400);
             return;
         }
-
-        $workspace = $input['workspace'];
-        $jobUid = $input['job_uid'];
         $status = $input['status'] ?? '';
         $phase = $input['phase'] ?? '';
         $summary = $input['summary'] ?? null;

@@ -1045,9 +1045,25 @@ class Admin extends Control {
             $job->issue_key = 'TEST-AGENT-001';
             $job->status = 'pending';
             $job->phase = 'agent-test';
-            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response.';
+            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. After responding, call the `job_complete` MCP tool with success=true and summary="Test completed successfully" to mark this test as complete.';
             $job->delay = $delay;  // Optional delay for testing
             $job->created_at = date('Y-m-d H:i:s');
+
+            // Start with agent's existing MCP config and add myctobot jobs server
+            $mcpConfig = json_decode($agent->mcp_config ?: '{"mcpServers":{}}', true);
+            if (!isset($mcpConfig['mcpServers'])) {
+                $mcpConfig['mcpServers'] = [];
+            }
+            // Add myctobot jobs server for test completion
+            $mcpConfig['mcpServers']['myctobot'] = [
+                'type' => 'http',
+                'url' => \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/mcp/jobs',
+                'headers' => [
+                    'Authorization' => 'Basic ' . base64_encode($this->member->id . ':' . $jobUid)
+                ]
+            ];
+            $job->mcp_config_json = json_encode($mcpConfig);
+
             Bean::store($job);
 
             Flight::get('log')->info('Created agent test job for job-executor', [

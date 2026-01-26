@@ -183,7 +183,7 @@
                 <li>Right to opt-out of sale of personal information (we do not sell data)</li>
                 <li>Right to non-discrimination for exercising privacy rights</li>
             </ul>
-            <p>To exercise these rights, contact us at privacy@myctobot.ai.</p>
+            <p>To exercise these rights, contact us at <?= htmlspecialchars($site_privacy_email ?? 'privacy@myctobot.ai') ?>.</p>
 
             <h2 class="h4 mt-5 mb-3">12. European Privacy Rights (GDPR)</h2>
             <p>If you are in the European Economic Area, you have rights under GDPR including:</p>
@@ -203,7 +203,7 @@
             <h2 class="h4 mt-5 mb-3">14. Contact Us</h2>
             <p>If you have questions about this Privacy Policy or our data practices, please contact us:</p>
             <ul>
-                <li>Email: privacy@myctobot.ai</li>
+                <li>Email: <?= htmlspecialchars($site_privacy_email ?? 'privacy@myctobot.ai') ?></li>
                 <li>Company: ClickSimple, Inc.</li>
             </ul>
             <p>For data protection inquiries in the EU, you may also contact your local data protection authority.</p>

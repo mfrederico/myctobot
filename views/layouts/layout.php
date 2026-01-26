@@ -9,19 +9,24 @@
     <!-- SEO Meta Tags -->
     <meta name="description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'AI-powered daily sprint digests for Jira') ?>">
 
+    <?php
+    // Site config fallbacks for OG tags
+    $ogBaseUrl = $site_base_url ?? 'https://myctobot.ai';
+    $ogSiteName = $site_name ?? 'MyCTOBot';
+    ?>
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="<?= htmlspecialchars(Flight::get('social.og_type') ?? 'website') ?>">
-    <meta property="og:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? 'https://myctobot.ai') ?>">
-    <meta property="og:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? 'MyCTOBot - AI-Powered Sprint Intelligence') ?>">
+    <meta property="og:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? $ogBaseUrl) ?>">
+    <meta property="og:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? $ogSiteName . ' - AI-Powered Sprint Intelligence') ?>">
     <meta property="og:description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'Replace your $275K CTO with AI') ?>">
-    <meta property="og:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? 'https://myctobot.ai/images/og-preview.png') ?>">
+    <meta property="og:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? $ogBaseUrl . '/images/og-preview.png') ?>">
 
     <!-- Twitter -->
     <meta name="twitter:card" content="<?= htmlspecialchars(Flight::get('social.twitter_card') ?? 'summary_large_image') ?>">
-    <meta name="twitter:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? 'https://myctobot.ai') ?>">
-    <meta name="twitter:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? 'MyCTOBot - AI-Powered Sprint Intelligence') ?>">
+    <meta name="twitter:url" content="<?= htmlspecialchars(Flight::get('social.og_url') ?? $ogBaseUrl) ?>">
+    <meta name="twitter:title" content="<?= htmlspecialchars(Flight::get('social.og_title') ?? $ogSiteName . ' - AI-Powered Sprint Intelligence') ?>">
     <meta name="twitter:description" content="<?= htmlspecialchars(Flight::get('social.og_description') ?? 'Replace your $275K CTO with AI') ?>">
-    <meta name="twitter:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? 'https://myctobot.ai/images/og-preview.png') ?>">
+    <meta name="twitter:image" content="<?= htmlspecialchars(Flight::get('social.og_image') ?? $ogBaseUrl . '/images/og-preview.png') ?>">
     <?php if (Flight::get('social.twitter_site')): ?>
     <meta name="twitter:site" content="<?= htmlspecialchars(Flight::get('social.twitter_site')) ?>">
     <?php endif; ?>
@@ -53,7 +58,17 @@
     
     <!-- Footer -->
     <?= $footer_content ?>
-    
+
+    <!-- Site Configuration for JavaScript -->
+    <script>
+    window.SiteConfig = {
+        domain: '<?= htmlspecialchars($site_domain ?? 'myctobot.ai', ENT_QUOTES, 'UTF-8') ?>',
+        protocol: '<?= htmlspecialchars($site_protocol ?? 'https', ENT_QUOTES, 'UTF-8') ?>',
+        baseUrl: '<?= htmlspecialchars($site_base_url ?? 'https://myctobot.ai', ENT_QUOTES, 'UTF-8') ?>',
+        name: '<?= htmlspecialchars($site_name ?? 'MyCTOBot', ENT_QUOTES, 'UTF-8') ?>'
+    };
+    </script>
+
     <!-- Bootstrap 5 JS Bundle (includes Popper) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     

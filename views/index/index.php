@@ -749,7 +749,7 @@ $proYearlyPrice = $allPricing['ai-developer']['pro_yearly'] ?? 4800;
                 <p class="text-muted">Enter your team's subdomain to go to your workspace:</p>
                 <div class="input-group mb-3">
                     <input type="text" class="form-control" id="teamSubdomain" placeholder="yourteam" autofocus>
-                    <span class="input-group-text">.myctobot.ai</span>
+                    <span class="input-group-text">.<?= htmlspecialchars($site_domain ?? 'myctobot.ai') ?></span>
                 </div>
                 <div class="d-grid">
                     <button type="button" class="btn btn-primary" onclick="goToTeam()">
@@ -768,7 +768,7 @@ $proYearlyPrice = $allPricing['ai-developer']['pro_yearly'] ?? 4800;
 function goToTeam() {
     const subdomain = document.getElementById('teamSubdomain').value.trim().toLowerCase();
     if (subdomain) {
-        window.location.href = 'https://' + subdomain + '.myctobot.ai';
+        window.location.href = window.SiteConfig.protocol + '://' + subdomain + '.' + window.SiteConfig.domain;
     }
 }
 document.getElementById('teamSubdomain')?.addEventListener('keypress', function(e) {

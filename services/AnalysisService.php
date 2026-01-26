@@ -469,7 +469,7 @@ class AnalysisService {
         $this->log("Created digest job {$jobId} for board {$board['board_name']}");
 
         // Build callback URL and get API key for webhook auth
-        $baseUrl = Flight::get('app.baseurl') ?? 'https://myctobot.ai';
+        $baseUrl = Flight::get('app.baseurl') ?? SiteConfig::getBaseUrl();
         $callbackUrl = rtrim($baseUrl, '/') . '/webhook/digest';
         $webhookApiKey = Flight::get('cron.api_key');
 

@@ -1232,7 +1232,7 @@ PROMPT;
         }
 
         $body .= "---\n";
-        $body .= "*This PR was created automatically by [MyCTOBot AI Developer](https://myctobot.ai)*\n";
+        $body .= "*This PR was created automatically by [" . SiteConfig::getName() . " AI Developer](" . SiteConfig::getBaseUrl() . ")*\n";
 
         return $body;
     }

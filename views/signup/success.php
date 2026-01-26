@@ -57,7 +57,7 @@
             </div>
 
             <div class="text-center mt-4 text-muted small">
-                Need help? Contact <a href="mailto:support@myctobot.ai">support@myctobot.ai</a>
+                Need help? Contact <a href="mailto:<?= htmlspecialchars($site_support_email ?? 'support@myctobot.ai') ?>"><?= htmlspecialchars($site_support_email ?? 'support@myctobot.ai') ?></a>
             </div>
         </div>
     </div>

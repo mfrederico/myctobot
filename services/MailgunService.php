@@ -22,8 +22,8 @@ class MailgunService {
 
         $apiKey = $config['key'] ?? '';
         $this->domain = $config['domain'] ?? '';
-        $this->fromEmail = $config['fromEmail'] ?? 'noreply@myctobot.ai';
-        $this->fromName = $config['fromName'] ?? 'MyCTOBot';
+        $this->fromEmail = $config['fromEmail'] ?? SiteConfig::getEmail('noreply');
+        $this->fromName = $config['fromName'] ?? SiteConfig::getName();
 
         $this->enabled = !empty($apiKey) && !empty($this->domain);
 

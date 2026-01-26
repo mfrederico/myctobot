@@ -619,8 +619,8 @@ class Mcpservers extends BaseControls\Control {
             }
         }
 
-        // Use subdomain-based URL pattern: https://{workspace}.myctobot.ai/mcp/...
-        $subdomainUrl = "https://{$workspaceSlug}.myctobot.ai";
+        // Use subdomain-based URL pattern: https://{workspace}.{domain}/mcp/...
+        $subdomainUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug);
 
         return [
             'myctobot-gateway' => [

@@ -654,9 +654,16 @@ async function pollWsTestStatus(originalBtnHtml) {
             return;
         }
 
-        // Test completed
+        // Test completed - send exit to clean up tmux session
         clearInterval(wsPollInterval);
         wsPollInterval = null;
+
+        // Send exit command to gracefully close the session
+        try {
+            await fetch('/admin/teststatus/' + wsCurrentTestId + '?send_exit=1');
+        } catch (e) {
+            console.warn('Failed to send exit:', e);
+        }
 
         const btn = document.querySelector('button[onclick="runTestWithAgent()"]');
         if (btn) {

@@ -122,19 +122,20 @@ class AgentTestService {
         $providerConfig = $this->agent['provider_config'] ?? [];
         $envVars = [];
 
-        // Check if using Ollama as backend (via LiteLLM proxy or direct)
+        // Check if using Ollama as backend
+        // Official Ollama + Claude Code integration: https://docs.ollama.com/integrations/claude-code
         if (!empty($providerConfig['use_ollama'])) {
             // Claude CLI with Ollama backend
             $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
-            $apiKey = $providerConfig['ollama_api_key'] ?? 'sk-litellm-proxy-key';
+            $envVars[] = "export ANTHROPIC_AUTH_TOKEN=\"ollama\"";
+            $envVars[] = "export ANTHROPIC_API_KEY=\"\"";
             $envVars[] = "export ANTHROPIC_BASE_URL=\"{$ollamaHost}\"";
-            $envVars[] = "export ANTHROPIC_API_KEY=\"{$apiKey}\"";
         } elseif ($provider === 'ollama') {
             // Standalone Ollama provider
             $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
-            $apiKey = $providerConfig['api_key'] ?? 'sk-litellm-proxy-key';
+            $envVars[] = "export ANTHROPIC_AUTH_TOKEN=\"ollama\"";
+            $envVars[] = "export ANTHROPIC_API_KEY=\"\"";
             $envVars[] = "export ANTHROPIC_BASE_URL=\"{$ollamaHost}\"";
-            $envVars[] = "export ANTHROPIC_API_KEY=\"{$apiKey}\"";
         }
 
         // Add any other env vars needed

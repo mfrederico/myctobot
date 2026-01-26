@@ -658,6 +658,9 @@ async function pollWsTestStatus(originalBtnHtml) {
         clearInterval(wsPollInterval);
         wsPollInterval = null;
 
+        // Wait 5 seconds for agent to finish, then send exit
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
         // Send exit command to gracefully close the session
         try {
             await fetch('/admin/teststatus/' + wsCurrentTestId + '?send_exit=1');

@@ -1045,7 +1045,7 @@ class Admin extends Control {
             $job->issue_key = 'TEST-AGENT-001';
             $job->status = 'pending';
             $job->phase = 'agent-test';
-            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response.';
+            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. Then run /exit to complete this test.';
             $job->delay = $delay;  // Optional delay for testing
             $job->created_at = date('Y-m-d H:i:s');
             Bean::store($job);

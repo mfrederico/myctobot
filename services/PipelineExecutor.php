@@ -15,6 +15,7 @@ namespace app\services;
 use \app\Bean;
 use \RedBeanPHP\R as R;
 use \app\services\AnthropicKeyService;
+use \app\services\LLMProviders\OllamaProvider;
 
 /**
  * Exception thrown when a pipeline pauses for user input in interactive mode
@@ -1390,15 +1391,17 @@ class PipelineExecutor {
      *   agent_id       - Required: ID from aiagents table
      *   prompt         - The prompt to send (supports variable substitution)
      *   system_prompt  - Optional system prompt override
-     *   model          - Optional model override (default: claude-sonnet-4-20250514)
+     *   model          - Optional model override (uses agent's configured model if not specified)
      *   max_tokens     - Optional max tokens (default: 4096)
      *   include_input  - Whether to include step input in the prompt (default: true)
+     *
+     * The agent's provider and provider_config determine which LLM backend is used.
+     * Supported providers: ollama, claude_cli (with optional use_ollama), claude_api
      */
     private function executeAIAgent(array $config, array $input, int $timeout): array {
         $agentId = $config['agent_id'] ?? null;
         $prompt = $config['prompt'] ?? '';
         $systemPrompt = $config['system_prompt'] ?? 'You are a helpful assistant processing pipeline data. Analyze the input and respond with structured JSON when appropriate.';
-        $model = $config['model'] ?? 'claude-sonnet-4-20250514';
         $maxTokens = (int)($config['max_tokens'] ?? 4096);
         $includeInput = $config['include_input'] ?? true;
 
@@ -1412,12 +1415,9 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Agent not found'];
         }
 
-        // Get API key
-        $memberId = $this->run->member_id ?? 1;
-        $apiKey = AnthropicKeyService::getApiKeyForAgent($agent, $memberId);
-        if (empty($apiKey)) {
-            return ['success' => false, 'error' => 'No Anthropic API key available'];
-        }
+        // Get agent's provider configuration
+        $provider = $agent->provider ?: 'claude_api';
+        $providerConfig = json_decode($agent->provider_config ?: '{}', true);
 
         // Substitute variables in prompts
         $prompt = $this->substituteVariables($prompt);
@@ -1431,9 +1431,151 @@ class PipelineExecutor {
         }
 
         $this->log('info', "Executing AI agent: {$agent->name}", [
-            'model' => $model,
+            'provider' => $provider,
+            'provider_config' => $providerConfig,
             'prompt_length' => strlen($userMessage)
         ]);
+
+        // Route to appropriate provider based on agent configuration
+        try {
+            // Check for Ollama provider (direct or via claude_cli with use_ollama)
+            $useOllama = ($provider === 'ollama') ||
+                         ($provider === 'claude_cli' && !empty($providerConfig['use_ollama']));
+
+            if ($useOllama) {
+                return $this->executeOllamaAgent($agent, $provider, $providerConfig, $userMessage, $systemPrompt, $timeout);
+            }
+
+            // Claude API provider
+            if ($provider === 'claude_api') {
+                $model = $config['model'] ?? $providerConfig['model'] ?? 'claude-sonnet-4-20250514';
+                return $this->executeClaudeApiAgent($agent, $model, $userMessage, $systemPrompt, $maxTokens, $timeout);
+            }
+
+            // claude_cli without use_ollama - this requires the Claude CLI which isn't available in pipeline context
+            if ($provider === 'claude_cli') {
+                return [
+                    'success' => false,
+                    'error' => "Agent '{$agent->name}' is configured to use Claude CLI, but claude_cli provider requires " .
+                               "either 'use_ollama' to be enabled in provider config, or switch the agent to 'claude_api' " .
+                               "or 'ollama' provider for pipeline execution."
+                ];
+            }
+
+            // Unsupported provider
+            return [
+                'success' => false,
+                'error' => "Unsupported provider '{$provider}' for agent '{$agent->name}'. " .
+                           "Supported providers for pipelines: ollama, claude_api, claude_cli (with use_ollama enabled)"
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "AI agent exception: {$e->getMessage()}");
+            return ['success' => false, 'error' => "AI agent exception: {$e->getMessage()}"];
+        }
+    }
+
+    /**
+     * Execute agent using Ollama provider
+     */
+    private function executeOllamaAgent($agent, string $provider, array $providerConfig, string $userMessage, string $systemPrompt, int $timeout): array {
+        // Determine host and model based on provider type
+        if ($provider === 'ollama') {
+            $ollamaHost = $providerConfig['host'] ?? $providerConfig['base_url'] ?? 'http://localhost:11434';
+            $ollamaModel = $providerConfig['model'] ?? '';
+        } else {
+            // claude_cli with use_ollama
+            $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
+            $ollamaModel = $providerConfig['ollama_model'] ?? '';
+        }
+
+        if (empty($ollamaModel)) {
+            return [
+                'success' => false,
+                'error' => "Agent '{$agent->name}' has Ollama enabled but no model specified in provider_config. " .
+                           "Please configure ollama_model (for claude_cli) or model (for ollama provider)."
+            ];
+        }
+
+        $this->log('info', "Using Ollama provider", [
+            'host' => $ollamaHost,
+            'model' => $ollamaModel
+        ]);
+
+        try {
+            // Use OllamaProvider for the request
+            $ollamaProvider = new OllamaProvider([
+                'host' => $ollamaHost,
+                'model' => $ollamaModel
+            ]);
+
+            // Use chat API with system prompt
+            $messages = [
+                ['role' => 'system', 'content' => $systemPrompt],
+                ['role' => 'user', 'content' => $userMessage]
+            ];
+
+            $result = $ollamaProvider->chat($messages, [
+                'model' => $ollamaModel
+            ]);
+
+            if (!$result['success']) {
+                return [
+                    'success' => false,
+                    'error' => "Ollama request failed: " . ($result['error'] ?? 'Unknown error')
+                ];
+            }
+
+            $content = $result['response'] ?? '';
+
+            // Try to parse response as JSON
+            $parsed = null;
+            if (preg_match('/```json\s*([\s\S]*?)\s*```/', $content, $matches)) {
+                $parsed = json_decode($matches[1], true);
+            } elseif (str_starts_with(trim($content), '{') || str_starts_with(trim($content), '[')) {
+                $parsed = json_decode($content, true);
+            }
+
+            $this->log('info', "Ollama agent completed", [
+                'response_length' => strlen($content),
+                'has_json' => $parsed !== null
+            ]);
+
+            return [
+                'success' => true,
+                'output' => [
+                    'agent_id' => $agent->id,
+                    'agent_name' => $agent->name,
+                    'provider' => 'ollama',
+                    'model' => $ollamaModel,
+                    'response' => $content,
+                    'parsed' => $parsed,
+                    'usage' => $result['usage'] ?? null
+                ]
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "Ollama agent failed: {$e->getMessage()}");
+            return ['success' => false, 'error' => "Ollama error: {$e->getMessage()}"];
+        }
+    }
+
+    /**
+     * Execute agent using Claude API (Anthropic)
+     */
+    private function executeClaudeApiAgent($agent, string $model, string $userMessage, string $systemPrompt, int $maxTokens, int $timeout): array {
+        $memberId = $this->run->member_id ?? 1;
+        $apiKey = AnthropicKeyService::getApiKeyForAgent($agent, $memberId);
+
+        if (empty($apiKey)) {
+            return [
+                'success' => false,
+                'error' => "Agent '{$agent->name}' is configured to use Claude API but no Anthropic API key is available. " .
+                           "Please assign an API key to this agent or switch to a different provider."
+            ];
+        }
+
+        $this->log('info', "Using Claude API provider", ['model' => $model]);
 
         try {
             $client = new \GuzzleHttp\Client([
@@ -1468,7 +1610,7 @@ class PipelineExecutor {
                 $parsed = json_decode($content, true);
             }
 
-            $this->log('info', "AI agent completed", [
+            $this->log('info', "Claude API agent completed", [
                 'response_length' => strlen($content),
                 'has_json' => $parsed !== null
             ]);
@@ -1476,8 +1618,9 @@ class PipelineExecutor {
             return [
                 'success' => true,
                 'output' => [
-                    'agent_id' => $agentId,
+                    'agent_id' => $agent->id,
                     'agent_name' => $agent->name,
+                    'provider' => 'claude_api',
                     'model' => $model,
                     'response' => $content,
                     'parsed' => $parsed,
@@ -1491,12 +1634,8 @@ class PipelineExecutor {
                 $errorBody = json_decode($e->getResponse()->getBody()->getContents(), true);
                 $errorMessage = $errorBody['error']['message'] ?? $errorMessage;
             }
-            $this->log('error', "AI agent failed: {$errorMessage}");
-            return ['success' => false, 'error' => "AI agent error: {$errorMessage}"];
-
-        } catch (\Exception $e) {
-            $this->log('error', "AI agent exception: {$e->getMessage()}");
-            return ['success' => false, 'error' => "AI agent exception: {$e->getMessage()}"];
+            $this->log('error', "Claude API agent failed: {$errorMessage}");
+            return ['success' => false, 'error' => "Claude API error: {$errorMessage}"];
         }
     }
 

@@ -1,9 +1,10 @@
 # Configuration files with sensitive data
-/conf/config.ini
-/conf/config.*.ini
-/conf/mailgun.ini
-/conf/stripe.ini
-/conf/atlassian.ini
+conf/jobexecutor.ini
+conf/config.ini
+conf/config.*.ini
+conf/mailgun.ini
+conf/stripe.ini
+conf/atlassian.ini
 config.ini
 stripe
 storage
@@ -114,3 +115,4 @@ Desktop.ini
 sql/
 database/
 conf/github.ini
+conf/jobexecutor.ini

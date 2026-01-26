@@ -449,6 +449,9 @@ class Agents extends BaseControls\Control {
         $isDefault = (bool) $this->getParam('is_default', false);
         $isActive = (bool) $this->getParam('is_active', true);
 
+        // DEBUG
+        $this->logger->debug("POST data", ['post' => $_POST]);
+
         if (!empty($name)) {
             $agent->name = $name;
         }
@@ -457,6 +460,18 @@ class Agents extends BaseControls\Control {
         if (LLMProviderFactory::getProviderInfo($provider)) {
             $agent->provider = $provider;
             $agent->provider_config = json_encode($this->buildRunnerConfig($provider));
+
+            // Handle Anthropic API key assignment for claude_api provider
+            $anthropicKeyId = $this->getParam('anthropickeys_id');
+            if ($provider === 'claude_api' && $anthropicKeyId) {
+                $key = Bean::load('anthropickeys', (int)$anthropicKeyId);
+                if ($key->id) {
+                    $agent->anthropickeys_id = (int)$anthropicKeyId;
+                }
+            } elseif ($provider !== 'claude_api') {
+                // Clear key assignment if switching away from claude_api
+                $agent->anthropickeys_id = null;
+            }
         }
 
         $agent->is_active = $isActive ? 1 : 0;

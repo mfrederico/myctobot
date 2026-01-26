@@ -1045,9 +1045,25 @@ class Admin extends Control {
             $job->issue_key = 'TEST-AGENT-001';
             $job->status = 'pending';
             $job->phase = 'agent-test';
-            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response.';
+            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. After responding, call the `job_complete` MCP tool with success=true and summary="Test completed successfully" to mark this test as complete.';
             $job->delay = $delay;  // Optional delay for testing
             $job->created_at = date('Y-m-d H:i:s');
+
+            // Start with agent's existing MCP config and add myctobot jobs server
+            $mcpConfig = json_decode($agent->mcp_config ?: '{"mcpServers":{}}', true);
+            if (!isset($mcpConfig['mcpServers'])) {
+                $mcpConfig['mcpServers'] = [];
+            }
+            // Add myctobot jobs server for test completion
+            $mcpConfig['mcpServers']['myctobot'] = [
+                'type' => 'http',
+                'url' => \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/mcp/jobs',
+                'headers' => [
+                    'Authorization' => 'Basic ' . base64_encode($this->member->id . ':' . $jobUid)
+                ]
+            ];
+            $job->mcp_config_json = json_encode($mcpConfig);
+
             Bean::store($job);
 
             Flight::get('log')->info('Created agent test job for job-executor', [
@@ -1059,7 +1075,9 @@ class Admin extends Control {
 
             // Submit to job-executor (PING)
             $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+            // Build callback URL with workspace subdomain from site config
+            $callbackUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/api/jobexecutor';
+            $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
 
             $ch = curl_init($submitUrl);
             curl_setopt_array($ch, [
@@ -1076,6 +1094,8 @@ class Admin extends Control {
                 ]),
                 CURLOPT_TIMEOUT => 30,
                 CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
             ]);
 
             $response = curl_exec($ch);
@@ -1135,6 +1155,7 @@ class Admin extends Control {
      */
     public function teststatus($params = []) {
         $testId = $this->opId() ?? $this->getParam('test_id') ?? '';
+        $sendExit = $this->getParam('send_exit') === '1' || $this->getParam('send_exit') === 'true';
 
         if (empty($testId)) {
             $this->json(['success' => false, 'error' => 'Test ID is required']);
@@ -1201,6 +1222,13 @@ class Admin extends Control {
                 $response['phase'] = $phase;
             }
 
+            // Send /exit to tmux session if requested
+            if ($sendExit && $job->job_uid) {
+                $exitResult = $this->sendExitToJobExecutor($job->job_uid);
+                $response['exit_sent'] = $exitResult['success'] ?? false;
+                $response['exit_message'] = $exitResult['message'] ?? $exitResult['error'] ?? null;
+            }
+
             $this->json($response);
             return;
         }
@@ -1221,6 +1249,59 @@ class Admin extends Control {
         }
 
         $this->json(array_merge(['success' => true], $status));
+    }
+
+    /**
+     * Send /exit command to job-executor to stop a tmux session
+     *
+     * @param string $jobUid The job UID
+     * @return array Result with success/error
+     */
+    private function sendExitToJobExecutor(string $jobUid): array {
+        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+        $jobExecutorUrl = \app\services\JobExecutorConfig::getUrl();
+        $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
+
+        $exitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/exit';
+
+        $ch = curl_init($exitUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode([
+                'workspace' => $workspaceSlug,
+                'job_uid' => $jobUid,
+            ]),
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_SSL_VERIFYPEER => $verifySsl,
+            CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError) {
+            Flight::get('log')->warning('Failed to send exit to job-executor', [
+                'error' => $curlError,
+                'job_uid' => $jobUid,
+            ]);
+            return ['success' => false, 'error' => "Connection failed: {$curlError}"];
+        }
+
+        $result = json_decode($response, true) ?? [];
+
+        if ($httpCode !== 200) {
+            return ['success' => false, 'error' => $result['error'] ?? "HTTP {$httpCode}"];
+        }
+
+        return $result;
     }
 
     /**
@@ -1300,7 +1381,9 @@ class Admin extends Control {
 
             // Step 2: Submit to job-executor (PING)
             $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+            // Build callback URL with workspace subdomain from site config
+            $callbackUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/api/jobexecutor';
+            $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
 
             $ch = curl_init($submitUrl);
             curl_setopt_array($ch, [
@@ -1317,6 +1400,8 @@ class Admin extends Control {
                 ]),
                 CURLOPT_TIMEOUT => 30,
                 CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
             ]);
 
             $response = curl_exec($ch);

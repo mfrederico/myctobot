@@ -40,6 +40,7 @@ class JobExecutorConfig {
             'url' => null,
             'timeout' => 30,
             'enabled' => true,
+            'verify_ssl' => true,
         ];
 
         $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
@@ -50,7 +51,8 @@ class JobExecutorConfig {
             $baseConfig = parse_ini_file($jobexecutorIni, true);
             if ($baseConfig && isset($baseConfig['jobexecutor'])) {
                 foreach ($baseConfig['jobexecutor'] as $key => $value) {
-                    if ($value !== '' && $value !== null) {
+                    // Note: For booleans, INI 'false' becomes '' - handled by Flight::isOn() later
+                    if ($value !== null) {
                         $config[$key] = $value;
                     }
                 }
@@ -64,7 +66,8 @@ class JobExecutorConfig {
                 $workspaceConfig = parse_ini_file($workspaceIni, true);
                 if ($workspaceConfig && isset($workspaceConfig['jobexecutor'])) {
                     foreach ($workspaceConfig['jobexecutor'] as $key => $value) {
-                        if ($value !== '' && $value !== null) {
+                        // Note: For booleans, INI 'false' becomes '' - handled by Flight::isOn() later
+                        if ($value !== null) {
                             $config[$key] = $value;
                         }
                     }
@@ -77,10 +80,9 @@ class JobExecutorConfig {
             $config['url'] = Flight::get('job_executor_url') ?? 'http://localhost:8081';
         }
 
-        // Normalize boolean for enabled
-        if (is_string($config['enabled'])) {
-            $config['enabled'] = filter_var($config['enabled'], FILTER_VALIDATE_BOOLEAN);
-        }
+        // Normalize booleans using Flight::isOn() for consistent INI parsing
+        $config['enabled'] = Flight::isOn($config['enabled']);
+        $config['verify_ssl'] = Flight::isOn($config['verify_ssl']);
 
         // Normalize timeout to int
         $config['timeout'] = (int) $config['timeout'];
@@ -122,6 +124,16 @@ class JobExecutorConfig {
      */
     public static function isEnabled(?string $workspaceSlug = null): bool {
         return self::getConfig($workspaceSlug)['enabled'];
+    }
+
+    /**
+     * Check if SSL verification should be performed
+     *
+     * @param string|null $workspaceSlug Optional workspace slug
+     * @return bool Whether to verify SSL certificates
+     */
+    public static function shouldVerifySsl(?string $workspaceSlug = null): bool {
+        return self::getConfig($workspaceSlug)['verify_ssl'];
     }
 
     /**

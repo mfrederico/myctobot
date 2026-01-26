@@ -112,194 +112,11 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                               placeholder="Optional description of this agent's purpose"><?= htmlspecialchars($agent['description'] ?? '') ?></textarea>
                 </div>
 
-                <?php if ($isNew): ?>
-                <!-- Provider Selection for New Agent -->
-                <div class="mb-3">
-                    <label for="provider" class="form-label">Provider <span class="text-danger">*</span></label>
-                    <select class="form-select" id="provider_create" name="provider" onchange="updateCreateProviderConfig()">
-                        <?php foreach ($providers as $p): ?>
-                        <option value="<?= $p['type'] ?>" <?= $provider === $p['type'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($p['name']) ?> - <?= htmlspecialchars($p['description']) ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <!-- Provider Config for New Agent (inline) -->
-                <div id="create-provider-config" class="mb-3">
-                    <!-- Claude CLI Config -->
-                    <div class="create-provider-config" id="create-config-claude_cli">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-terminal"></i> Claude CLI Settings</h6>
-                                <div class="form-check form-switch mb-2">
-                                    <input class="form-check-input" type="checkbox" id="create-use-ollama" name="use_ollama"
-                                           onchange="toggleCreateClaudeBackend()">
-                                    <label class="form-check-label" for="create-use-ollama">
-                                        <i class="bi bi-cpu"></i> Use Ollama as backend
-                                    </label>
-                                </div>
-                                <div id="create-claude-anthropic">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select" name="model">
-                                        <option value="sonnet" selected>Sonnet (Recommended)</option>
-                                        <option value="opus">Opus</option>
-                                        <option value="haiku">Haiku (Fast)</option>
-                                    </select>
-                                </div>
-                                <div id="create-claude-ollama" style="display:none;">
-                                    <div class="mb-2">
-                                        <label class="form-label">Ollama Host</label>
-                                        <div class="input-group">
-                                            <input type="text" class="form-control" id="create-ollama-host" name="ollama_host"
-                                                   value="http://localhost:11434" placeholder="http://localhost:11434">
-                                            <button type="button" class="btn btn-outline-primary" onclick="loadCreateOllamaModels()">
-                                                <i class="bi bi-arrow-clockwise"></i> Load Models
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="mb-2">
-                                        <label class="form-label">Ollama Model</label>
-                                        <select class="form-select" id="create-ollama-model" name="ollama_model">
-                                            <option value="">-- Click "Load Models" to fetch --</option>
-                                        </select>
-                                        <div class="form-text">
-                                            Recommended: <code>qwen3-coder</code>, <code>codellama</code>, <code>llama3</code>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- OpenAI Config -->
-                    <div class="create-provider-config" id="create-config-openai" style="display:none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-stars"></i> OpenAI Settings</h6>
-                                <div class="mb-2">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select" name="model">
-                                        <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                        <option value="gpt-4o">GPT-4o</option>
-                                        <option value="gpt-4o-mini">GPT-4o Mini</option>
-                                    </select>
-                                </div>
-                                <div class="form-text">API key is configured in Settings → Connections</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Claude API Config -->
-                    <div class="create-provider-config" id="create-config-claude_api" style="display:none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-cloud"></i> Claude API Settings</h6>
-
-                                <div class="mb-3">
-                                    <label class="form-label">Anthropic API Key <span class="text-danger">*</span></label>
-                                    <select class="form-select" name="anthropickeys_id" id="create_anthropickeys_id">
-                                        <option value="">-- Select API Key --</option>
-                                        <?php if (!empty($anthropicKeys)): ?>
-                                            <?php foreach ($anthropicKeys as $key): ?>
-                                            <option value="<?= $key->id ?>"
-                                                    data-model="<?= htmlspecialchars($key->model ?? '') ?>">
-                                                <?= htmlspecialchars($key->name) ?>
-                                                <?php if ($key->shared): ?>(Shared)<?php endif; ?>
-                                                - <?= htmlspecialchars($key->model ?? 'default') ?>
-                                            </option>
-                                            <?php endforeach; ?>
-                                        <?php endif; ?>
-                                    </select>
-                                    <div class="form-text">
-                                        Select the API key this agent will use.
-                                        <a href="/anthropic/keys">Manage API Keys</a>
-                                    </div>
-                                </div>
-
-                                <div class="mb-2">
-                                    <label class="form-label">Model</label>
-                                    <select class="form-select" name="model">
-                                        <option value="claude-sonnet-4-20250514">Claude Sonnet 4 (Recommended)</option>
-                                        <option value="claude-opus-4-20250514">Claude Opus 4</option>
-                                        <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fast)</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Custom HTTP Config -->
-                    <div class="create-provider-config" id="create-config-custom_http" style="display:none;">
-                        <div class="card bg-light">
-                            <div class="card-body">
-                                <h6><i class="bi bi-globe"></i> Custom HTTP Settings</h6>
-                                <div class="mb-2">
-                                    <label class="form-label">Endpoint URL</label>
-                                    <input type="text" class="form-control" name="endpoint"
-                                           placeholder="https://api.example.com/v1/chat/completions">
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label">Model</label>
-                                    <input type="text" class="form-control" name="model"
-                                           placeholder="Model name">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <?php else: ?>
-                <!-- Provider Display for Existing Agent (edit on Provider tab) -->
-                <div class="mb-3">
-                    <label class="form-label">Runner & LLM Engine</label>
-                    <div class="d-flex align-items-center gap-2 flex-wrap">
-                        <?php if ($provider === 'claude_cli'): ?>
-                            <?php if (!empty($providerConfig['use_ollama'])): ?>
-                            <span class="badge bg-primary fs-6" title="Runner: Claude Code CLI">
-                                <i class="bi bi-terminal"></i> Claude CLI
-                            </span>
-                            <span class="badge bg-info text-dark fs-6" title="LLM Engine: Ollama">
-                                <i class="bi bi-cpu"></i> Ollama
-                            </span>
-                            <?php else: ?>
-                            <span class="badge bg-primary fs-6" title="Runner: Claude Code CLI">
-                                <i class="bi bi-terminal"></i> Claude CLI
-                            </span>
-                            <span class="badge bg-success fs-6" title="LLM Engine: Anthropic API">
-                                <i class="bi bi-cloud"></i> Anthropic
-                            </span>
-                            <?php endif; ?>
-                        <?php else: ?>
-                            <?php
-                            $providerName = 'Unknown';
-                            foreach ($providers as $p) {
-                                if ($p['type'] === $provider) {
-                                    $providerName = $p['name'];
-                                    break;
-                                }
-                            }
-                            ?>
-                            <span class="badge bg-secondary fs-6">
-                                <i class="bi bi-gear"></i> <?= htmlspecialchars($providerName) ?>
-                            </span>
-                        <?php endif; ?>
-                        <a href="/agents/edit/<?= $agentId ?>?tab=provider" class="btn btn-sm btn-outline-secondary">
-                            <i class="bi bi-gear"></i> Configure
-                        </a>
-                    </div>
-                </div>
-                <?php if ($provider === 'claude_cli'): ?>
-                <div class="mb-3">
-                    <label class="form-label">Model</label>
-                    <div>
-                        <?php if (!empty($providerConfig['use_ollama'])): ?>
-                        <code class="fs-6"><?= htmlspecialchars($providerConfig['ollama_model'] ?? 'not set') ?></code>
-                        <?php else: ?>
-                        <code class="fs-6"><?= htmlspecialchars($providerConfig['model'] ?? 'sonnet') ?></code>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
+                <?php
+                // Include the shared provider config partial
+                $prefix = $isNew ? 'create' : 'edit';
+                include __DIR__ . '/_provider_config.php';
+                ?>
 
                 <!-- Provider Capabilities -->
                 <div class="mb-3">
@@ -309,7 +126,6 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     </div>
                     <div class="form-text">Capabilities derived from the selected model</div>
                 </div>
-                <?php endif; ?>
 
                 <hr>
 
@@ -643,40 +459,61 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
     </script>
     <?php endif; ?>
 
-    <?php if ($isNew): ?>
-    <!-- JavaScript for Create Form -->
+    <!-- Shared JavaScript for Provider Config (works with any prefix) -->
     <script>
-    function updateCreateProviderConfig() {
-        const provider = document.getElementById('provider_create')?.value;
+    const currentPrefix = '<?= $isNew ? 'create' : 'edit' ?>';
+
+    // Generic function to update provider config visibility and field states
+    function updateProviderConfig(prefix) {
+        const provider = document.getElementById('provider_' + prefix)?.value;
         if (!provider) return;
 
-        document.querySelectorAll('.create-provider-config').forEach(el => el.style.display = 'none');
-        const configEl = document.getElementById('create-config-' + provider);
+        // Hide all provider configs and disable their fields
+        document.querySelectorAll('.provider-config-' + prefix).forEach(el => {
+            el.style.display = 'none';
+            // Disable all fields in hidden sections so they don't submit
+            el.querySelectorAll('input, select, textarea').forEach(field => {
+                field.disabled = true;
+            });
+        });
+
+        // Show selected provider config and enable its fields
+        const configEl = document.getElementById(prefix + '-config-' + provider);
         if (configEl) {
             configEl.style.display = 'block';
+            // Enable fields in the visible section
+            configEl.querySelectorAll('input, select, textarea').forEach(field => {
+                field.disabled = false;
+            });
         }
     }
 
-    function toggleCreateClaudeBackend() {
-        const useOllama = document.getElementById('create-use-ollama')?.checked;
-        const anthropicEl = document.getElementById('create-claude-anthropic');
-        const ollamaEl = document.getElementById('create-claude-ollama');
+    // Generic function to toggle Claude backend between Anthropic and Ollama
+    function toggleClaudeBackend(prefix) {
+        const useOllama = document.getElementById(prefix + '-use-ollama')?.checked;
+        const anthropicEl = document.getElementById(prefix + '-claude-anthropic');
+        const ollamaEl = document.getElementById(prefix + '-claude-ollama');
         if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
         if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
 
         // Auto-load models when toggling on
         if (useOllama) {
-            loadCreateOllamaModels();
+            loadOllamaModels(prefix);
         }
     }
 
-    function loadCreateOllamaModels() {
-        const host = document.getElementById('create-ollama-host').value;
-        const modelSelect = document.getElementById('create-ollama-model');
+    // Generic function to load Ollama models
+    function loadOllamaModels(prefix, isDirect = false) {
+        const hostId = isDirect ? prefix + '-ollama-direct-host' : prefix + '-ollama-host';
+        const modelId = isDirect ? prefix + '-ollama-direct-model' : prefix + '-ollama-model';
+
+        const host = document.getElementById(hostId)?.value;
+        const modelSelect = document.getElementById(modelId);
+
+        if (!modelSelect) return;
 
         modelSelect.innerHTML = '<option value="">Loading models...</option>';
 
-        // Fetch via server (Ollama runs on same server)
         fetch('/agents/getmodels', {
             method: 'POST',
             headers: {
@@ -698,30 +535,36 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     opt.textContent = model.name + paramInfo + sizeInfo;
                     modelSelect.appendChild(opt);
                 });
-                hideCreateOllamaManualInput();
+                hideOllamaManualInput(prefix, isDirect);
             } else {
                 modelSelect.innerHTML = '<option value="">No models found - enter manually</option>';
-                showCreateOllamaManualInput();
+                showOllamaManualInput(prefix, isDirect);
             }
         })
         .catch(e => {
             console.log('Failed to load models:', e.message);
             modelSelect.innerHTML = '<option value="">Error loading models</option>';
-            showCreateOllamaManualInput();
+            showOllamaManualInput(prefix, isDirect);
         });
     }
 
-    function showCreateOllamaManualInput() {
-        let manualDiv = document.getElementById('create-ollama-manual');
+    function showOllamaManualInput(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualId = prefix + '-ollama' + suffix + '-manual';
+        const modelId = prefix + '-ollama' + suffix + '-model';
+
+        let manualDiv = document.getElementById(manualId);
         if (!manualDiv) {
-            const modelDiv = document.getElementById('create-ollama-model').parentElement;
+            const modelDiv = document.getElementById(modelId)?.parentElement;
+            if (!modelDiv) return;
+
             manualDiv = document.createElement('div');
-            manualDiv.id = 'create-ollama-manual';
+            manualDiv.id = manualId;
             manualDiv.className = 'mt-2';
             manualDiv.innerHTML = `
                 <label class="form-label small text-muted">Or enter model name:</label>
-                <input type="text" class="form-control form-control-sm" id="create-ollama-model-manual"
-                       placeholder="qwen3-coder, codellama, llama3" onchange="syncManualModel()">
+                <input type="text" class="form-control form-control-sm" id="${manualId}-input"
+                       placeholder="qwen3-coder, codellama, llama3" onchange="syncManualModel('${prefix}', ${isDirect})">
                 <div class="form-text">Localhost not reachable from web - model will be validated when agent runs</div>
             `;
             modelDiv.appendChild(manualDiv);
@@ -729,16 +572,20 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         manualDiv.style.display = 'block';
     }
 
-    function hideCreateOllamaManualInput() {
-        const manualDiv = document.getElementById('create-ollama-manual');
+    function hideOllamaManualInput(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualDiv = document.getElementById(prefix + '-ollama' + suffix + '-manual');
         if (manualDiv) manualDiv.style.display = 'none';
     }
 
-    function syncManualModel() {
-        const manual = document.getElementById('create-ollama-model-manual');
-        const select = document.getElementById('create-ollama-model');
-        if (manual && manual.value) {
-            // Add as option and select it
+    function syncManualModel(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualId = prefix + '-ollama' + suffix + '-manual-input';
+        const modelId = prefix + '-ollama' + suffix + '-model';
+
+        const manual = document.getElementById(manualId);
+        const select = document.getElementById(modelId);
+        if (manual && manual.value && select) {
             const opt = document.createElement('option');
             opt.value = manual.value;
             opt.textContent = manual.value;
@@ -748,10 +595,9 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        updateCreateProviderConfig();
+        updateProviderConfig(currentPrefix);
     });
     </script>
-    <?php endif; ?>
 
     <?php elseif ($activeTab === 'mcp'): ?>
     <!-- MCP Servers Tab -->
@@ -2244,26 +2090,6 @@ function testClaudeOllamaConnection() {
         resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
         showClaudeOllamaManualInput();
     });
-}
-
-// Create form provider functions
-function updateCreateProviderConfig() {
-    const provider = document.getElementById('provider_create')?.value;
-    if (!provider) return;
-
-    document.querySelectorAll('.create-provider-config').forEach(el => el.style.display = 'none');
-    const configEl = document.getElementById('create-config-' + provider);
-    if (configEl) {
-        configEl.style.display = 'block';
-    }
-}
-
-function toggleCreateClaudeBackend() {
-    const useOllama = document.getElementById('create-use-ollama')?.checked;
-    const anthropicEl = document.getElementById('create-claude-anthropic');
-    const ollamaEl = document.getElementById('create-claude-ollama');
-    if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
-    if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
 }
 
 // MCP Config functions

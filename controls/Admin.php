@@ -1004,147 +1004,22 @@ class Admin extends Control {
      * Combines workstation SSH connection with agent config (model, Ollama settings).
      */
     public function testwithagent($params = []) {
-        require_once __DIR__ . '/../services/RunnerService.php';
+        require_once __DIR__ . '/../services/JobExecutorConfig.php';
 
         $runnerId = (int)($this->opId() ?? 0);
         $agentId = (int)($this->getParam('agent_id') ?? 0);
-        $jobExecutorUrl = $this->getParam('job_executor_url') ?: \app\services\JobExecutorConfig::getUrl();
-        $delay = (int)($this->getParam('delay') ?? 0);  // Optional delay in seconds for testing
 
         if (!$runnerId || !$agentId) {
             $this->json(['success' => false, 'error' => 'Workstation ID and Agent ID are required']);
             return;
         }
 
-        // Load agent and workstation
-        $agent = Bean::load('aiagents', $agentId);
-        if (!$agent || !$agent->id || !$agent->is_active) {
-            $this->json(['success' => false, 'error' => 'Agent not found or inactive']);
-            return;
-        }
-
-        $runner = \app\services\RunnerService::getRunner($runnerId);
-        if (!$runner) {
-            $this->json(['success' => false, 'error' => 'Workstation not found']);
-            return;
-        }
-
+        $memberId = $this->member->id ?? 1;
         $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
-        $testId = 'at-' . bin2hex(random_bytes(8));
-        $jobUid = 'test-' . $workspaceSlug . '-' . $testId;
 
-        try {
-            // Create test job in aidevjobs
-            $job = Bean::dispense('aidevjobs');
-            $job->job_uid = $jobUid;
-            $job->member_id = $this->member->id ?? 1;
-            $job->boards_id = null;
-            $job->repoconnections_id = null;
-            $job->runners_id = $runnerId;
-            $job->aiagents_id = $agentId; // Link to agent for config
-            $job->issue_key = 'TEST-AGENT-001';
-            $job->status = 'pending';
-            $job->phase = 'agent-test';
-            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. After responding, call the `job_complete` MCP tool with success=true and summary="Test completed successfully" to mark this test as complete.';
-            $job->delay = $delay;  // Optional delay for testing
-            $job->created_at = date('Y-m-d H:i:s');
+        $result = \app\services\JobExecutorConfig::submitTestJob($agentId, $runnerId, $memberId, $workspaceSlug);
 
-            // Start with agent's existing MCP config and add myctobot jobs server
-            $mcpConfig = json_decode($agent->mcp_config ?: '{"mcpServers":{}}', true);
-            if (!isset($mcpConfig['mcpServers'])) {
-                $mcpConfig['mcpServers'] = [];
-            }
-            // Add myctobot jobs server for test completion
-            $mcpConfig['mcpServers']['myctobot'] = [
-                'type' => 'http',
-                'url' => \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/mcp/jobs',
-                'headers' => [
-                    'Authorization' => 'Basic ' . base64_encode($this->member->id . ':' . $jobUid)
-                ]
-            ];
-            $job->mcp_config_json = json_encode($mcpConfig);
-
-            Bean::store($job);
-
-            Flight::get('log')->info('Created agent test job for job-executor', [
-                'job_uid' => $jobUid,
-                'agent_id' => $agentId,
-                'runner_id' => $runnerId,
-                'workspace' => $workspaceSlug,
-            ]);
-
-            // Submit to job-executor (PING)
-            $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            // Build callback URL with workspace subdomain from site config
-            $callbackUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/api/jobexecutor';
-            $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
-
-            $ch = curl_init($submitUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Accept: application/json',
-                ],
-                CURLOPT_POSTFIELDS => json_encode([
-                    'workspace' => $workspaceSlug,
-                    'job_uid' => $jobUid,
-                    'callback_url' => $callbackUrl,
-                ]),
-                CURLOPT_TIMEOUT => 30,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_SSL_VERIFYPEER => $verifySsl,
-                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
-            ]);
-
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
-            curl_close($ch);
-
-            if ($curlError) {
-                Bean::trash($job);
-                $this->json(['success' => false, 'error' => "Connection failed: {$curlError}"]);
-                return;
-            }
-
-            if ($httpCode !== 200) {
-                Bean::trash($job);
-                $result = json_decode($response, true);
-                $this->json([
-                    'success' => false,
-                    'error' => $result['error'] ?? "Job-executor returned HTTP {$httpCode}",
-                ]);
-                return;
-            }
-
-            // Parse provider config for display
-            $providerConfig = json_decode($agent->provider_config ?: '{}', true);
-
-            $this->json([
-                'success' => true,
-                'test_id' => $testId,
-                'job_uid' => $jobUid,
-                'status' => 'started',
-                'message' => 'Agent test submitted to job-executor',
-                'agent' => [
-                    'name' => $agent->name,
-                    'use_ollama' => !empty($providerConfig['use_ollama']),
-                    'ollama_model' => $providerConfig['ollama_model'] ?? '',
-                    'anthropic_model' => $providerConfig['model'] ?? 'sonnet',
-                ],
-                'workstation' => [
-                    'name' => $runner['name'],
-                    'host' => $runner['host'],
-                    'ssh_user' => $runner['ssh_user'] ?? 'claudeuser',
-                ],
-            ]);
-
-        } catch (\Exception $e) {
-            Flight::get('log')->error('Agent test failed', ['error' => $e->getMessage()]);
-            $this->json(['success' => false, 'error' => $e->getMessage()]);
-        }
+        $this->json($result);
     }
 
     /**
@@ -1224,7 +1099,7 @@ class Admin extends Control {
 
             // Send /exit to tmux session if requested
             if ($sendExit && $job->job_uid) {
-                $exitResult = $this->sendExitToJobExecutor($job->job_uid);
+                $exitResult = \app\services\JobExecutorConfig::sendExit($job->job_uid);
                 $response['exit_sent'] = $exitResult['success'] ?? false;
                 $response['exit_message'] = $exitResult['message'] ?? $exitResult['error'] ?? null;
             }
@@ -1249,59 +1124,6 @@ class Admin extends Control {
         }
 
         $this->json(array_merge(['success' => true], $status));
-    }
-
-    /**
-     * Send /exit command to job-executor to stop a tmux session
-     *
-     * @param string $jobUid The job UID
-     * @return array Result with success/error
-     */
-    private function sendExitToJobExecutor(string $jobUid): array {
-        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
-        $jobExecutorUrl = \app\services\JobExecutorConfig::getUrl();
-        $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
-
-        $exitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/exit';
-
-        $ch = curl_init($exitUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST => true,
-            CURLOPT_HTTPHEADER => [
-                'Content-Type: application/json',
-                'Accept: application/json',
-            ],
-            CURLOPT_POSTFIELDS => json_encode([
-                'workspace' => $workspaceSlug,
-                'job_uid' => $jobUid,
-            ]),
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_SSL_VERIFYPEER => $verifySsl,
-            CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
-        curl_close($ch);
-
-        if ($curlError) {
-            Flight::get('log')->warning('Failed to send exit to job-executor', [
-                'error' => $curlError,
-                'job_uid' => $jobUid,
-            ]);
-            return ['success' => false, 'error' => "Connection failed: {$curlError}"];
-        }
-
-        $result = json_decode($response, true) ?? [];
-
-        if ($httpCode !== 200) {
-            return ['success' => false, 'error' => $result['error'] ?? "HTTP {$httpCode}"];
-        }
-
-        return $result;
     }
 
     /**

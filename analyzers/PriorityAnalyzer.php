@@ -6,13 +6,15 @@
 
 namespace app\analyzers;
 
-use app\services\ClaudeClient;
+use app\services\LLMClientInterface;
 use app\services\JiraClient;
 
-class PriorityAnalyzer {
-    private ClaudeClient $claude;
+require_once __DIR__ . '/../services/LLMClientInterface.php';
 
-    public function __construct(ClaudeClient $claude) {
+class PriorityAnalyzer {
+    private LLMClientInterface $claude;
+
+    public function __construct(LLMClientInterface $claude) {
         $this->claude = $claude;
     }
 

@@ -17,6 +17,7 @@ require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
 require_once __DIR__ . '/UserDatabaseService.php';
 require_once __DIR__ . '/JiraClient.php';
 require_once __DIR__ . '/ClaudeClient.php';
+require_once __DIR__ . '/OllamaClient.php';
 require_once __DIR__ . '/AnalysisStatusService.php';
 require_once __DIR__ . '/SubscriptionService.php';
 require_once __DIR__ . '/TierFeatures.php';
@@ -122,6 +123,9 @@ class AnalysisService {
             $boardApiKey = null;
             $boardModel = null;
             $agentName = null;
+            $useOllama = false;
+            $ollamaHost = null;
+            $ollamaModel = null;
 
             // First check for AI Agent assignment
             if (!empty($board['aiagents_id'])) {
@@ -130,21 +134,30 @@ class AnalysisService {
                     $agentName = $agent->name;
                     $providerConfig = json_decode($agent->provider_config ?: '{}', true);
 
-                    // Get API key from agent's anthropickeys_id
-                    if (!empty($agent->anthropickeys_id)) {
-                        $keyData = $this->getBoardAnthropicKey($agent->anthropickeys_id);
-                        if ($keyData) {
-                            $boardApiKey = $keyData['api_key'];
-                            $boardModel = $keyData['model'];
+                    // Check if agent uses Ollama provider
+                    if ($agent->provider === 'ollama') {
+                        // Use Ollama for analysis
+                        $useOllama = true;
+                        $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
+                        $ollamaModel = $providerConfig['model'] ?? 'llama3';
+                        $this->log("Using AI Agent '{$agentName}' with Ollama - host: {$ollamaHost}, model: {$ollamaModel}");
+                    } else {
+                        // Get API key from agent's anthropickeys_id
+                        if (!empty($agent->anthropickeys_id)) {
+                            $keyData = $this->getBoardAnthropicKey($agent->anthropickeys_id);
+                            if ($keyData) {
+                                $boardApiKey = $keyData['api_key'];
+                                $boardModel = $keyData['model'];
+                            }
                         }
-                    }
 
-                    // Override model from provider config if set
-                    if (!empty($providerConfig['model'])) {
-                        $boardModel = $providerConfig['model'];
-                    }
+                        // Override model from provider config if set
+                        if (!empty($providerConfig['model'])) {
+                            $boardModel = $providerConfig['model'];
+                        }
 
-                    $this->log("Using AI Agent '{$agentName}' - model: " . ($boardModel ?? 'default'));
+                        $this->log("Using AI Agent '{$agentName}' - model: " . ($boardModel ?? 'default'));
+                    }
                 }
             }
             // Fall back to legacy aidev_anthropic_key_id
@@ -157,13 +170,17 @@ class AnalysisService {
                 }
             }
 
-            // Initialize Claude client and analyzers (with optional per-board key/model)
-            $claudeClient = new ClaudeClient($boardApiKey, $boardModel);
-            $priorityAnalyzer = new \app\analyzers\PriorityAnalyzer($claudeClient);
+            // Initialize LLM client based on provider
+            if ($useOllama) {
+                $llmClient = new OllamaClient($ollamaHost, $ollamaModel);
+            } else {
+                $llmClient = new ClaudeClient($boardApiKey, $boardModel);
+            }
+            $priorityAnalyzer = new \app\analyzers\PriorityAnalyzer($llmClient);
 
             // Pass JiraClient to ClarityAnalyzer for image fetching (Pro feature)
             $clarityAnalyzer = new \app\analyzers\ClarityAnalyzer(
-                $claudeClient,
+                $llmClient,
                 $includeImages ? $jiraClient : null,
                 $includeImages
             );

@@ -12,7 +12,9 @@ use Monolog\Logger;
 use Monolog\Handler\RotatingFileHandler;
 use Monolog\Formatter\LineFormatter;
 
-class ClaudeClient {
+require_once __DIR__ . '/LLMClientInterface.php';
+
+class ClaudeClient implements LLMClientInterface {
     private Client $client;
     private string $apiKey;
     private string $model;

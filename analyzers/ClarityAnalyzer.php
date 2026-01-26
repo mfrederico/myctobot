@@ -6,16 +6,18 @@
 
 namespace app\analyzers;
 
-use app\services\ClaudeClient;
+use app\services\LLMClientInterface;
 use app\services\JiraClient;
 use app\services\UserDatabaseService;
 
+require_once __DIR__ . '/../services/LLMClientInterface.php';
+
 class ClarityAnalyzer {
-    private ClaudeClient $claude;
+    private LLMClientInterface $claude;
     private ?JiraClient $jira = null;
     private bool $includeImages = false;
 
-    public function __construct(ClaudeClient $claude, ?JiraClient $jira = null, bool $includeImages = false) {
+    public function __construct(LLMClientInterface $claude, ?JiraClient $jira = null, bool $includeImages = false) {
         $this->claude = $claude;
         $this->jira = $jira;
         $this->includeImages = $includeImages && ($jira !== null);

@@ -603,8 +603,17 @@ class Agents extends BaseControls\Control {
      * Combines agent config (model, Ollama settings) with
      * workstation SSH connection for a hello-world test.
      */
+    /**
+     * Run agent test via job-executor pipeline
+     * POST /agents/testagent/{agent_id}
+     *
+     * Uses the same job-executor pipeline as workstation tests for unified execution.
+     * Creates a job in aidevjobs, submits to job-executor, which runs in tmux via aoe-php.
+     */
     public function testagent($params = []) {
         if (!$this->requireEnterprise()) return;
+
+        require_once __DIR__ . '/../services/JobExecutorConfig.php';
 
         $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
         $workstationId = (int) ($this->getParam('workstation_id') ?? 0);
@@ -614,41 +623,16 @@ class Agents extends BaseControls\Control {
             return;
         }
 
-        // Verify agent and workstation exist
-        require_once __DIR__ . '/../services/AgentTestService.php';
-        $testService = \app\services\AgentTestService::fromIds($agentId, $workstationId);
-
-        if (!$testService) {
-            Flight::jsonError('Agent or workstation not found', 404);
-            return;
-        }
-
-        // Generate unique test ID
-        $testId = 'at-' . bin2hex(random_bytes(8));
-
-        // Get workspace slug
+        $memberId = $this->member->id ?? 1;
         $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 
-        // Spawn background script
-        $scriptPath = __DIR__ . '/../scripts/agent-test-runner.php';
-        $cmd = sprintf(
-            'php %s --workspace=%s --agent=%d --workstation=%d --test-id=%s > /dev/null 2>&1 &',
-            escapeshellarg($scriptPath),
-            escapeshellarg($workspaceSlug),
-            $agentId,
-            $workstationId,
-            escapeshellarg($testId)
-        );
+        $result = \app\services\JobExecutorConfig::submitTestJob($agentId, $workstationId, $memberId, $workspaceSlug);
 
-        exec($cmd);
-
-        Flight::jsonSuccess([
-            'test_id' => $testId,
-            'status' => 'started',
-            'message' => 'Test started in background',
-            'agent' => $testService->getAgentInfo(),
-            'workstation' => $testService->getWorkstationInfo()
-        ]);
+        if ($result['success']) {
+            Flight::jsonSuccess($result);
+        } else {
+            Flight::jsonError($result['error'] ?? 'Test submission failed', 500);
+        }
     }
 
     /**
@@ -656,18 +640,111 @@ class Agents extends BaseControls\Control {
      * GET /agents/teststatus/{test_id}
      *
      * Polls the status of a background agent test.
+     * Checks database first (job-executor jobs), falls back to file for legacy tests.
      */
     public function teststatus($params = []) {
         if (!$this->requireEnterprise()) return;
 
+        require_once __DIR__ . '/../services/JobExecutorConfig.php';
+
         $testId = $this->opId() ?? $this->getParam('test_id') ?? '';
+        $sendExit = $this->getParam('send_exit') === '1' || $this->getParam('send_exit') === 'true';
 
         if (empty($testId)) {
             Flight::jsonError('Test ID is required', 400);
             return;
         }
 
-        // Read status file
+        // First check database for job-executor jobs (job_uid contains test_id)
+        $job = Bean::findOne('aidevjobs', 'job_uid LIKE ?', ['%' . $testId]);
+
+        if ($job) {
+            $status = $job->status ?? 'pending';
+            $phase = $job->phase ?? '';
+
+            // Calculate duration if we have timing info
+            $durationMs = null;
+            if ($job->started_at && ($job->completed_at || $job->updated_at)) {
+                $startTime = strtotime($job->started_at);
+                $endTime = strtotime($job->completed_at ?? $job->updated_at);
+                if ($startTime && $endTime) {
+                    $durationMs = ($endTime - $startTime) * 1000;
+                }
+            }
+
+            // Load workstation info if available
+            $workstationInfo = null;
+            if ($job->runners_id) {
+                $runner = Bean::load('runners', $job->runners_id);
+                if ($runner && $runner->id) {
+                    $workstationInfo = [
+                        'name' => $runner->name,
+                        'host' => $runner->host,
+                        'ssh_user' => $runner->ssh_user ?? 'claudeuser',
+                    ];
+                }
+            }
+
+            // Load agent info if available
+            $agentInfo = null;
+            if ($job->aiagents_id) {
+                $agent = Bean::load('aiagents', $job->aiagents_id);
+                if ($agent && $agent->id) {
+                    $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+                    $agentInfo = [
+                        'name' => $agent->name,
+                        'provider' => $agent->provider ?: 'claude_cli',
+                        'use_ollama' => !empty($providerConfig['use_ollama']) || ($agent->provider === 'ollama'),
+                        'ollama_model' => $providerConfig['ollama_model'] ?? $providerConfig['model'] ?? '',
+                    ];
+                }
+            }
+
+            // Determine work directory path
+            $sshUser = $workstationInfo['ssh_user'] ?? 'claudeuser';
+            $workDir = "/home/{$sshUser}/jobs/" . $job->job_uid;
+
+            $response = [
+                'test_id' => $testId,
+                'status' => $status,
+                'phase' => $phase,
+                'job_uid' => $job->job_uid,
+                'duration_ms' => $durationMs,
+                'work_dir' => $workDir,
+                'started_at' => $job->started_at,
+                'completed_at' => $job->completed_at,
+                'agent' => $agentInfo,
+                'workstation' => $workstationInfo,
+            ];
+
+            // Map status to result format
+            if ($status === 'completed') {
+                $response['success'] = true;
+                $response['message'] = $job->summary ?? 'Test completed successfully';
+                $response['output'] = $job->summary ?? '';
+            } elseif ($status === 'failed') {
+                $response['success'] = false;
+                $response['error'] = $job->error_message ?? 'Test failed';
+            } elseif (in_array($status, ['running', 'validated'])) {
+                $response['status'] = 'running';
+            }
+
+            // Automatically send /exit for TEST jobs when completed/failed
+            // (or when explicitly requested via send_exit parameter)
+            $isTestJob = str_starts_with($job->job_uid ?? '', 'test-');
+            $isFinished = in_array($status, ['completed', 'failed']);
+
+            if ($job->job_uid && ($sendExit || ($isTestJob && $isFinished))) {
+                $exitResult = \app\services\JobExecutorConfig::sendExit($job->job_uid);
+                $response['exit_sent'] = $exitResult['success'] ?? false;
+                $response['exit_message'] = $exitResult['message'] ?? $exitResult['error'] ?? null;
+            }
+
+            Flight::jsonSuccess($response);
+            return;
+        }
+
+        // Fall back to status file (legacy method)
         $statusFile = "/tmp/agent-test-{$testId}.json";
 
         if (!file_exists($statusFile)) {
@@ -684,6 +761,7 @@ class Agents extends BaseControls\Control {
 
         Flight::jsonSuccess($status);
     }
+
 
     /**
      * Get available workstations for agent testing dropdown

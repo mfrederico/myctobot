@@ -173,35 +173,31 @@
                             <div class="tab-pane fade" id="aidev" role="tabpanel">
                                 <div class="<?= $isEnterprise ? '' : 'pro-feature-locked' ?>">
 
-                                    <!-- Execution Mode -->
+                                    <!-- Agent Selection -->
                                     <div class="card bg-light mb-4">
                                         <div class="card-body">
-                                            <h6 class="card-title mb-3"><i class="bi bi-cpu"></i> Execution Mode</h6>
-                                            <select class="form-select" name="aidev_anthropic_key_id" id="aidev_anthropic_key_id" <?= $isEnterprise ? '' : 'disabled' ?>>
-                                                <option value="" <?= empty($board['aidev_anthropic_key_id']) ? 'selected' : '' ?>>
-                                                    🖥️ Local Runner (uses Claude Code subscription)
-                                                </option>
-                                                <?php if (!empty($anthropicKeys)): ?>
-                                                    <optgroup label="API Keys">
-                                                    <?php foreach ($anthropicKeys as $key):
-                                                        $modelBadge = match($key['model']) {
-                                                            'claude-haiku-3-5-20241022' => '⚡ Haiku',
-                                                            'claude-opus-4-20250514' => '🌟 Opus',
-                                                            default => '💎 Sonnet'
-                                                        };
-                                                    ?>
-                                                        <option value="<?= $key['id'] ?>" <?= ($board['aidev_anthropic_key_id'] ?? '') == $key['id'] ? 'selected' : '' ?>>
-                                                            🔑 <?= htmlspecialchars($key['name']) ?> (<?= $modelBadge ?>) - <?= htmlspecialchars($key['masked_key']) ?>
-                                                        </option>
-                                                    <?php endforeach; ?>
-                                                    </optgroup>
-                                                <?php endif; ?>
+                                            <h6 class="card-title mb-3"><i class="bi bi-robot"></i> AI Agent</h6>
+                                            <select class="form-select" name="aiagents_id" id="aiagents_id" <?= $isEnterprise ? '' : 'disabled' ?>>
+                                                <option value="">-- Select an Agent --</option>
+                                                <?php foreach ($agents ?? [] as $agent):
+                                                    $providerIcon = match($agent['provider']) {
+                                                        'ollama' => '🦙',
+                                                        'claude_api' => '☁️',
+                                                        'openai' => '🤖',
+                                                        default => '🖥️'
+                                                    };
+                                                ?>
+                                                    <option value="<?= $agent['id'] ?>" <?= ($board['aiagents_id'] ?? '') == $agent['id'] ? 'selected' : '' ?>>
+                                                        <?= $providerIcon ?> <?= htmlspecialchars($agent['name']) ?> (<?= htmlspecialchars($agent['model']) ?>)
+                                                    </option>
+                                                <?php endforeach; ?>
                                             </select>
                                             <div class="form-text">
-                                                <?php if (empty($anthropicKeys)): ?>
-                                                    <a href="/settings/connections">Add API keys</a> to use remote execution with different models.
+                                                <?php if (empty($agents)): ?>
+                                                    <a href="/agents">Create an agent</a> to configure how AI Developer jobs run.
                                                 <?php else: ?>
-                                                    Choose Local Runner for no API charges, or select an API key for remote runner execution.
+                                                    Select which agent profile to use for AI Developer jobs on this board.
+                                                    <a href="/agents">Manage agents</a>
                                                 <?php endif; ?>
                                             </div>
                                         </div>

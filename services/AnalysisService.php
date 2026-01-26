@@ -118,9 +118,37 @@ class AnalysisService {
             $includeImages = $isPro; // Image analysis is a Pro feature
 
             // Get board's API key/model if configured (Enterprise feature)
+            // Priority: aiagents_id (new) > aidev_anthropic_key_id (legacy)
             $boardApiKey = null;
             $boardModel = null;
-            if (!empty($board['aidev_anthropic_key_id'])) {
+            $agentName = null;
+
+            // First check for AI Agent assignment
+            if (!empty($board['aiagents_id'])) {
+                $agent = Bean::load('aiagents', $board['aiagents_id']);
+                if ($agent && $agent->id) {
+                    $agentName = $agent->name;
+                    $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+
+                    // Get API key from agent's anthropickeys_id
+                    if (!empty($agent->anthropickeys_id)) {
+                        $keyData = $this->getBoardAnthropicKey($agent->anthropickeys_id);
+                        if ($keyData) {
+                            $boardApiKey = $keyData['api_key'];
+                            $boardModel = $keyData['model'];
+                        }
+                    }
+
+                    // Override model from provider config if set
+                    if (!empty($providerConfig['model'])) {
+                        $boardModel = $providerConfig['model'];
+                    }
+
+                    $this->log("Using AI Agent '{$agentName}' - model: " . ($boardModel ?? 'default'));
+                }
+            }
+            // Fall back to legacy aidev_anthropic_key_id
+            elseif (!empty($board['aidev_anthropic_key_id'])) {
                 $keyData = $this->getBoardAnthropicKey($board['aidev_anthropic_key_id']);
                 if ($keyData) {
                     $boardApiKey = $keyData['api_key'];

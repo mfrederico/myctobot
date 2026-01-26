@@ -142,4 +142,195 @@ class JobExecutorConfig {
     public static function clearCache(): void {
         self::$configCache = null;
     }
+
+    /**
+     * Submit a test job to job-executor
+     *
+     * Creates an aidevjobs record and submits it to job-executor via PING.
+     * Used by both Agent Test and Workstation Test endpoints.
+     *
+     * @param int $agentId Agent ID
+     * @param int $workstationId Workstation/Runner ID
+     * @param int $memberId Member ID
+     * @param string|null $workspaceSlug Optional workspace slug
+     * @return array Result with success, test_id, job_uid, agent, workstation info
+     */
+    public static function submitTestJob(int $agentId, int $workstationId, int $memberId, ?string $workspaceSlug = null): array {
+        require_once __DIR__ . '/RunnerService.php';
+        require_once __DIR__ . '/SiteConfig.php';
+
+        $workspace = $workspaceSlug ?? ($_SESSION['workspace_slug'] ?? 'default');
+
+        // Load agent
+        $agent = \app\Bean::load('aiagents', $agentId);
+        if (!$agent || !$agent->id || !$agent->is_active) {
+            return ['success' => false, 'error' => 'Agent not found or inactive'];
+        }
+
+        // Load workstation
+        $runner = RunnerService::getRunner($workstationId);
+        if (!$runner) {
+            return ['success' => false, 'error' => 'Workstation not found'];
+        }
+
+        $testId = 'at-' . bin2hex(random_bytes(8));
+        $jobUid = 'test-' . $workspace . '-' . $testId;
+
+        try {
+            // Create test job in aidevjobs
+            $job = \app\Bean::dispense('aidevjobs');
+            $job->job_uid = $jobUid;
+            $job->member_id = $memberId;
+            $job->boards_id = null;
+            $job->repoconnections_id = null;
+            $job->runners_id = $workstationId;
+            $job->aiagents_id = $agentId;
+            $job->issue_key = 'TEST-AGENT-001';
+            $job->status = 'pending';
+            $job->phase = 'agent-test';
+            $job->prompt = 'Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. After responding, call the `job_complete` MCP tool with success=true and summary="Test completed successfully" to mark this test as complete.';
+            $job->created_at = date('Y-m-d H:i:s');
+
+            // Start with agent's existing MCP config and add myctobot jobs server
+            $mcpConfig = json_decode($agent->mcp_config ?: '{"mcpServers":{}}', true);
+            if (!isset($mcpConfig['mcpServers'])) {
+                $mcpConfig['mcpServers'] = [];
+            }
+            // Add myctobot jobs server for test completion
+            $mcpConfig['mcpServers']['myctobot'] = [
+                'type' => 'http',
+                'url' => SiteConfig::getWorkspaceUrl($workspace) . '/mcp/jobs',
+                'headers' => [
+                    'Authorization' => 'Basic ' . base64_encode($memberId . ':' . $jobUid)
+                ]
+            ];
+            $job->mcp_config_json = json_encode($mcpConfig);
+
+            \app\Bean::store($job);
+
+            \Flight::get('log')->info('Created agent test job for job-executor', [
+                'job_uid' => $jobUid,
+                'agent_id' => $agentId,
+                'runner_id' => $workstationId,
+                'workspace' => $workspace,
+            ]);
+
+            // Submit to job-executor (PING)
+            $jobExecutorUrl = self::getUrl($workspace);
+            $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
+            $callbackUrl = SiteConfig::getWorkspaceUrl($workspace) . '/api/jobexecutor';
+            $verifySsl = self::shouldVerifySsl($workspace);
+
+            $ch = curl_init($submitUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => [
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                ],
+                CURLOPT_POSTFIELDS => json_encode([
+                    'workspace' => $workspace,
+                    'job_uid' => $jobUid,
+                    'callback_url' => $callbackUrl,
+                ]),
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+
+            if ($curlError) {
+                \app\Bean::trash($job);
+                return ['success' => false, 'error' => "Connection to job-executor failed: {$curlError}"];
+            }
+
+            if ($httpCode !== 200) {
+                \app\Bean::trash($job);
+                $result = json_decode($response, true);
+                return ['success' => false, 'error' => $result['error'] ?? "Job-executor returned HTTP {$httpCode}"];
+            }
+
+            // Parse provider config for display
+            $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+
+            return [
+                'success' => true,
+                'test_id' => $testId,
+                'job_uid' => $jobUid,
+                'status' => 'started',
+                'message' => 'Agent test submitted to job-executor',
+                'agent' => [
+                    'name' => $agent->name,
+                    'provider' => $agent->provider ?: 'claude_cli',
+                    'use_ollama' => !empty($providerConfig['use_ollama']) || ($agent->provider === 'ollama'),
+                    'ollama_model' => $providerConfig['ollama_model'] ?? $providerConfig['model'] ?? '',
+                    'anthropic_model' => $providerConfig['model'] ?? 'sonnet',
+                ],
+                'workstation' => [
+                    'name' => $runner['name'],
+                    'host' => $runner['host'],
+                    'ssh_user' => $runner['ssh_user'] ?? 'claudeuser',
+                ],
+            ];
+
+        } catch (\Exception $e) {
+            \Flight::get('log')->error('Agent test submission failed', ['error' => $e->getMessage()]);
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Send /exit command to job-executor to stop a tmux session
+     *
+     * @param string $jobUid The job UID
+     * @param string|null $workspaceSlug Optional workspace slug
+     * @return array Result with success/error
+     */
+    public static function sendExit(string $jobUid, ?string $workspaceSlug = null): array {
+        $workspace = $workspaceSlug ?? ($_SESSION['workspace_slug'] ?? 'default');
+        $jobExecutorUrl = self::getUrl($workspace);
+        $verifySsl = self::shouldVerifySsl($workspace);
+
+        $exitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/exit';
+
+        $ch = curl_init($exitUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Accept: application/json',
+            ],
+            CURLOPT_POSTFIELDS => json_encode([
+                'workspace' => $workspace,
+                'job_uid' => $jobUid,
+            ]),
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_SSL_VERIFYPEER => $verifySsl,
+            CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+
+        if ($curlError) {
+            return ['success' => false, 'error' => $curlError];
+        }
+
+        if ($httpCode !== 200) {
+            return ['success' => false, 'error' => "HTTP {$httpCode}"];
+        }
+
+        $result = json_decode($response, true);
+        return ['success' => true, 'message' => $result['message'] ?? 'Exit sent'];
+    }
 }

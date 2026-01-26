@@ -118,16 +118,24 @@ class AgentTestService {
      * Build environment variables based on agent config
      */
     private function buildEnvVars(): string {
+        $provider = $this->agent['provider'] ?? 'claude_cli';
         $providerConfig = $this->agent['provider_config'] ?? [];
         $envVars = [];
 
-        // Check if using Ollama as backend (via LiteLLM proxy or direct)
+        // Check if using Ollama as backend
+        // Official Ollama + Claude Code integration: https://docs.ollama.com/integrations/claude-code
         if (!empty($providerConfig['use_ollama'])) {
+            // Claude CLI with Ollama backend
             $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
-            // Use configured API key, or default to LiteLLM proxy key
-            $apiKey = $providerConfig['ollama_api_key'] ?? 'sk-litellm-proxy-key';
+            $envVars[] = "export ANTHROPIC_AUTH_TOKEN=\"ollama\"";
+            $envVars[] = "export ANTHROPIC_API_KEY=\"\"";
             $envVars[] = "export ANTHROPIC_BASE_URL=\"{$ollamaHost}\"";
-            $envVars[] = "export ANTHROPIC_API_KEY=\"{$apiKey}\"";
+        } elseif ($provider === 'ollama') {
+            // Standalone Ollama provider
+            $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
+            $envVars[] = "export ANTHROPIC_AUTH_TOKEN=\"ollama\"";
+            $envVars[] = "export ANTHROPIC_API_KEY=\"\"";
+            $envVars[] = "export ANTHROPIC_BASE_URL=\"{$ollamaHost}\"";
         }
 
         // Add any other env vars needed
@@ -140,10 +148,18 @@ class AgentTestService {
      * Get model flag for Claude CLI
      */
     private function getModelFlag(): string {
+        $provider = $this->agent['provider'] ?? 'claude_cli';
         $providerConfig = $this->agent['provider_config'] ?? [];
 
         if (!empty($providerConfig['use_ollama'])) {
+            // Claude CLI with Ollama backend
             $model = $providerConfig['ollama_model'] ?? 'qwen3-coder';
+            return "--model " . escapeshellarg($model);
+        }
+
+        if ($provider === 'ollama') {
+            // Standalone Ollama provider
+            $model = $providerConfig['model'] ?? 'llama3';
             return "--model " . escapeshellarg($model);
         }
 
@@ -156,14 +172,27 @@ class AgentTestService {
      * Get agent info for display
      */
     public function getAgentInfo(): array {
+        $provider = $this->agent['provider'] ?? 'claude_cli';
         $providerConfig = $this->agent['provider_config'] ?? [];
+
+        // Determine if using Ollama (either via claude_cli + use_ollama, or standalone ollama provider)
+        $useOllama = !empty($providerConfig['use_ollama']) || $provider === 'ollama';
+
+        // Get Ollama settings based on provider type
+        if ($provider === 'ollama') {
+            $ollamaHost = $providerConfig['base_url'] ?? 'http://localhost:11434';
+            $ollamaModel = $providerConfig['model'] ?? '';
+        } else {
+            $ollamaHost = $providerConfig['ollama_host'] ?? 'http://localhost:11434';
+            $ollamaModel = $providerConfig['ollama_model'] ?? '';
+        }
 
         return [
             'name' => $this->agent['name'] ?? 'Unknown',
-            'provider' => $this->agent['provider'] ?? 'claude_cli',
-            'use_ollama' => !empty($providerConfig['use_ollama']),
-            'ollama_host' => $providerConfig['ollama_host'] ?? 'http://localhost:11434',
-            'ollama_model' => $providerConfig['ollama_model'] ?? '',
+            'provider' => $provider,
+            'use_ollama' => $useOllama,
+            'ollama_host' => $ollamaHost,
+            'ollama_model' => $ollamaModel,
             'anthropic_model' => $providerConfig['model'] ?? 'sonnet',
         ];
     }
@@ -325,16 +354,27 @@ class AgentTestService {
         $agents = [];
 
         foreach ($beans as $bean) {
+            $provider = $bean->provider ?? 'claude_cli';
             $providerConfig = json_decode($bean->provider_config ?: '{}', true);
+
+            // Determine if using Ollama
+            $useOllama = !empty($providerConfig['use_ollama']) || $provider === 'ollama';
+
+            // Get model based on provider type
+            if ($provider === 'ollama') {
+                $model = $providerConfig['model'] ?? 'unknown';
+            } elseif (!empty($providerConfig['use_ollama'])) {
+                $model = $providerConfig['ollama_model'] ?? 'unknown';
+            } else {
+                $model = $providerConfig['model'] ?? 'sonnet';
+            }
 
             $agents[] = [
                 'id' => $bean->id,
                 'name' => $bean->name,
-                'provider' => $bean->provider ?? 'claude_cli',
-                'use_ollama' => !empty($providerConfig['use_ollama']),
-                'model' => !empty($providerConfig['use_ollama'])
-                    ? ($providerConfig['ollama_model'] ?? 'unknown')
-                    : ($providerConfig['model'] ?? 'sonnet'),
+                'provider' => $provider,
+                'use_ollama' => $useOllama,
+                'model' => $model,
             ];
         }
 

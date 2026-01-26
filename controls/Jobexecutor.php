@@ -175,6 +175,7 @@ class Jobexecutor extends BaseControls\Control {
             $response['agent'] = [
                 'id' => (int) $agent->id,
                 'name' => $agent->name,
+                'provider' => $agent->provider ?: 'claude_cli',  // Include provider type
                 'claude_md' => $claudeMd,
                 'mcp_config_json' => $mcpConfigJson,  // Raw JSON string, not decoded
                 'provider_config' => json_decode($agent->provider_config ?: '{}', true),

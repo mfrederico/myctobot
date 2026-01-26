@@ -1059,7 +1059,9 @@ class Admin extends Control {
 
             // Submit to job-executor (PING)
             $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+            // Build callback URL with workspace subdomain from site config
+            $callbackUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/api/jobexecutor';
+            $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
 
             $ch = curl_init($submitUrl);
             curl_setopt_array($ch, [
@@ -1076,6 +1078,8 @@ class Admin extends Control {
                 ]),
                 CURLOPT_TIMEOUT => 30,
                 CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
             ]);
 
             $response = curl_exec($ch);
@@ -1300,7 +1304,9 @@ class Admin extends Control {
 
             // Step 2: Submit to job-executor (PING)
             $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            $callbackUrl = Flight::get('baseurl') . '/api/jobexecutor';
+            // Build callback URL with workspace subdomain from site config
+            $callbackUrl = \app\services\SiteConfig::getWorkspaceUrl($workspaceSlug) . '/api/jobexecutor';
+            $verifySsl = \app\services\JobExecutorConfig::shouldVerifySsl();
 
             $ch = curl_init($submitUrl);
             curl_setopt_array($ch, [
@@ -1317,6 +1323,8 @@ class Admin extends Control {
                 ]),
                 CURLOPT_TIMEOUT => 30,
                 CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
             ]);
 
             $response = curl_exec($ch);

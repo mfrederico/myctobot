@@ -163,7 +163,7 @@ class UserDatabaseService {
             'priority_weights', 'goals', 'last_analysis_at', 'last_digest_at',
             'aidev_status_working', 'aidev_status_pr_created',
             'aidev_status_clarification', 'aidev_status_failed',
-            'aidev_status_complete', 'aidev_anthropic_key_id'
+            'aidev_status_complete', 'aidev_anthropic_key_id', 'aiagents_id'
         ];
 
         foreach ($data as $key => $value) {

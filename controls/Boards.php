@@ -268,8 +268,10 @@ class Boards extends BaseControls\Control {
                 'aidev_status_clarification' => trim($this->getParam('aidev_status_clarification') ?? '') ?: null,
                 'aidev_status_failed' => trim($this->getParam('aidev_status_failed') ?? '') ?: null,
                 'aidev_status_complete' => trim($this->getParam('aidev_status_complete') ?? '') ?: null,
-                // Execution mode: NULL = local runner, integer = anthropickeys.id
-                'aidev_anthropic_key_id' => $this->getParam('aidev_anthropic_key_id') ?: null
+                // Execution mode: NULL = local runner, integer = anthropickeys.id (LEGACY)
+                'aidev_anthropic_key_id' => $this->getParam('aidev_anthropic_key_id') ?: null,
+                // Agent selection for AI Developer jobs
+                'aiagents_id' => $this->getParam('aiagents_id') ?: null
             ];
 
             // Handle priority weights (Pro feature)
@@ -358,7 +360,7 @@ class Boards extends BaseControls\Control {
             }
         }
 
-        // Fetch API keys for execution mode dropdown (Enterprise feature)
+        // Fetch API keys for execution mode dropdown (Enterprise feature) - LEGACY
         $anthropicKeys = [];
         if ($this->member->isEnterprise()) {
             try {
@@ -382,6 +384,26 @@ class Boards extends BaseControls\Control {
             }
         }
 
+        // Fetch agents for AI Developer selection (Enterprise feature)
+        $agents = [];
+        if ($this->member->isEnterprise()) {
+            try {
+                $agentBeans = Bean::findAll('aiagents', ' is_active = 1 ORDER BY name ASC ');
+                foreach ($agentBeans as $agent) {
+                    $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+                    $agents[] = [
+                        'id' => $agent->id,
+                        'name' => $agent->name,
+                        'provider' => $agent->provider ?: 'claude_cli',
+                        'model' => $providerConfig['model'] ?? $providerConfig['ollama_model'] ?? 'sonnet',
+                        'description' => $agent->description ?? ''
+                    ];
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to fetch agents: ' . $e->getMessage());
+            }
+        }
+
         $this->render('boards/edit', [
             'title' => 'Edit Board - ' . $board['board_name'],
             'board' => $board,
@@ -392,7 +414,8 @@ class Boards extends BaseControls\Control {
             'tier' => $this->member->getTier(),
             'isEnterprise' => $this->member->isEnterprise(),
             'jiraStatuses' => $jiraStatuses,
-            'anthropicKeys' => $anthropicKeys
+            'anthropicKeys' => $anthropicKeys,
+            'agents' => $agents
         ]);
     }
 

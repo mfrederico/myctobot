@@ -74,7 +74,7 @@
                                 </div>
 
                                 <p class="text-center text-muted small mb-0">
-                                    Already have an account? Log in at <strong>yourteam.myctobot.ai</strong>
+                                    Already have an account? Log in at <strong>yourteam.<?= htmlspecialchars($site_domain ?? 'myctobot.ai') ?></strong>
                                 </p>
                             </form>
                         </div>

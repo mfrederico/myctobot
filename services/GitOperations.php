@@ -194,9 +194,11 @@ class GitOperations {
     public function commit(string $message, ?string $author = null): string {
         $this->ensureInitialized();
 
-        // Configure git user if not set
-        $this->execute('git config user.email "ai-dev@myctobot.ai" 2>&1');
-        $this->execute('git config user.name "MyCTOBot AI Developer" 2>&1');
+        // Configure git user if not set - use SiteConfig for branding
+        $gitEmail = SiteConfig::getEmail('ai_dev');
+        $gitName = SiteConfig::getName() . ' AI Developer';
+        $this->execute('git config user.email "' . $gitEmail . '" 2>&1');
+        $this->execute('git config user.name "' . $gitName . '" 2>&1');
 
         $cmd = 'git commit -m ' . escapeshellarg($message);
         if ($author) {

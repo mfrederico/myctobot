@@ -148,7 +148,7 @@
             <h2 class="h4 mt-5 mb-3">17. Contact Us</h2>
             <p>If you have questions about these Terms, please contact us:</p>
             <ul>
-                <li>Email: legal@myctobot.ai</li>
+                <li>Email: <?= htmlspecialchars($site_legal_email ?? 'legal@myctobot.ai') ?></li>
                 <li>Company: ClickSimple, Inc.</li>
             </ul>
 

@@ -19,7 +19,7 @@ class InviteService {
     public function __construct() {
         $this->mailer = new MailgunService();
         $this->workspace = $_SESSION['workspace_slug'] ?? 'default';
-        $this->baseUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
+        $this->baseUrl = Flight::get('baseurl') ?? SiteConfig::getBaseUrl();
     }
 
     /**
@@ -206,11 +206,9 @@ MD;
      */
     private function buildInviteUrl(string $token): string {
         // For workspace invites, build URL to workspace subdomain
-        // URL pattern: https://workspace.myctobot.ai/auth/invite/{token}
+        // URL pattern: https://workspace.{domain}/auth/invite/{token}
         if ($this->workspace && $this->workspace !== 'default') {
-            $baseDomain = Flight::get('app.domain') ?? 'myctobot.ai';
-            $protocol = Flight::get('app.protocol') ?? 'https';
-            return "{$protocol}://{$this->workspace}.{$baseDomain}/auth/invite/{$token}";
+            return SiteConfig::buildWorkspacePath($this->workspace, "/auth/invite/{$token}");
         }
         return "{$this->baseUrl}/auth/invite/{$token}";
     }

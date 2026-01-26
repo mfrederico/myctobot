@@ -8,6 +8,7 @@ namespace app\BaseControls;
 
 use \Flight as Flight;
 use \app\Bean;
+use \app\services\SiteConfig;
 use \Exception as Exception;
 
 abstract class Control {
@@ -16,20 +17,23 @@ abstract class Control {
     protected $member;
     protected $viewData = [];
     protected $routeParams = [];
-    
+
     public function __construct() {
         $this->logger = Flight::get('log');
         $this->member = Flight::getMember();
-        
-        // Initialize view data
-        $this->viewData = [
-            'member' => $this->member,
-            'isLoggedIn' => Flight::isLoggedIn(),
-            'menu' => Flight::loadMenu(),
-            'title' => 'App',
-            'csrf' => Flight::csrf()->getTokenArray()
-        ];
-        
+
+        // Initialize view data with site config for branding
+        $this->viewData = array_merge(
+            SiteConfig::getViewData(),
+            [
+                'member' => $this->member,
+                'isLoggedIn' => Flight::isLoggedIn(),
+                'menu' => Flight::loadMenu(),
+                'title' => 'App',
+                'csrf' => Flight::csrf()->getTokenArray()
+            ]
+        );
+
         $this->logger->debug('Controller initialized: ' . get_class($this));
     }
     

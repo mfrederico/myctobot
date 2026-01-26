@@ -116,58 +116,63 @@ class Runnerapi extends Control {
     public function boot() {
         header('Content-Type: text/plain');
 
-        echo <<<'BASH'
+        // Get site config for domain branding
+        $siteDomain = \app\services\SiteConfig::getDomain();
+        $siteName = \app\services\SiteConfig::getName();
+        $siteBaseUrl = \app\services\SiteConfig::getBaseUrl();
+
+        echo <<<BASH
 #!/bin/bash
 #
-# MyCTOBot Runner Bootstrap
+# {$siteName} Runner Bootstrap
 # Fetched fresh on every job - always up to date
 #
-# Usage: curl -sfL https://myctobot.ai/api/runner/boot | bash -s -- --workspace=workspace --job=JOB_ID --token=TOKEN
+# Usage: curl -sfL {$siteBaseUrl}/api/runner/boot | bash -s -- --workspace=workspace --job=JOB_ID --token=TOKEN
 #
 
 set -e
 
 # Parse arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --workspace=*) workspace="${1#*=}"; shift ;;
-        --job=*) JOB_ID="${1#*=}"; shift ;;
-        --token=*) TOKEN="${1#*=}"; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+while [[ \$# -gt 0 ]]; do
+    case \$1 in
+        --workspace=*) workspace="\${1#*=}"; shift ;;
+        --job=*) JOB_ID="\${1#*=}"; shift ;;
+        --token=*) TOKEN="\${1#*=}"; shift ;;
+        *) echo "Unknown option: \$1"; exit 1 ;;
     esac
 done
 
 # Validate required args
-if [[ -z "$workspace" || -z "$JOB_ID" || -z "$TOKEN" ]]; then
+if [[ -z "\$workspace" || -z "\$JOB_ID" || -z "\$TOKEN" ]]; then
     echo "Usage: boot.sh --workspace=workspace --job=JOB_ID --token=TOKEN"
     exit 1
 fi
 
 # Setup
-API="https://${workspace}.myctobot.ai/api/runner"
-WORK="$HOME/jobs/${workspace}/${JOB_ID}"
-AUTH_HEADER="X-Job-Token: ${TOKEN}"
+API="https://\${workspace}.{$siteDomain}/api/runner"
+WORK="\$HOME/jobs/\${workspace}/\${JOB_ID}"
+AUTH_HEADER="X-Job-Token: \${TOKEN}"
 
-echo "=== MyCTOBot Runner Bootstrap ==="
-echo "workspace: $workspace"
-echo "Job ID: $JOB_ID"
-echo "Work Dir: $WORK"
+echo "=== {$siteName} Runner Bootstrap ==="
+echo "workspace: \$workspace"
+echo "Job ID: \$JOB_ID"
+echo "Work Dir: \$WORK"
 echo ""
 
 # Create work directory
-mkdir -p "$WORK"
-cd "$WORK"
+mkdir -p "\$WORK"
+cd "\$WORK"
 
 # Fetch job manifest
 echo "Fetching job manifest..."
-if ! curl -sf -H "$AUTH_HEADER" "${API}/jobs/${JOB_ID}/manifest" -o manifest.json; then
+if ! curl -sf -H "\$AUTH_HEADER" "\${API}/jobs/\${JOB_ID}/manifest" -o manifest.json; then
     echo "ERROR: Failed to fetch manifest"
     exit 1
 fi
 
 # Fetch runner script
 echo "Fetching runner script..."
-if ! curl -sf -H "$AUTH_HEADER" "${API}/jobs/${JOB_ID}/runner" -o runner.sh; then
+if ! curl -sf -H "\$AUTH_HEADER" "\${API}/jobs/\${JOB_ID}/runner" -o runner.sh; then
     echo "ERROR: Failed to fetch runner"
     exit 1
 fi
@@ -241,38 +246,42 @@ BASH;
 
         header('Content-Type: text/plain');
 
-        echo <<<'BASH'
+        // Get site config for domain branding
+        $siteDomain = \app\services\SiteConfig::getDomain();
+        $siteName = \app\services\SiteConfig::getName();
+
+        echo <<<BASH
 #!/bin/bash
 #
-# MyCTOBot Job Runner
+# {$siteName} Job Runner
 # Executes Claude CLI with job configuration
 #
 
 set -e
 
 # Load manifest
-workspace=$(jq -r '.workspace' manifest.json)
-JOB_ID=$(jq -r '.job_id' manifest.json)
-REPO_URL=$(jq -r '.repo.url // empty' manifest.json)
-BRANCH=$(jq -r '.repo.default_branch // "main"' manifest.json)
-AGENT_NAME=$(jq -r '.agent.name // "AI Assistant"' manifest.json)
+workspace=\$(jq -r '.workspace' manifest.json)
+JOB_ID=\$(jq -r '.job_id' manifest.json)
+REPO_URL=\$(jq -r '.repo.url // empty' manifest.json)
+BRANCH=\$(jq -r '.repo.default_branch // "main"' manifest.json)
+AGENT_NAME=\$(jq -r '.agent.name // "AI Assistant"' manifest.json)
 
-API="https://${workspace}.myctobot.ai/api/runner"
-TOKEN="${TOKEN:-$(cat .token 2>/dev/null || echo '')}"
-AUTH_HEADER="X-Job-Token: ${TOKEN}"
+API="https://\${workspace}.{$siteDomain}/api/runner"
+TOKEN="\${TOKEN:-\$(cat .token 2>/dev/null || echo '')}"
+AUTH_HEADER="X-Job-Token: \${TOKEN}"
 
 # Status update helper
 update_status() {
-    local status=$1
-    local phase=$2
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-        "${API}/jobs/${JOB_ID}/status" \
-        -d "{\"status\":\"$status\",\"phase\":\"$phase\"}" >/dev/null 2>&1 || true
+    local status=\$1
+    local phase=\$2
+    curl -sf -X POST -H "\$AUTH_HEADER" -H "Content-Type: application/json" \\
+        "\${API}/jobs/\${JOB_ID}/status" \\
+        -d "{\\"status\\":\\"\$status\\",\\"phase\\":\\"\$phase\\"}" >/dev/null 2>&1 || true
 }
 
-echo "=== MyCTOBot Job Runner ==="
-echo "Agent: $AGENT_NAME"
-echo "Job: $JOB_ID"
+echo "=== {$siteName} Job Runner ==="
+echo "Agent: \$AGENT_NAME"
+echo "Job: \$JOB_ID"
 echo ""
 
 # Update status
@@ -281,7 +290,7 @@ update_status "running" "setup"
 # Fetch job files
 echo "Fetching job files..."
 for file in prompt.txt claude.md mcp.json env.sh; do
-    curl -sf -H "$AUTH_HEADER" "${API}/jobs/${JOB_ID}/files/${file}" -o "$file" 2>/dev/null || true
+    curl -sf -H "\$AUTH_HEADER" "\${API}/jobs/\${JOB_ID}/files/\${file}" -o "\$file" 2>/dev/null || true
 done
 
 # Source environment (sets GITHUB_TOKEN, ANTHROPIC_API_KEY, etc.)
@@ -290,7 +299,7 @@ if [[ -f env.sh ]]; then
 fi
 
 # Clone repository if specified
-if [[ -n "$REPO_URL" ]]; then
+if [[ -n "\$REPO_URL" ]]; then
     echo "Cloning repository..."
     update_status "running" "cloning"
 
@@ -298,7 +307,7 @@ if [[ -n "$REPO_URL" ]]; then
         rm -rf repo
     fi
 
-    git clone --depth 1 -b "$BRANCH" "$REPO_URL" repo
+    git clone --depth 1 -b "\$BRANCH" "\$REPO_URL" repo
     cd repo
 
     # Copy config files into repo
@@ -314,34 +323,34 @@ fi
 echo "Starting Claude..."
 update_status "running" "claude"
 
-PROMPT=$(cat ../prompt.txt 2>/dev/null || echo "Hello, please help with this task.")
+PROMPT=\$(cat ../prompt.txt 2>/dev/null || echo "Hello, please help with this task.")
 
 if command -v claude &>/dev/null; then
-    claude --dangerously-skip-permissions "$PROMPT"
-    EXIT_CODE=$?
+    claude --dangerously-skip-permissions "\$PROMPT"
+    EXIT_CODE=\$?
 else
     echo "ERROR: Claude CLI not found"
     EXIT_CODE=1
 fi
 
 # Report completion
-if [[ $EXIT_CODE -eq 0 ]]; then
+if [[ \$EXIT_CODE -eq 0 ]]; then
     echo "Job completed successfully"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-        "${API}/jobs/${JOB_ID}/complete" \
+    curl -sf -X POST -H "\$AUTH_HEADER" -H "Content-Type: application/json" \\
+        "\${API}/jobs/\${JOB_ID}/complete" \\
         -d '{"status":"success"}' >/dev/null 2>&1 || true
 else
-    echo "Job failed with exit code $EXIT_CODE"
-    curl -sf -X POST -H "$AUTH_HEADER" -H "Content-Type: application/json" \
-        "${API}/jobs/${JOB_ID}/complete" \
-        -d "{\"status\":\"failed\",\"error\":\"Exit code $EXIT_CODE\"}" >/dev/null 2>&1 || true
+    echo "Job failed with exit code \$EXIT_CODE"
+    curl -sf -X POST -H "\$AUTH_HEADER" -H "Content-Type: application/json" \\
+        "\${API}/jobs/\${JOB_ID}/complete" \\
+        -d "{\\"status\\":\\"failed\\",\\"error\\":\\"Exit code \$EXIT_CODE\\"}" >/dev/null 2>&1 || true
 fi
 
 # Cleanup
 cd ~
-rm -rf "$WORK"
+rm -rf "\$WORK"
 
-exit $EXIT_CODE
+exit \$EXIT_CODE
 BASH;
         exit;
     }
@@ -558,12 +567,13 @@ BASH;
             $cloudId = $token->cloud_uid;
         }
 
-        // Use subdomain-based URL pattern: https://{workspace}.myctobot.ai/mcp/jira
+        // Use subdomain-based URL pattern: https://{workspace}.{domain}/mcp/jira
+        $mcpUrl = \app\services\SiteConfig::getWorkspaceUrl($workspace) . '/mcp/jira';
         $config = [
             'mcpServers' => [
                 'jira' => [
                     'type' => 'http',
-                    'url' => "https://{$workspace}.myctobot.ai/mcp/jira",
+                    'url' => $mcpUrl,
                     'headers' => [
                         'X-MCP-Member-ID' => (string)$memberId,
                         'X-MCP-Cloud-ID' => $cloudId,

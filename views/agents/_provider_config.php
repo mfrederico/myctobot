@@ -78,7 +78,8 @@ $agent = $agent ?? [];
                             <?php endif; ?>
                         </select>
                         <div class="form-text">
-                            Recommended: <code>qwen3-coder</code>, <code>codellama</code>, <code>llama3</code>
+                            <strong>Verified for MCP tool calling:</strong> <code>qwen3-coder:30b</code><br>
+                            <span class="text-muted">Not recommended: llama3-groq-tool-use (outputs tool text but doesn't execute)</span>
                         </div>
                     </div>
                 </div>
@@ -115,7 +116,8 @@ $agent = $agent ?? [];
                         <?php endif; ?>
                     </select>
                     <div class="form-text">
-                        Recommended: <code>llama3.2</code>, <code>qwen3-coder</code>, <code>codellama</code>
+                        <strong>Verified for MCP tool calling:</strong> <code>qwen3-coder:30b</code><br>
+                        <span class="text-muted">Not recommended: llama3-groq-tool-use (outputs tool text but doesn't execute)</span>
                     </div>
                 </div>
             </div>

@@ -729,8 +729,12 @@ class Agents extends BaseControls\Control {
                 $response['status'] = 'running';
             }
 
-            // Send /exit to tmux session if requested
-            if ($sendExit && $job->job_uid) {
+            // Automatically send /exit for TEST jobs when completed/failed
+            // (or when explicitly requested via send_exit parameter)
+            $isTestJob = str_starts_with($job->job_uid ?? '', 'test-');
+            $isFinished = in_array($status, ['completed', 'failed']);
+
+            if ($job->job_uid && ($sendExit || ($isTestJob && $isFinished))) {
                 $exitResult = \app\services\JobExecutorConfig::sendExit($job->job_uid);
                 $response['exit_sent'] = $exitResult['success'] ?? false;
                 $response['exit_message'] = $exitResult['message'] ?? $exitResult['error'] ?? null;

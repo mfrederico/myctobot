@@ -614,6 +614,43 @@ ssh claudeuser@173.231.12.84
 - `POST /analysis/shardaidev` - Run AI Developer job
 - `GET /health` - Health check
 
+## Ollama + Claude Code Integration
+
+AI agents can use local Ollama models instead of Anthropic's Claude API. This requires models that properly support MCP (Model Context Protocol) tool calling.
+
+### Verified Working Models
+
+| Model | Size | MCP Tool Calling | Notes |
+|-------|------|------------------|-------|
+| `qwen3-coder:30b` | 18GB | ✅ Works | MoE model (30B params, 3.3B active). Requires 24GB+ VRAM. |
+
+### Models That Do NOT Work
+
+| Model | Issue |
+|-------|-------|
+| `llama3-groq-tool-use` | Outputs JSON text that looks like tool calls but doesn't actually invoke MCP tools |
+| `llama3.2` | Same issue - describes tool calls in text but doesn't execute them |
+
+### Environment Variables
+
+When using Ollama with Claude Code CLI, set these environment variables:
+
+```bash
+export ANTHROPIC_AUTH_TOKEN=ollama
+export ANTHROPIC_API_KEY=""
+export ANTHROPIC_BASE_URL=http://localhost:11434
+```
+
+### Agent Configuration
+
+In the agent's `provider_config`, set:
+```json
+{
+  "model": "qwen3-coder:30b",
+  "base_url": "http://localhost:11434"
+}
+```
+
 ## AI Developer Agent Types
 
 The following specialized agent types are available for the Task tool when running AI Developer jobs.

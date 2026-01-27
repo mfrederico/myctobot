@@ -1,0 +1,1 @@
+tmux new -d -s OLLAMA-FORWARD "/usr/bin/ssh -v -nNT -o StrictHostKeyChecking=no -o ExitOnForwardFailure=yes -o ServerAliveInterval=60 -o ServerAliveCountMax=1 -L11434:127.0.0.1:11434 aibot@dev.fatdata.ai"

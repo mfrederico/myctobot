@@ -1388,28 +1388,69 @@ class AIDevJobService {
                 // Check if repo's agent has an assigned workstation (job-executor flow)
                 $workstation = null;
                 $runner = null;
+                $repoBean = null;
+
+                // First try direct repo connection on job
                 if ($job->repoconnections_id) {
                     $repoBean = Bean::load('repoconnections', $job->repoconnections_id);
-                    if ($repoBean && $repoBean->aiagents_id) {
-                        $agent = Bean::load('aiagents', $repoBean->aiagents_id);
-                        if ($agent && $agent->runners_id) {
-                            $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
-                            if ($runner) {
-                                $workstation = [
-                                    'host' => $runner->host,
-                                    'user' => $runner->ssh_user,
-                                    'port' => $runner->ssh_port ?? 22
-                                ];
+                }
+
+                // If no repo on job, try to find repo from Jira issue's repo-* label
+                if (!$repoBean && $job->issue_key && $job->cloud_uid) {
+                    try {
+                        $jiraClient = new JiraClient($job->member_id, $job->cloud_uid);
+                        $issue = $jiraClient->getIssue($job->issue_key);
+                        $labels = $issue['fields']['labels'] ?? [];
+
+                        foreach ($labels as $label) {
+                            if (preg_match('/^repo-(.+)$/', $label, $matches)) {
+                                $repoName = $matches[1];
+                                // Find repo by name (case-insensitive match on repo_name)
+                                $repoBean = Bean::findOne('repoconnections',
+                                    'LOWER(repo_name) = ? AND enabled = 1',
+                                    [strtolower($repoName)]
+                                );
+                                if ($repoBean) {
+                                    // Update job with found repo for future reference
+                                    $job->repoconnections_id = $repoBean->id;
+                                    Bean::store($job);
+                                    $this->logger->info('Queue processor: found repo from label', [
+                                        'job_uid' => $job->job_uid,
+                                        'label' => $label,
+                                        'repo_id' => $repoBean->id,
+                                        'repo_name' => $repoBean->repo_name
+                                    ]);
+                                    break;
+                                }
                             }
+                        }
+                    } catch (\Exception $e) {
+                        $this->logger->warning('Queue processor: failed to lookup repo from labels', [
+                            'job_uid' => $job->job_uid,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+
+                // Get workstation from repo's agent
+                if ($repoBean && $repoBean->aiagents_id) {
+                    $agent = Bean::load('aiagents', $repoBean->aiagents_id);
+                    if ($agent && $agent->runners_id) {
+                        $runner = Bean::findOne('runners', 'id = ? AND is_active = 1', [$agent->runners_id]);
+                        if ($runner) {
+                            $workstation = [
+                                'host' => $runner->host,
+                                'user' => $runner->ssh_user,
+                                'port' => $runner->ssh_port ?? 22
+                            ];
                         }
                     }
                 }
 
                 // For job-executor jobs (workstation configured): run script directly via exec()
-                // The script builds the prompt, submits to job-executor, then exits
-                // Job-executor creates the tmux on the remote workstation - no local tmux needed
+                // Job-executor creates everything on the remote - no local tmux needed
                 if ($workstation && $runner) {
-                    $this->logger->info('Queue processor: running job-dispatcher for job-executor submission', [
+                    $this->logger->info('Queue processor: submitting to job-executor', [
                         'job_uid' => $job->job_uid,
                         'issue_key' => $job->issue_key,
                         'workstation' => $runner->name ?? $workstation['host']
@@ -1460,7 +1501,7 @@ class AIDevJobService {
                 if ($tmux->spawnWithScript($scriptPath, $useOrchestrator, $job->job_uid, $job->repoconnections_id, $jobWorkspace, null, null)) {
                     $results['jobs_started']++;
 
-                    AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue', [
+                    AIDevStatusService::log($job->job_uid, $job->member_id, 'info', 'Job started from queue (local)', [
                         'session' => $tmux->getSessionName(),
                         'wait_time' => $this->calculateWaitTime($job->created_at)
                     ]);

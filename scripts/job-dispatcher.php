@@ -1553,7 +1553,7 @@ if ($useJobExecutor) {
             'Accept: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'tenant' => $workspaceSlug,
+            'workspace' => $workspaceSlug,
             'job_uid' => $jobId,
             'callback_url' => $callbackUrl,
         ]),

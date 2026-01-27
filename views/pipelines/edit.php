@@ -244,6 +244,76 @@
         </div>
     </div>
 
+    <!-- Debugger Toolbar (shown during interactive/debug runs) -->
+    <div id="runStatusBar" class="debugger-toolbar mb-4" style="display: none !important;">
+        <div class="debugger-toolbar-inner">
+            <!-- Left: Status and Current Step -->
+            <div class="debugger-status">
+                <span class="spinner-border spinner-border-sm me-2" id="runStatusSpinner"></span>
+                <span class="debugger-status-badge" id="runStatusBadge">
+                    <i class="bi bi-play-fill"></i>
+                    <span id="runStatusLabel">Running</span>
+                </span>
+                <span class="debugger-step-info ms-3" id="currentStepInfo">
+                    <span class="text-muted">Step:</span>
+                    <strong id="currentStepName">-</strong>
+                    <span class="text-muted ms-2">Position:</span>
+                    <code id="currentStepPosition">-</code>
+                </span>
+            </div>
+
+            <!-- Center: Progress -->
+            <div class="debugger-progress">
+                <span class="debugger-progress-text" id="runStatusDetail">0/0 steps</span>
+                <div class="progress" style="width: 120px; height: 6px;">
+                    <div class="progress-bar" id="runStatusProgress" role="progressbar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Right: Controls -->
+            <div class="debugger-controls">
+                <button class="btn btn-sm btn-outline-info" onclick="toggleAllOutputRows()" id="toggleOutputBtn" style="display: none;" title="Toggle step outputs">
+                    <i class="bi bi-terminal"></i>
+                </button>
+
+                <!-- Step Back Button - move playhead backwards -->
+                <button class="btn btn-sm btn-outline-secondary" onclick="stepBack()" id="stepBackBtn" style="display: none;" title="Go back to previous step">
+                    <i class="bi bi-skip-backward-fill"></i>
+                    <span id="prevStepName" class="prev-step-label"></span>
+                </button>
+
+                <!-- Next Step Button - shows what step will execute -->
+                <button class="btn btn-sm btn-primary debugger-next-btn" onclick="executeNextStep()" id="nextStepBtn" style="display: none;" title="Execute next step">
+                    <i class="bi bi-skip-forward-fill"></i>
+                    <span>Next:</span>
+                    <span id="nextStepName" class="next-step-label">-</span>
+                </button>
+
+                <!-- Continue Button (run all remaining) -->
+                <button class="btn btn-sm btn-success" onclick="continueInteractiveRun()" id="continueRunBtn" style="display: none;" title="Run all remaining steps">
+                    <i class="bi bi-play-fill"></i> Run All
+                </button>
+
+                <!-- Restart Button -->
+                <button class="btn btn-sm btn-outline-warning" onclick="restartInteractiveRun()" id="restartRunBtn" style="display: none;" title="Restart from beginning">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </button>
+
+                <!-- Stop/Cancel Button -->
+                <button class="btn btn-sm btn-outline-danger" onclick="cancelInteractiveRun()" id="cancelRunBtn" title="Stop execution">
+                    <i class="bi bi-stop-fill"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Keyboard shortcuts hint -->
+        <div class="debugger-shortcuts" id="debuggerShortcuts">
+            <kbd>Space</kbd> Next Step
+            <kbd>Ctrl+Enter</kbd> Run All
+            <kbd>Esc</kbd> Stop
+        </div>
+    </div>
+
     <!-- Pipeline Grid -->
     <div class="card">
         <div class="card-header d-flex justify-content-between align-items-center">
@@ -283,9 +353,21 @@
                             // Check if all steps in this row are inactive
                             $rowSteps = array_filter($stepGrid[$row] ?? [], fn($s) => isset($s['id']));
                             $rowActive = empty($rowSteps) || array_reduce($rowSteps, fn($carry, $s) => $carry || $s['is_active'], false);
+                            // Check if any step in this row has run_parallel enabled
+                            $rowParallel = array_reduce($rowSteps, fn($carry, $s) => $carry || ($s['run_parallel'] ?? false), false);
                         ?>
-                        <tr data-row="<?= $row ?>" class="<?= !$rowActive ? 'row-disabled' : '' ?>">
-                            <td class="text-center text-muted align-middle"><?= $row + 1 ?></td>
+                        <tr data-row="<?= $row ?>" class="<?= !$rowActive ? 'row-disabled' : '' ?><?= $rowParallel ? ' row-parallel' : '' ?>" data-parallel="<?= $rowParallel ? '1' : '0' ?>">
+                            <td class="text-center text-muted align-middle row-number-cell">
+                                <div class="d-flex flex-column align-items-center">
+                                    <span class="row-num"><?= $row + 1 ?></span>
+                                    <button type="button"
+                                            class="btn btn-sm p-0 row-parallel-toggle <?= $rowParallel ? 'active' : '' ?>"
+                                            onclick="toggleRowParallel(<?= $row ?>, this)"
+                                            title="<?= $rowParallel ? 'Parallel ON: This row runs concurrently with other parallel rows. Click to disable.' : 'Click to enable parallel execution for this row' ?>">
+                                        <i class="bi <?= $rowParallel ? 'bi-lightning-fill text-warning' : 'bi-lightning text-muted' ?>" style="font-size: 0.75rem;"></i>
+                                    </button>
+                                </div>
+                            </td>
                             <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
                             <td class="p-2 drop-zone" data-row="<?= $row ?>" data-col="<?= $colIndex ?>"
                                 ondragover="handleDragOver(event)" ondrop="handleDrop(event, <?= $row ?>, <?= $colIndex ?>)"
@@ -294,6 +376,8 @@
                                     <?php $step = $stepGrid[$row][$colIndex]; ?>
                                     <div class="step-cell bg-<?= $step['type_info']['color'] ?? 'secondary' ?>-subtle border border-<?= $step['type_info']['color'] ?? 'secondary' ?> rounded p-2 <?= !$step['is_active'] ? 'opacity-50' : '' ?>"
                                          data-step-id="<?= $step['id'] ?>"
+                                         data-step-name="<?= htmlspecialchars($step['step_name']) ?>"
+                                         data-step-type="<?= htmlspecialchars($step['step_type']) ?>"
                                          draggable="true"
                                          ondragstart="handleDragStart(event, <?= $step['id'] ?>, <?= $row ?>, <?= $colIndex ?>)"
                                          ondragend="handleDragEnd(event)"
@@ -311,6 +395,18 @@
                                             </span>
                                         </div>
                                         <?php endif; ?>
+                                        <!-- Output section (hidden by default, shown after step completes) -->
+                                        <div class="step-output-section" style="display: none;">
+                                            <div class="step-output-header d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+                                                <small class="text-muted"><i class="bi bi-terminal"></i> Output</small>
+                                                <button type="button" class="btn btn-sm btn-link p-0 step-output-toggle" onclick="event.stopPropagation(); toggleStepOutput(this);">
+                                                    <i class="bi bi-chevron-down"></i>
+                                                </button>
+                                            </div>
+                                            <div class="step-output-content mt-1">
+                                                <pre class="step-output-pre mb-0"></pre>
+                                            </div>
+                                        </div>
                                     </div>
                                 <?php else: ?>
                                     <div class="step-cell-empty border border-dashed rounded p-3 text-center text-muted"
@@ -324,6 +420,11 @@
                             <?php endforeach; ?>
                             <td class="text-center align-middle">
                                 <div class="btn-group-vertical btn-group-sm">
+                                    <button class="btn btn-outline-info row-output-btn" data-row="<?= $row ?>"
+                                            onclick="toggleRowOutput(<?= $row ?>); event.stopPropagation();"
+                                            title="Toggle Output" style="display: none;">
+                                        <i class="bi bi-terminal"></i>
+                                    </button>
                                     <button class="btn btn-outline-<?= $rowActive ? 'warning' : 'success' ?>"
                                             onclick="toggleRow(<?= $row ?>, <?= $rowActive ? 'false' : 'true' ?>)"
                                             title="<?= $rowActive ? 'Disable Row' : 'Enable Row' ?>">
@@ -348,7 +449,7 @@
 <?php if ($pipeline): ?>
 <!-- Step Editor Modal -->
 <div class="modal fade" id="stepModal" tabindex="-1" data-bs-backdrop="static">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title" id="stepModalTitle">
@@ -442,6 +543,35 @@
                         <small class="text-muted">Reference another step's output</small>
                     </div>
 
+                    <!-- Universal Input Preview (shown during debug mode) -->
+                    <div class="card border-info mb-3" id="universalInputPreview" style="display: none;">
+                        <div class="card-header bg-info-subtle py-2 d-flex justify-content-between align-items-center"
+                             data-bs-toggle="collapse" data-bs-target="#inputPreviewPanel"
+                             style="cursor: pointer;" role="button">
+                            <span>
+                                <i class="bi bi-box-arrow-in-down text-info"></i> Input Preview
+                                <span class="badge bg-info ms-1" id="inputPreviewBadge">STDIN</span>
+                            </span>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-outline-info me-1" onclick="event.stopPropagation(); refreshInputPreview();">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                                <i class="bi bi-chevron-down" id="inputPreviewChevron"></i>
+                            </div>
+                        </div>
+                        <div class="collapse show" id="inputPreviewPanel">
+                            <div class="card-body p-0">
+                                <div class="p-2 bg-light border-bottom small" id="inputPreviewSource">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    <span id="inputPreviewSourceText">Loading...</span>
+                                </div>
+                                <div id="inputPreviewData" style="max-height: 250px; overflow: auto;">
+                                    <pre class="mb-0 p-3 bg-dark text-light small" id="inputPreviewContent" style="white-space: pre-wrap; word-break: break-word;">(Start an Interactive Debug run to see input data)</pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Variable Browser -->
                     <div class="card bg-light mb-3" id="variableBrowserCard">
                         <div class="card-header py-2 d-flex justify-content-between align-items-center"
@@ -494,6 +624,53 @@
                                 <!-- Empty state -->
                                 <div id="variablesEmpty" class="text-center py-2 text-muted small" style="display: none;">
                                     <i class="bi bi-info-circle"></i> No previous steps - this is the first step.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Variable Exporter (shown when step has output from interactive run) -->
+                    <div class="card bg-light mb-3" id="variableExporterCard" style="display: none;">
+                        <div class="card-header py-2 d-flex justify-content-between align-items-center"
+                             data-bs-toggle="collapse" data-bs-target="#variableExporterPanel"
+                             style="cursor: pointer;" role="button">
+                            <span>
+                                <i class="bi bi-box-arrow-right text-success"></i> Variable Exporter
+                                <span class="badge bg-success ms-1" id="exportCount">0</span>
+                            </span>
+                            <i class="bi bi-chevron-down" id="variableExporterChevron"></i>
+                        </div>
+                        <div class="collapse show" id="variableExporterPanel">
+                            <div class="card-body">
+                                <p class="small text-muted mb-2">
+                                    This step has output from the current run. Click paths to export them for subsequent steps:
+                                </p>
+
+                                <!-- Output Preview -->
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold">Output Preview:</label>
+                                    <pre class="bg-dark text-light p-2 rounded" id="exporterOutputPreview" style="max-height: 150px; overflow: auto; font-size: 0.75rem;"></pre>
+                                </div>
+
+                                <!-- Available Paths -->
+                                <div class="mb-3">
+                                    <label class="form-label small fw-bold">Available Paths:</label>
+                                    <div class="export-paths-list" id="modalExportPathsList"></div>
+                                </div>
+
+                                <!-- Exported Variables -->
+                                <div id="modalExportedVars" style="display: none;">
+                                    <label class="form-label small fw-bold text-success">
+                                        <i class="bi bi-check-circle-fill"></i> Exported:
+                                    </label>
+                                    <div class="d-flex flex-wrap gap-2" id="modalExportedVarsList"></div>
+                                </div>
+
+                                <!-- Save Button -->
+                                <div class="d-flex justify-content-end mt-3">
+                                    <button type="button" class="btn btn-success" id="saveExportsBtn" onclick="saveExportedVariablesFromModal()">
+                                        <i class="bi bi-check-lg"></i> Save Exported Variables
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -573,6 +750,9 @@
                 <button type="button" class="btn btn-outline-danger me-auto" id="deleteStepBtn" style="display: none;" onclick="deleteStep()">
                     <i class="bi bi-trash"></i> Delete
                 </button>
+                <span class="text-muted small me-3 d-none d-md-inline">
+                    <kbd>Ctrl</kbd>+<kbd>S</kbd> to save
+                </span>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="saveStep()">
                     <i class="bi bi-check-lg"></i> Save Step
@@ -619,6 +799,7 @@
 .step-cell {
     cursor: pointer;
     transition: all 0.2s;
+    position: relative;
 }
 .step-cell:hover {
     transform: translateY(-2px);
@@ -669,6 +850,41 @@ tr.row-disabled .step-cell {
 }
 tr.row-disabled td:first-child {
     text-decoration: line-through;
+}
+/* Parallel row indicator */
+tr.row-parallel {
+    background: linear-gradient(90deg, rgba(255,193,7,0.08) 0%, transparent 40%);
+}
+tr.row-parallel .row-number-cell {
+    position: relative;
+}
+tr.row-parallel .row-number-cell::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #ffc107;
+}
+/* Row parallel toggle button */
+.row-parallel-toggle {
+    border: none;
+    background: transparent;
+    opacity: 0.4;
+    transition: all 0.2s;
+    line-height: 1;
+}
+.row-parallel-toggle:hover {
+    opacity: 1;
+    transform: scale(1.2);
+}
+.row-parallel-toggle.active {
+    opacity: 1;
+}
+.row-number-cell .row-num {
+    font-size: 0.85rem;
+    line-height: 1.2;
 }
 /* Step type accordion */
 .step-type-option {
@@ -772,6 +988,522 @@ tr.row-disabled td:first-child {
     max-width: 250px;
     pointer-events: none;
 }
+/* Full-height modal for step editor */
+#stepModal .modal-xl .modal-body {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+}
+/* GraphQL editor specific styles */
+.graphql-editor-row {
+    min-height: 350px;
+}
+.graphql-query-editor,
+.graphql-variables-editor {
+    resize: vertical;
+    min-height: 280px;
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+.graphql-result-panel {
+    max-height: 300px;
+    overflow: auto;
+    font-size: 0.85rem;
+}
+/* Make textareas take full height on larger screens */
+@media (min-width: 992px) {
+    .graphql-editor-row {
+        min-height: 400px;
+    }
+    .graphql-editor-row .col-lg-7,
+    .graphql-editor-row .col-lg-5 {
+        display: flex;
+        flex-direction: column;
+    }
+    .graphql-query-editor,
+    .graphql-variables-editor {
+        flex: 1;
+        min-height: 350px;
+    }
+}
+/* Interactive run styles */
+.step-cell.step-running {
+    animation: pulse-border 1.5s infinite;
+    border-color: #0d6efd !important;
+    border-width: 2px !important;
+    position: relative;
+}
+.step-cell.step-running::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid #0d6efd;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+@keyframes pulse-border {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4); }
+    50% { opacity: 0.85; box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.1); }
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.step-cell.step-success {
+    position: relative;
+}
+.step-cell.step-success::before {
+    content: '\f26b';
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 20px;
+    height: 20px;
+    background: #198754;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+.step-cell.step-failed {
+    border-color: #dc3545 !important;
+    background: rgba(220, 53, 69, 0.1) !important;
+    position: relative;
+}
+.step-cell.step-failed::before {
+    content: '\f62a';
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    width: 20px;
+    height: 20px;
+    background: #dc3545;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+/* In-cell output section */
+.step-output-section {
+    width: 100%;
+}
+.step-output-header {
+    border-top-color: rgba(0,0,0,0.1) !important;
+}
+.step-output-toggle {
+    color: inherit;
+    text-decoration: none;
+}
+.step-output-toggle:hover {
+    color: #0d6efd;
+}
+.step-output-content {
+    max-height: 250px;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+.step-output-content.collapsed {
+    max-height: 0;
+}
+.step-output-pre {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.step-output-pre.error {
+    color: #f48771;
+}
+/* Make cells with output larger */
+.step-cell.has-output {
+    min-height: auto;
+}
+/* Adjust cell when output is shown */
+td.drop-zone {
+    vertical-align: top;
+}
+/* Variable Exporter styles */
+.variable-exporter {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 12px;
+    font-size: 0.8rem;
+    margin-top: 8px;
+}
+.export-paths-list {
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 8px;
+}
+.export-path-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    margin: 4px 0;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.export-path-item:hover {
+    background: #e7f1ff;
+    border-color: #0d6efd;
+    transform: translateX(2px);
+}
+.export-path-item.exported {
+    background: #d1e7dd;
+    border-color: #198754;
+}
+.export-path-item .path-name {
+    flex: 1;
+    font-family: monospace;
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.export-path-item .path-type {
+    font-size: 0.7rem;
+    color: #6c757d;
+    margin-left: 8px;
+    padding: 2px 6px;
+    background: #e9ecef;
+    border-radius: 3px;
+}
+.export-path-item .export-check {
+    margin-right: 10px;
+    color: #198754;
+    font-size: 1rem;
+}
+.exported-var-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-family: monospace;
+    background: #d1e7dd;
+    border: 1px solid #198754;
+    border-radius: 4px;
+    color: #0f5132;
+}
+.exported-var-chip .remove-export {
+    margin-left: 6px;
+    cursor: pointer;
+    opacity: 0.6;
+    font-size: 0.9rem;
+}
+.exported-var-chip .remove-export:hover {
+    opacity: 1;
+    color: #dc3545;
+}
+.exported-vars {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #dee2e6;
+}
+.exported-vars-list {
+    margin-top: 8px;
+}
+/* Debugger Toolbar Styling */
+.debugger-toolbar {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 0;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.debugger-toolbar-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    gap: 16px;
+}
+.debugger-status {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+.debugger-status .spinner-border {
+    color: #00d9ff;
+}
+.debugger-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: rgba(0, 217, 255, 0.15);
+    color: #00d9ff;
+    border: 1px solid rgba(0, 217, 255, 0.3);
+}
+.debugger-status-badge.status-paused {
+    background: rgba(255, 193, 7, 0.15);
+    color: #ffc107;
+    border-color: rgba(255, 193, 7, 0.3);
+}
+.debugger-status-badge.status-completed {
+    background: rgba(25, 135, 84, 0.15);
+    color: #20c997;
+    border-color: rgba(25, 135, 84, 0.3);
+}
+.debugger-status-badge.status-failed {
+    background: rgba(220, 53, 69, 0.15);
+    color: #dc3545;
+    border-color: rgba(220, 53, 69, 0.3);
+}
+.debugger-step-info {
+    color: #a0a0a0;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.debugger-step-info strong {
+    color: #ffffff;
+}
+.debugger-step-info code {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: #00d9ff;
+    font-size: 0.8rem;
+}
+.debugger-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.debugger-progress-text {
+    color: #a0a0a0;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+.debugger-progress .progress {
+    background: rgba(255, 255, 255, 0.1);
+}
+.debugger-progress .progress-bar {
+    background: linear-gradient(90deg, #00d9ff, #00ff88);
+}
+.debugger-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.debugger-next-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    font-weight: 500;
+    background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+    border: none;
+    animation: pulse-next 2s infinite;
+}
+.debugger-next-btn:hover {
+    background: linear-gradient(135deg, #0a58ca 0%, #084298 100%);
+}
+.debugger-next-btn .next-step-label {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+@keyframes pulse-next {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(13, 110, 253, 0); }
+}
+.debugger-shortcuts {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    padding: 6px 16px;
+    background: rgba(0, 0, 0, 0.2);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 0.75rem;
+    color: #6c757d;
+}
+.debugger-shortcuts kbd {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #a0a0a0;
+    margin-right: 4px;
+    box-shadow: none;
+}
+/* Keyboard shortcut styling */
+kbd {
+    background: #f4f4f4;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    box-shadow: 0 1px 0 #888;
+    color: #333;
+    display: inline-block;
+    font-size: 0.75rem;
+    font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    line-height: 1;
+    padding: 2px 5px;
+}
+/* Flow indicator between adjacent steps */
+.step-cell::after {
+    display: none;
+}
+.step-cell:not(.step-running)::before {
+    display: none;
+}
+.has-right-neighbor::after {
+    content: '\f285';
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    right: -18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6c757d;
+    font-size: 0.8rem;
+    z-index: 5;
+}
+/* CURRENT state - step just completed, paused here (blue pulsing) */
+.step-cell.step-paused {
+    border-color: #0d6efd !important;
+    border-width: 3px !important;
+    background: rgba(13, 110, 253, 0.08) !important;
+    animation: pulse-current 1.5s ease-in-out infinite;
+}
+.step-cell.step-paused::before {
+    content: '\f4f4';  /* bi-pause-circle-fill */
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 24px;
+    height: 24px;
+    background: #0d6efd;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(13, 110, 253, 0.4);
+}
+@keyframes pulse-current {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(13, 110, 253, 0); }
+}
+
+/* NEXT state - will execute when user clicks Next Step (orange dashed border) */
+.step-cell.step-next {
+    border: 2px dashed #fd7e14 !important;
+    background: rgba(253, 126, 20, 0.05) !important;
+    position: relative;
+}
+.step-cell.step-modified {
+    border: 2px solid #6f42c1 !important;
+    box-shadow: 0 0 8px rgba(111, 66, 193, 0.4);
+}
+.step-cell.step-modified::after {
+    content: 'Modified';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.65rem;
+    background: #6f42c1;
+    color: white;
+    padding: 1px 6px;
+    border-radius: 8px;
+    z-index: 10;
+}
+.step-cell.step-next::before {
+    content: '\f4fc';  /* bi-play-circle */
+    font-family: 'bootstrap-icons';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    width: 24px;
+    height: 24px;
+    background: #fd7e14;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    animation: bounce-next 1s ease-in-out infinite;
+}
+@keyframes bounce-next {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+}
+
+/* Input preview for parser steps */
+.step-input-preview {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 8px;
+    margin-top: 8px;
+    font-size: 0.8rem;
+}
+.step-input-preview-label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.step-input-preview-content {
+    background: #ffffff;
+    border: 1px solid #e9ecef;
+    border-radius: 3px;
+    padding: 6px;
+    max-height: 150px;
+    overflow: auto;
+    font-family: monospace;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+/* Selection state for copy/paste */
+.step-cell.selected {
+    outline: 2px solid #6f42c1;
+    outline-offset: 2px;
+}
+.drop-zone.selected {
+    background: rgba(111, 66, 193, 0.1);
+    outline: 2px dashed #6f42c1;
+    outline-offset: -2px;
+}
 </style>
 
 <script>
@@ -791,7 +1523,118 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('inputSource').addEventListener('change', function() {
         document.getElementById('getfromConfig').style.display = this.value === 'getfrom' ? 'block' : 'none';
     });
+
+    // Keyboard shortcuts for step modal
+    document.addEventListener('keydown', function(e) {
+        const modalEl = document.getElementById('stepModal');
+        const isModalOpen = modalEl && modalEl.classList.contains('show');
+
+        if (!isModalOpen) return;
+
+        // Ctrl+S or Cmd+S to save step
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+            e.preventDefault();
+            saveStep();
+        }
+    });
+
+    // Global keyboard shortcuts (for debugger and grid)
+    document.addEventListener('keydown', function(e) {
+        // Don't trigger shortcuts when typing in input fields
+        const target = e.target;
+        const isTyping = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        const isModalOpen = document.querySelector('.modal.show');
+
+        // If typing or modal is open, only handle specific shortcuts
+        if (isTyping && !isModalOpen) return;
+        if (isModalOpen) return;  // Let modal handle its own shortcuts
+
+        // Check if debugger is active
+        const isDebuggerActive = activeRunId && document.getElementById('runStatusBar')?.style.display !== 'none';
+
+        if (isDebuggerActive) {
+            // Space or Enter - Execute next step
+            if (e.key === ' ' || e.key === 'Enter') {
+                e.preventDefault();
+                const nextStepBtn = document.getElementById('nextStepBtn');
+                if (nextStepBtn && nextStepBtn.style.display !== 'none' && !nextStepBtn.disabled) {
+                    executeNextStep();
+                }
+            }
+
+            // Ctrl+Enter - Run all remaining steps
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                const continueBtn = document.getElementById('continueRunBtn');
+                if (continueBtn && continueBtn.style.display !== 'none') {
+                    continueInteractiveRun();
+                }
+            }
+
+            // Escape - Stop execution
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelInteractiveRun();
+            }
+        }
+
+        // Grid shortcuts (when not in debugger mode or also available)
+
+        // Ctrl+C - Copy selected step config (if a step is selected)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !isTyping) {
+            const selectedStep = document.querySelector('.step-cell.selected');
+            if (selectedStep) {
+                e.preventDefault();
+                copyStepToClipboard(selectedStep.dataset.stepId);
+            }
+        }
+
+        // Ctrl+V - Paste step config to empty cell
+        if ((e.ctrlKey || e.metaKey) && e.key === 'v' && !isTyping) {
+            const selectedCell = document.querySelector('.drop-zone.selected');
+            if (selectedCell && !selectedCell.querySelector('.step-cell[data-step-id]')) {
+                e.preventDefault();
+                pasteStepFromClipboard(selectedCell);
+            }
+        }
+
+        // Ctrl+Z - Undo (placeholder - would need undo stack implementation)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !isTyping) {
+            // TODO: Implement undo stack for editor actions
+            console.log('Undo not yet implemented');
+        }
+    });
+
+    // Mark cells that have adjacent steps for flow indicators
+    updateFlowIndicators();
 });
+
+// Update flow indicators between adjacent steps
+function updateFlowIndicators() {
+    const grid = document.getElementById('pipelineGrid');
+    if (!grid) return;
+
+    // Remove existing indicators
+    grid.querySelectorAll('.step-cell.has-right-neighbor').forEach(cell => {
+        cell.classList.remove('has-right-neighbor');
+    });
+
+    // Find all step cells and mark those with a neighbor to the right
+    const rows = grid.querySelectorAll('tbody tr[data-row]');
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td.drop-zone');
+        cells.forEach((cell, index) => {
+            const stepCell = cell.querySelector('.step-cell[data-step-id]');
+            if (!stepCell) return;
+
+            // Check if next cell has a step
+            const nextCell = cells[index + 1];
+            if (nextCell && nextCell.querySelector('.step-cell[data-step-id]')) {
+                stepCell.classList.add('has-right-neighbor');
+            }
+        });
+    });
+}
 
 // Select step type (helper for clicking the option div)
 function selectStepType(type) {
@@ -1183,9 +2026,11 @@ function copyVariable(path, chipElement) {
 function showToast(message, type = 'info') {
     // Create a simple toast notification
     const toast = document.createElement('div');
-    toast.className = `alert alert-${type === 'success' ? 'success' : 'info'} position-fixed`;
+    const alertClass = type === 'success' ? 'success' : (type === 'warning' ? 'warning' : 'info');
+    const iconClass = type === 'success' ? 'check-circle' : (type === 'warning' ? 'exclamation-triangle' : 'info-circle');
+    toast.className = `alert alert-${alertClass} position-fixed`;
     toast.style.cssText = 'bottom: 20px; right: 20px; z-index: 9999; padding: 8px 16px; font-size: 0.875rem; animation: fadeIn 0.2s;';
-    toast.innerHTML = `<i class="bi bi-${type === 'success' ? 'check-circle' : 'clipboard'}"></i> ${message}`;
+    toast.innerHTML = `<i class="bi bi-${iconClass}"></i> ${message}`;
 
     document.body.appendChild(toast);
 
@@ -1297,6 +2142,10 @@ function addStep(row, col) {
     lastFocusedField = null;
     // Load available variables for this position
     loadStepVariables(row, col, 0);
+    // Hide Variable Exporter (no output for new steps)
+    hideModalVariableExporter();
+    // Show Input Preview if in debug mode - new steps CAN see previous step output
+    setTimeout(showUniversalInputPreview, 100);
     stepModal.show();
 }
 
@@ -1343,6 +2192,26 @@ function editStep(stepId, row, col) {
                 document.querySelector('[name="timeout_seconds"]').value = step.timeout_seconds;
                 document.getElementById('stepIsActive').checked = step.is_active;
                 document.getElementById('stepRunParallel').checked = step.run_parallel;
+
+                // Check if this step has output from the current interactive run
+                // Look up by step_id (primary key in stepOutputs)
+                const stepName = step.step_name;
+                const stepOutputData = stepOutputs[stepId];
+                const hasCurrentOutput = stepOutputData && stepOutputData.output;
+                const hasSavedMappings = step.output_mappings && Object.keys(step.output_mappings).length > 0;
+
+                if (hasCurrentOutput) {
+                    // Show exporter with current output
+                    showModalVariableExporter(stepId, stepName, stepOutputData.output, step.output_mappings || {});
+                } else if (hasSavedMappings) {
+                    // Show saved mappings even without current output
+                    showSavedMappingsOnly(stepId, stepName, step.output_mappings);
+                } else {
+                    hideModalVariableExporter();
+                }
+
+                // Show universal input preview if in debug mode
+                setTimeout(showUniversalInputPreview, 100);
 
                 stepModal.show();
             } else {
@@ -1596,13 +2465,223 @@ async function saveStep() {
 
         if (result.success) {
             stepModal.hide();
-            location.reload();
+
+            // If in debug mode, don't reload - stay in debug mode and auto-rerun
+            if (activeRunId) {
+                // Update the cell's visual content without reloading
+                const stepId = document.getElementById('stepId').value;
+                const stepName = document.getElementById('stepName').value;
+                const stepLabel = document.getElementById('stepLabel').value;
+                const cell = document.querySelector(`[data-step-id="${stepId}"]`);
+                if (cell) {
+                    // Update the label in the cell
+                    const labelEl = cell.querySelector('strong');
+                    if (labelEl) labelEl.textContent = stepLabel || stepName;
+
+                    // Mark as modified
+                    cell.classList.add('step-modified');
+                }
+
+                // Check if this step has already run (has output)
+                const hasRun = cell && (cell.classList.contains('step-success') || cell.classList.contains('step-failed'));
+
+                if (hasRun) {
+                    // Step already executed - ask if user wants to re-run
+                    showRerunPromptWithOptions(stepId, stepName);
+                } else {
+                    // Step hasn't run yet - it's the next step to run
+                    showToast('Step saved! Click "Next Step" to execute.', 'success');
+                }
+            } else {
+                location.reload();
+            }
         } else {
             alert('Error: ' + (result.message || result.error || 'Failed to save step'));
         }
     } catch (err) {
         alert('Error: ' + err.message);
     }
+}
+
+// Show prompt with clear options after saving a step during debug
+function showRerunPromptWithOptions(stepId, stepName) {
+    const toolbar = document.getElementById('debuggerToolbar');
+    if (!toolbar) return;
+
+    // Remove any existing alert
+    const existing = document.getElementById('rerunFromHereAlert');
+    if (existing) existing.remove();
+
+    // Create new alert with clear options
+    const rerunAlert = document.createElement('div');
+    rerunAlert.id = 'rerunFromHereAlert';
+    rerunAlert.className = 'alert alert-info mb-2';
+    rerunAlert.style.cssText = 'border-left: 4px solid #0dcaf0;';
+    toolbar.parentNode.insertBefore(rerunAlert, toolbar.nextSibling);
+
+    rerunAlert.innerHTML = `
+        <div class="d-flex align-items-start justify-content-between">
+            <div>
+                <strong><i class="bi bi-pencil-square me-1"></i> Step Updated:</strong> <code>${stepName}</code>
+                <p class="mb-2 mt-1 small text-muted">
+                    Your changes are saved. Choose how to proceed:
+                </p>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-sm btn-primary" onclick="rerunAndExecute(${stepId}, '${stepName}')">
+                        <i class="bi bi-play-fill"></i> Re-run This Step
+                    </button>
+                    <button class="btn btn-sm btn-warning" onclick="rerunFromStep(${stepId}, '${stepName}')">
+                        <i class="bi bi-fast-forward-fill"></i> Re-run From Here (All Following)
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="this.closest('.alert').remove()">
+                        <i class="bi bi-x"></i> Keep Changes, Don't Re-run
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Re-run just the single modified step (reset it and execute immediately)
+async function rerunAndExecute(stepId, stepName) {
+    if (!activeRunId) {
+        alert('No active debug run');
+        return;
+    }
+
+    try {
+        // First reset this step
+        const resetResponse = await fetch('/pipelines/rerunfrom/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: stepId
+            })
+        });
+
+        const resetResult = await resetResponse.json();
+
+        if (resetResult.success) {
+            // Remove the alert
+            const rerunAlert = document.getElementById('rerunFromHereAlert');
+            if (rerunAlert) rerunAlert.remove();
+
+            // Reset cell state
+            const cell = document.querySelector(`[data-step-id="${stepId}"]`);
+            if (cell) {
+                cell.classList.remove('step-success', 'step-failed', 'step-modified');
+                cell.classList.add('step-running');
+            }
+
+            showToast(`Executing "${stepName}" with new config...`, 'info');
+
+            // Now execute the step immediately
+            await executeNextStep();
+
+        } else {
+            alert('Error: ' + (resetResult.error || 'Failed to reset step'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// Show prompt to re-run from a specific step (legacy function)
+function showRerunFromHerePrompt(stepId, stepName) {
+    showRerunPromptWithOptions(stepId, stepName);
+}
+
+// Re-run pipeline from a specific step
+async function rerunFromStep(stepId, stepName) {
+    if (!activeRunId) {
+        alert('No active debug run');
+        return;
+    }
+
+    if (!confirm(`This will reset "${stepName}" and all following steps, then re-run from there. Continue?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/pipelines/rerunfrom/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: stepId
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Remove the rerun alert
+            const rerunAlert = document.getElementById('rerunFromHereAlert');
+            if (rerunAlert) rerunAlert.remove();
+
+            // Reset cell states from this step forward
+            resetCellStatesFrom(stepId);
+
+            // Update next step info
+            if (result.next_step) {
+                updateNextStepDisplay(result.next_step);
+            }
+
+            showToast(`Reset to "${stepName}". Click "Next Step" to execute.`, 'info');
+
+            // Start polling again if we were paused
+            if (!pollInterval) {
+                startRunPolling();
+            }
+        } else {
+            alert('Error: ' + (result.error || 'Failed to reset'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+// Reset cell visual states from a step forward
+function resetCellStatesFrom(fromStepId) {
+    const fromCell = document.querySelector(`[data-step-id="${fromStepId}"]`);
+    if (!fromCell) return;
+
+    const fromRow = parseInt(fromCell.closest('td').dataset.row);
+    const fromCol = parseInt(fromCell.closest('td').dataset.col);
+
+    // Reset all cells at or after this position
+    document.querySelectorAll('.step-cell').forEach(cell => {
+        const td = cell.closest('td');
+        const row = parseInt(td.dataset.row);
+        const col = parseInt(td.dataset.col);
+
+        // Reset if same row and same/later col, or later row
+        if ((row === fromRow && col >= fromCol) || row > fromRow) {
+            cell.classList.remove('step-success', 'step-failed', 'step-running', 'step-current', 'step-next', 'step-modified');
+            cell.classList.add('step-pending');
+
+            // Clear output section
+            const outputSection = cell.querySelector('.step-output-section');
+            if (outputSection) outputSection.style.display = 'none';
+
+            // Clear from stepOutputs
+            const stepId = cell.dataset.stepId;
+            if (stepId && stepOutputs[stepId]) {
+                delete stepOutputs[stepId];
+            }
+        }
+    });
+
+    // Mark the target step as "next"
+    fromCell.classList.remove('step-pending');
+    fromCell.classList.add('step-next');
 }
 
 async function deleteStep() {
@@ -1633,6 +2712,60 @@ async function deleteStep() {
     } catch (err) {
         alert('Error: ' + err.message);
     }
+}
+
+/**
+ * Toggle parallel execution for an entire row
+ * This updates all steps in the row to have run_parallel enabled/disabled
+ */
+async function toggleRowParallel(row, buttonEl) {
+    const tr = document.querySelector(`tr[data-row="${row}"]`);
+    if (!tr) return;
+
+    const currentlyParallel = tr.dataset.parallel === '1';
+    const newValue = !currentlyParallel;
+
+    // Find all steps in this row
+    const stepCells = tr.querySelectorAll('.step-cell[data-step-id]');
+    if (stepCells.length === 0) {
+        showToast('No steps in this row to set parallel mode', 'warning');
+        return;
+    }
+
+    // Update visual immediately
+    buttonEl.classList.toggle('active', newValue);
+    const icon = buttonEl.querySelector('i');
+    if (icon) {
+        icon.className = newValue ? 'bi bi-lightning-fill text-warning' : 'bi bi-lightning text-muted';
+    }
+    tr.classList.toggle('row-parallel', newValue);
+    tr.dataset.parallel = newValue ? '1' : '0';
+    buttonEl.title = newValue
+        ? 'Parallel ON: This row runs concurrently with other parallel rows. Click to disable.'
+        : 'Click to enable parallel execution for this row';
+
+    // Update each step in the row
+    for (const cell of stepCells) {
+        const stepId = cell.dataset.stepId;
+        try {
+            await fetch('/pipelines/updatestepparallel/' + pipelineId, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: new URLSearchParams({
+                    csrf_token: csrfToken,
+                    step_id: stepId,
+                    run_parallel: newValue ? '1' : '0'
+                })
+            });
+        } catch (err) {
+            console.error('Failed to update step parallel:', err);
+        }
+    }
+
+    showToast(`Row ${row + 1} parallel mode ${newValue ? 'enabled' : 'disabled'}`, 'success');
 }
 
 function addRow() {
@@ -1881,6 +3014,106 @@ async function trimGrid() {
         alert('Error: ' + err.message);
     }
 }
+
+// =========================================================================
+// Step Copy/Paste
+// =========================================================================
+
+let clipboardStep = null;  // Store copied step config
+
+async function copyStepToClipboard(stepId) {
+    try {
+        const response = await fetch('/pipelines/getstep/' + pipelineId + '?step_id=' + stepId);
+        const result = await response.json();
+
+        if (result.success) {
+            clipboardStep = result.data.step;
+            showToast('Step copied to clipboard', 'success');
+
+            // Also try to copy to system clipboard as JSON
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(clipboardStep, null, 2));
+            } catch (clipErr) {
+                // System clipboard not available, internal clipboard works
+            }
+        } else {
+            showToast('Failed to copy step', 'warning');
+        }
+    } catch (err) {
+        showToast('Error copying step: ' + err.message, 'warning');
+    }
+}
+
+async function pasteStepFromClipboard(targetCell) {
+    if (!clipboardStep) {
+        showToast('No step in clipboard. Select a step and press Ctrl+C first.', 'info');
+        return;
+    }
+
+    const row = parseInt(targetCell.dataset.row);
+    const col = parseInt(targetCell.dataset.col);
+
+    // Generate a new step name
+    const newStepName = clipboardStep.step_name + '_copy_' + Date.now().toString(36).slice(-4);
+
+    try {
+        const data = new URLSearchParams({
+            csrf_token: csrfToken,
+            step_id: '0',  // New step
+            step_name: newStepName,
+            label: (clipboardStep.label || clipboardStep.step_name) + ' (Copy)',
+            row: row,
+            col: col,
+            step_type: clipboardStep.step_type,
+            config: JSON.stringify(clipboardStep.config || {}),
+            input_source: clipboardStep.input_source || 'prev',
+            input_config: JSON.stringify(clipboardStep.input_config || {}),
+            condition: clipboardStep.condition || '{}',
+            on_success: clipboardStep.on_success || 'next_col',
+            on_failure: clipboardStep.on_failure || 'exit',
+            timeout_seconds: clipboardStep.timeout_seconds || 300,
+            is_active: clipboardStep.is_active ? '1' : '0',
+            run_parallel: clipboardStep.run_parallel ? '1' : '0'
+        });
+
+        const response = await fetch('/pipelines/savestep/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: data.toString()
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('Step pasted', 'success');
+            location.reload();
+        } else {
+            alert('Failed to paste step: ' + (result.error || result.message));
+        }
+    } catch (err) {
+        alert('Error pasting step: ' + err.message);
+    }
+}
+
+// Make cells selectable for copy/paste
+document.addEventListener('click', function(e) {
+    const stepCell = e.target.closest('.step-cell[data-step-id]');
+    const dropZone = e.target.closest('.drop-zone');
+
+    // Clear previous selections
+    document.querySelectorAll('.step-cell.selected, .drop-zone.selected').forEach(el => {
+        el.classList.remove('selected');
+    });
+
+    if (stepCell) {
+        stepCell.classList.add('selected');
+    } else if (dropZone && !dropZone.querySelector('.step-cell[data-step-id]')) {
+        dropZone.classList.add('selected');
+    }
+});
 
 async function deleteRow(row) {
     // Find all steps in this row
@@ -2132,8 +3365,21 @@ function triggerInteractive() {
     new bootstrap.Modal(document.getElementById('triggerModal')).show();
 }
 
+// =========================================================================
+// Interactive Run Infrastructure
+// =========================================================================
+
+let activeRunId = null;
+let pollInterval = null;
+let stepOutputs = {};  // Store output data by step_name
+
 async function confirmTriggerInteractive() {
     const context = document.getElementById('triggerContext').value || '{}';
+    const submitBtn = document.getElementById('triggerModalSubmit');
+    const originalHtml = submitBtn.innerHTML;
+
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
 
     try {
         const response = await fetch('/pipelines/triggerinteractive/' + pipelineId, {
@@ -2148,12 +3394,1679 @@ async function confirmTriggerInteractive() {
         const result = await response.json();
 
         if (result.success) {
-            window.location.href = '/pipelines/viewrun/' + result.data.run_id;
+            // Close modal and stay on page
+            bootstrap.Modal.getInstance(document.getElementById('triggerModal')).hide();
+
+            // Start tracking the run
+            activeRunId = result.data.run_id;
+            stepOutputs = {};
+
+            // Show progress bar
+            showRunProgressBar(true);
+
+            // Clear any existing step states
+            clearStepStates();
+
+            // Start polling for status
+            startRunPolling();
+
+            showToast('Interactive run started', 'success');
         } else {
             alert('Error: ' + (result.error || 'Failed to start interactive run'));
         }
     } catch (err) {
         alert('Error: ' + err.message);
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalHtml;
+    }
+}
+
+// Track the next step info for the debugger
+let nextStepInfo = null;
+
+function showRunProgressBar(show) {
+    const statusBar = document.getElementById('runStatusBar');
+    if (statusBar) {
+        statusBar.style.display = show ? 'block' : 'none';
+        statusBar.style.setProperty('display', show ? 'block' : 'none', 'important');
+    }
+}
+
+function clearStepStates() {
+    // Remove all step state classes and output sections
+    document.querySelectorAll('.step-cell').forEach(cell => {
+        cell.classList.remove('step-running', 'step-success', 'step-failed', 'step-pending', 'step-paused', 'step-next', 'has-output');
+
+        // Hide in-cell output section
+        const outputSection = cell.querySelector('.step-output-section');
+        if (outputSection) {
+            outputSection.style.display = 'none';
+        }
+    });
+
+    // Hide all output toggle buttons
+    document.querySelectorAll('.row-output-btn').forEach(btn => {
+        btn.style.display = 'none';
+    });
+
+    // Hide the main toggle output button
+    const toggleOutputBtn = document.getElementById('toggleOutputBtn');
+    if (toggleOutputBtn) {
+        toggleOutputBtn.style.display = 'none';
+    }
+
+    // Clear stored outputs and next step info
+    stepOutputs = {};
+    nextStepInfo = null;
+}
+
+function startRunPolling() {
+    // Clear any existing interval
+    if (pollInterval) {
+        clearInterval(pollInterval);
+    }
+
+    // Poll immediately, then every 2 seconds
+    pollRunStatus();
+    pollInterval = setInterval(pollRunStatus, 2000);
+}
+
+function stopRunPolling() {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+}
+
+async function pollRunStatus() {
+    if (!activeRunId) {
+        console.log('pollRunStatus: No active run ID, stopping poll');
+        stopRunPolling();
+        return;
+    }
+
+    try {
+        const response = await fetch('/pipelines/interactivestatus/' + activeRunId);
+        const result = await response.json();
+
+        if (!result.success) {
+            console.error('Failed to get run status:', result.error);
+            // If run not found, the run was probably deleted or ID is invalid
+            if (result.error && result.error.includes('not found')) {
+                stopRunPolling();
+                showToast('Debug session ended (run not found)', 'warning');
+                activeRunId = null;
+                showRunProgressBar(false);
+            }
+            return;
+        }
+
+        const data = result.data;
+        const run = data.run;
+
+        // Update progress bar
+        updateProgressBar(run);
+
+        // Update grid cells with step statuses
+        updateGridWithStepRuns(data.step_runs || []);
+
+        // Check for completion or failure
+        if (run.status === 'completed') {
+            stopRunPolling();
+            onRunCompleted(run);
+        } else if (run.status === 'failed') {
+            stopRunPolling();
+            onRunFailed(run, data.step_runs);
+        } else if (run.status === 'paused') {
+            // Interactive mode - paused for user input
+            stopRunPolling();  // Stop polling while paused
+
+            // Calculate next step from step runs
+            const pausedStepRun = data.step_runs.find(sr => sr.awaiting_input);
+            if (pausedStepRun) {
+                // Find the next pending step
+                const pendingSteps = data.step_runs
+                    .filter(sr => sr.status === 'pending')
+                    .sort((a, b) => {
+                        if (a.row !== b.row) return a.row - b.row;
+                        return a.col - b.col;
+                    });
+
+                if (pendingSteps.length > 0) {
+                    nextStepInfo = {
+                        step_id: pendingSteps[0].step_id,
+                        step_name: pendingSteps[0].step_name,
+                        row: pendingSteps[0].row,
+                        col: pendingSteps[0].col
+                    };
+                } else {
+                    nextStepInfo = null;
+                }
+            }
+
+            updateDebuggerUI(run, nextStepInfo, pausedStepRun);
+        } else if (run.status === 'cancelled') {
+            stopRunPolling();
+            onRunCancelled();
+        }
+
+    } catch (err) {
+        console.error('Error polling run status:', err);
+    }
+}
+
+function updateProgressBar(run, statusOverride = null) {
+    const progressFill = document.getElementById('runStatusProgress');
+    const statusLabel = document.getElementById('runStatusLabel');
+    const statusDetail = document.getElementById('runStatusDetail');
+    const spinner = document.getElementById('runStatusSpinner');
+    const statusBadge = document.getElementById('runStatusBadge');
+
+    if (progressFill) {
+        const percent = run.progress_percent ||
+            (run.steps_total > 0 ? Math.round((run.steps_completed / run.steps_total) * 100) : 0);
+        progressFill.style.width = percent + '%';
+    }
+
+    if (statusLabel) {
+        if (statusOverride) {
+            statusLabel.textContent = statusOverride;
+        } else if (run.status === 'paused') {
+            statusLabel.textContent = 'Paused';
+        } else if (run.status === 'completed') {
+            statusLabel.textContent = 'Completed';
+        } else if (run.status === 'failed') {
+            statusLabel.textContent = 'Failed';
+        } else {
+            statusLabel.textContent = 'Running';
+        }
+    }
+
+    if (statusDetail) {
+        statusDetail.textContent = `${run.steps_completed}/${run.steps_total} steps`;
+    }
+
+    // Update status badge styling
+    if (statusBadge) {
+        statusBadge.classList.remove('status-paused', 'status-completed', 'status-failed');
+        if (run.status === 'paused') {
+            statusBadge.classList.add('status-paused');
+        } else if (run.status === 'completed') {
+            statusBadge.classList.add('status-completed');
+        } else if (run.status === 'failed') {
+            statusBadge.classList.add('status-failed');
+        }
+    }
+
+    // Update spinner visibility
+    if (spinner) {
+        spinner.style.display = (run.status === 'running' || run.status === 'pending') ? '' : 'none';
+    }
+
+    // Update current step info
+    const currentStepName = document.getElementById('currentStepName');
+    const currentStepPosition = document.getElementById('currentStepPosition');
+    if (currentStepName) {
+        currentStepName.textContent = run.current_step_name || '-';
+    }
+}
+
+/**
+ * Update the debugger UI when paused
+ */
+function updateDebuggerUI(run, nextStep, pausedStepRun) {
+    const nextStepBtn = document.getElementById('nextStepBtn');
+    const nextStepNameEl = document.getElementById('nextStepName');
+    const stepBackBtn = document.getElementById('stepBackBtn');
+    const prevStepNameEl = document.getElementById('prevStepName');
+    const continueBtn = document.getElementById('continueRunBtn');
+    const restartBtn = document.getElementById('restartRunBtn');
+    const spinner = document.getElementById('runStatusSpinner');
+    const currentStepName = document.getElementById('currentStepName');
+    const currentStepPosition = document.getElementById('currentStepPosition');
+
+    // Hide spinner when paused
+    if (spinner) spinner.style.display = 'none';
+
+    // Show Next Step button with next step name
+    if (nextStepBtn && nextStepNameEl) {
+        if (nextStep) {
+            nextStepBtn.style.display = '';
+            nextStepNameEl.textContent = nextStep.step_name || 'Unknown';
+
+            // Mark the next step cell visually
+            markNextStep(nextStep.step_id);
+        } else {
+            nextStepBtn.style.display = 'none';
+        }
+    }
+
+    // Show/hide Step Back button based on completed steps
+    if (stepBackBtn && prevStepNameEl) {
+        const completedCells = document.querySelectorAll('.step-cell.step-success');
+        if (completedCells.length > 0) {
+            stepBackBtn.style.display = '';
+            // Get the last completed step name
+            const lastCompleted = Array.from(completedCells)
+                .map(cell => ({
+                    name: cell.dataset.stepName,
+                    row: parseInt(cell.closest('td').dataset.row),
+                    col: parseInt(cell.closest('td').dataset.col)
+                }))
+                .sort((a, b) => (b.row - a.row) || (b.col - a.col))[0];
+            prevStepNameEl.textContent = lastCompleted ? lastCompleted.name : '';
+        } else {
+            stepBackBtn.style.display = 'none';
+        }
+    }
+
+    // Show Continue and Restart buttons
+    if (continueBtn) continueBtn.style.display = '';
+    if (restartBtn) restartBtn.style.display = '';
+
+    // Update current step info
+    if (pausedStepRun) {
+        if (currentStepName) currentStepName.textContent = pausedStepRun.step_name || '-';
+        if (currentStepPosition) currentStepPosition.textContent = `R${pausedStepRun.row + 1}:C${pausedStepRun.col + 1}`;
+    }
+
+    // Update progress bar
+    updateProgressBar(run);
+}
+
+/**
+ * Mark a step cell as the "next" step to execute
+ * Also shows INPUT preview for parser steps
+ */
+function markNextStep(stepId) {
+    // Remove existing next markers and input previews
+    document.querySelectorAll('.step-cell.step-next').forEach(cell => {
+        cell.classList.remove('step-next');
+    });
+    document.querySelectorAll('.step-input-preview').forEach(el => el.remove());
+
+    // Add next marker to the specified step
+    if (stepId) {
+        const nextCell = document.querySelector(`.step-cell[data-step-id="${stepId}"]`);
+        if (nextCell) {
+            nextCell.classList.add('step-next');
+
+            // Check if this is a parser step - if so, show the INPUT data
+            const stepType = nextCell.dataset.stepType;
+            if (stepType === 'parser') {
+                showInputPreviewForParserStep(nextCell, stepId);
+            }
+        }
+    }
+}
+
+/**
+ * Show INPUT preview for parser steps
+ * This helps users see what data the parser will operate on
+ */
+function showInputPreviewForParserStep(stepCell, stepId) {
+    // Find the previous step's output (what will be the INPUT for this parser)
+    const row = parseInt(stepCell.closest('td').dataset.row);
+    const col = parseInt(stepCell.closest('td').dataset.col);
+
+    // Look for the most recent completed step before this one
+    let inputData = null;
+    let inputSource = 'previous step';
+
+    // Check stepOutputs for any completed step that could feed into this one
+    // First, try to find a step in the same row with a lower col, or any step in a previous row
+    const completedSteps = Object.values(stepOutputs)
+        .filter(so => so.output && Object.keys(so.output).length > 0)
+        .sort((a, b) => {
+            // Sort by row desc, then col desc to get most recent
+            const cellA = document.querySelector(`.step-cell[data-step-id="${a.step_id}"]`);
+            const cellB = document.querySelector(`.step-cell[data-step-id="${b.step_id}"]`);
+            if (!cellA || !cellB) return 0;
+
+            const rowA = parseInt(cellA.closest('td').dataset.row);
+            const colA = parseInt(cellA.closest('td').dataset.col);
+            const rowB = parseInt(cellB.closest('td').dataset.row);
+            const colB = parseInt(cellB.closest('td').dataset.col);
+
+            if (rowA !== rowB) return rowB - rowA;
+            return colB - colA;
+        });
+
+    if (completedSteps.length > 0) {
+        // Get the most recently completed step that comes before this one
+        for (const so of completedSteps) {
+            const cell = document.querySelector(`.step-cell[data-step-id="${so.step_id}"]`);
+            if (!cell) continue;
+
+            const soRow = parseInt(cell.closest('td').dataset.row);
+            const soCol = parseInt(cell.closest('td').dataset.col);
+
+            // Check if this step comes before the parser step
+            if (soRow < row || (soRow === row && soCol < col)) {
+                inputData = so.output;
+                inputSource = so.step_name;
+                break;
+            }
+        }
+    }
+
+    if (!inputData) {
+        return;  // No input data to show
+    }
+
+    // Create and insert the INPUT preview element
+    const preview = document.createElement('div');
+    preview.className = 'step-input-preview';
+    preview.innerHTML = `
+        <div class="step-input-preview-label">
+            <i class="bi bi-box-arrow-in-right text-warning"></i>
+            <span>INPUT from <code>${inputSource}</code>:</span>
+        </div>
+        <div class="step-input-preview-content">${JSON.stringify(inputData, null, 2)}</div>
+    `;
+
+    // Insert after the step cell content
+    const outputSection = stepCell.querySelector('.step-output-section');
+    if (outputSection) {
+        stepCell.insertBefore(preview, outputSection);
+    } else {
+        stepCell.appendChild(preview);
+    }
+}
+
+/**
+ * Execute exactly one step (Next Step button)
+ */
+async function executeNextStep() {
+    if (!activeRunId) {
+        showToast('No active debug run. Start a new Interactive Run to continue.', 'warning');
+        return;
+    }
+
+    const nextStepBtn = document.getElementById('nextStepBtn');
+    const originalHtml = nextStepBtn ? nextStepBtn.innerHTML : '';
+
+    if (nextStepBtn) {
+        nextStepBtn.disabled = true;
+        nextStepBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Executing...';
+    }
+
+    try {
+        const response = await fetch('/pipelines/stepnext/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: 'csrf_token=' + encodeURIComponent(csrfToken)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            const data = result.data;
+
+            // Update grid with new step states
+            if (data.step_runs) {
+                updateGridWithStepRuns(data.step_runs);
+            }
+
+            // Update stored next step info
+            nextStepInfo = data.next_step;
+
+            // Update debugger UI
+            const run = {
+                status: data.run_status,
+                steps_completed: data.steps_completed,
+                steps_total: data.steps_total,
+                progress_percent: data.progress_percent,
+                current_step_name: data.step_executed ? data.step_executed.step_name : null
+            };
+
+            // Find the paused step run
+            const pausedStepRun = data.step_runs ? data.step_runs.find(sr => sr.awaiting_input) : data.step_executed;
+
+            if (data.run_status === 'paused') {
+                updateDebuggerUI(run, data.next_step, pausedStepRun);
+            } else if (data.run_status === 'completed') {
+                onRunCompleted(run);
+            } else if (data.run_status === 'failed') {
+                onRunFailed(run, data.step_runs || []);
+            }
+
+            // Show what was executed
+            if (data.step_executed) {
+                const status = data.step_executed.status === 'success' ? 'success' : 'warning';
+                showToast(`Executed: ${data.step_executed.step_name}`, status);
+            }
+
+        } else {
+            // Check for specific error conditions
+            if (result.error && result.error.includes('not found')) {
+                showToast('Debug session has ended. Start a new Interactive Run to continue.', 'warning');
+                activeRunId = null;
+                showRunProgressBar(false);
+            } else if (result.error && result.error.includes('cannot be stepped')) {
+                showToast('Pipeline has completed. Start a new Interactive Run to debug again.', 'info');
+                activeRunId = null;
+                showRunProgressBar(false);
+            } else {
+                alert('Step execution failed: ' + (result.error || 'Unknown error'));
+            }
+        }
+
+    } catch (err) {
+        alert('Error executing step: ' + err.message);
+    } finally {
+        if (nextStepBtn) {
+            nextStepBtn.disabled = false;
+            nextStepBtn.innerHTML = originalHtml;
+            // Re-populate next step name if available
+            const nextStepNameEl = document.getElementById('nextStepName');
+            if (nextStepNameEl && nextStepInfo) {
+                nextStepNameEl.textContent = nextStepInfo.step_name || '-';
+            }
+        }
+    }
+}
+
+// Track execution history for step back functionality
+let executionHistory = [];  // Array of step_ids in execution order
+let currentPlayheadIndex = -1;  // Current position in history
+
+/**
+ * Step back to the previous step (move playhead backwards)
+ * This reloads the context from before that step executed
+ */
+async function stepBack() {
+    if (!activeRunId) {
+        showToast('No active run', 'info');
+        return;
+    }
+
+    // Get the completed steps in order
+    const completedCells = Array.from(document.querySelectorAll('.step-cell.step-success'))
+        .map(cell => ({
+            stepId: cell.dataset.stepId,
+            stepName: cell.dataset.stepName,
+            row: parseInt(cell.closest('td').dataset.row),
+            col: parseInt(cell.closest('td').dataset.col)
+        }))
+        .sort((a, b) => (a.row - b.row) || (a.col - b.col));
+
+    if (completedCells.length === 0) {
+        showToast('No completed steps to go back to', 'warning');
+        return;
+    }
+
+    // Get the last completed step
+    const lastCompleted = completedCells[completedCells.length - 1];
+
+    // Confirm the action
+    if (!confirm(`Move playhead back to "${lastCompleted.stepName}"?\nThis will reset it so you can re-run with its original input context.`)) {
+        return;
+    }
+
+    try {
+        // Use rerunfrom to reset from this step
+        const response = await fetch('/pipelines/rerunfrom/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: lastCompleted.stepId
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            // Reset cell visual state
+            resetCellStatesFrom(lastCompleted.stepId);
+
+            // Update next step display
+            if (result.next_step) {
+                updateNextStepDisplay(result.next_step);
+            }
+
+            // Update prev step display (the step before this one)
+            updatePrevStepDisplay(completedCells, completedCells.length - 1);
+
+            showToast(`Playhead moved to "${lastCompleted.stepName}". Click Next to re-execute.`, 'info');
+
+        } else {
+            alert('Error: ' + (result.error || 'Failed to step back'));
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+    }
+}
+
+/**
+ * Update the previous step display for the back button
+ */
+function updatePrevStepDisplay(completedCells, currentIndex) {
+    const stepBackBtn = document.getElementById('stepBackBtn');
+    const prevStepNameEl = document.getElementById('prevStepName');
+
+    if (!stepBackBtn || !prevStepNameEl) return;
+
+    // Show the step we can go back to (the one before current)
+    if (currentIndex > 0 && completedCells[currentIndex - 1]) {
+        stepBackBtn.style.display = '';
+        prevStepNameEl.textContent = completedCells[currentIndex - 1].stepName;
+    } else if (currentIndex === 0) {
+        // At the first step, show the button but indicate start
+        stepBackBtn.style.display = '';
+        prevStepNameEl.textContent = '(start)';
+    } else {
+        stepBackBtn.style.display = 'none';
+    }
+}
+
+/**
+ * Restart the interactive run from the beginning
+ */
+async function restartInteractiveRun() {
+    if (!confirm('Restart the pipeline from the beginning? All progress will be lost.')) {
+        return;
+    }
+
+    // Cancel current run
+    await cancelInteractiveRun();
+
+    // Trigger a new interactive run
+    setTimeout(() => {
+        triggerInteractive();
+    }, 500);
+}
+
+function updateGridWithStepRuns(stepRuns) {
+    stepRuns.forEach(sr => {
+        // Find the step cell by step_id data attribute
+        const cell = document.querySelector(`[data-step-id="${sr.step_id}"]`);
+        if (!cell) return;
+
+        // Remove previous state classes
+        cell.classList.remove('step-running', 'step-success', 'step-failed', 'step-pending', 'step-paused', 'step-next');
+
+        // Add appropriate state class
+        if (sr.status === 'running') {
+            cell.classList.add('step-running');
+        } else if (sr.status === 'success' || sr.status === 'completed') {
+            cell.classList.add('step-success');
+            // Store output data keyed by step_id for uniqueness
+            if (sr.output || sr.stdout) {
+                stepOutputs[sr.step_id] = {
+                    step_id: sr.step_id,
+                    step_name: sr.step_name,
+                    output: sr.output,
+                    stdout: sr.stdout,
+                    stderr: sr.stderr,
+                    exit_code: sr.exit_code,
+                    duration_ms: sr.duration_ms
+                };
+            }
+        } else if (sr.status === 'failed') {
+            cell.classList.add('step-failed');
+            // Store error info keyed by step_id
+            stepOutputs[sr.step_id] = {
+                step_id: sr.step_id,
+                step_name: sr.step_name,
+                output: sr.output,
+                stdout: sr.stdout,
+                stderr: sr.stderr,
+                error_message: sr.error_message,
+                exit_code: sr.exit_code
+            };
+        }
+
+        // Mark steps that are awaiting input (paused)
+        if (sr.awaiting_input) {
+            cell.classList.add('step-paused');
+        }
+    });
+
+    // Update in-cell outputs for completed steps
+    updateStepOutputs();
+}
+
+function updateStepOutputs() {
+    let hasAnyOutputs = false;
+
+    // Update in-cell outputs for each step (keyed by step_id)
+    Object.entries(stepOutputs).forEach(([stepId, data]) => {
+        // Find the step cell by step_id attribute (primary) or step_name (fallback)
+        let cell = document.querySelector(`.step-cell[data-step-id="${stepId}"]`);
+        if (!cell && data.step_name) {
+            cell = document.querySelector(`.step-cell[data-step-name="${data.step_name}"]`);
+        }
+        if (!cell) return;
+
+        hasAnyOutputs = true;
+        cell.classList.add('has-output');
+
+        const outputSection = cell.querySelector('.step-output-section');
+        const outputPre = cell.querySelector('.step-output-pre');
+
+        if (outputSection && outputPre) {
+            // Build output content
+            let content = '';
+            let isError = false;
+
+            if (data.error_message) {
+                content = 'ERROR: ' + data.error_message + '\n\n';
+                isError = true;
+            }
+
+            if (data.output && Object.keys(data.output).length > 0) {
+                content += JSON.stringify(data.output, null, 2);
+            } else if (data.stdout) {
+                content += data.stdout;
+            } else if (!content) {
+                content = '(no output)';
+            }
+
+            if (data.stderr) {
+                content += '\n\nSTDERR:\n' + data.stderr;
+                isError = true;
+            }
+
+            outputPre.textContent = content;
+            outputPre.classList.toggle('error', isError);
+
+            // Show the output section
+            outputSection.style.display = 'block';
+        }
+
+        // Show the row output toggle button
+        const td = cell.closest('td');
+        if (td) {
+            const row = parseInt(td.dataset.row);
+            const outputBtn = document.querySelector(`.row-output-btn[data-row="${row}"]`);
+            if (outputBtn) {
+                outputBtn.style.display = '';
+            }
+        }
+    });
+
+    // Show/hide the main Toggle Output button in status bar
+    const toggleOutputBtn = document.getElementById('toggleOutputBtn');
+    if (toggleOutputBtn) {
+        toggleOutputBtn.style.display = hasAnyOutputs ? '' : 'none';
+    }
+}
+
+function toggleStepOutput(btn) {
+    const content = btn.closest('.step-output-section').querySelector('.step-output-content');
+    const icon = btn.querySelector('i');
+
+    if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        icon.classList.remove('bi-chevron-right');
+        icon.classList.add('bi-chevron-down');
+    } else {
+        content.classList.add('collapsed');
+        icon.classList.remove('bi-chevron-down');
+        icon.classList.add('bi-chevron-right');
+    }
+}
+
+function toggleAllOutputRows() {
+    const outputSections = document.querySelectorAll('.step-output-section[style*="block"]');
+    const outputContents = document.querySelectorAll('.step-output-content');
+
+    // Check if any are expanded (not collapsed)
+    const anyExpanded = Array.from(outputContents).some(c => !c.classList.contains('collapsed'));
+
+    outputContents.forEach(content => {
+        if (anyExpanded) {
+            content.classList.add('collapsed');
+        } else {
+            content.classList.remove('collapsed');
+        }
+    });
+
+    // Update all toggle icons
+    document.querySelectorAll('.step-output-toggle i').forEach(icon => {
+        icon.classList.remove('bi-chevron-down', 'bi-chevron-right');
+        icon.classList.add(anyExpanded ? 'bi-chevron-right' : 'bi-chevron-down');
+    });
+}
+
+function toggleRowOutput(rowNum) {
+    // Toggle all step outputs in this row
+    const row = document.querySelector(`tr[data-row="${rowNum}"]`);
+    if (!row) return;
+
+    const contents = row.querySelectorAll('.step-output-content');
+    const anyExpanded = Array.from(contents).some(c => !c.classList.contains('collapsed'));
+
+    contents.forEach(content => {
+        content.classList.toggle('collapsed', anyExpanded);
+    });
+
+    row.querySelectorAll('.step-output-toggle i').forEach(icon => {
+        icon.classList.remove('bi-chevron-down', 'bi-chevron-right');
+        icon.classList.add(anyExpanded ? 'bi-chevron-right' : 'bi-chevron-down');
+    });
+}
+
+// =========================================================================
+// Variable Exporter
+// =========================================================================
+
+// Store pending exports per step (before saving)
+let pendingExports = {};  // stepId -> Set of paths
+
+// Extract all paths from a JSON object
+function extractJsonPaths(obj, prefix = '', maxDepth = 4) {
+    const paths = [];
+
+    if (maxDepth <= 0) return paths;
+
+    if (obj === null || obj === undefined) {
+        return paths;
+    }
+
+    if (Array.isArray(obj)) {
+        paths.push({ path: prefix, type: 'array', length: obj.length });
+        // Show first item's structure if array is not empty
+        if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
+            const itemPaths = extractJsonPaths(obj[0], prefix + '[0]', maxDepth - 1);
+            paths.push(...itemPaths);
+        }
+    } else if (typeof obj === 'object') {
+        if (prefix) {
+            paths.push({ path: prefix, type: 'object', keys: Object.keys(obj).length });
+        }
+        for (const key of Object.keys(obj)) {
+            const newPath = prefix ? `${prefix}.${key}` : key;
+            const value = obj[key];
+
+            if (value === null) {
+                paths.push({ path: newPath, type: 'null' });
+            } else if (Array.isArray(value)) {
+                paths.push(...extractJsonPaths(value, newPath, maxDepth - 1));
+            } else if (typeof value === 'object') {
+                paths.push(...extractJsonPaths(value, newPath, maxDepth - 1));
+            } else {
+                paths.push({ path: newPath, type: typeof value, sample: String(value).substring(0, 30) });
+            }
+        }
+    } else {
+        paths.push({ path: prefix, type: typeof obj });
+    }
+
+    return paths;
+}
+
+// Render the Variable Exporter for a step's output
+function renderVariableExporter(cell, output, existingExports = []) {
+    const exporter = cell.querySelector('.variable-exporter');
+    const pathsList = cell.querySelector('.export-paths-list');
+    const exportedSection = cell.querySelector('.exported-vars');
+    const exportedList = cell.querySelector('.exported-vars-list');
+    const saveBtn = cell.querySelector('.save-exports-btn');
+
+    if (!exporter || !pathsList) return;
+
+    // Check if output is valid JSON object
+    if (!output || typeof output !== 'object' || Object.keys(output).length === 0) {
+        exporter.style.display = 'none';
+        return;
+    }
+
+    const stepId = cell.dataset.stepId;
+    const stepName = cell.dataset.stepName;
+
+    // Initialize pending exports from existing
+    if (!pendingExports[stepId]) {
+        pendingExports[stepId] = new Set(existingExports);
+    }
+
+    // Extract paths from output
+    const paths = extractJsonPaths(output);
+
+    if (paths.length === 0) {
+        exporter.style.display = 'none';
+        return;
+    }
+
+    exporter.style.display = 'block';
+    pathsList.innerHTML = '';
+
+    // Render each path
+    paths.forEach(({ path, type, length, keys, sample }) => {
+        const fullPath = `${stepName}.output.${path}`;
+        const isExported = pendingExports[stepId].has(path);
+
+        const item = document.createElement('div');
+        item.className = 'export-path-item' + (isExported ? ' exported' : '');
+        item.dataset.path = path;
+        item.onclick = (e) => {
+            e.stopPropagation();
+            toggleExportPath(stepId, path, item);
+        };
+
+        let typeLabel = type;
+        if (type === 'array') typeLabel = `array[${length}]`;
+        else if (type === 'object') typeLabel = `object{${keys}}`;
+
+        item.innerHTML = `
+            <span class="export-check" style="${isExported ? '' : 'visibility: hidden'}">
+                <i class="bi bi-check-lg"></i>
+            </span>
+            <span class="path-name" title="{${fullPath}}">${path}</span>
+            <span class="path-type">${typeLabel}</span>
+        `;
+
+        pathsList.appendChild(item);
+    });
+
+    // Update exported chips display
+    updateExportedChips(cell, stepId, stepName);
+}
+
+function toggleExportPath(stepId, path, itemEl) {
+    if (!pendingExports[stepId]) {
+        pendingExports[stepId] = new Set();
+    }
+
+    const checkEl = itemEl.querySelector('.export-check');
+
+    if (pendingExports[stepId].has(path)) {
+        pendingExports[stepId].delete(path);
+        itemEl.classList.remove('exported');
+        checkEl.style.visibility = 'hidden';
+    } else {
+        pendingExports[stepId].add(path);
+        itemEl.classList.add('exported');
+        checkEl.style.visibility = 'visible';
+    }
+
+    // Show save button and update chips
+    const cell = itemEl.closest('.step-cell');
+    const saveBtn = cell.querySelector('.save-exports-btn');
+    if (saveBtn) {
+        saveBtn.style.display = pendingExports[stepId].size > 0 ? '' : 'none';
+    }
+
+    updateExportedChips(cell, stepId, cell.dataset.stepName);
+}
+
+function updateExportedChips(cell, stepId, stepName) {
+    const exportedSection = cell.querySelector('.exported-vars');
+    const exportedList = cell.querySelector('.exported-vars-list');
+
+    if (!exportedSection || !exportedList) return;
+
+    const exports = pendingExports[stepId] || new Set();
+
+    if (exports.size === 0) {
+        exportedSection.style.display = 'none';
+        return;
+    }
+
+    exportedSection.style.display = 'block';
+    exportedList.innerHTML = '';
+
+    exports.forEach(path => {
+        const chip = document.createElement('span');
+        chip.className = 'exported-var-chip';
+        chip.innerHTML = `
+            {${stepName}.output.${path}}
+            <span class="remove-export" onclick="event.stopPropagation(); removeExport('${stepId}', '${path}', this);">
+                <i class="bi bi-x"></i>
+            </span>
+        `;
+        exportedList.appendChild(chip);
+    });
+}
+
+function removeExport(stepId, path, chipRemoveEl) {
+    if (pendingExports[stepId]) {
+        pendingExports[stepId].delete(path);
+    }
+
+    const cell = chipRemoveEl.closest('.step-cell');
+    const pathItem = cell.querySelector(`.export-path-item[data-path="${path}"]`);
+    if (pathItem) {
+        pathItem.classList.remove('exported');
+        pathItem.querySelector('.export-check').style.visibility = 'hidden';
+    }
+
+    updateExportedChips(cell, stepId, cell.dataset.stepName);
+
+    // Update save button visibility
+    const saveBtn = cell.querySelector('.save-exports-btn');
+    if (saveBtn) {
+        saveBtn.style.display = (pendingExports[stepId]?.size || 0) > 0 ? '' : 'none';
+    }
+}
+
+async function saveExportedVariables(saveBtn) {
+    const cell = saveBtn.closest('.step-cell');
+    const stepId = cell.dataset.stepId;
+    const stepName = cell.dataset.stepName;
+
+    const exports = Array.from(pendingExports[stepId] || []);
+
+    // Build mappings object
+    const mappings = {};
+    exports.forEach(path => {
+        // Create a simple alias (last part of path)
+        const alias = path.replace(/\[\d+\]/g, '').split('.').pop();
+        mappings[alias] = {
+            path: path,
+            fullPath: `${stepName}.output.${path}`
+        };
+    });
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width: 10px; height: 10px;"></span>';
+
+    try {
+        const response = await fetch('/pipelines/savestepmappings/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: stepId,
+                mappings: JSON.stringify(mappings)
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('Variables exported!', 'success');
+            saveBtn.innerHTML = '<i class="bi bi-check"></i> Saved';
+            saveBtn.classList.remove('btn-outline-success');
+            saveBtn.classList.add('btn-success');
+
+            setTimeout(() => {
+                saveBtn.innerHTML = '<i class="bi bi-check"></i> Save';
+                saveBtn.classList.remove('btn-success');
+                saveBtn.classList.add('btn-outline-success');
+                saveBtn.disabled = false;
+            }, 2000);
+        } else {
+            alert('Failed to save: ' + (result.error || 'Unknown error'));
+            saveBtn.innerHTML = '<i class="bi bi-check"></i> Save';
+            saveBtn.disabled = false;
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+        saveBtn.innerHTML = '<i class="bi bi-check"></i> Save';
+        saveBtn.disabled = false;
+    }
+}
+
+// =========================================================================
+// Modal Variable Exporter Functions
+// =========================================================================
+
+let modalExporterStepId = null;
+let modalExporterStepName = null;
+
+function showModalVariableExporter(stepId, stepName, output, existingMappings = [], isTestPreview = false) {
+    const card = document.getElementById('variableExporterCard');
+    const preview = document.getElementById('exporterOutputPreview');
+    const pathsList = document.getElementById('modalExportPathsList');
+
+    if (!card || !output || typeof output !== 'object') {
+        hideModalVariableExporter();
+        return;
+    }
+
+    modalExporterStepId = stepId;
+    modalExporterStepName = stepName;
+
+    // Update description based on whether this is test output or actual run output
+    const descEl = card.querySelector('.card-body > p.text-muted');
+    if (descEl) {
+        if (isTestPreview) {
+            descEl.innerHTML = '<i class="bi bi-lightning-fill text-warning me-1"></i><strong>Test Output Preview:</strong> These are the paths from your test expression. Save the step and re-run to update actual output.';
+        } else {
+            descEl.innerHTML = 'This step has output from the current run. Click paths to export them for subsequent steps:';
+        }
+    }
+
+    // Always reinitialize pending exports from server data to ensure we show the latest saved mappings
+    pendingExports[stepId] = new Set();
+    // Load existing mappings from server
+    if (existingMappings && typeof existingMappings === 'object') {
+        Object.values(existingMappings).forEach(m => {
+            if (m.path) pendingExports[stepId].add(m.path);
+        });
+    }
+
+    // Show the output preview
+    preview.textContent = JSON.stringify(output, null, 2);
+
+    // Extract and render paths
+    const paths = extractJsonPaths(output);
+    pathsList.innerHTML = '';
+
+    if (paths.length === 0) {
+        pathsList.innerHTML = '<p class="text-muted small">No exportable paths found in output.</p>';
+    } else {
+        paths.forEach(({ path, type, length, keys, sample }) => {
+            const isExported = pendingExports[stepId].has(path);
+
+            const item = document.createElement('div');
+            item.className = 'export-path-item' + (isExported ? ' exported' : '');
+            item.dataset.path = path;
+            item.onclick = () => toggleModalExportPath(stepId, path, item);
+
+            let typeLabel = type;
+            if (type === 'array') typeLabel = `array[${length}]`;
+            else if (type === 'object') typeLabel = `object{${keys}}`;
+
+            item.innerHTML = `
+                <span class="export-check" style="${isExported ? '' : 'visibility: hidden'}">
+                    <i class="bi bi-check-lg"></i>
+                </span>
+                <span class="path-name" title="{${stepName}.output.${path}}">${path}</span>
+                <span class="path-type">${typeLabel}</span>
+            `;
+
+            pathsList.appendChild(item);
+        });
+    }
+
+    // Update exported chips
+    updateModalExportedChips();
+
+    // Show the card
+    card.style.display = 'block';
+}
+
+function hideModalVariableExporter() {
+    const card = document.getElementById('variableExporterCard');
+    if (card) {
+        card.style.display = 'none';
+    }
+    modalExporterStepId = null;
+    modalExporterStepName = null;
+}
+
+// =========================================================================
+// Universal Input Preview (for ALL step types)
+// =========================================================================
+
+function showUniversalInputPreview() {
+    const card = document.getElementById('universalInputPreview');
+    if (!card) return;
+
+    // Only show if we're in debug mode
+    if (typeof activeRunId === 'undefined' || !activeRunId) {
+        card.style.display = 'none';
+        return;
+    }
+
+    card.style.display = 'block';
+    refreshInputPreview();
+}
+
+function hideUniversalInputPreview() {
+    const card = document.getElementById('universalInputPreview');
+    if (card) {
+        card.style.display = 'none';
+    }
+}
+
+function refreshInputPreview() {
+    const stepId = document.getElementById('stepId').value;
+    const row = parseInt(document.getElementById('stepRow').value);
+    const col = parseInt(document.getElementById('stepCol').value);
+    const inputSource = document.getElementById('inputSource').value;
+
+    const previewCard = document.getElementById('universalInputPreview');
+    const contentEl = document.getElementById('inputPreviewContent');
+    const sourceTextEl = document.getElementById('inputPreviewSourceText');
+    const badgeEl = document.getElementById('inputPreviewBadge');
+
+    if (!previewCard || !contentEl) return;
+
+    // Only show if we're in debug mode
+    if (typeof activeRunId === 'undefined' || !activeRunId) {
+        previewCard.style.display = 'none';
+        return;
+    }
+
+    previewCard.style.display = 'block';
+
+    // Update badge based on input source
+    if (badgeEl) {
+        if (inputSource === 'stdin') {
+            badgeEl.textContent = 'STDIN';
+            badgeEl.className = 'badge bg-info ms-1';
+        } else if (inputSource === 'context') {
+            badgeEl.textContent = 'Context';
+            badgeEl.className = 'badge bg-secondary ms-1';
+        } else if (inputSource === 'getfrom') {
+            badgeEl.textContent = 'Get From';
+            badgeEl.className = 'badge bg-warning ms-1';
+        }
+    }
+
+    console.log('refreshInputPreview called:', { stepId, row, col, inputSource });
+    console.log('activeRunId:', activeRunId);
+    console.log('stepOutputs:', stepOutputs);
+
+    // Find the previous step based on input source
+    let prevStepOutput = null;
+    let prevStepName = null;
+    let foundStepId = null;
+
+    if (inputSource === 'stdin' || inputSource === 'previous' || inputSource === 'context') {
+        // Find the step that would be "previous" based on flow
+        const prevCol = col - 1;
+
+        // First try the cell directly to the left
+        if (prevCol >= 0) {
+            const prevCell = document.querySelector(`td[data-row="${row}"][data-col="${prevCol}"] .step-cell`);
+            if (prevCell) {
+                foundStepId = prevCell.dataset.stepId;
+                prevStepName = prevCell.dataset.stepName;
+                console.log('Found prev cell:', { foundStepId, prevStepName });
+            }
+        }
+
+        // If no cell to the left, look at the last cell of the previous row
+        if (!foundStepId && row > 0) {
+            const prevRowCells = document.querySelectorAll(`td[data-row="${row - 1}"] .step-cell`);
+            if (prevRowCells.length > 0) {
+                const lastCell = prevRowCells[prevRowCells.length - 1];
+                foundStepId = lastCell.dataset.stepId;
+                prevStepName = lastCell.dataset.stepName;
+                console.log('Found prev row cell:', { foundStepId, prevStepName });
+            }
+        }
+
+        // Check if we have output for this step
+        if (foundStepId && stepOutputs[foundStepId]) {
+            const outputData = stepOutputs[foundStepId];
+            // Prefer 'output' object, fall back to 'stdout'
+            if (outputData.output && Object.keys(outputData.output).length > 0) {
+                prevStepOutput = outputData.output;
+            } else if (outputData.stdout) {
+                // Try to parse stdout as JSON
+                try {
+                    prevStepOutput = JSON.parse(outputData.stdout);
+                } catch (e) {
+                    prevStepOutput = outputData.stdout;  // Use raw string if not JSON
+                }
+            }
+            console.log('Found output for step:', prevStepOutput);
+        }
+    } else if (inputSource === 'getfrom') {
+        const getFromStep = document.querySelector('[name="input_getfrom_step"]').value;
+        // Find the step by name
+        const sourceCell = document.querySelector(`.step-cell[data-step-name="${getFromStep}"]`);
+        if (sourceCell) {
+            foundStepId = sourceCell.dataset.stepId;
+            prevStepName = getFromStep;
+            if (stepOutputs[foundStepId]) {
+                const outputData = stepOutputs[foundStepId];
+                if (outputData.output && Object.keys(outputData.output).length > 0) {
+                    prevStepOutput = outputData.output;
+                } else if (outputData.stdout) {
+                    try {
+                        prevStepOutput = JSON.parse(outputData.stdout);
+                    } catch (e) {
+                        prevStepOutput = outputData.stdout;
+                    }
+                }
+            }
+        }
+    }
+
+    if (prevStepOutput) {
+        const outputStr = typeof prevStepOutput === 'string'
+            ? prevStepOutput
+            : JSON.stringify(prevStepOutput, null, 2);
+        contentEl.textContent = outputStr;
+        contentEl.classList.remove('text-muted');
+        sourceTextEl.innerHTML = `<strong>Input from:</strong> <code>${prevStepName}</code> (${inputSource})`;
+    } else {
+        // Show what we found for debugging
+        const availableKeys = Object.keys(stepOutputs || {});
+        contentEl.textContent = `(Previous step has not run yet or has no output)\n\nDebug info:\n- Looking for step: ${prevStepName || 'unknown'}\n- Step ID: ${foundStepId || 'not found'}\n- Available outputs: ${availableKeys.join(', ') || 'none'}`;
+        contentEl.classList.add('text-muted');
+        sourceTextEl.textContent = `Input source: ${inputSource} (no data available yet)`;
+    }
+}
+
+// Update input preview when input source changes
+document.getElementById('inputSource')?.addEventListener('change', function() {
+    refreshInputPreview();
+});
+
+function showSavedMappingsOnly(stepId, stepName, savedMappings) {
+    const card = document.getElementById('variableExporterCard');
+    const preview = document.getElementById('exporterOutputPreview');
+    const pathsList = document.getElementById('modalExportPathsList');
+
+    if (!card) return;
+
+    modalExporterStepId = stepId;
+    modalExporterStepName = stepName;
+
+    // Initialize pending exports from saved mappings
+    pendingExports[stepId] = new Set();
+    if (savedMappings && typeof savedMappings === 'object') {
+        Object.values(savedMappings).forEach(m => {
+            if (m.path) pendingExports[stepId].add(m.path);
+        });
+    }
+
+    // Show message instead of output preview
+    preview.textContent = '(No output from current run - showing previously saved exports)';
+    preview.style.color = '#6c757d';
+    preview.style.fontStyle = 'italic';
+
+    // Show saved paths as non-interactive items
+    pathsList.innerHTML = '';
+    if (pendingExports[stepId].size > 0) {
+        pendingExports[stepId].forEach(path => {
+            const item = document.createElement('div');
+            item.className = 'export-path-item exported';
+            item.innerHTML = `
+                <span class="export-check">
+                    <i class="bi bi-check-lg"></i>
+                </span>
+                <span class="path-name">{${stepName}.output.${path}}</span>
+                <span class="path-type">saved</span>
+            `;
+            pathsList.appendChild(item);
+        });
+    } else {
+        pathsList.innerHTML = '<p class="text-muted small mb-0">No exports saved for this step.</p>';
+    }
+
+    // Update exported chips
+    updateModalExportedChips();
+
+    // Show the card
+    card.style.display = 'block';
+}
+
+function toggleModalExportPath(stepId, path, itemEl) {
+    if (!pendingExports[stepId]) {
+        pendingExports[stepId] = new Set();
+    }
+
+    const checkEl = itemEl.querySelector('.export-check');
+
+    if (pendingExports[stepId].has(path)) {
+        pendingExports[stepId].delete(path);
+        itemEl.classList.remove('exported');
+        checkEl.style.visibility = 'hidden';
+    } else {
+        pendingExports[stepId].add(path);
+        itemEl.classList.add('exported');
+        checkEl.style.visibility = 'visible';
+    }
+
+    updateModalExportedChips();
+}
+
+function updateModalExportedChips() {
+    const exportedSection = document.getElementById('modalExportedVars');
+    const exportedList = document.getElementById('modalExportedVarsList');
+    const countBadge = document.getElementById('exportCount');
+
+    if (!exportedSection || !exportedList || !modalExporterStepId) return;
+
+    const exports = pendingExports[modalExporterStepId] || new Set();
+
+    countBadge.textContent = exports.size;
+
+    if (exports.size === 0) {
+        exportedSection.style.display = 'none';
+        return;
+    }
+
+    exportedSection.style.display = 'block';
+    exportedList.innerHTML = '';
+
+    exports.forEach(path => {
+        const chip = document.createElement('span');
+        chip.className = 'exported-var-chip';
+        chip.innerHTML = `
+            {${modalExporterStepName}.output.${path}}
+            <span class="remove-export" onclick="removeModalExport('${path}')">
+                <i class="bi bi-x"></i>
+            </span>
+        `;
+        exportedList.appendChild(chip);
+    });
+}
+
+function removeModalExport(path) {
+    if (!modalExporterStepId || !pendingExports[modalExporterStepId]) return;
+
+    pendingExports[modalExporterStepId].delete(path);
+
+    const pathItem = document.querySelector(`#modalExportPathsList .export-path-item[data-path="${path}"]`);
+    if (pathItem) {
+        pathItem.classList.remove('exported');
+        pathItem.querySelector('.export-check').style.visibility = 'hidden';
+    }
+
+    updateModalExportedChips();
+}
+
+async function saveExportedVariablesFromModal() {
+    if (!modalExporterStepId || !modalExporterStepName) {
+        alert('No step selected for export');
+        return;
+    }
+
+    const exports = Array.from(pendingExports[modalExporterStepId] || []);
+    const saveBtn = document.getElementById('saveExportsBtn');
+
+    // Build mappings object
+    const mappings = {};
+    exports.forEach(path => {
+        const alias = path.replace(/\[\d+\]/g, '').split('.').pop();
+        mappings[alias] = {
+            path: path,
+            fullPath: `${modalExporterStepName}.output.${path}`
+        };
+    });
+
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+    try {
+        const response = await fetch('/pipelines/savestepmappings/' + pipelineId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: new URLSearchParams({
+                csrf_token: csrfToken,
+                step_id: modalExporterStepId,
+                mappings: JSON.stringify(mappings)
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(`Exported ${exports.length} variable(s)!`, 'success');
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Saved!';
+            saveBtn.classList.remove('btn-success');
+            saveBtn.classList.add('btn-outline-success');
+
+            setTimeout(() => {
+                saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Exported Variables';
+                saveBtn.classList.remove('btn-outline-success');
+                saveBtn.classList.add('btn-success');
+                saveBtn.disabled = false;
+            }, 2000);
+        } else {
+            alert('Failed to save: ' + (result.error || 'Unknown error'));
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Exported Variables';
+            saveBtn.disabled = false;
+        }
+    } catch (err) {
+        alert('Error: ' + err.message);
+        saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Exported Variables';
+        saveBtn.disabled = false;
+    }
+}
+
+function onRunCompleted(run) {
+    // IMPORTANT: Set activeRunId to null FIRST to prevent any race conditions
+    const completedRunId = activeRunId;
+    activeRunId = null;
+    stopRunPolling();
+
+    // Update status bar to show completion
+    const statusBar = document.getElementById('runStatusBar');
+    if (statusBar) {
+        statusBar.classList.remove('alert-info');
+        statusBar.classList.add('alert-success');
+    }
+
+    const statusLabel = document.getElementById('runStatusLabel');
+    if (statusLabel) {
+        statusLabel.textContent = 'Completed!';
+    }
+
+    const spinner = document.getElementById('runStatusSpinner');
+    if (spinner) {
+        spinner.style.display = 'none';
+    }
+
+    const cancelBtn = document.getElementById('cancelRunBtn');
+    if (cancelBtn) {
+        cancelBtn.style.display = 'none';
+    }
+
+    // Hide the debugger toolbar since the run is done
+    const debuggerToolbar = document.getElementById('debuggerToolbar');
+    if (debuggerToolbar) {
+        debuggerToolbar.style.display = 'none';
+    }
+
+    // Expand all output sections
+    document.querySelectorAll('.step-output-content').forEach(content => {
+        content.classList.remove('collapsed');
+    });
+    document.querySelectorAll('.step-output-toggle i').forEach(icon => {
+        icon.classList.remove('bi-chevron-right');
+        icon.classList.add('bi-chevron-down');
+    });
+
+    showToast('Pipeline completed successfully!', 'success');
+
+    // Show completion options in the status bar instead of a popup
+    if (statusBar) {
+        const existingActions = statusBar.querySelector('.completion-actions');
+        if (existingActions) existingActions.remove();
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'completion-actions mt-2';
+        actionsDiv.innerHTML = `
+            <a href="/pipelines/viewrun/${completedRunId}" class="btn btn-sm btn-success me-2">
+                <i class="bi bi-eye"></i> View Full Details
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="location.reload()">
+                <i class="bi bi-arrow-clockwise"></i> Start New Debug Run
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary ms-2" onclick="showRunProgressBar(false)">
+                <i class="bi bi-x"></i> Close
+            </button>
+        `;
+        statusBar.appendChild(actionsDiv);
+    }
+}
+
+function onRunFailed(run, stepRuns) {
+    showRunProgressBar(false);
+
+    // Find the failed step
+    const failedStep = stepRuns.find(sr => sr.status === 'failed');
+
+    // Show error modal
+    showRunErrorModal(run, failedStep);
+
+    activeRunId = null;
+}
+
+function showRunErrorModal(run, failedStep) {
+    // Create error modal if it doesn't exist
+    let modal = document.getElementById('runErrorModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'runErrorModal';
+        modal.className = 'modal fade';
+        modal.tabIndex = -1;
+        modal.innerHTML = `
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title"><i class="bi bi-exclamation-triangle"></i> Pipeline Failed</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body" id="runErrorModalBody">
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <a href="#" class="btn btn-primary" id="runErrorViewDetails">
+                            <i class="bi bi-eye"></i> View Full Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    // Populate error details
+    const body = document.getElementById('runErrorModalBody');
+    body.innerHTML = `
+        <div class="alert alert-danger mb-3">
+            <strong>Error:</strong> ${run.error_message || 'Unknown error'}
+        </div>
+        ${failedStep ? `
+        <h6>Failed Step: <code>${failedStep.step_name}</code></h6>
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Position</dt>
+            <dd class="col-sm-9">Row ${failedStep.row + 1}, Column ${failedStep.col + 1}</dd>
+            ${failedStep.exit_code !== null ? `
+            <dt class="col-sm-3">Exit Code</dt>
+            <dd class="col-sm-9"><code>${failedStep.exit_code}</code></dd>
+            ` : ''}
+        </dl>
+        ${failedStep.error_message ? `
+        <div class="mt-3">
+            <strong>Step Error:</strong>
+            <pre class="bg-dark text-danger p-2 rounded mt-1" style="max-height: 200px; overflow: auto;">${failedStep.error_message}</pre>
+        </div>
+        ` : ''}
+        ${failedStep.stderr ? `
+        <div class="mt-3">
+            <strong>STDERR:</strong>
+            <pre class="bg-dark text-warning p-2 rounded mt-1" style="max-height: 200px; overflow: auto;">${failedStep.stderr}</pre>
+        </div>
+        ` : ''}
+        ` : ''}
+    `;
+
+    document.getElementById('runErrorViewDetails').href = '/pipelines/viewrun/' + run.id;
+
+    new bootstrap.Modal(modal).show();
+}
+
+function onRunCancelled() {
+    showRunProgressBar(false);
+    clearStepStates();
+    showToast('Run cancelled', 'info');
+    activeRunId = null;
+}
+
+async function continueInteractiveRun() {
+    if (!activeRunId) {
+        showToast('No active run to continue', 'info');
+        return;
+    }
+
+    const continueBtn = document.getElementById('continueRunBtn');
+    if (continueBtn) {
+        continueBtn.disabled = true;
+        continueBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Continuing...';
+    }
+
+    try {
+        const response = await fetch('/pipelines/resumerun/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: 'csrf_token=' + encodeURIComponent(csrfToken)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('Pipeline continuing...', 'success');
+            // Hide continue button, show spinner
+            if (continueBtn) {
+                continueBtn.style.display = 'none';
+            }
+            const spinner = document.getElementById('runStatusSpinner');
+            if (spinner) spinner.style.display = '';
+
+            // Resume polling
+            startRunPolling();
+        } else {
+            alert('Failed to continue: ' + (result.error || result.message || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error continuing run: ' + err.message);
+    } finally {
+        if (continueBtn) {
+            continueBtn.disabled = false;
+            continueBtn.innerHTML = '<i class="bi bi-play-fill"></i> Continue';
+        }
+    }
+}
+
+async function cancelInteractiveRun() {
+    if (!activeRunId) {
+        showToast('No active run to cancel', 'info');
+        return;
+    }
+
+    if (!confirm('Cancel the current run?')) return;
+
+    const cancelBtn = document.getElementById('cancelRunBtn');
+    if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    }
+
+    try {
+        const response = await fetch('/pipelines/cancelrun/' + activeRunId, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': csrfToken
+            },
+            body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&run_id=' + activeRunId
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            stopRunPolling();
+            onRunCancelled();
+        } else {
+            alert('Failed to cancel: ' + (result.error || result.message || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Error cancelling run: ' + err.message);
+    } finally {
+        if (cancelBtn) {
+            cancelBtn.disabled = false;
+            cancelBtn.innerHTML = '<i class="bi bi-x-circle"></i> Cancel';
+        }
     }
 }
 

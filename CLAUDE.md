@@ -616,13 +616,26 @@ ssh claudeuser@173.231.12.84
 
 ## Ollama + Claude Code Integration
 
-AI agents can use local Ollama models instead of Anthropic's Claude API. This requires models that properly support MCP (Model Context Protocol) tool calling.
+AI agents can use local Ollama models instead of Anthropic's Claude API. **Ollama natively supports Anthropic API format** including tool calling, so no proxy is needed.
+
+### Quick Start
+
+```bash
+# Use the claude-ollama wrapper script:
+claude-ollama
+
+# Or set environment variables manually:
+export ANTHROPIC_BASE_URL=http://localhost:11434
+export ANTHROPIC_API_KEY=ollama
+claude --model qwen3-coder:30b
+```
 
 ### Verified Working Models
 
-| Model | Size | MCP Tool Calling | Notes |
-|-------|------|------------------|-------|
+| Model | Size | Tool Calling | Notes |
+|-------|------|--------------|-------|
 | `qwen3-coder:30b` | 18GB | ✅ Works | MoE model (30B params, 3.3B active). Requires 24GB+ VRAM. |
+| `devstral:latest` | ~14GB | ✅ Works | Mistral's code model. Good alternative. |
 
 ### Models That Do NOT Work
 
@@ -631,15 +644,10 @@ AI agents can use local Ollama models instead of Anthropic's Claude API. This re
 | `llama3-groq-tool-use` | Outputs JSON text that looks like tool calls but doesn't actually invoke MCP tools |
 | `llama3.2` | Same issue - describes tool calls in text but doesn't execute them |
 
-### Environment Variables
+### Known Limitations
 
-When using Ollama with Claude Code CLI, set these environment variables:
-
-```bash
-export ANTHROPIC_AUTH_TOKEN=ollama
-export ANTHROPIC_API_KEY=""
-export ANTHROPIC_BASE_URL=http://localhost:11434
-```
+- **Internal haiku requests fail**: Claude CLI internally calls `claude-haiku-4-5-20251001` for summarization/token counting. These show 404 errors but are non-fatal.
+- **No streaming translation needed**: Ollama handles Anthropic streaming format natively.
 
 ### Agent Configuration
 

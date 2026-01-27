@@ -61,6 +61,12 @@ class PipelineExecutor {
     private bool $interactiveMode = false;
     private ?int $resumeFromStepIndex = null;  // When resuming, start from this step index
 
+    // Debug/step-by-step mode - pause after EVERY step regardless of mappings
+    private bool $debugMode = false;
+
+    // Single-step execution mode - execute only one step then pause
+    private bool $singleStepMode = false;
+
     // File storage for run outputs (images, CSVs, binary files, etc.)
     private ?string $runDirectory = null;
     private const RUN_FILES_BASE = '/tmp/pipeline-runs';
@@ -178,6 +184,339 @@ class PipelineExecutor {
     }
 
     /**
+     * Enable debug/step-by-step mode (pause after EVERY step)
+     */
+    public function setDebugMode(bool $enabled = true): self {
+        $this->debugMode = $enabled;
+        return $this;
+    }
+
+    /**
+     * Check if debug mode is enabled
+     */
+    public function isDebugMode(): bool {
+        return $this->debugMode;
+    }
+
+    /**
+     * Enable single-step mode (execute exactly one step then pause)
+     */
+    public function setSingleStepMode(bool $enabled = true): self {
+        $this->singleStepMode = $enabled;
+        return $this;
+    }
+
+    /**
+     * Execute exactly one step and pause
+     *
+     * This is the core method for the debugger's "Next Step" button.
+     * Returns information about what was executed and what comes next.
+     *
+     * @return array ['success' => bool, 'step_executed' => [...], 'next_step' => [...], 'run_status' => string]
+     */
+    public function stepNext(): array {
+        try {
+            // Enable single-step mode
+            $this->singleStepMode = true;
+
+            // Load run and pipeline
+            $this->run = Bean::load('pipelineruns', $this->runId);
+            if (!$this->run->id) {
+                return ['success' => false, 'error' => "Run not found: {$this->runId}"];
+            }
+
+            // Check if run is in a resumable state
+            if (!in_array($this->run->status, ['paused', 'pending', 'running'])) {
+                return [
+                    'success' => false,
+                    'error' => "Run cannot be stepped (status: {$this->run->status})",
+                    'run_status' => $this->run->status
+                ];
+            }
+
+            $this->pipeline = Bean::load('pipelines', $this->run->pipelines_id);
+            if (!$this->pipeline->id) {
+                return ['success' => false, 'error' => "Pipeline not found for run: {$this->runId}"];
+            }
+
+            // Load step lookups
+            $this->loadStepLookups();
+
+            // Load context from run
+            $this->context = json_decode($this->run->context_json ?: '{}', true);
+
+            // Ensure run directory is in context
+            $this->context['run_directory'] = $this->getRunDirectory();
+
+            // Set interactive mode (required for pausing to work)
+            $this->interactiveMode = true;
+
+            // Check if this is a fresh run or resuming from a paused state
+            $awaitingStepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                [$this->run->id]
+            );
+
+            if ($awaitingStepRun) {
+                // Resuming from a paused step - clear the awaiting flag and find next step
+                $awaitingStepRun->awaiting_input = 0;
+                $awaitingStepRun->updated_at = date('Y-m-d H:i:s');
+                Bean::store($awaitingStepRun);
+
+                // Auto-apply saved mappings for the step that was awaiting
+                $pausedStep = Bean::load('pipelinesteps', $awaitingStepRun->pipelinesteps_id);
+                $stepOutput = json_decode($awaitingStepRun->output_json ?: '{}', true);
+                $this->autoApplySavedMappings($pausedStep, $stepOutput);
+
+                // Load outputs from completed steps
+                $this->loadCompletedStepOutputs();
+
+                // Ensure the paused step's output is LAST in the array so it's the "previous step" for stdin
+                // This is important because prepareStepInput uses end($this->stepOutputs) for stdin passthrough
+                unset($this->stepOutputs[$pausedStep->step_name]);
+                $this->stepOutputs[$pausedStep->step_name] = $stepOutput;
+
+                // Find the resume index
+                $stepsArray = array_values($this->steps);
+                $pausedStepIndex = null;
+                foreach ($stepsArray as $idx => $step) {
+                    if ($step->id == $awaitingStepRun->pipelinesteps_id) {
+                        $pausedStepIndex = $idx;
+                        break;
+                    }
+                }
+
+                if ($pausedStepIndex === null) {
+                    return ['success' => false, 'error' => 'Could not find paused step in step list'];
+                }
+
+                $this->resumeFromStepIndex = $pausedStepIndex + 1;
+
+            } else if ($this->run->status === 'pending') {
+                // First step of a fresh run
+                $this->run->status = 'running';
+                $this->run->started_at = date('Y-m-d H:i:s');
+                $this->run->steps_total = count($this->steps);
+                $this->run->updated_at = date('Y-m-d H:i:s');
+                Bean::store($this->run);
+
+                // Initialize step runs if not already done
+                $existingStepRuns = Bean::count('pipelinestepruns',
+                    ' pipelineruns_id = ? ',
+                    [$this->run->id]
+                );
+                if ($existingStepRuns === 0) {
+                    $this->initializeStepRuns();
+                }
+
+                $this->resumeFromStepIndex = 0;
+            } else {
+                // Running state but no awaiting step - shouldn't happen normally
+                // Try to continue from last completed step
+                $lastCompletedStep = Bean::findOne('pipelinestepruns',
+                    ' pipelineruns_id = ? AND status = ? ORDER BY id DESC ',
+                    [$this->run->id, 'success']
+                );
+
+                if ($lastCompletedStep) {
+                    $stepsArray = array_values($this->steps);
+                    foreach ($stepsArray as $idx => $step) {
+                        if ($step->id == $lastCompletedStep->pipelinesteps_id) {
+                            $this->resumeFromStepIndex = $idx + 1;
+                            break;
+                        }
+                    }
+                }
+
+                if ($this->resumeFromStepIndex === null) {
+                    $this->resumeFromStepIndex = 0;
+                }
+            }
+
+            // Update run status to running
+            $this->run->status = 'running';
+            $this->run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($this->run);
+
+            // Execute steps - will stop after one step due to singleStepMode
+            $this->executeSteps();
+
+            // Reload run to get updated status
+            $this->run = Bean::load('pipelineruns', $this->runId);
+
+            // Get the step that was just executed
+            $executedStepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND (status = ? OR status = ? OR awaiting_input = 1) ORDER BY id DESC ',
+                [$this->run->id, 'success', 'failure']
+            );
+
+            $executedStepInfo = null;
+            if ($executedStepRun) {
+                $stepDef = Bean::load('pipelinesteps', $executedStepRun->pipelinesteps_id);
+                $executedStepInfo = [
+                    'step_id' => $executedStepRun->pipelinesteps_id,
+                    'step_name' => $executedStepRun->step_name,
+                    'label' => $stepDef->label ?? $executedStepRun->step_name,
+                    'row' => (int) $executedStepRun->row,
+                    'col' => (int) $executedStepRun->col,
+                    'status' => $executedStepRun->status,
+                    'output' => json_decode($executedStepRun->output_json ?: '{}', true),
+                    'stdout' => $executedStepRun->stdout,
+                    'stderr' => $executedStepRun->stderr,
+                    'exit_code' => $executedStepRun->exit_code,
+                    'duration_ms' => $executedStepRun->duration_ms,
+                    'error_message' => $executedStepRun->error_message
+                ];
+            }
+
+            // Calculate next step info
+            $nextStepInfo = $this->calculateNextStep();
+
+            return [
+                'success' => true,
+                'step_executed' => $executedStepInfo,
+                'next_step' => $nextStepInfo,
+                'run_status' => $this->run->status,
+                'steps_completed' => $this->run->steps_completed,
+                'steps_total' => $this->run->steps_total,
+                'progress_percent' => $this->run->progress_percent
+            ];
+
+        } catch (PipelinePausedException $e) {
+            // Step executed and paused - this is expected
+            $this->run = Bean::load('pipelineruns', $this->runId);
+
+            $executedStepRun = Bean::load('pipelinestepruns', $e->getStepRunId());
+            $stepDef = Bean::load('pipelinesteps', $executedStepRun->pipelinesteps_id);
+
+            $executedStepInfo = [
+                'step_id' => $executedStepRun->pipelinesteps_id,
+                'step_name' => $executedStepRun->step_name,
+                'label' => $stepDef->label ?? $executedStepRun->step_name,
+                'row' => (int) $executedStepRun->row,
+                'col' => (int) $executedStepRun->col,
+                'status' => $executedStepRun->status,
+                'output' => $e->getStepOutput(),
+                'stdout' => $executedStepRun->stdout,
+                'stderr' => $executedStepRun->stderr,
+                'exit_code' => $executedStepRun->exit_code,
+                'duration_ms' => $executedStepRun->duration_ms
+            ];
+
+            $nextStepInfo = $this->calculateNextStep();
+
+            return [
+                'success' => true,
+                'step_executed' => $executedStepInfo,
+                'next_step' => $nextStepInfo,
+                'run_status' => 'paused',
+                'steps_completed' => $this->run->steps_completed,
+                'steps_total' => $this->run->steps_total,
+                'progress_percent' => $this->run->progress_percent
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', "Step execution failed: " . $e->getMessage());
+
+            // Reload run to get the current state
+            $this->run = Bean::load('pipelineruns', $this->runId);
+
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'run_status' => $this->run->status ?? 'failed'
+            ];
+        }
+    }
+
+    /**
+     * Calculate what the next step will be based on current state
+     *
+     * @return array|null Next step info or null if pipeline is complete
+     */
+    private function calculateNextStep(): ?array {
+        // Reload steps if needed
+        if (empty($this->steps)) {
+            $this->loadStepLookups();
+        }
+
+        $stepsArray = array_values($this->steps);
+
+        // Find the awaiting step (just paused) or the last completed step
+        $awaitingStepRun = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$this->run->id]
+        );
+
+        if ($awaitingStepRun) {
+            // Find what comes after the awaiting step
+            foreach ($stepsArray as $idx => $step) {
+                if ($step->id == $awaitingStepRun->pipelinesteps_id) {
+                    // Check on_success to determine actual next step
+                    $onSuccess = $step->on_success ?: 'next_col';
+
+                    if ($onSuccess === 'exit') {
+                        // Pipeline will complete
+                        return null;
+                    } elseif (strpos($onSuccess, 'goto:') === 0) {
+                        $target = substr($onSuccess, 5);
+                        if (isset($this->stepsByName[$target])) {
+                            $nextStep = $this->stepsByName[$target];
+                            return [
+                                'step_id' => $nextStep->id,
+                                'step_name' => $nextStep->step_name,
+                                'label' => $nextStep->label ?? $nextStep->step_name,
+                                'row' => (int) $nextStep->row,
+                                'col' => (int) $nextStep->col,
+                                'reason' => "goto:{$target}"
+                            ];
+                        }
+                    }
+
+                    // Default: next step by sequence
+                    if ($idx + 1 < count($stepsArray)) {
+                        $nextStep = $stepsArray[$idx + 1];
+                        return [
+                            'step_id' => $nextStep->id,
+                            'step_name' => $nextStep->step_name,
+                            'label' => $nextStep->label ?? $nextStep->step_name,
+                            'row' => (int) $nextStep->row,
+                            'col' => (int) $nextStep->col,
+                            'reason' => 'next_col'
+                        ];
+                    }
+
+                    // No more steps
+                    return null;
+                }
+            }
+        }
+
+        // Check if there's a pending step
+        $pendingStepRun = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND status = ? ORDER BY row ASC, col ASC ',
+            [$this->run->id, 'pending']
+        );
+
+        if ($pendingStepRun) {
+            $step = Bean::load('pipelinesteps', $pendingStepRun->pipelinesteps_id);
+            if ($step->id) {
+                return [
+                    'step_id' => $step->id,
+                    'step_name' => $step->step_name,
+                    'label' => $step->label ?? $step->step_name,
+                    'row' => (int) $step->row,
+                    'col' => (int) $step->col,
+                    'reason' => 'pending'
+                ];
+            }
+        }
+
+        // All steps completed
+        return null;
+    }
+
+    /**
      * Resume a paused interactive run after user submits mappings
      *
      * @param array $mappings User's field mappings: [['source' => 'data.field', 'target' => 'var_name'], ...]
@@ -261,12 +600,15 @@ class PipelineExecutor {
                 throw new \Exception("Could not find paused step in step list");
             }
 
-            // Store the paused step's output for reference by other steps
-            $pausedStep = $stepsArray[$pausedStepIndex];
-            $this->stepOutputs[$pausedStep->step_name] = $stepOutput;
-
-            // Load outputs from all completed steps before the paused one
+            // Load outputs from all completed steps
             $this->loadCompletedStepOutputs();
+
+            // Ensure the paused step's output is LAST in the array so it's the "previous step" for stdin
+            // This is important because prepareStepInput uses end($this->stepOutputs) for stdin passthrough
+            // We must unset and re-add to move it to the end (PHP arrays maintain insertion order)
+            $pausedStep = $stepsArray[$pausedStepIndex];
+            unset($this->stepOutputs[$pausedStep->step_name]);
+            $this->stepOutputs[$pausedStep->step_name] = $stepOutput;
 
             // Resume from next step
             $this->resumeFromStepIndex = $pausedStepIndex + 1;
@@ -346,13 +688,26 @@ class PipelineExecutor {
 
     /**
      * Check if pipeline should pause after a step (interactive mode)
+     *
+     * In debug mode (step-by-step), pause after EVERY step regardless of mappings.
+     * In normal interactive mode, only pause if step has no saved mappings.
      */
     private function shouldPauseAfterStep($step): bool {
+        // Single-step mode always pauses (used by stepnext endpoint)
+        if ($this->singleStepMode) {
+            return true;
+        }
+
         if (!$this->interactiveMode) {
             return false;
         }
 
-        // Check if step has saved mappings that should auto-apply
+        // Debug mode: pause after EVERY step, regardless of saved mappings
+        if ($this->debugMode) {
+            return true;
+        }
+
+        // Normal interactive mode: only pause if no saved mappings
         $stepDef = Bean::load('pipelinesteps', $step->id);
         if ($stepDef->output_mappings_json) {
             $savedMappings = json_decode($stepDef->output_mappings_json, true);
@@ -1025,23 +1380,23 @@ class PipelineExecutor {
             $stepRun->duration_ms = (int) (($endTime - $startTime) * 1000);
 
             if ($result['success']) {
-                // Ensure stepOutput is always an array (some step types may return strings)
-                $stepOutput = $result['output'] ?? [];
-                if (!is_array($stepOutput)) {
-                    $stepOutput = ['raw' => $stepOutput];
+                // Build stepOutput with proper structure for variable substitution
+                // Variables use paths like {step.output.field} and {step.stdout}
+                $rawOutput = $result['output'] ?? [];
+                if (!is_array($rawOutput)) {
+                    $rawOutput = ['raw' => $rawOutput];
                 }
 
-                // Always include stdout/stderr in output for variable substitution
-                // This allows {step.stdout} and {step.stderr} to work
-                if (isset($result['stdout'])) {
-                    $stepOutput['stdout'] = $result['stdout'];
-                }
-                if (isset($result['stderr'])) {
-                    $stepOutput['stderr'] = $result['stderr'];
-                }
-                if (isset($result['exit_code'])) {
-                    $stepOutput['exit_code'] = $result['exit_code'];
-                }
+                // Structure stepOutput so variable paths work correctly:
+                // - {step.output.field} accesses the parsed output
+                // - {step.stdout} accesses raw stdout
+                // - {step.stderr} accesses raw stderr
+                $stepOutput = [
+                    'output' => $rawOutput,
+                    'stdout' => $result['stdout'] ?? null,
+                    'stderr' => $result['stderr'] ?? null,
+                    'exit_code' => $result['exit_code'] ?? null
+                ];
 
                 $stepRun->status = 'success';
                 $stepRun->output_json = json_encode($stepOutput);
@@ -1823,13 +2178,12 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Expression required'];
         }
 
-        // If input has 'stdin' key, use that as the raw data to parse (it's already a string)
-        // Otherwise, encode the full input array as JSON
-        if (isset($input['stdin'])) {
-            // stdin contains the raw output from the previous step - use it directly
-            $inputData = trim($input['stdin']);
-        } else {
-            $inputData = json_encode($input);
+        // Use stdin directly - it's the raw passthrough from previous step
+        // Context is available separately for variable substitution
+        $inputData = trim($input['stdin'] ?? '');
+
+        if (empty($inputData)) {
+            return ['success' => false, 'error' => 'No input data available. Set Input Source to "STDIN from previous step" or "Get from specific step".'];
         }
 
         switch ($parserType) {
@@ -2019,30 +2373,43 @@ class PipelineExecutor {
 
     /**
      * Prepare input for a step based on input_source configuration
+     *
+     * Context/ENV is ALWAYS available for {variable} substitution.
+     * Input source determines what comes in as stdin (raw passthrough).
      */
     private function prepareStepInput($step): array {
         $inputSource = $step->input_source ?? 'context';
         $inputConfig = json_decode($step->input_config_json ?: '{}', true);
 
+        // Determine stdin based on input source
+        $stdin = '';
         switch ($inputSource) {
-            case 'context':
-                return $this->context;
-
             case 'stdin':
-                // Get stdout from previous step
+                // Raw stdout passthrough from previous step
                 $prevOutput = end($this->stepOutputs) ?: [];
-                return ['stdin' => $prevOutput['stdout'] ?? json_encode($prevOutput)];
+                $stdin = $prevOutput['stdout'] ?? '';
+                break;
 
             case 'getfrom':
+                // Raw stdout from a specific step
                 $stepName = $inputConfig['step'] ?? '';
-                if (empty($stepName)) {
-                    return $this->context;
+                if (!empty($stepName) && isset($this->stepOutputs[$stepName])) {
+                    $stdin = $this->stepOutputs[$stepName]['stdout'] ?? '';
                 }
-                return $this->stepOutputs[$stepName] ?? [];
+                break;
 
+            case 'context':
             default:
-                return $this->context;
+                // No stdin, just context
+                $stdin = '';
+                break;
         }
+
+        // Always return both stdin and context
+        return [
+            'stdin' => $stdin,
+            'context' => $this->context,
+        ];
     }
 
     /**
@@ -2077,10 +2444,23 @@ class PipelineExecutor {
      * Supports: {context.key}, {step_name.output.key}, {step_name.stdout}
      */
     private function substituteVariables(string $template): string {
+        // Log available step outputs for debugging
+        $this->log('debug', 'substituteVariables called', [
+            'template_preview' => substr($template, 0, 200),
+            'available_step_outputs' => array_keys($this->stepOutputs),
+            'context_keys' => array_keys($this->context)
+        ]);
+
         // Replace context variables {context.xxx}
         $template = preg_replace_callback('/\{context\.([^}]+)\}/', function($matches) {
             $key = $matches[1];
-            return $this->getNestedValue($this->context, $key) ?? '';
+            $value = $this->getNestedValue($this->context, $key);
+            $this->log('debug', "Substituting context variable", [
+                'key' => $key,
+                'found' => $value !== null,
+                'value_preview' => $value !== null ? substr((string)$value, 0, 100) : 'NULL'
+            ]);
+            return $value ?? '';
         }, $template);
 
         // Replace step output variables {step_name.xxx}
@@ -2089,10 +2469,22 @@ class PipelineExecutor {
             $path = $matches[2];
 
             if (!isset($this->stepOutputs[$stepName])) {
+                $this->log('warning', "Step output not found for substitution", [
+                    'step_name' => $stepName,
+                    'path' => $path,
+                    'available_steps' => array_keys($this->stepOutputs)
+                ]);
                 return '';
             }
 
-            return $this->getNestedValue($this->stepOutputs[$stepName], $path) ?? '';
+            $value = $this->getNestedValue($this->stepOutputs[$stepName], $path);
+            $this->log('debug', "Substituting step variable", [
+                'step_name' => $stepName,
+                'path' => $path,
+                'found' => $value !== null,
+                'value_preview' => $value !== null ? substr((string)$value, 0, 100) : 'NULL'
+            ]);
+            return $value ?? '';
         }, $template);
 
         // Replace simple variables {xxx} - look up directly in context
@@ -2693,14 +3085,15 @@ class PipelineExecutor {
                 ];
             }
 
+            $output = [
+                'data' => $result['data'],
+                'extensions' => $result['extensions'],
+                'shop' => $client->getShop()
+            ];
             return [
                 'success' => true,
-                'output' => [
-                    'data' => $result['data'],
-                    'extensions' => $result['extensions'],
-                    'shop' => $client->getShop()
-                ],
-                'stdout' => json_encode($result['data'], JSON_PRETTY_PRINT)
+                'output' => $output,
+                'stdout' => json_encode($output, JSON_PRETTY_PRINT)
             ];
 
         } catch (\Exception $e) {
@@ -2942,10 +3335,13 @@ class PipelineExecutor {
                     $lastStepName = array_key_last($this->stepOutputs);
                     $lastStep = $this->stepOutputs[$lastStepName];
                     $content = $lastStep['stdout'] ?? ($lastStep['raw'] ?? '');
-                    $this->log('debug', "file_write stdin: using {$lastStepName}.stdout");
+                    $this->log('debug', "file_write stdin: using {$lastStepName}.stdout", [
+                        'stdout_len' => is_string($content) ? strlen($content) : 'N/A'
+                    ]);
                 }
 
                 $content = $content ?? '';
+
                 if (is_array($content)) {
                     $content = json_encode($content, JSON_PRETTY_PRINT);
                 }

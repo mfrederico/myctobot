@@ -636,6 +636,207 @@ class Pipelines extends BaseControls\Control {
     }
 
     /**
+     * Update just the run_parallel flag for a step
+     * Used by the row-level parallel toggle
+     *
+     * POST /pipelines/updatestepparallel/{pipeline_id}
+     */
+    public function updatestepparallel($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $stepId = (int) $this->getParam('step_id', 0);
+        $runParallel = $this->getParam('run_parallel', '0') === '1';
+
+        $step = Bean::findOne('pipelinesteps', 'id = ? AND pipelines_id = ?', [$stepId, $pipelineId]);
+        if (!$step) {
+            Flight::jsonError('Step not found', 404);
+            return;
+        }
+
+        $step->run_parallel = $runParallel ? 1 : 0;
+        $step->updated_at = date('Y-m-d H:i:s');
+        Bean::store($step);
+
+        Flight::jsonSuccess(['message' => 'Parallel mode updated', 'run_parallel' => $runParallel]);
+    }
+
+    /**
+     * Test a command/expression against sample input data
+     * Used by the Input Inspector to preview jq, bash, or other stdio results
+     *
+     * POST /pipelines/testparser
+     *
+     * Supports:
+     * - jq: JSON transformation
+     * - bash: Shell command with stdin
+     * - regex: Pattern matching
+     * - php: (disabled for security)
+     */
+    public function testparser($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $parserType = $this->getParam('parser_type', 'jq');
+        $expression = $this->getParam('expression', '');
+        $command = $this->getParam('command', '');  // For bash/direct_exec
+        $input = $this->getParam('input', '{}');
+        $timeout = min((int) $this->getParam('timeout', 5), 30);  // Max 30 seconds
+
+        // Use command if provided, otherwise use expression
+        $toExecute = !empty($command) ? $command : $expression;
+
+        if (empty($toExecute)) {
+            Flight::jsonError('Expression or command is required', 400);
+            return;
+        }
+
+        try {
+            switch ($parserType) {
+                case 'jq':
+                    // Test jq expression
+                    $tempFile = tempnam(sys_get_temp_dir(), 'jq_input_');
+                    file_put_contents($tempFile, $input);
+
+                    // Escape the expression for shell
+                    $escapedExpr = escapeshellarg($toExecute);
+
+                    // Run jq with timeout
+                    $cmd = "timeout {$timeout}s jq {$escapedExpr} " . escapeshellarg($tempFile) . " 2>&1";
+                    $output = shell_exec($cmd);
+                    unlink($tempFile);
+
+                    if ($output === null) {
+                        Flight::jsonError('jq command failed to execute', 500);
+                        return;
+                    }
+
+                    // Check for jq errors
+                    if (strpos($output, 'jq: error') !== false || strpos($output, 'parse error') !== false) {
+                        Flight::jsonError(trim($output), 400);
+                        return;
+                    }
+
+                    Flight::jsonSuccess(['output' => trim($output)]);
+                    break;
+
+                case 'bash':
+                case 'direct_exec':
+                    // Test bash command with stdin
+                    // SECURITY: Only allow testing on the local machine, not shards
+                    // And limit what commands can be tested (no rm, no curl to external, etc)
+
+                    $tempFile = tempnam(sys_get_temp_dir(), 'bash_input_');
+                    file_put_contents($tempFile, $input);
+
+                    // Build a safe test command - pipe input to the command
+                    // We wrap in a subshell with timeout for safety
+                    $escapedCmd = $toExecute;
+
+                    // Simple safety checks - block obviously dangerous patterns
+                    $blockedPatterns = ['rm -rf', 'dd if=', 'mkfs', '> /dev', 'curl', 'wget', 'nc ', 'netcat'];
+                    foreach ($blockedPatterns as $pattern) {
+                        if (stripos($escapedCmd, $pattern) !== false) {
+                            Flight::jsonError("Command contains blocked pattern: {$pattern}", 400);
+                            return;
+                        }
+                    }
+
+                    // Run with timeout and capture output
+                    $fullCmd = "timeout {$timeout}s /bin/bash -c " . escapeshellarg($escapedCmd) . " < " . escapeshellarg($tempFile) . " 2>&1";
+                    $output = shell_exec($fullCmd);
+                    $exitCode = 0;  // shell_exec doesn't give us exit code easily
+
+                    unlink($tempFile);
+
+                    Flight::jsonSuccess([
+                        'output' => $output ?? '(no output)',
+                        'exit_code' => $exitCode
+                    ]);
+                    break;
+
+                case 'php':
+                    // PHP expressions are risky - just show a preview message
+                    Flight::jsonSuccess(['output' => '(PHP expressions cannot be safely previewed - run the step to test)']);
+                    break;
+
+                case 'regex':
+                    // Test regex against input
+                    $inputData = json_decode($input, true);
+                    $subject = is_string($inputData) ? $inputData : json_encode($inputData);
+
+                    // Validate regex syntax first
+                    if (@preg_match($toExecute, '') === false) {
+                        Flight::jsonError('Invalid regex pattern: ' . preg_last_error_msg(), 400);
+                        return;
+                    }
+
+                    if (preg_match($toExecute, $subject, $matches)) {
+                        Flight::jsonSuccess(['output' => json_encode($matches, JSON_PRETTY_PRINT)]);
+                    } else {
+                        Flight::jsonSuccess(['output' => '(No matches found)']);
+                    }
+                    break;
+
+                default:
+                    Flight::jsonError("Unknown parser type: {$parserType}", 400);
+            }
+        } catch (\Exception $e) {
+            Flight::jsonError('Test failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Save output variable mappings for a step
+     *
+     * POST /pipelines/savestepmappings/{pipeline_id}
+     * Body: step_id, mappings (JSON)
+     *
+     * These mappings make specific output paths available as named variables
+     * in subsequent steps' Variable Browser.
+     */
+    public function savestepmappings($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
+        $stepId = (int) $this->getParam('step_id', 0);
+        $mappingsJson = $this->getParam('mappings', '{}');
+
+        $step = Bean::findOne('pipelinesteps', 'id = ? AND pipelines_id = ?', [$stepId, $pipelineId]);
+        if (!$step) {
+            Flight::jsonError('Step not found', 404);
+            return;
+        }
+
+        // Validate mappings JSON
+        $mappings = json_decode($mappingsJson, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            Flight::jsonError('Invalid mappings JSON', 400);
+            return;
+        }
+
+        $step->output_mappings_json = $mappingsJson;
+        $step->updated_at = date('Y-m-d H:i:s');
+        Bean::store($step);
+
+        Flight::jsonSuccess([
+            'message' => 'Mappings saved',
+            'mappings' => $mappings
+        ]);
+    }
+
+    /**
      * Move a step to a new row/col position
      * If target cell is occupied, swap positions
      */
@@ -893,7 +1094,8 @@ class Pipelines extends BaseControls\Control {
                 'timeout_seconds' => (int) $step->timeout_seconds,
                 'retry_count' => (int) $step->retry_count,
                 'is_active' => (bool) $step->is_active,
-                'run_parallel' => (bool) $step->run_parallel
+                'run_parallel' => (bool) $step->run_parallel,
+                'output_mappings' => json_decode($step->output_mappings_json ?: '{}', true)
             ]
         ]);
     }
@@ -1601,7 +1803,7 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
-        if (!in_array($run->status, ['pending', 'running'])) {
+        if (!in_array($run->status, ['pending', 'running', 'paused'])) {
             Flight::jsonError('Run cannot be cancelled (status: ' . $run->status . ')', 400);
             return;
         }
@@ -1612,6 +1814,59 @@ class Pipelines extends BaseControls\Control {
         Bean::store($run);
 
         Flight::jsonSuccess(['message' => 'Run cancelled']);
+    }
+
+    /**
+     * Resume a paused interactive run
+     *
+     * POST /pipelines/resumerun/{run_id}
+     * Body: mappings (optional JSON of field mappings)
+     *
+     * This continues execution of an interactive pipeline that paused after a step.
+     */
+    public function resumerun($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        if ($run->status !== 'paused') {
+            Flight::jsonError('Run is not paused (status: ' . $run->status . ')', 400);
+            return;
+        }
+
+        // Parse optional mappings
+        $mappingsJson = $this->getParam('mappings', '[]');
+        $mappings = json_decode($mappingsJson, true);
+        if (!is_array($mappings)) {
+            $mappings = [];
+        }
+
+        try {
+            $executor = new \app\services\PipelineExecutor($runId);
+            $success = $executor->resume($mappings, false, false);
+
+            // Reload run to get current status
+            $run = Bean::load('pipelineruns', $runId);
+
+            Flight::jsonSuccess([
+                'message' => $run->status === 'paused' ? 'Pipeline paused at next step' : 'Pipeline resumed',
+                'status' => $run->status,
+                'run_id' => $run->id
+            ]);
+
+        } catch (\Exception $e) {
+            Flight::jsonError('Failed to resume: ' . $e->getMessage(), 500);
+        }
     }
 
     /**
@@ -1835,6 +2090,7 @@ class Pipelines extends BaseControls\Control {
      *   - The step that's awaiting input
      *   - The step's full output (for mapping UI)
      *   - Any saved mappings for the step
+     *   - Full step_runs array with output data for grid display
      */
     public function interactivestatus($params = []) {
         if (!$this->requireLogin()) return;
@@ -1854,6 +2110,7 @@ class Pipelines extends BaseControls\Control {
         );
 
         $stepStatuses = [];
+        $stepRunsArray = [];
         $awaitingStep = null;
         $awaitingStepOutput = null;
         $savedMappings = null;
@@ -1863,6 +2120,23 @@ class Pipelines extends BaseControls\Control {
                 'status' => $sr->status,
                 'row' => (int) $sr->row,
                 'col' => (int) $sr->col,
+                'duration_ms' => $sr->duration_ms,
+                'error_message' => $sr->error_message,
+                'awaiting_input' => (bool) $sr->awaiting_input
+            ];
+
+            // Build detailed step_runs array for grid display
+            $stepRunsArray[] = [
+                'id' => $sr->id,
+                'step_id' => $sr->pipelinesteps_id,
+                'step_name' => $sr->step_name,
+                'row' => (int) $sr->row,
+                'col' => (int) $sr->col,
+                'status' => $sr->status,
+                'output' => json_decode($sr->output_json ?: '{}', true),
+                'stdout' => $sr->stdout,
+                'stderr' => $sr->stderr,
+                'exit_code' => $sr->exit_code,
                 'duration_ms' => $sr->duration_ms,
                 'error_message' => $sr->error_message,
                 'awaiting_input' => (bool) $sr->awaiting_input
@@ -1899,7 +2173,8 @@ class Pipelines extends BaseControls\Control {
                 'completed_at' => $run->completed_at,
                 'interactive_mode' => (bool) $run->interactive_mode
             ],
-            'steps' => $stepStatuses
+            'steps' => $stepStatuses,
+            'step_runs' => $stepRunsArray
         ];
 
         // Add pause/mapping info if run is paused
@@ -1912,6 +2187,170 @@ class Pipelines extends BaseControls\Control {
         }
 
         Flight::jsonSuccess($result);
+    }
+
+    /**
+     * Execute exactly one step in debug mode
+     *
+     * POST /pipelines/stepnext/{run_id}
+     *
+     * This is the API endpoint for the debugger's "Next Step" button.
+     * Executes exactly one step, then pauses and returns:
+     * - The executed step's result
+     * - Information about the next step (id, name, row, col, reason)
+     * - Updated run status and progress
+     */
+    public function stepnext($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Verify run is in a steppable state
+        if (!in_array($run->status, ['paused', 'pending', 'running'])) {
+            Flight::jsonError("Run cannot be stepped (status: {$run->status})", 400);
+            return;
+        }
+
+        try {
+            $executor = new \app\services\PipelineExecutor($runId);
+            $result = $executor->stepNext();
+
+            if ($result['success']) {
+                // Build extended step_runs array for UI update
+                $stepRuns = Bean::find('pipelinestepruns',
+                    ' pipelineruns_id = ? ORDER BY row ASC, col ASC ',
+                    [$run->id]
+                );
+
+                $stepRunsArray = [];
+                foreach ($stepRuns as $sr) {
+                    $stepRunsArray[] = [
+                        'id' => $sr->id,
+                        'step_id' => $sr->pipelinesteps_id,
+                        'step_name' => $sr->step_name,
+                        'row' => (int) $sr->row,
+                        'col' => (int) $sr->col,
+                        'status' => $sr->status,
+                        'output' => json_decode($sr->output_json ?: '{}', true),
+                        'stdout' => $sr->stdout,
+                        'stderr' => $sr->stderr,
+                        'exit_code' => $sr->exit_code,
+                        'duration_ms' => $sr->duration_ms,
+                        'error_message' => $sr->error_message,
+                        'awaiting_input' => (bool) $sr->awaiting_input
+                    ];
+                }
+
+                $result['step_runs'] = $stepRunsArray;
+
+                Flight::jsonSuccess($result);
+            } else {
+                Flight::jsonError($result['error'] ?? 'Step execution failed', 500);
+            }
+
+        } catch (\Exception $e) {
+            Flight::jsonError('Step execution failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Re-run pipeline from a specific step
+     * POST /pipelines/rerunfrom/{run_id}
+     * Body: step_id - the step to restart from
+     *
+     * This resets the specified step and all following steps to 'pending',
+     * then sets the run to 'paused' so user can step through again.
+     */
+    public function rerunfrom($params = []) {
+        if (!$this->requireLogin()) return;
+        if (!$this->validateCSRF()) {
+            Flight::jsonError('Invalid request', 403);
+            return;
+        }
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+        $stepId = (int) $this->getParam('step_id', 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Get the target step to find its position
+        $targetStep = Bean::findOne('pipelinesteps', 'id = ?', [$stepId]);
+        if (!$targetStep) {
+            Flight::jsonError('Step not found', 404);
+            return;
+        }
+
+        $targetRow = (int) $targetStep->row;
+        $targetCol = (int) $targetStep->col;
+
+        // Get all step runs for this pipeline run
+        $stepRuns = Bean::find('pipelinestepruns', ' pipelineruns_id = ? ', [$runId]);
+
+        // Reset steps at or after the target position
+        $resetCount = 0;
+        foreach ($stepRuns as $sr) {
+            $srRow = (int) $sr->row;
+            $srCol = (int) $sr->col;
+
+            // Reset if same row and same/later col, or later row
+            if (($srRow === $targetRow && $srCol >= $targetCol) || $srRow > $targetRow) {
+                $sr->status = 'pending';
+                $sr->output_json = null;
+                $sr->stdout = null;
+                $sr->stderr = null;
+                $sr->exit_code = null;
+                $sr->error_message = null;
+                $sr->started_at = null;
+                $sr->completed_at = null;
+                $sr->duration_ms = null;
+                Bean::store($sr);
+                $resetCount++;
+            }
+        }
+
+        // Set run status to paused
+        $run->status = 'paused';
+        $run->current_step = $targetStep->step_name;
+
+        // Update step counts
+        $completedCount = Bean::count('pipelinestepruns',
+            ' pipelineruns_id = ? AND status IN (?, ?) ',
+            [$runId, 'completed', 'success']
+        );
+        $run->steps_completed = $completedCount;
+
+        Bean::store($run);
+
+        // Calculate what the next step will be
+        $nextStep = [
+            'id' => $targetStep->id,
+            'step_name' => $targetStep->step_name,
+            'label' => $targetStep->label,
+            'row' => $targetRow,
+            'col' => $targetCol,
+            'step_type' => $targetStep->step_type
+        ];
+
+        Flight::jsonSuccess([
+            'message' => "Reset {$resetCount} steps. Ready to re-run from '{$targetStep->step_name}'",
+            'reset_count' => $resetCount,
+            'run_status' => 'paused',
+            'next_step' => $nextStep
+        ]);
     }
 
     /**
@@ -2009,13 +2448,23 @@ class Pipelines extends BaseControls\Control {
                 'description' => 'Step status (completed, failed)'
             ];
 
-            // If step has saved output_mappings_json, show those mapped variables
-            // Mapped variables are added to context and can be accessed as {variable_name}
+            // If step has saved output_mappings_json, show those mapped/exported variables
+            // These are displayed with a special "mapped" type and highlighted in the Variable Browser
             if ($step->output_mappings_json) {
                 $mappings = json_decode($step->output_mappings_json, true);
                 if ($mappings && is_array($mappings)) {
-                    foreach ($mappings as $mapping) {
-                        if (isset($mapping['target'])) {
+                    foreach ($mappings as $alias => $mapping) {
+                        // Support both old format (target/source) and new format (path/fullPath)
+                        if (isset($mapping['fullPath'])) {
+                            // New format from Variable Exporter
+                            $stepVars['variables'][] = [
+                                'path' => $mapping['fullPath'],
+                                'type' => 'mapped',
+                                'description' => 'Exported: ' . $alias,
+                                'alias' => $alias
+                            ];
+                        } elseif (isset($mapping['target'])) {
+                            // Old format
                             $stepVars['variables'][] = [
                                 'path' => $mapping['target'],
                                 'type' => 'mapped',

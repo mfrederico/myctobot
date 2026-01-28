@@ -218,13 +218,19 @@
                                 <div class="mb-0">
                                     <label class="form-label">
                                         Input Schema (JSON)
+                                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()">
+                                            <i class="bi bi-magic"></i> Derive from Steps
+                                        </button>
                                         <button type="button" class="btn btn-sm btn-link p-0 ms-2" onclick="insertSampleSchema()">
                                             <i class="bi bi-lightning"></i> Insert sample
                                         </button>
                                     </label>
                                     <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="6"
                                               placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($pipeline['input_schema_json']) ?></textarea>
-                                    <small class="text-muted">JSON Schema defining the tool's input parameters. Properties become available in pipeline context.</small>
+                                    <small class="text-muted">
+                                        JSON Schema defining the tool's input parameters. Properties become available in pipeline context.
+                                        <a href="/docs/pipelines#input-schema" target="_blank" class="ms-1"><i class="bi bi-question-circle"></i> Help</a>
+                                    </small>
                                 </div>
                             </div>
                         </div>
@@ -3266,6 +3272,40 @@ async function toggleRow(row, enable) {
 function toggleInputSchema() {
     const enabled = document.getElementById('exposeAsTool').checked;
     document.getElementById('mcpToolSettings').style.display = enabled ? '' : 'none';
+
+    // Auto-derive schema when enabling MCP and schema is empty
+    if (enabled) {
+        const schemaEl = document.getElementById('inputSchemaJson');
+        const val = schemaEl.value.trim();
+        // Consider empty if blank, empty array, or empty object
+        const isEmpty = !val || val === '[]' || val === '{}';
+        if (isEmpty) {
+            deriveSchemaFromSteps();
+        }
+    }
+}
+
+async function deriveSchemaFromSteps() {
+    try {
+        const resp = await fetch(`/pipelines/extractvariables?id=${pipelineId}`);
+        const data = await resp.json();
+        if (data.success && data.data) {
+            const schema = data.data.schema;
+            const variables = data.data.variables || [];
+
+            if (variables.length === 0) {
+                alert('No {context.xxx} variables found in first-row steps.');
+                return;
+            }
+
+            document.getElementById('inputSchemaJson').value = JSON.stringify(schema, null, 2);
+        } else {
+            alert(data.error || 'Failed to extract variables');
+        }
+    } catch (err) {
+        console.error('Error deriving schema:', err);
+        alert('Failed to derive schema: ' + err.message);
+    }
 }
 
 function insertSampleSchema() {

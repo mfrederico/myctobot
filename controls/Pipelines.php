@@ -2500,6 +2500,68 @@ class Pipelines extends BaseControls\Control {
     }
 
     /**
+     * Extract context variables from first-row steps for MCP input schema generation
+     *
+     * Scans all active steps in row 0 for {context.xxx} variable references
+     * and generates a JSON Schema with those variables as required properties.
+     */
+    public function extractvariables($params = []): void {
+        if (!$this->requireLogin()) return;
+
+        $pipelineId = (int) ($this->opId() ?? $this->getParam('id') ?? 0);
+        if (!$pipelineId) {
+            Flight::jsonError('Pipeline ID required', 400);
+            return;
+        }
+
+        $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
+        if (!$pipeline) {
+            Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        // Get all active steps in row 0
+        $steps = Bean::find('pipelinesteps', 'pipelines_id = ? AND row = 0 AND is_active = 1', [$pipelineId]);
+
+        $variables = [];
+        foreach ($steps as $step) {
+            // Extract {context.xxx} patterns from config_json
+            $configJson = $step->config_json ?: '';
+            preg_match_all('/\{context\.([^}]+)\}/', $configJson, $matches);
+
+            foreach ($matches[1] as $varPath) {
+                // Get the root variable name (e.g., "issue_key" from "issue_key.summary")
+                $rootVar = explode('.', $varPath)[0];
+                $variables[$rootVar] = true;
+            }
+        }
+
+        $varNames = array_keys($variables);
+
+        // Generate JSON Schema with placeholder descriptions
+        $properties = new \stdClass();
+        foreach ($varNames as $name) {
+            // Convert snake_case to readable description
+            $readableName = str_replace('_', ' ', $name);
+            $properties->$name = [
+                'type' => 'string',
+                'description' => "The {$readableName} value (update this description for MCP)"
+            ];
+        }
+
+        $schema = [
+            'type' => 'object',
+            'properties' => $properties,
+            'required' => $varNames
+        ];
+
+        Flight::jsonSuccess([
+            'schema' => $schema,
+            'variables' => $varNames
+        ]);
+    }
+
+    /**
      * Sanitize slug
      */
     private function sanitizeSlug(string $slug): string {

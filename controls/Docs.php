@@ -58,6 +58,26 @@ class Docs extends BaseControls\Control {
     }
 
     /**
+     * Display Pipelines documentation
+     */
+    public function pipelines() {
+        $pipelinesPath = BASE_PATH . '/docs/PIPELINES.md';
+        $content = '';
+
+        if (file_exists($pipelinesPath)) {
+            $markdown = file_get_contents($pipelinesPath);
+            $content = MarkdownParser::parse($markdown);
+        } else {
+            $content = '<div class="alert alert-warning">Pipeline documentation file not found.</div>';
+        }
+
+        $this->render('docs/pipelines', [
+            'title' => 'Pipeline System Documentation',
+            'content' => $content
+        ]);
+    }
+
+    /**
      * Display Caching documentation
      */
     public function caching() {

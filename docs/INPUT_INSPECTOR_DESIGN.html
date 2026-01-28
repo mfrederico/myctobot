@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Input Inspector Panel - UI Design</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background: #f8f9fa;
+        }
+
+        /* ===================================================================
+           INPUT INSPECTOR PANEL
+           =================================================================== */
+
+        .input-inspector {
+            border: 2px solid #0d6efd;
+            border-radius: 8px;
+            background: #fff;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(13, 110, 253, 0.1);
+        }
+
+        .input-inspector-header {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 6px 6px 0 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            user-select: none;
+        }
+
+        .input-inspector-header:hover {
+            background: linear-gradient(135deg, #0a58ca 0%, #084298 100%);
+        }
+
+        .input-inspector-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .input-inspector-title .bi {
+            font-size: 1.2rem;
+        }
+
+        .input-source-badge {
+            background: rgba(255, 255, 255, 0.25);
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin-left: 8px;
+        }
+
+        .input-inspector-body {
+            padding: 0;
+        }
+
+        /* Tabs for different views */
+        .input-tabs {
+            display: flex;
+            border-bottom: 1px solid #dee2e6;
+            background: #f8f9fa;
+            padding: 0 12px;
+        }
+
+        .input-tab {
+            padding: 10px 16px;
+            border: none;
+            background: transparent;
+            color: #6c757d;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .input-tab:hover {
+            color: #0d6efd;
+            background: rgba(13, 110, 253, 0.05);
+        }
+
+        .input-tab.active {
+            color: #0d6efd;
+            border-bottom-color: #0d6efd;
+            background: white;
+        }
+
+        .input-tab-content {
+            padding: 16px;
+            display: none;
+        }
+
+        .input-tab-content.active {
+            display: block;
+        }
+
+        /* Info banner explaining stdin vs variables */
+        .stdin-explainer {
+            background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+            border-left: 4px solid #ffc107;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            display: flex;
+            gap: 12px;
+        }
+
+        .stdin-explainer .bi {
+            color: #856404;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .stdin-explainer-content h6 {
+            margin: 0 0 6px 0;
+            color: #856404;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+
+        .stdin-explainer-content p {
+            margin: 0;
+            color: #664d03;
+            line-height: 1.5;
+        }
+
+        .stdin-explainer-content code {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+        }
+
+        /* Input source display */
+        .input-source-info {
+            background: #e7f1ff;
+            border: 1px solid #b6d4fe;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+
+        .input-source-info .bi {
+            color: #0d6efd;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .input-source-details h6 {
+            margin: 0 0 4px 0;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #084298;
+        }
+
+        .input-source-details p {
+            margin: 0;
+            font-size: 0.8rem;
+            color: #495057;
+        }
+
+        .step-reference {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            margin-top: 6px;
+        }
+
+        /* Data preview */
+        .data-preview {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 6px;
+            padding: 16px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            max-height: 400px;
+            overflow-y: auto;
+            position: relative;
+            border: 1px solid #333;
+        }
+
+        .data-preview pre {
+            margin: 0;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .preview-toolbar {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            display: flex;
+            gap: 4px;
+        }
+
+        .preview-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #d4d4d4;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .preview-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
+        .data-size-badge {
+            background: rgba(13, 110, 253, 0.2);
+            color: #9ec5fe;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        /* No data state */
+        .no-data-state {
+            text-align: center;
+            padding: 48px 16px;
+            color: #6c757d;
+        }
+
+        .no-data-state .bi {
+            font-size: 3rem;
+            color: #dee2e6;
+            margin-bottom: 12px;
+        }
+
+        .no-data-state h6 {
+            margin: 0 0 8px 0;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .no-data-state p {
+            margin: 0;
+            font-size: 0.85rem;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* JQ Playground */
+        .jq-playground {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 16px;
+        }
+
+        .jq-editor-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .jq-expression-input {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 10px 12px;
+            width: 100%;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .jq-expression-input:focus {
+            outline: none;
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
+        }
+
+        .jq-test-btn {
+            width: 100%;
+            margin-top: 10px;
+            background: #198754;
+            border-color: #198754;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .jq-test-btn:hover {
+            background: #157347;
+            border-color: #146c43;
+        }
+
+        .jq-output {
+            margin-top: 16px;
+        }
+
+        .jq-output-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .jq-result-success {
+            background: #d1e7dd;
+            border: 1px solid #a3cfbb;
+            border-left: 4px solid #198754;
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .jq-result-success pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #0f5132;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .jq-result-error {
+            background: #f8d7da;
+            border: 1px solid #f1aeb5;
+            border-left: 4px solid #dc3545;
+            border-radius: 4px;
+            padding: 12px;
+        }
+
+        .jq-result-error pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #842029;
+        }
+
+        /* Comparison view */
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .comparison-card {
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .comparison-header {
+            padding: 10px 14px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .comparison-header.stdin-header {
+            background: #e7f1ff;
+            color: #084298;
+        }
+
+        .comparison-header.vars-header {
+            background: #f3e5f5;
+            color: #6a1b9a;
+        }
+
+        .comparison-body {
+            padding: 12px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .comparison-body pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .preview-toolbar {
+                position: static;
+                margin-bottom: 10px;
+                justify-content: flex-end;
+            }
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Demo container */
+        .demo-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .demo-label {
+            background: #6c757d;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            display: inline-block;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <span class="demo-label">UI MOCKUP - Input Inspector Panel</span>
+
+        <!-- ===================================================================
+             INPUT INSPECTOR PANEL - Collapsed State
+             =================================================================== -->
+        <div class="input-inspector mb-4">
+            <div class="input-inspector-header" onclick="toggleInspector('collapsed')">
+                <div class="input-inspector-title">
+                    <i class="bi bi-funnel-fill"></i>
+                    Input Inspector
+                    <span class="input-source-badge">STDIN: Previous Step</span>
+                </div>
+                <i class="bi bi-chevron-down"></i>
+            </div>
+        </div>
+
+        <p class="text-muted small mb-4">↑ Collapsed state (click to expand)</p>
+
+        <!-- ===================================================================
+             INPUT INSPECTOR PANEL - Expanded State
+             =================================================================== -->
+        <div class="input-inspector">
+            <div class="input-inspector-header" onclick="toggleInspector('expanded')">
+                <div class="input-inspector-title">
+                    <i class="bi bi-funnel-fill"></i>
+                    Input Inspector
+                    <span class="input-source-badge">STDIN: Previous Step</span>
+                </div>
+                <i class="bi bi-chevron-up"></i>
+            </div>
+
+            <div class="input-inspector-body" id="inspectorBody">
+                <!-- Tabs -->
+                <div class="input-tabs">
+                    <button class="input-tab active" onclick="switchTab('preview')">
+                        <i class="bi bi-eye"></i> Data Preview
+                    </button>
+                    <button class="input-tab" onclick="switchTab('playground')">
+                        <i class="bi bi-play-circle"></i> Test Playground
+                    </button>
+                    <button class="input-tab" onclick="switchTab('comparison')">
+                        <i class="bi bi-columns-gap"></i> STDIN vs Variables
+                    </button>
+                </div>
+
+                <!-- TAB 1: Data Preview -->
+                <div class="input-tab-content active" id="previewTab">
+                    <!-- Explainer banner -->
+                    <div class="stdin-explainer">
+                        <i class="bi bi-info-circle-fill"></i>
+                        <div class="stdin-explainer-content">
+                            <h6>What is STDIN?</h6>
+                            <p>
+                                STDIN is the <strong>full output data</strong> that gets piped to this step.
+                                This is different from <strong>Exported Variables</strong> which are specific paths
+                                you chose to expose for <code>{variable}</code> substitution.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Input source info -->
+                    <div class="input-source-info">
+                        <i class="bi bi-diagram-3"></i>
+                        <div class="input-source-details">
+                            <h6>Input Source Configuration</h6>
+                            <p>This step receives STDIN from the <strong>previous step</strong> in the pipeline.</p>
+                            <div class="step-reference">
+                                <i class="bi bi-box-arrow-in-left"></i>
+                                query_products → this_step
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Data preview -->
+                    <div class="data-preview">
+                        <div class="preview-toolbar">
+                            <span class="data-size-badge">2.4 KB</span>
+                            <button class="preview-btn" onclick="copyToClipboard()">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                            <button class="preview-btn" onclick="downloadData()">
+                                <i class="bi bi-download"></i> Download
+                            </button>
+                        </div>
+                        <pre>{
+  "data": {
+    "products": {
+      "edges": [
+        {
+          "node": {
+            "id": "gid://shopify/Product/8123456789",
+            "title": "Premium Widget",
+            "handle": "premium-widget",
+            "status": "ACTIVE",
+            "totalInventory": 42,
+            "priceRange": {
+              "minVariantPrice": {
+                "amount": "29.99",
+                "currencyCode": "USD"
+              }
+            },
+            "variants": {
+              "edges": [
+                {
+                  "node": {
+                    "id": "gid://shopify/ProductVariant/41234567",
+                    "title": "Default",
+                    "sku": "WIDGET-001",
+                    "inventoryQuantity": 42
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "node": {
+            "id": "gid://shopify/Product/8123456790",
+            "title": "Standard Widget",
+            "handle": "standard-widget",
+            "status": "ACTIVE",
+            "totalInventory": 156,
+            "priceRange": {
+              "minVariantPrice": {
+                "amount": "19.99",
+                "currencyCode": "USD"
+              }
+            }
+          }
+        }
+      ],
+      "pageInfo": {
+        "hasNextPage": false,
+        "hasPreviousPage": false
+      }
+    }
+  },
+  "extensions": {
+    "cost": {
+      "requestedQueryCost": 5,
+      "actualQueryCost": 5,
+      "throttleStatus": {
+        "maximumAvailable": 1000,
+        "currentlyAvailable": 995,
+        "restoreRate": 50
+      }
+    }
+  }
+}</pre>
+                    </div>
+                </div>
+
+                <!-- TAB 2: Test Playground -->
+                <div class="input-tab-content" id="playgroundTab">
+                    <!-- Explainer -->
+                    <div class="stdin-explainer">
+                        <i class="bi bi-lightbulb-fill"></i>
+                        <div class="stdin-explainer-content">
+                            <h6>Test Your Expression</h6>
+                            <p>
+                                Write and test your jq expression against the actual STDIN data shown above.
+                                This helps you verify your transformation logic before running the pipeline.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- JQ Playground -->
+                    <div class="jq-playground">
+                        <div class="jq-editor-label">
+                            <i class="bi bi-code-slash"></i>
+                            JQ Expression
+                        </div>
+                        <textarea class="jq-expression-input" placeholder=". | .data.products.edges[] | .node | {id, title, price: .priceRange.minVariantPrice.amount}">. | .data.products.edges[] | .node | {
+  id,
+  title,
+  handle,
+  price: .priceRange.minVariantPrice.amount
+}</textarea>
+
+                        <button class="btn jq-test-btn" onclick="testExpression()">
+                            <i class="bi bi-play-fill"></i>
+                            Test Expression
+                        </button>
+
+                        <!-- Output area (shown after test) -->
+                        <div class="jq-output" style="display: none;">
+                            <div class="jq-output-label">
+                                <i class="bi bi-arrow-right-circle"></i>
+                                Output
+                            </div>
+                            <div class="jq-result-success">
+                                <pre>[
+  {
+    "id": "gid://shopify/Product/8123456789",
+    "title": "Premium Widget",
+    "handle": "premium-widget",
+    "price": "29.99"
+  },
+  {
+    "id": "gid://shopify/Product/8123456790",
+    "title": "Standard Widget",
+    "handle": "standard-widget",
+    "price": "19.99"
+  }
+]</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: Comparison View -->
+                <div class="input-tab-content" id="comparisonTab">
+                    <!-- Explainer -->
+                    <div class="stdin-explainer">
+                        <i class="bi bi-arrow-left-right"></i>
+                        <div class="stdin-explainer-content">
+                            <h6>Understanding the Difference</h6>
+                            <p>
+                                <strong>STDIN</strong> is the raw data piped to your step (jq/bash input).
+                                <strong>Variables</strong> are specific paths exported for <code>{variable}</code> substitution in configs.
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Side-by-side comparison -->
+                    <div class="comparison-grid">
+                        <!-- STDIN -->
+                        <div class="comparison-card">
+                            <div class="comparison-header stdin-header">
+                                <i class="bi bi-funnel"></i>
+                                STDIN (What jq/bash receives)
+                            </div>
+                            <div class="comparison-body">
+<pre>{
+  "data": {
+    "products": {
+      "edges": [...],
+      "pageInfo": {...}
+    }
+  },
+  "extensions": {...}
+}</pre>
+                                <p class="text-info mt-2 mb-0" style="font-size: 0.75rem;">
+                                    ↑ Full output from query_products
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Variables -->
+                        <div class="comparison-card">
+                            <div class="comparison-header vars-header">
+                                <i class="bi bi-braces"></i>
+                                Exported Variables (For substitution)
+                            </div>
+                            <div class="comparison-body">
+<pre style="color: #ce9178;">{query_products.output.data.products.edges}
+→ [array of product nodes]
+
+{query_products.output.extensions.cost}
+→ cost tracking object</pre>
+                                <p class="text-warning mt-2 mb-0" style="font-size: 0.75rem;">
+                                    ↑ Specific paths available for {'{'}variable{'}'} use
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Key differences -->
+                    <div class="alert alert-info mt-3" style="font-size: 0.875rem;">
+                        <strong>Key Differences:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li><strong>STDIN</strong>: Used by jq/bash/parser steps as their input data</li>
+                            <li><strong>Variables</strong>: Used in config fields with <code>{'{'}stepname.path{'}'}</code> syntax</li>
+                            <li>jq expressions operate on STDIN, not variables</li>
+                            <li>Variables are created by exporting paths from step outputs</li>
+                        </ul>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Example: No data available -->
+        <div class="input-inspector mt-4">
+            <div class="input-inspector-header">
+                <div class="input-inspector-title">
+                    <i class="bi bi-funnel-fill"></i>
+                    Input Inspector
+                    <span class="input-source-badge">STDIN: Context Only</span>
+                </div>
+                <i class="bi bi-chevron-up"></i>
+            </div>
+            <div class="input-inspector-body">
+                <div class="input-tabs">
+                    <button class="input-tab active">
+                        <i class="bi bi-eye"></i> Data Preview
+                    </button>
+                </div>
+                <div class="input-tab-content active">
+                    <div class="stdin-explainer">
+                        <i class="bi bi-info-circle-fill"></i>
+                        <div class="stdin-explainer-content">
+                            <h6>Context-Only Mode</h6>
+                            <p>
+                                This step uses <code>input_source: "context"</code>, which means it doesn't receive STDIN.
+                                Only context variables are available for <code>{variable}</code> substitution.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="no-data-state">
+                        <i class="bi bi-inbox"></i>
+                        <h6>No STDIN Available</h6>
+                        <p>
+                            This step doesn't receive piped input. Change the input source to "Previous Step"
+                            or "Get From Step" to receive STDIN data.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleInspector(id) {
+            // Toggle demo visual only
+            console.log('Toggle inspector:', id);
+        }
+
+        function switchTab(tab) {
+            // Remove active from all tabs
+            document.querySelectorAll('.input-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.input-tab-content').forEach(c => c.classList.remove('active'));
+
+            // Add active to selected
+            event.target.classList.add('active');
+            document.getElementById(tab + 'Tab').classList.add('active');
+        }
+
+        function testExpression() {
+            // Show the output section
+            document.querySelector('.jq-output').style.display = 'block';
+
+            // In real implementation, this would:
+            // 1. Get the jq expression from textarea
+            // 2. Get the stdin data
+            // 3. POST to /pipelines/testjq endpoint
+            // 4. Display result or error
+        }
+
+        function copyToClipboard() {
+            alert('In real implementation: Copy STDIN data to clipboard');
+        }
+
+        function downloadData() {
+            alert('In real implementation: Download STDIN as JSON file');
+        }
+    </script>
+</body>
+</html>

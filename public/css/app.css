@@ -891,6 +891,16 @@ pre.bg-dark {
     border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
+/* Ensure ALL child elements in warning backgrounds have dark text */
+.bg-warning *,
+.card-header.bg-warning *,
+.bg-warning h1, .bg-warning h2, .bg-warning h3,
+.bg-warning h4, .bg-warning h5, .bg-warning h6,
+.card-header.bg-warning h1, .card-header.bg-warning h2, .card-header.bg-warning h3,
+.card-header.bg-warning h4, .card-header.bg-warning h5, .card-header.bg-warning h6 {
+    color: #000 !important;
+}
+
 .card-header.bg-warning .btn {
     color: #212529;
 }

@@ -100,8 +100,33 @@ class Bootstrap {
     private function initLogging() {
 		$config = $this->config;
 
+        // Determine workspace slug for log file naming
+        // Priority: CLI --workspace arg > subdomain > 'default'
+        $workspaceSlug = 'default';
+        if (php_sapi_name() === 'cli') {
+            // Check CLI args for --workspace
+            global $argv;
+            foreach ($argv ?? [] as $arg) {
+                if (preg_match('/^--workspace=(.+)$/', $arg, $m)) {
+                    $workspaceSlug = $m[1];
+                    break;
+                }
+            }
+        } else {
+            // Web request - use subdomain
+            $workspaceSlug = $_SERVER['WORKSPACE'] ?? 'default';
+        }
+
         $config['logLevel'] = $this->config['logging']['level'] ?? 'DEBUG';
-        $config['logFile']  = $this->config['logging']['file'] ?? 'log/app.log';
+
+        // Use workspace slug in log filename (e.g., log/gwt.log -> gwt-2026-01-28.log)
+        $defaultLogFile = "log/{$workspaceSlug}.log";
+        $config['logFile'] = $this->config['logging']['file'] ?? $defaultLogFile;
+
+        // If config specifies 'app.log', replace 'app' with workspace slug
+        if (strpos($config['logFile'], 'app.log') !== false) {
+            $config['logFile'] = str_replace('app.log', "{$workspaceSlug}.log", $config['logFile']);
+        }
 
         // Create log directory if it doesn't exist
         $logDir = dirname($config['logFile']);
@@ -109,7 +134,7 @@ class Bootstrap {
             mkdir($logDir, 0755, true);
         }
 
-		if (empty($config['log.name'])) $config['log.name'] = 'app';
+		if (empty($config['log.name'])) $config['log.name'] = $workspaceSlug;
 
 		// Set up logging for legacy
 		Flight::register('log', 'Monolog\Logger', array($config['log.name']), function($log) use ($config) {

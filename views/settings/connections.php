@@ -55,7 +55,7 @@
         <!-- Subscription Card -->
         <div class="col-md-6">
             <div class="card h-100 border-<?= $tierInfo['color'] ?>">
-                <div class="card-header bg-<?= $tierInfo['color'] ?> <?= $tier !== 'free' ? 'text-white' : '' ?>">
+                <div class="card-header bg-<?= $tierInfo['color'] ?> text-dark">
                     <i class="bi bi-star-fill"></i> Subscription
                 </div>
                 <div class="card-body">

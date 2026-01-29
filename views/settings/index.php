@@ -14,7 +14,7 @@
             $tierInfo = \app\services\SubscriptionService::getTierInfo($currentTier);
             ?>
             <div class="card mb-4 border-<?= $tierInfo['color'] ?>">
-                <div class="card-header bg-<?= $tierInfo['color'] ?> <?= $currentTier !== 'free' ? 'text-white' : '' ?>">
+                <div class="card-header bg-<?= $tierInfo['color'] ?> text-dark">
                     <i class="bi bi-star-fill"></i> Subscription
                 </div>
                 <div class="card-body">

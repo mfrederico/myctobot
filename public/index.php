@@ -59,7 +59,74 @@ if (php_sapi_name() === 'cli' && $argc > 1) {
 if (php_sapi_name() !== 'cli') {
     $host = $_SERVER['HTTP_HOST'] ?? '';
     $parts = explode('.', $host);
-    $_SERVER['WORKSPACE'] = (count($parts) >= 3) ? $parts[0] : null;
+    $potentialWorkspace = (count($parts) >= 3) ? strtolower($parts[0]) : null;
+
+    // Reserved subdomains that should redirect to the primary domain
+    $reservedSubdomains = [
+        'www',      // Common www prefix
+        'mail',     // Mail services
+        'smtp',     // SMTP
+        'pop',      // POP3
+        'imap',     // IMAP
+        'ftp',      // FTP
+        'admin',    // Admin (if not a workspace)
+        'api',      // API (if routed differently)
+        'cdn',      // CDN
+        'static',   // Static assets
+        'assets',   // Assets
+        'img',      // Images
+        'images',   // Images
+        'ns1',      // Nameservers
+        'ns2',
+        'localhost',
+    ];
+
+    // Profanity/invalid workspace names to block
+    $blockedSubdomains = [
+        'fuck', 'shit', 'ass', 'dick', 'cock', 'pussy', 'bitch', 'cunt',
+        'nigger', 'faggot', 'retard', 'porn', 'xxx', 'sex', 'nude',
+        'hitler', 'nazi', 'terrorist', 'isis', 'null', 'undefined',
+        'root', 'system', 'test', 'demo', 'example', 'default',
+    ];
+
+    if ($potentialWorkspace !== null) {
+        // Check if it's a reserved subdomain - redirect to primary domain
+        if (in_array($potentialWorkspace, $reservedSubdomains)) {
+            // Parse config minimally to get the primary domain
+            $configPath = BASE_PATH . '/conf/config.ini';
+            $primaryDomain = null;
+            if (file_exists($configPath)) {
+                $config = parse_ini_file($configPath, true);
+                $primaryDomain = $config['site']['domain'] ?? null;
+            }
+
+            // Fallback: just strip the subdomain from current host
+            if (!$primaryDomain) {
+                array_shift($parts);
+                $primaryDomain = implode('.', $parts);
+            }
+
+            // Build redirect URL
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+            $redirectUrl = "{$protocol}://{$primaryDomain}{$requestUri}";
+
+            header("Location: {$redirectUrl}", true, 301);
+            exit;
+        }
+
+        // Check if it's a blocked/profanity subdomain - show error
+        if (in_array($potentialWorkspace, $blockedSubdomains)) {
+            http_response_code(400);
+            die('<!DOCTYPE html><html><head><title>Invalid Workspace</title>
+                <style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a2e;color:#eee;}
+                .box{text-align:center;padding:40px;background:#16213e;border-radius:8px;max-width:500px;}
+                h1{color:#e94560;margin-bottom:20px;}p{color:#aaa;}</style></head>
+                <body><div class="box"><h1>Invalid Workspace</h1><p>This workspace name is not available.</p></div></body></html>');
+        }
+    }
+
+    $_SERVER['WORKSPACE'] = $potentialWorkspace;
 }
 
 // Load bootstrap

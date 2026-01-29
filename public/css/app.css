@@ -827,3 +827,89 @@ pre.bg-dark {
     background-color: rgba(255, 193, 7, 0.2) !important;
     color: var(--warning-color) !important;
 }
+
+/* ============================================
+   Dark Mode Button Fixes
+   ============================================ */
+
+/* btn-outline-dark is invisible on dark backgrounds - invert for dark mode */
+.btn-outline-dark {
+    --bs-btn-color: #adb5bd;
+    --bs-btn-border-color: #6c757d;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #6c757d;
+    --bs-btn-hover-border-color: #6c757d;
+    --bs-btn-focus-shadow-rgb: 108, 117, 125;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #6c757d;
+    --bs-btn-active-border-color: #6c757d;
+}
+
+/* Alternative: use btn-outline-light styling for dark mode */
+.btn-outline-secondary {
+    --bs-btn-color: #adb5bd;
+    --bs-btn-border-color: #6c757d;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #5c636a;
+    --bs-btn-hover-border-color: #565e64;
+}
+
+/* ============================================
+   Warning Background Text Contrast Fix
+   ============================================ */
+
+/* bg-warning should have dark text for readability, not white */
+.bg-warning,
+.bg-warning.text-white,
+.card-header.bg-warning,
+.card-header.bg-warning.text-white,
+.alert-warning {
+    color: #000 !important;
+}
+
+/* Ensure links in warning backgrounds are also dark */
+.bg-warning a,
+.card-header.bg-warning a,
+.alert-warning a {
+    color: #0d6efd !important;
+}
+
+/* Better warning card header styling */
+.card-header.bg-warning {
+    background-color: #ffc107 !important;
+    color: #212529 !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.card-header.bg-warning .btn {
+    color: #212529;
+}
+
+/* Muted warning - softer yellow for dark mode that's less glaring */
+.card-header.bg-warning-subtle,
+.bg-warning-subtle {
+    background-color: rgba(255, 193, 7, 0.15) !important;
+    color: #ffda6a !important;
+}
+
+/* ============================================
+   Other Background Color Text Fixes
+   ============================================ */
+
+/* Info backgrounds - ensure readable text */
+.bg-info,
+.bg-info.text-white {
+    color: #000 !important;
+}
+
+/* Light backgrounds in dark mode need adjustment */
+.bg-light {
+    background-color: var(--bg-surface-raised) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Ensure text-white doesn't override when it shouldn't */
+.bg-warning .text-white,
+.bg-info .text-white {
+    color: #000 !important;
+}

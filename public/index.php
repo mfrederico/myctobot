@@ -83,7 +83,7 @@ if (php_sapi_name() !== 'cli') {
 
     // Profanity/invalid workspace names to block
     $blockedSubdomains = [
-        'fuck', 'shit', 'ass', 'dick', 'cock', 'pussy', 'bitch', 'cunt',
+        'penis','fuck', 'shit', 'ass', 'dick', 'cock', 'pussy', 'bitch', 'cunt',
         'nigger', 'faggot', 'retard', 'porn', 'xxx', 'sex', 'nude',
         'hitler', 'nazi', 'terrorist', 'isis', 'null', 'undefined',
         'root', 'system', 'test', 'demo', 'example', 'default',

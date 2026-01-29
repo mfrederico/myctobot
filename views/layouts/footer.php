@@ -1,5 +1,5 @@
 <!-- Footer -->
-<footer class="footer mt-auto py-3 bg-secondary text-light">
+<footer class="footer mt-auto py-3">
     <div class="container">
         <div class="row">
             <!-- About Section -->

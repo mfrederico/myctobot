@@ -858,12 +858,22 @@ pre.bg-dark {
    Warning Background Text Contrast Fix
    ============================================ */
 
-/* bg-warning should have dark text for readability, not white */
+/* bg-warning should have dark text for readability - override Bootstrap dark mode inversions */
 .bg-warning,
 .bg-warning.text-white,
+.bg-warning.text-dark,
 .card-header.bg-warning,
 .card-header.bg-warning.text-white,
+.card-header.bg-warning.text-dark,
+.badge.bg-warning,
+.badge.bg-warning.text-dark,
 .alert-warning {
+    color: #000 !important;
+}
+
+/* Ensure text-dark stays dark on warning backgrounds (Bootstrap dark mode inverts text-dark) */
+.bg-warning .text-dark,
+.card-header.bg-warning .text-dark {
     color: #000 !important;
 }
 

@@ -78,13 +78,13 @@
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <div class="rounded bg-light p-2 me-3">
-                                                <i class="bi <?= htmlspecialchars($project['template_icon']) ?> text-primary"></i>
+                                                <i class="bi <?= htmlspecialchars($project['template_icon'] ?? 'bi-gear') ?> text-primary"></i>
                                             </div>
                                             <div>
                                                 <a href="/orchestration/project/<?= $project['id'] ?>" class="fw-semibold text-decoration-none">
-                                                    <?= htmlspecialchars($project['name']) ?>
+                                                    <?= htmlspecialchars($project['name'] ?? 'Untitled') ?>
                                                 </a>
-                                                <small class="d-block text-muted"><?= htmlspecialchars($project['template_name']) ?></small>
+                                                <small class="d-block text-muted"><?= htmlspecialchars($project['template_name'] ?? 'Custom') ?></small>
                                             </div>
                                         </div>
                                     </td>
@@ -148,8 +148,8 @@
                                     <i class="bi <?= $template['icon'] ?> text-<?= $template['color'] ?>"></i>
                                 </div>
                                 <div class="flex-grow-1">
-                                    <div class="fw-semibold"><?= htmlspecialchars($template['name']) ?></div>
-                                    <small class="text-muted"><?= htmlspecialchars(substr($template['description'], 0, 60)) ?>...</small>
+                                    <div class="fw-semibold"><?= htmlspecialchars($template['name'] ?? 'Template') ?></div>
+                                    <small class="text-muted"><?= htmlspecialchars(substr($template['description'] ?? '', 0, 60)) ?>...</small>
                                 </div>
                                 <i class="bi bi-chevron-right text-muted"></i>
                             </div>

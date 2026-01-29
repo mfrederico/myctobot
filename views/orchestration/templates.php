@@ -3,7 +3,7 @@
         <div>
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-1">
-                    <li class="breadcrumb-item"><a href="/studio">Studio</a></li>
+                    <li class="breadcrumb-item"><a href="/orchestration">Studio</a></li>
                     <li class="breadcrumb-item active">Templates</li>
                 </ol>
             </nav>
@@ -11,7 +11,7 @@
                 <i class="bi bi-collection"></i> Orchestration Templates
             </h1>
         </div>
-        <a href="/studio/wizard" class="btn btn-primary">
+        <a href="/orchestration/wizard" class="btn btn-primary">
             <i class="bi bi-plus-lg"></i> Custom Orchestration
         </a>
     </div>
@@ -20,11 +20,11 @@
     <div class="card mb-4">
         <div class="card-body py-3">
             <div class="d-flex flex-wrap gap-2">
-                <a href="/studio/templates" class="btn btn-sm <?= !$selectedCategory ? 'btn-primary' : 'btn-outline-secondary' ?>">
+                <a href="/orchestration/templates" class="btn btn-sm <?= !$selectedCategory ? 'btn-primary' : 'btn-outline-secondary' ?>">
                     <i class="bi bi-grid-3x3-gap"></i> All
                 </a>
                 <?php foreach ($categories as $key => $cat): ?>
-                <a href="/studio/templates?category=<?= $key ?>"
+                <a href="/orchestration/templates?category=<?= $key ?>"
                    class="btn btn-sm <?= $selectedCategory === $key ? 'btn-' . $cat['color'] : 'btn-outline-' . $cat['color'] ?>">
                     <i class="bi <?= $cat['icon'] ?>"></i> <?= $cat['label'] ?>
                 </a>
@@ -45,7 +45,7 @@
                 Templates are being added. Check back soon!
                 <?php endif; ?>
             </p>
-            <a href="/studio/wizard" class="btn btn-primary">
+            <a href="/orchestration/wizard" class="btn btn-primary">
                 <i class="bi bi-plus-lg"></i> Create Custom Orchestration
             </a>
         </div>
@@ -92,10 +92,10 @@
                 </div>
                 <div class="card-footer bg-transparent border-top-0">
                     <div class="d-grid gap-2">
-                        <a href="/studio/wizard/<?= $template['id'] ?>" class="btn btn-<?= $template['color'] ?>">
+                        <a href="/orchestration/wizard/<?= $template['id'] ?>" class="btn btn-<?= $template['color'] ?>">
                             <i class="bi bi-play-fill"></i> Use This Template
                         </a>
-                        <a href="/studio/template/<?= $template['id'] ?>" class="btn btn-outline-secondary btn-sm">
+                        <a href="/orchestration/template/<?= $template['id'] ?>" class="btn btn-outline-secondary btn-sm">
                             <i class="bi bi-info-circle"></i> View Details
                         </a>
                     </div>

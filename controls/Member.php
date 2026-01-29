@@ -103,11 +103,21 @@ class Member extends Control {
             
             if (empty($this->viewData['error'])) {
                 $member->updated_at = date('Y-m-d H:i:s');
-                
+
                 try {
                     Bean::store($member);
                     $_SESSION['member'] = $member->export();
                     $this->member = $member; // Update current member object
+
+                    // Handle studio preference
+                    $preferredStudio = trim($request->data->preferred_studio ?? '');
+                    if ($preferredStudio && in_array($preferredStudio, ['developer', 'commerce', 'pipeline'])) {
+                        Flight::setStudio($preferredStudio);
+                    } elseif ($preferredStudio === '') {
+                        // Clear studio preference if "Ask each time" selected
+                        Flight::setSetting('active_studio', '');
+                    }
+
                     if (empty($this->viewData['success'])) {
                         $this->viewData['success'] = 'Profile updated successfully';
                     }

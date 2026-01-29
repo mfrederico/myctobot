@@ -63,7 +63,7 @@ class Auth extends BaseControls\Control {
 
         // If already logged in and NOT coming from a permission denied redirect
         if (Flight::isLoggedIn() && empty($redirect)) {
-            Flight::redirect('/settings/connections');
+            Flight::redirect('/studio');
             return;
         }
 
@@ -109,7 +109,7 @@ class Auth extends BaseControls\Control {
             $email = $request->data->email ?? '';
             $password = $request->data->password ?? '';
             $workspace = strtolower(trim($request->data->workspace ?? ''));
-            $redirect = $request->data->redirect ?? '/settings/connections';
+            $redirect = $request->data->redirect ?? '/studio';
 
             // Use username if provided, otherwise use email
             $login = $username ?: $email;
@@ -299,7 +299,7 @@ class Auth extends BaseControls\Control {
 
         // Redirect if already logged in
         if (Flight::isLoggedIn()) {
-            Flight::redirect('/settings/connections');
+            Flight::redirect('/studio');
             return;
         }
 
@@ -472,7 +472,7 @@ class Auth extends BaseControls\Control {
             }
 
             $this->flash('success', 'Your email has been verified! Welcome to ' . Flight::get('app.name') . '!');
-            Flight::redirect('/settings/connections');
+            Flight::redirect('/studio');
 
         } catch (\Exception $e) {
             Flight::get('log')->error('Member verification failed: ' . $e->getMessage());
@@ -857,7 +857,7 @@ HTML;
 
             // Check for workspace from OAuth flow
             $workspace = $_SESSION['oauth_workspace'] ?? '';
-            $redirect = $_SESSION['oauth_redirect'] ?? '/settings/connections';
+            $redirect = $_SESSION['oauth_redirect'] ?? '/studio';
             unset($_SESSION['oauth_workspace'], $_SESSION['oauth_redirect']);
 
             // If workspace specified, switch to workspace database

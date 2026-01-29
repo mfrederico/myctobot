@@ -79,7 +79,7 @@
     <!-- CEO Directives -->
     <div class="card mb-4 border-warning">
         <div class="card-header bg-warning text-dark">
-            <h6 class="mb-0"><i class="bi bi-briefcase me-1"></i>CEO Directives</h6>
+            <i class="bi bi-briefcase me-1"></i>CEO Directives
         </div>
         <div class="card-body">
             <div class="row g-3">

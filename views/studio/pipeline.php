@@ -3,20 +3,26 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h2 mb-1">
-                <i class="bi <?= $studio['icon'] ?> text-<?= $studio['color'] ?>"></i>
-                <?= htmlspecialchars($studio['name']) ?>
+                <i class="bi <?= $studio['icon'] ?? 'bi-gear' ?> text-<?= $studio['color'] ?? 'info' ?>"></i>
+                <?= htmlspecialchars($studio['name'] ?? 'Pipeline Studio') ?>
             </h1>
-            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline']) ?></p>
+            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline'] ?? '') ?></p>
         </div>
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-arrow-left-right"></i> Switch Studio
             </button>
-            <ul class="dropdown-menu dropdown-menu-end">
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width: 240px;">
                 <?php foreach ($studios as $key => $s): ?>
                 <li>
-                    <a class="dropdown-item <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
-                        <i class="bi <?= $s['icon'] ?> me-2"></i> <?= htmlspecialchars($s['name']) ?>
+                    <a class="dropdown-item py-2 <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
+                        <div class="d-flex align-items-start">
+                            <i class="bi <?= $s['icon'] ?> me-2 mt-1"></i>
+                            <div>
+                                <div class="fw-semibold"><?= htmlspecialchars($s['shortName'] ?? $s['name'] ?? '') ?></div>
+                                <small class="<?= $key === $studioKey ? 'text-light opacity-75' : 'text-muted' ?>"><?= htmlspecialchars($s['description'] ?? '') ?></small>
+                            </div>
+                        </div>
                     </a>
                 </li>
                 <?php endforeach; ?>
@@ -120,10 +126,10 @@
                                             </div>
                                             <div>
                                                 <a href="/pipelines/edit/<?= $pipeline['id'] ?>" class="fw-semibold text-decoration-none">
-                                                    <?= htmlspecialchars($pipeline['name']) ?>
+                                                    <?= htmlspecialchars($pipeline['name'] ?? 'Unnamed') ?>
                                                 </a>
-                                                <?php if ($pipeline['description']): ?>
-                                                <small class="d-block text-muted"><?= htmlspecialchars(substr($pipeline['description'], 0, 40)) ?>...</small>
+                                                <?php if (!empty($pipeline['description'])): ?>
+                                                <small class="d-block text-muted"><?= htmlspecialchars(substr($pipeline['description'] ?? '', 0, 40)) ?>...</small>
                                                 <?php endif; ?>
                                             </div>
                                         </div>
@@ -185,13 +191,13 @@
                                 <?php foreach ($runs as $run): ?>
                                 <tr>
                                     <td>
-                                        <code class="small"><?= htmlspecialchars($run['run_uid']) ?></code>
+                                        <code class="small"><?= htmlspecialchars($run['run_uid'] ?? '') ?></code>
                                     </td>
                                     <td>
-                                        <small><?= htmlspecialchars($run['pipeline_name']) ?></small>
+                                        <small><?= htmlspecialchars($run['pipeline_name'] ?? '') ?></small>
                                     </td>
                                     <td>
-                                        <small class="text-muted"><?= htmlspecialchars($run['trigger_source']) ?></small>
+                                        <small class="text-muted"><?= htmlspecialchars($run['trigger_source'] ?? '') ?></small>
                                     </td>
                                     <td>
                                         <?php
@@ -240,7 +246,7 @@
             </div>
 
             <!-- MCP Servers -->
-            <div class="card">
+            <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h6 class="mb-0"><i class="bi bi-plug"></i> MCP Servers</h6>
                     <a href="/mcpservers" class="btn btn-sm btn-outline-secondary">Manage</a>
@@ -257,13 +263,41 @@
                         <li class="list-group-item d-flex align-items-center justify-content-between">
                             <div>
                                 <i class="bi bi-plug me-2 text-muted"></i>
-                                <span class="small"><?= htmlspecialchars($server['name']) ?></span>
+                                <span class="small"><?= htmlspecialchars($server['name'] ?? 'Unnamed') ?></span>
                             </div>
                             <?php if ($server['is_active']): ?>
                             <span class="badge bg-success">Active</span>
                             <?php else: ?>
                             <span class="badge bg-secondary">Inactive</span>
                             <?php endif; ?>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- Templates -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0"><i class="bi bi-lightning-charge"></i> Quick Start Templates</h6>
+                    <a href="/orchestration" class="btn btn-sm btn-outline-secondary">Browse All</a>
+                </div>
+                <div class="card-body p-0">
+                    <?php if (empty($templates)): ?>
+                    <div class="text-center py-4">
+                        <p class="text-muted mb-0 small">No templates available.</p>
+                    </div>
+                    <?php else: ?>
+                    <ul class="list-group list-group-flush">
+                        <?php foreach (array_slice($templates, 0, 3) as $template): ?>
+                        <li class="list-group-item">
+                            <a href="/orchestration/wizard/<?= $template['id'] ?>" class="text-decoration-none">
+                                <div class="fw-semibold small"><?= htmlspecialchars($template['name'] ?? 'Template') ?></div>
+                                <?php if (!empty($template['description'])): ?>
+                                <small class="text-muted"><?= htmlspecialchars(substr($template['description'] ?? '', 0, 50)) ?>...</small>
+                                <?php endif; ?>
+                            </a>
                         </li>
                         <?php endforeach; ?>
                     </ul>

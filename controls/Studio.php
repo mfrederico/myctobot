@@ -21,8 +21,10 @@ class Studio extends BaseControls\Control {
     private const STUDIOS = [
         'developer' => [
             'name' => 'Developer Studio',
+            'shortName' => 'Developer',
             'tagline' => 'Build and deploy with AI-powered development tools',
-            'icon' => 'bi-code-slash',
+            'description' => 'Code & repos',
+            'icon' => 'code-slash',
             'color' => 'primary',
             'features' => [
                 'AI Dev Jobs - Automated code generation and fixes',
@@ -33,8 +35,10 @@ class Studio extends BaseControls\Control {
         ],
         'commerce' => [
             'name' => 'Commerce Studio',
+            'shortName' => 'Commerce',
             'tagline' => 'Manage your Shopify stores with AI assistance',
-            'icon' => 'bi-shop',
+            'description' => 'Shopify & themes',
+            'icon' => 'shop',
             'color' => 'success',
             'features' => [
                 'Shopify Stores - Connect and manage multiple stores',
@@ -45,9 +49,11 @@ class Studio extends BaseControls\Control {
         ],
         'pipeline' => [
             'name' => 'Pipeline Studio',
+            'shortName' => 'Pipeline',
             'tagline' => 'Orchestrate complex workflows and automations',
-            'icon' => 'bi-diagram-3',
-            'color' => 'info',
+            'description' => 'Automations',
+            'icon' => 'diagram-3',
+            'color' => 'warning',
             'features' => [
                 'Pipeline Builder - Visual workflow designer',
                 'Run History - Monitor and debug executions',
@@ -56,6 +62,31 @@ class Studio extends BaseControls\Control {
             ]
         ]
     ];
+
+    /**
+     * Get all studio configurations (static helper for views)
+     */
+    public static function getAllStudios(): array {
+        return self::STUDIOS;
+    }
+
+    /**
+     * Get a specific studio configuration
+     */
+    public static function getStudioConfig(string $type): ?array {
+        return self::STUDIOS[$type] ?? null;
+    }
+
+    /**
+     * Get current studio for a member
+     */
+    public static function getCurrentStudio(int $memberId): ?array {
+        $studioType = Flight::getStudio();
+        if (empty($studioType) || !isset(self::STUDIOS[$studioType])) {
+            return null;
+        }
+        return array_merge(['type' => $studioType], self::STUDIOS[$studioType]);
+    }
 
     /**
      * Main index - redirect to preferred studio or show selector
@@ -93,187 +124,27 @@ class Studio extends BaseControls\Control {
     }
 
     /**
-     * Developer Studio dashboard
+     * Developer Studio dashboard - delegates to Studiodev controller
      */
     public function developer() {
-        if (!$this->requireLogin()) return;
-
-        // Set this as the active studio
-        Flight::setStudio('developer');
-
-        $member = Flight::getMember();
-        $studioInfo = self::STUDIOS['developer'];
-
-        // Get recent AI Dev jobs
-        $recentJobs = Bean::find('aidevjobs',
-            ' member_id = ? ORDER BY created_at DESC LIMIT 5 ',
-            [$member->id]
-        );
-
-        $jobs = [];
-        foreach ($recentJobs as $job) {
-            $jobs[] = [
-                'id' => $job->id,
-                'issue_key' => $job->issue_key,
-                'status' => $job->status,
-                'created_at' => $job->created_at,
-                'completed_at' => $job->completed_at
-            ];
-        }
-
-        // Get connected repos
-        $repos = Bean::find('repoconnections',
-            ' member_id = ? ORDER BY created_at DESC LIMIT 5 ',
-            [$member->id]
-        );
-
-        $repoList = [];
-        foreach ($repos as $repo) {
-            $repoList[] = [
-                'id' => $repo->id,
-                'name' => $repo->repo_name ?? $repo->name,
-                'provider' => $repo->provider ?? 'github',
-                'url' => $repo->repo_url ?? $repo->url
-            ];
-        }
-
-        // Get Jira boards
-        $boards = Bean::find('jiraboards',
-            ' member_id = ? ORDER BY created_at DESC LIMIT 5 ',
-            [$member->id]
-        );
-
-        $boardList = [];
-        foreach ($boards as $board) {
-            $boardList[] = [
-                'id' => $board->id,
-                'name' => $board->name,
-                'project_key' => $board->project_key
-            ];
-        }
-
-        $this->viewData['title'] = 'Developer Studio';
-        $this->viewData['studio'] = $studioInfo;
-        $this->viewData['studioKey'] = 'developer';
-        $this->viewData['jobs'] = $jobs;
-        $this->viewData['repos'] = $repoList;
-        $this->viewData['boards'] = $boardList;
-        $this->viewData['studios'] = self::STUDIOS;
-
-        $this->render('studio/developer', $this->viewData);
+        $controller = new Studiodev();
+        $controller->index();
     }
 
     /**
-     * Commerce Studio dashboard
+     * Commerce Studio dashboard - delegates to Studiocommerce controller
      */
     public function commerce() {
-        if (!$this->requireLogin()) return;
-
-        // Set this as the active studio
-        Flight::setStudio('commerce');
-
-        $member = Flight::getMember();
-        $studioInfo = self::STUDIOS['commerce'];
-
-        // Get Shopify connections
-        $shopifyStores = Bean::find('shopifyconnections',
-            ' member_id = ? ORDER BY created_at DESC ',
-            [$member->id]
-        );
-
-        $stores = [];
-        foreach ($shopifyStores as $store) {
-            $stores[] = [
-                'id' => $store->id,
-                'shop_domain' => $store->shop_domain,
-                'shop_name' => $store->shop_name ?? $store->shop_domain,
-                'status' => $store->status ?? 'active'
-            ];
-        }
-
-        $this->viewData['title'] = 'Commerce Studio';
-        $this->viewData['studio'] = $studioInfo;
-        $this->viewData['studioKey'] = 'commerce';
-        $this->viewData['stores'] = $stores;
-        $this->viewData['studios'] = self::STUDIOS;
-
-        $this->render('studio/commerce', $this->viewData);
+        $controller = new Studiocommerce();
+        $controller->index();
     }
 
     /**
-     * Pipeline Studio dashboard
+     * Pipeline Studio dashboard - delegates to Studiopipeline controller
      */
     public function pipeline() {
-        if (!$this->requireLogin()) return;
-
-        // Set this as the active studio
-        Flight::setStudio('pipeline');
-
-        $member = Flight::getMember();
-        $studioInfo = self::STUDIOS['pipeline'];
-
-        // Get pipelines
-        $pipelines = Bean::find('pipelines',
-            ' member_id = ? ORDER BY updated_at DESC LIMIT 10 ',
-            [$member->id]
-        );
-
-        $pipelineList = [];
-        foreach ($pipelines as $p) {
-            $pipelineList[] = [
-                'id' => $p->id,
-                'name' => $p->name,
-                'description' => $p->description,
-                'is_active' => (bool) $p->is_active,
-                'run_count' => $p->run_count ?? 0,
-                'last_run_at' => $p->last_run_at
-            ];
-        }
-
-        // Get recent runs
-        $recentRuns = Bean::find('pipelineruns',
-            ' member_id = ? ORDER BY created_at DESC LIMIT 10 ',
-            [$member->id]
-        );
-
-        $runs = [];
-        foreach ($recentRuns as $run) {
-            $pipeline = Bean::load('pipelines', $run->pipelines_id);
-            $runs[] = [
-                'id' => $run->id,
-                'run_uid' => $run->run_uid,
-                'pipeline_name' => $pipeline->name ?? 'Unknown',
-                'status' => $run->status,
-                'trigger_source' => $run->trigger_source,
-                'created_at' => $run->created_at
-            ];
-        }
-
-        // Get MCP servers
-        $mcpServers = Bean::find('mcpservers',
-            ' member_id = ? ORDER BY name ASC LIMIT 5 ',
-            [$member->id]
-        );
-
-        $servers = [];
-        foreach ($mcpServers as $server) {
-            $servers[] = [
-                'id' => $server->id,
-                'name' => $server->name,
-                'transport' => $server->transport,
-                'is_active' => (bool) $server->is_active
-            ];
-        }
-
-        $this->viewData['title'] = 'Pipeline Studio';
-        $this->viewData['studio'] = $studioInfo;
-        $this->viewData['studioKey'] = 'pipeline';
-        $this->viewData['pipelines'] = $pipelineList;
-        $this->viewData['runs'] = $runs;
-        $this->viewData['servers'] = $servers;
-        $this->viewData['studios'] = self::STUDIOS;
-
-        $this->render('studio/pipeline', $this->viewData);
+        $controller = new Studiopipeline();
+        $controller->index();
     }
 
     /**

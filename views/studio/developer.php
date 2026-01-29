@@ -3,20 +3,26 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h2 mb-1">
-                <i class="bi <?= $studio['icon'] ?> text-<?= $studio['color'] ?>"></i>
-                <?= htmlspecialchars($studio['name']) ?>
+                <i class="bi <?= $studio['icon'] ?? 'bi-code-slash' ?> text-<?= $studio['color'] ?? 'primary' ?>"></i>
+                <?= htmlspecialchars($studio['name'] ?? 'Developer Studio') ?>
             </h1>
-            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline']) ?></p>
+            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline'] ?? '') ?></p>
         </div>
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-arrow-left-right"></i> Switch Studio
             </button>
-            <ul class="dropdown-menu dropdown-menu-end">
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width: 240px;">
                 <?php foreach ($studios as $key => $s): ?>
                 <li>
-                    <a class="dropdown-item <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
-                        <i class="bi <?= $s['icon'] ?> me-2"></i> <?= htmlspecialchars($s['name']) ?>
+                    <a class="dropdown-item py-2 <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
+                        <div class="d-flex align-items-start">
+                            <i class="bi <?= $s['icon'] ?> me-2 mt-1"></i>
+                            <div>
+                                <div class="fw-semibold"><?= htmlspecialchars($s['shortName'] ?? $s['name'] ?? '') ?></div>
+                                <small class="<?= $key === $studioKey ? 'text-light opacity-75' : 'text-muted' ?>"><?= htmlspecialchars($s['description'] ?? '') ?></small>
+                            </div>
+                        </div>
                     </a>
                 </li>
                 <?php endforeach; ?>
@@ -147,6 +153,39 @@
 
         <!-- Sidebar -->
         <div class="col-lg-4">
+            <!-- Connection Status -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-plug"></i> Connections</h6>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex align-items-center justify-content-between">
+                            <div>
+                                <i class="bi bi-github me-2"></i>
+                                <span class="small">GitHub</span>
+                            </div>
+                            <?php if ($gitHubConnected): ?>
+                            <span class="badge bg-success"><i class="bi bi-check-lg"></i> Connected</span>
+                            <?php else: ?>
+                            <a href="/settings/connections" class="btn btn-sm btn-outline-primary">Connect</a>
+                            <?php endif; ?>
+                        </li>
+                        <li class="list-group-item d-flex align-items-center justify-content-between">
+                            <div>
+                                <i class="bi bi-kanban me-2"></i>
+                                <span class="small">Atlassian/Jira</span>
+                            </div>
+                            <?php if ($atlassianConnected): ?>
+                            <span class="badge bg-success"><i class="bi bi-check-lg"></i> Connected</span>
+                            <?php else: ?>
+                            <a href="/settings/connections" class="btn btn-sm btn-outline-primary">Connect</a>
+                            <?php endif; ?>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
             <!-- Connected Repos -->
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -164,7 +203,7 @@
                         <?php foreach ($repos as $repo): ?>
                         <li class="list-group-item d-flex align-items-center">
                             <i class="bi bi-<?= $repo['provider'] ?? 'github' ?> me-2 text-muted"></i>
-                            <span class="small"><?= htmlspecialchars($repo['name']) ?></span>
+                            <span class="small"><?= htmlspecialchars($repo['name'] ?? 'Unnamed') ?></span>
                         </li>
                         <?php endforeach; ?>
                     </ul>
@@ -188,8 +227,8 @@
                     <ul class="list-group list-group-flush">
                         <?php foreach ($boards as $board): ?>
                         <li class="list-group-item d-flex align-items-center">
-                            <span class="badge bg-light text-dark me-2"><?= htmlspecialchars($board['project_key']) ?></span>
-                            <span class="small"><?= htmlspecialchars($board['name']) ?></span>
+                            <span class="badge bg-light text-dark me-2"><?= htmlspecialchars($board['project_key'] ?? '') ?></span>
+                            <span class="small"><?= htmlspecialchars($board['name'] ?? 'Unnamed') ?></span>
                         </li>
                         <?php endforeach; ?>
                     </ul>

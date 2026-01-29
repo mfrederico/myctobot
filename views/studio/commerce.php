@@ -3,20 +3,26 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h2 mb-1">
-                <i class="bi <?= $studio['icon'] ?> text-<?= $studio['color'] ?>"></i>
-                <?= htmlspecialchars($studio['name']) ?>
+                <i class="bi <?= $studio['icon'] ?? 'bi-shop' ?> text-<?= $studio['color'] ?? 'success' ?>"></i>
+                <?= htmlspecialchars($studio['name'] ?? 'Commerce Studio') ?>
             </h1>
-            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline']) ?></p>
+            <p class="text-muted mb-0"><?= htmlspecialchars($studio['tagline'] ?? '') ?></p>
         </div>
         <div class="dropdown">
             <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-arrow-left-right"></i> Switch Studio
             </button>
-            <ul class="dropdown-menu dropdown-menu-end">
+            <ul class="dropdown-menu dropdown-menu-end" style="min-width: 240px;">
                 <?php foreach ($studios as $key => $s): ?>
                 <li>
-                    <a class="dropdown-item <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
-                        <i class="bi <?= $s['icon'] ?> me-2"></i> <?= htmlspecialchars($s['name']) ?>
+                    <a class="dropdown-item py-2 <?= $key === $studioKey ? 'active' : '' ?>" href="/studio/<?= $key ?>">
+                        <div class="d-flex align-items-start">
+                            <i class="bi <?= $s['icon'] ?> me-2 mt-1"></i>
+                            <div>
+                                <div class="fw-semibold"><?= htmlspecialchars($s['shortName'] ?? $s['name'] ?? '') ?></div>
+                                <small class="<?= $key === $studioKey ? 'text-light opacity-75' : 'text-muted' ?>"><?= htmlspecialchars($s['description'] ?? '') ?></small>
+                            </div>
+                        </div>
                     </a>
                 </li>
                 <?php endforeach; ?>
@@ -137,7 +143,29 @@
 
         <!-- Sidebar -->
         <div class="col-lg-4">
-            <!-- Store Count -->
+            <!-- Connection Status -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h6 class="mb-0"><i class="bi bi-plug"></i> Connection Status</h6>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex align-items-center justify-content-between">
+                            <div>
+                                <i class="bi bi-shop me-2"></i>
+                                <span class="small">Shopify</span>
+                            </div>
+                            <?php if ($shopifyConnected): ?>
+                            <span class="badge bg-success"><i class="bi bi-check-lg"></i> <?= count($stores) ?> Store<?= count($stores) !== 1 ? 's' : '' ?></span>
+                            <?php else: ?>
+                            <a href="/shopify/connect" class="btn btn-sm btn-outline-success">Connect</a>
+                            <?php endif; ?>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Store Stats -->
             <div class="card mb-4">
                 <div class="card-body text-center">
                     <div class="display-4 fw-bold text-success"><?= count($stores) ?></div>
@@ -152,20 +180,24 @@
                 </div>
                 <div class="card-body">
                     <ul class="list-unstyled mb-0">
-                        <li class="mb-3">
-                            <i class="bi bi-1-circle-fill text-success me-2"></i>
+                        <li class="mb-3 d-flex align-items-start">
+                            <?php if ($shopifyConnected): ?>
+                            <i class="bi bi-check-circle-fill text-success me-2"></i>
+                            <?php else: ?>
+                            <i class="bi bi-1-circle text-muted me-2"></i>
+                            <?php endif; ?>
                             <span class="small">Connect your Shopify store</span>
                         </li>
-                        <li class="mb-3">
-                            <i class="bi bi-2-circle-fill text-success me-2"></i>
+                        <li class="mb-3 d-flex align-items-start">
+                            <i class="bi bi-2-circle text-muted me-2"></i>
                             <span class="small">Set up theme preview environments</span>
                         </li>
-                        <li class="mb-3">
-                            <i class="bi bi-3-circle-fill text-success me-2"></i>
+                        <li class="mb-3 d-flex align-items-start">
+                            <i class="bi bi-3-circle text-muted me-2"></i>
                             <span class="small">Create visual QA pipelines</span>
                         </li>
-                        <li>
-                            <i class="bi bi-4-circle-fill text-success me-2"></i>
+                        <li class="d-flex align-items-start">
+                            <i class="bi bi-4-circle text-muted me-2"></i>
                             <span class="small">Automate product updates</span>
                         </li>
                     </ul>

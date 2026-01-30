@@ -218,11 +218,8 @@
                                 <div class="mb-0">
                                     <label class="form-label">
                                         Input Schema (JSON)
-                                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()">
-                                            <i class="bi bi-magic"></i> Derive from Steps
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-link p-0 ms-2" onclick="insertSampleSchema()">
-                                            <i class="bi bi-lightning"></i> Insert sample
+                                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()" title="Scans Row 1 steps for {context.xxx} variables">
+                                            <i class="bi bi-magic"></i> Set from Row 1
                                         </button>
                                     </label>
                                     <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="6"
@@ -3297,7 +3294,7 @@ async function deriveSchemaFromSteps() {
             const variables = data.data.variables || [];
 
             if (variables.length === 0) {
-                alert('No {context.xxx} variables found in first-row steps.');
+                alert('No {context.xxx} variables found in Row 1 steps. Add variables like {context.my_param} to your step configs first.');
                 return;
             }
 
@@ -3309,24 +3306,6 @@ async function deriveSchemaFromSteps() {
         console.error('Error deriving schema:', err);
         alert('Failed to derive schema: ' + err.message);
     }
-}
-
-function insertSampleSchema() {
-    const sampleSchema = {
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "A message to pass to the pipeline"
-            },
-            "options": {
-                "type": "object",
-                "description": "Optional configuration parameters"
-            }
-        },
-        "required": ["message"]
-    };
-    document.getElementById('inputSchemaJson').value = JSON.stringify(sampleSchema, null, 2);
 }
 
 async function saveSettings() {

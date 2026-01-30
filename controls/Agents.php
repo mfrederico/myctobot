@@ -58,7 +58,12 @@ class Agents extends BaseControls\Control {
 
         $agents = [];
         foreach ($agentBeans as $bean) {
-            $mcpServers = json_decode($bean->mcp_servers ?: '[]', true);
+            // Count linked MCP servers (many-to-many) - this is the new approach
+            $linkedMcpCount = count($bean->sharedMcpserversList);
+            // Fallback to legacy JSON if no linked servers
+            $legacyMcpServers = json_decode($bean->mcp_servers ?: '[]', true);
+            $mcpCount = $linkedMcpCount > 0 ? $linkedMcpCount : count($legacyMcpServers);
+
             $hooksConfig = json_decode($bean->hooks_config ?: '{}', true);
             $capabilities = json_decode($bean->capabilities ?: '[]', true);
 
@@ -82,7 +87,7 @@ class Agents extends BaseControls\Control {
                 'provider_label' => $providerInfo['name'] ?? $provider,
                 'provider_config' => $providerConfig,
                 'llm_capabilities' => $llmCapabilities,
-                'mcp_count' => count($mcpServers),
+                'mcp_count' => $mcpCount,
                 'hooks_count' => $this->countHooks($hooksConfig),
                 'capabilities_count' => count($capabilities),
                 'repo_count' => $repoCount,
@@ -312,7 +317,9 @@ class Agents extends BaseControls\Control {
                 'url' => $server->url,
                 'headers' => json_decode($server->headers_json ?: '{}', true),
                 'env' => json_decode($server->env_json ?: '{}', true),
-                'is_shared' => (bool) $server->is_shared
+                'is_shared' => (bool) $server->is_shared,
+                'tools_count' => $server->tools_json ? count(json_decode($server->tools_json, true) ?: []) : null,
+                'tools_token_estimate' => $server->tools_token_estimate ? (int) $server->tools_token_estimate : null
             ];
         }
 
@@ -333,7 +340,9 @@ class Agents extends BaseControls\Control {
                 'url' => $server->url,
                 'headers' => json_decode($server->headers_json ?: '{}', true),
                 'env' => json_decode($server->env_json ?: '{}', true),
-                'is_shared' => (bool) $server->is_shared
+                'is_shared' => (bool) $server->is_shared,
+                'tools_count' => $server->tools_json ? count(json_decode($server->tools_json, true) ?: []) : null,
+                'tools_token_estimate' => $server->tools_token_estimate ? (int) $server->tools_token_estimate : null
             ];
         }
 
@@ -561,6 +570,74 @@ class Agents extends BaseControls\Control {
         }
 
         $agent->hooks_config = json_encode($parsed);
+    }
+
+    /**
+     * AJAX: Link/unlink MCP server to agent
+     * POST /agents/linkmcp/{agentId}
+     */
+    public function linkmcp($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $agentId = (int) ($this->opId() ?? $params[0] ?? 0);
+        $agent = Bean::load('aiagents', $agentId);
+
+        if (!$agent->id) {
+            Flight::jsonError('Agent not found', 404);
+            return;
+        }
+
+        $action = $this->getParam('action'); // 'add' or 'remove'
+        $serverId = (int) $this->getParam('server_id');
+
+        if (!$action || !$serverId) {
+            Flight::jsonError('Missing action or server_id', 400);
+            return;
+        }
+
+        $server = Bean::load('mcpservers', $serverId);
+        if (!$server->id) {
+            Flight::jsonError('Server not found', 404);
+            return;
+        }
+
+        // Verify access to server (own or shared)
+        if ($server->member_id != $this->member->id && !$server->is_shared) {
+            Flight::jsonError('Access denied to server', 403);
+            return;
+        }
+
+        if ($action === 'add') {
+            // Check if already linked
+            $alreadyLinked = false;
+            foreach ($agent->sharedMcpserversList as $linked) {
+                if ($linked->id == $serverId) {
+                    $alreadyLinked = true;
+                    break;
+                }
+            }
+
+            if (!$alreadyLinked) {
+                $agent->sharedMcpserversList[] = $server;
+                Bean::store($agent);
+            }
+
+            Flight::jsonSuccess(['linked' => true], 'Server linked');
+        } elseif ($action === 'remove') {
+            // Remove from the list
+            $newList = [];
+            foreach ($agent->sharedMcpserversList as $linked) {
+                if ($linked->id != $serverId) {
+                    $newList[] = $linked;
+                }
+            }
+            $agent->sharedMcpserversList = $newList;
+            Bean::store($agent);
+
+            Flight::jsonSuccess(['linked' => false], 'Server unlinked');
+        } else {
+            Flight::jsonError('Invalid action', 400);
+        }
     }
 
     /**

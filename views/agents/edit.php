@@ -4,8 +4,8 @@ $agentId = $agent['id'] ?? 0;
 $agentName = $agent['name'] ?? '';
 $provider = $agent['provider'] ?? 'claude_cli';
 $providerConfig = $agent['provider_config'] ?? [];
-$mcpServers = $agent['mcp_servers'] ?? []; // Legacy JSON
-$linkedMcpServers = $agent['linked_mcp_servers'] ?? []; // New many-to-many
+$linkedMcpServers = $agent['linked_mcp_servers'] ?? []; // Many-to-many linked servers
+$totalMcpCount = count($linkedMcpServers);
 $availableMcpServers = $availableMcpServers ?? []; // All available servers
 $hooksConfig = $agent['hooks_config'] ?? [];
 $agentCapabilities = $agent['capabilities'] ?? [];
@@ -44,8 +44,8 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
             <a class="nav-link <?= $activeTab === 'mcp' ? 'active' : '' ?>"
                href="/agents/edit/<?= $agentId ?>?tab=mcp">
                 <i class="bi bi-plug"></i> MCP Servers
-                <?php if (count($mcpServers) > 0): ?>
-                <span class="badge bg-secondary"><?= count($mcpServers) ?></span>
+                <?php if ($totalMcpCount > 0): ?>
+                <span class="badge bg-secondary"><?= $totalMcpCount ?></span>
                 <?php endif; ?>
             </a>
         </li>
@@ -605,9 +605,9 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-plug"></i> MCP Servers Configuration</span>
             <div>
-                <button type="button" class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#addMcpModal">
-                    <i class="bi bi-plus-lg"></i> Add Server
-                </button>
+                <a href="/mcpservers" class="btn btn-sm btn-outline-primary me-2" target="_blank">
+                    <i class="bi bi-collection"></i> Manage Library
+                </a>
                 <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAdvancedMcp()">
                     <i class="bi bi-code"></i> <span id="advancedToggleText">Advanced</span>
                 </button>
@@ -616,42 +616,29 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
         <div class="card-body">
             <div class="alert alert-info">
                 <i class="bi bi-info-circle"></i>
-                Configure <strong>additional</strong> MCP servers for this agent. <strong>Jira and Playwright are always enabled</strong> (auto-configured at runtime with your credentials).
-                <a href="/mcpservers" target="_blank">Manage Server Library</a>
+                Configure MCP servers for this agent. Add servers from your library or <a href="/mcpservers" target="_blank">create new ones</a>.
             </div>
 
             <!-- Link from Library Section -->
             <?php if (!empty($availableMcpServers)): ?>
-            <div class="card bg-light mb-4" id="librarySection">
-                <div class="card-header">
-                    <i class="bi bi-collection"></i> Link from Server Library
-                </div>
-                <div class="card-body">
-                    <div class="row g-2">
+            <div class="d-flex gap-2 mb-4 align-items-end" id="librarySection">
+                <div class="flex-grow-1">
+                    <label class="form-label"><i class="bi bi-collection"></i> Add from Server Library</label>
+                    <select class="form-select" id="libraryServerSelect">
+                        <option value="">-- Select a server to add --</option>
                         <?php foreach ($availableMcpServers as $libServer): ?>
-                        <?php $isLinked = in_array($libServer['id'], array_column($linkedMcpServers, 'id')); ?>
-                        <div class="col-md-4">
-                            <div class="form-check">
-                                <input class="form-check-input library-server-check" type="checkbox"
-                                       value="<?= $libServer['id'] ?>"
-                                       id="libServer<?= $libServer['id'] ?>"
-                                       <?= $isLinked ? 'checked' : '' ?>
-                                       onchange="updateLinkedServers()">
-                                <label class="form-check-label" for="libServer<?= $libServer['id'] ?>">
-                                    <i class="bi bi-<?= $libServer['server_type'] === 'stdio' ? 'terminal' : 'globe' ?>"></i>
-                                    <strong><?= htmlspecialchars($libServer['name']) ?></strong>
-                                    <?php if ($libServer['is_shared']): ?>
-                                    <span class="badge bg-success badge-sm"><i class="bi bi-people"></i></span>
-                                    <?php endif; ?>
-                                    <?php if ($libServer['description']): ?>
-                                    <small class="d-block text-muted"><?= htmlspecialchars($libServer['description']) ?></small>
-                                    <?php endif; ?>
-                                </label>
-                            </div>
-                        </div>
+                        <option value="<?= $libServer['id'] ?>"
+                                data-server='<?= htmlspecialchars(json_encode($libServer), ENT_QUOTES) ?>'>
+                            <?= htmlspecialchars($libServer['name']) ?>
+                            (<?= strtoupper($libServer['server_type']) ?>)
+                            <?= $libServer['is_shared'] ? ' [Shared]' : '' ?>
+                        </option>
                         <?php endforeach; ?>
-                    </div>
+                    </select>
                 </div>
+                <button type="button" class="btn btn-primary" onclick="addServerFromLibrary()">
+                    <i class="bi bi-plus-lg"></i> Add
+                </button>
             </div>
             <?php endif; ?>
 
@@ -663,273 +650,115 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
             <div id="emptyMcpState" class="text-center py-5 text-muted" style="display: none;">
                 <i class="bi bi-plug display-4"></i>
                 <p class="mt-3">No additional MCP servers configured.</p>
-                <div class="btn-group">
-                    <?php if (!empty($availableMcpServers)): ?>
-                    <span class="text-muted me-2">Select from library above or</span>
-                    <?php endif; ?>
-                    <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#addMcpModal">
-                        <i class="bi bi-plus-lg"></i> Create New Server
-                    </button>
-                </div>
+                <?php if (!empty($availableMcpServers)): ?>
+                <p class="small">Use the dropdown above to add servers from your library.</p>
+                <?php else: ?>
+                <a href="/mcpservers" class="btn btn-outline-primary">
+                    <i class="bi bi-plus-lg"></i> Create Server in Library
+                </a>
+                <?php endif; ?>
             </div>
 
-            <form method="POST" action="/agents/update/<?= $agentId ?>" id="mcpForm">
-                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
-                <input type="hidden" name="tab" value="mcp">
-                <input type="hidden" id="linked_server_ids" name="linked_server_ids" value="<?= htmlspecialchars(json_encode(array_column($linkedMcpServers, 'id'))) ?>">
-
-                <!-- Advanced JSON Editor (hidden by default) -->
-                <div id="advancedMcpEditor" class="mb-3" style="display: none;">
-                    <label class="form-label">MCP Servers (JSON) - Legacy Mode</label>
-                    <textarea class="form-control font-monospace" id="mcp_servers" name="mcp_servers" rows="18"><?= htmlspecialchars(json_encode($mcpServers, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '[]') ?></textarea>
-                    <div class="form-text">
-                        <strong>Note:</strong> Using JSON directly bypasses the library. Prefer linking servers from the library above.
-                    </div>
-                </div>
-
-                <div class="d-flex justify-content-end">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-check-lg"></i> Save MCP Config
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Add MCP Server Modal -->
-    <div class="modal fade" id="addMcpModal" tabindex="-1" aria-labelledby="addMcpModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="addMcpModalLabel"><i class="bi bi-plug"></i> Add MCP Server</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <!-- Preset Templates -->
-                    <div class="mb-4">
-                        <label class="form-label fw-bold">Quick Add from Templates</label>
-                        <div class="row g-2">
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-primary w-100" onclick="loadMcpPreset('myctobot-gateway')">
-                                    <i class="bi bi-cloud-arrow-up"></i> MyCTOBot Gateway
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-primary w-100" onclick="loadMcpPreset('pipelines')">
-                                    <i class="bi bi-diagram-3"></i> Pipelines
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('github')">
-                                    <i class="bi bi-github"></i> GitHub
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('fetch')">
-                                    <i class="bi bi-cloud-download"></i> Fetch
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('mantic')">
-                                    <i class="bi bi-search"></i> Mantic
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('filesystem')">
-                                    <i class="bi bi-folder"></i> Filesystem
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('memory')">
-                                    <i class="bi bi-brain"></i> Memory
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('puppeteer')">
-                                    <i class="bi bi-browser-chrome"></i> Puppeteer
-                                </button>
-                            </div>
-                            <div class="col-md-4">
-                                <button type="button" class="btn btn-outline-secondary w-100" onclick="loadMcpPreset('playwright')">
-                                    <i class="bi bi-display"></i> Playwright
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <hr>
-
-                    <!-- Manual Configuration -->
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Server Name <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="mcpServerName" placeholder="e.g., github, fetch, custom-server">
-                        <div class="form-text">Unique identifier for this server</div>
-                    </div>
-
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Server Type <span class="text-danger">*</span></label>
-                        <div class="btn-group w-100" role="group">
-                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeStdio" value="stdio" checked onchange="toggleMcpTypeFields()">
-                            <label class="btn btn-outline-primary" for="mcpTypeStdio">
-                                <i class="bi bi-terminal"></i> STDIO
-                            </label>
-                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeHttp" value="http" onchange="toggleMcpTypeFields()">
-                            <label class="btn btn-outline-primary" for="mcpTypeHttp">
-                                <i class="bi bi-globe"></i> HTTP
-                            </label>
-                            <input type="radio" class="btn-check" name="mcpServerType" id="mcpTypeSse" value="sse" onchange="toggleMcpTypeFields()">
-                            <label class="btn btn-outline-primary" for="mcpTypeSse">
-                                <i class="bi bi-broadcast"></i> SSE
-                            </label>
-                        </div>
-                        <div class="form-text">STDIO for local processes, HTTP/SSE for remote servers</div>
-                    </div>
-
-                    <!-- STDIO Fields -->
-                    <div id="stdioFields">
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Command <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="mcpCommand" placeholder="e.g., php, npx, node">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Arguments</label>
-                            <input type="text" class="form-control" id="mcpArgs" placeholder="e.g., -y, @modelcontextprotocol/server-github">
-                            <div class="form-text">Comma-separated arguments</div>
-                        </div>
-                    </div>
-
-                    <!-- HTTP Fields -->
-                    <div id="httpFields" style="display: none;">
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">URL <span class="text-danger">*</span></label>
-                            <input type="url" class="form-control" id="mcpUrl" placeholder="https://api.example.com/mcp">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Headers (JSON)</label>
-                            <textarea class="form-control font-monospace" id="mcpHeaders" rows="3" placeholder='{"Authorization": "Bearer token"}'></textarea>
-                        </div>
-                    </div>
-
-                    <!-- Environment Variables -->
-                    <div class="mb-3">
-                        <label class="form-label fw-bold">Environment Variables (Optional)</label>
-                        <div id="envVarList">
-                            <!-- Dynamic env var rows -->
-                        </div>
-                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="addEnvVarRow()">
-                            <i class="bi bi-plus"></i> Add Environment Variable
-                        </button>
-                    </div>
-
-                    <!-- Save to Library Option -->
-                    <div class="mb-3 p-3 bg-light rounded">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="saveToLibrary" checked>
-                            <label class="form-check-label fw-bold" for="saveToLibrary">
-                                <i class="bi bi-collection"></i> Save to Server Library
-                            </label>
-                            <div class="form-text">Save this server to your library so it can be reused across agents</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" onclick="addMcpServer()">
-                        <i class="bi bi-plus-lg"></i> Add Server
-                    </button>
+            <!-- Advanced JSON Editor (hidden by default) -->
+            <div id="advancedMcpEditor" class="mb-3" style="display: none;">
+                <label class="form-label">Generated MCP Config</label>
+                <textarea class="form-control font-monospace bg-light" id="generated_mcp_config" rows="16" readonly></textarea>
+                <div class="form-text">
+                    <i class="bi bi-info-circle"></i> Read-only preview of the MCP config that will be generated for this agent.
                 </div>
             </div>
         </div>
     </div>
 
 <script>
-// MCP Server data - use linked servers if available, fallback to legacy JSON
+// MCP Server data
 let linkedMcpServers = <?= json_encode($linkedMcpServers) ?>;
-let mcpServers = <?= json_encode($mcpServers) ?>;
 let advancedMode = false;
+const availableServers = <?= json_encode($availableMcpServers) ?>;
 
-// Update linked server IDs when checkboxes change
-function updateLinkedServers() {
-    const checkboxes = document.querySelectorAll('.library-server-check:checked');
-    const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
-    document.getElementById('linked_server_ids').value = JSON.stringify(ids);
+// Add server from library dropdown
+function addServerFromLibrary() {
+    const select = document.getElementById('libraryServerSelect');
+    const selectedId = select.value;
 
-    // Update linkedMcpServers from available servers
-    const availableServers = <?= json_encode($availableMcpServers) ?>;
-    linkedMcpServers = availableServers.filter(s => ids.includes(s.id)).map(s => ({
-        id: s.id,
-        name: s.name,
-        server_type: s.server_type,
-        description: s.description,
-        command: s.command,
-        args: s.args,
-        url: s.url,
-        headers: s.headers,
-        env: s.env
-    }));
+    if (!selectedId) {
+        alert('Please select a server to add');
+        return;
+    }
 
-    renderMcpServerList();
+    // Check if already linked
+    if (linkedMcpServers.some(s => String(s.id) === selectedId)) {
+        alert('This server is already linked');
+        select.value = '';
+        return;
+    }
+
+    // Find server data
+    const server = availableServers.find(s => String(s.id) === selectedId);
+    if (!server) {
+        select.value = '';
+        return;
+    }
+
+    // Disable button while saving
+    const addBtn = document.querySelector('#librarySection button');
+    addBtn.disabled = true;
+    addBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    // Save via AJAX
+    fetch('/agents/linkmcp/<?= $agentId ?>', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+            action: 'add',
+            server_id: selectedId
+        })
+    })
+    .then(r => r.json())
+    .then(result => {
+        addBtn.disabled = false;
+        addBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
+
+        if (result.success) {
+            linkedMcpServers.push(server);
+            renderMcpServerList();
+        } else {
+            alert(result.message || 'Error linking server');
+        }
+    })
+    .catch(err => {
+        addBtn.disabled = false;
+        addBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
+        alert('Error: ' + err.message);
+    });
+
+    select.value = '';
 }
 
-// Preset templates
-const mcpPresets = {
-    'myctobot-gateway': {
-        name: "myctobot",
-        type: "http",
-        url: "https://<?= htmlspecialchars($workspaceSlug) ?>.myctobot.ai/mcp",
-        headers: {"Authorization": "Bearer <?= htmlspecialchars($workspaceApiKey ?? '') ?>"},
-        description: "MyCTOBot Gateway (Jira, GitHub, Shopify tools) - Use this for remote agents"
-    },
-    pipelines: {
-        name: "pipelines",
-        type: "http",
-        url: "https://<?= htmlspecialchars($workspaceSlug) ?>.myctobot.ai/mcp/pipelines",
-        headers: {"Authorization": "Bearer <?= htmlspecialchars($workspaceApiKey ?? '') ?>"}
-    },
-    github: {
-        name: "github",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-github"],
-        env: {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"}
-    },
-    fetch: {
-        name: "fetch",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-fetch"]
-    },
-    mantic: {
-        name: "mantic",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "mantic-mcp"]
-    },
-    filesystem: {
-        name: "filesystem",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
-    },
-    memory: {
-        name: "memory",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-memory"]
-    },
-    puppeteer: {
-        name: "puppeteer",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-puppeteer"]
-    },
-    playwright: {
-        name: "playwright",
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@anthropic/mcp-server-playwright"]
-    }
-};
+// Remove a linked server
+function removeLinkedServer(serverId) {
+    // Save via AJAX
+    fetch('/agents/linkmcp/<?= $agentId ?>', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+            action: 'remove',
+            server_id: serverId
+        })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            linkedMcpServers = linkedMcpServers.filter(s => String(s.id) !== String(serverId));
+            renderMcpServerList();
+        } else {
+            alert(result.message || 'Error unlinking server');
+        }
+    })
+    .catch(err => {
+        alert('Error: ' + err.message);
+    });
+}
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -941,11 +770,7 @@ function renderMcpServerList() {
     const listEl = document.getElementById('mcpServerList');
     const emptyEl = document.getElementById('emptyMcpState');
 
-    // Combine linked servers and legacy inline servers
-    const hasLinked = linkedMcpServers && linkedMcpServers.length > 0;
-    const hasInline = mcpServers && mcpServers.length > 0;
-
-    if (!hasLinked && !hasInline) {
+    if (!linkedMcpServers || linkedMcpServers.length === 0) {
         listEl.innerHTML = '';
         emptyEl.style.display = 'block';
         return;
@@ -953,89 +778,44 @@ function renderMcpServerList() {
 
     emptyEl.style.display = 'none';
 
-    let html = '';
+    let html = '<div class="row g-3">';
+    linkedMcpServers.forEach((server) => {
+        const typeIcon = server.server_type === 'stdio' ? 'bi-terminal' : (server.server_type === 'sse' ? 'bi-broadcast' : 'bi-globe');
+        const typeBadge = server.server_type === 'stdio' ? 'bg-info' : (server.server_type === 'sse' ? 'bg-success' : 'bg-warning');
+        const tokenInfo = server.tools_token_estimate
+            ? `<span class="badge bg-secondary" title="Estimated token overhead"><i class="bi bi-speedometer2"></i> ~${server.tools_token_estimate.toLocaleString()}</span>`
+            : (server.tools_count !== null ? `<span class="badge bg-light text-muted" title="Test server to calculate tokens">${server.tools_count} tools</span>` : '');
 
-    // Show linked servers from library
-    if (hasLinked) {
-        html += '<h6 class="text-muted mb-3"><i class="bi bi-link-45deg"></i> Linked from Library</h6>';
-        html += '<div class="row g-3 mb-4">';
-        linkedMcpServers.forEach((server) => {
-            const typeIcon = server.server_type === 'stdio' ? 'bi-terminal' : (server.server_type === 'sse' ? 'bi-broadcast' : 'bi-globe');
-            const typeBadge = server.server_type === 'stdio' ? 'bg-info' : (server.server_type === 'sse' ? 'bg-success' : 'bg-warning');
-
-            html += `
-            <div class="col-md-6">
-                <div class="card h-100 border-primary">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">
-                                <i class="bi ${typeIcon}"></i> ${escapeHtml(server.name)}
-                                <span class="badge bg-primary badge-sm">Library</span>
-                            </h6>
+        html += `
+        <div class="col-md-6">
+            <div class="card h-100 border-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0">
+                            <i class="bi ${typeIcon}"></i> ${escapeHtml(server.name)}
+                        </h6>
+                        <div class="d-flex gap-2 align-items-center">
+                            ${tokenInfo}
                             <span class="badge ${typeBadge}">${(server.server_type || 'stdio').toUpperCase()}</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeLinkedServer(${server.id})" title="Remove">
+                                <i class="bi bi-trash"></i>
+                            </button>
                         </div>
-                        ${server.description ? `<div class="small text-muted">${escapeHtml(server.description)}</div>` : ''}
-                        ${server.command ? `<code class="small">${escapeHtml(server.command)} ${(server.args || []).join(' ')}</code>` : ''}
                     </div>
+                    ${server.description ? `<div class="small text-muted mb-1">${escapeHtml(server.description)}</div>` : ''}
+                    ${server.command ? `<code class="small">${escapeHtml(server.command)} ${(server.args || []).join(' ')}</code>` : ''}
+                    ${server.url ? `<code class="small d-block text-truncate">${escapeHtml(server.url)}</code>` : ''}
                 </div>
             </div>
-            `;
-        });
-        html += '</div>';
-    }
-
-    // Show legacy inline servers
-    if (hasInline) {
-        if (hasLinked) {
-            html += '<h6 class="text-muted mb-3"><i class="bi bi-code-slash"></i> Inline Servers (Legacy)</h6>';
-        }
-        html += '<div class="row g-3">';
-        mcpServers.forEach((server, index) => {
-            const typeIcon = server.type === 'stdio' ? 'bi-terminal' : (server.type === 'sse' ? 'bi-broadcast' : 'bi-globe');
-            const typeBadge = server.type === 'stdio' ? 'bg-info' : (server.type === 'sse' ? 'bg-success' : 'bg-warning');
-
-            html += `
-            <div class="col-md-6">
-                <div class="card h-100">
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">
-                                <i class="bi ${typeIcon}"></i> ${escapeHtml(server.name)}
-                            </h6>
-                            <div>
-                                <span class="badge ${typeBadge} me-1">${server.type.toUpperCase()}</span>
-                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeMcpServer(${index})" title="Remove server">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="small text-muted">
-                            ${isStdio ?
-                                `<code>${escapeHtml(server.command)} ${(server.args || []).join(' ')}</code>` :
-                                `<code>${escapeHtml(server.url || '')}</code>`
-                            }
-                        </div>
-                        ${server.env && Object.keys(server.env).length > 0 ?
-                            `<div class="mt-2 small"><span class="badge bg-secondary">ENV: ${Object.keys(server.env).join(', ')}</span></div>` : ''
-                        }
-                    </div>
-                </div>
-            </div>
-            `;
-        });
-        html += '</div>';
-    }
+        </div>
+        `;
+    });
+    html += '</div>';
 
     listEl.innerHTML = html;
-    updateHiddenTextarea();
 }
 
-// Update hidden textarea with current server list
-function updateHiddenTextarea() {
-    document.getElementById('mcp_servers').value = JSON.stringify(mcpServers, null, 2);
-}
-
-// Toggle advanced mode
+// Toggle advanced mode - shows generated MCP config
 function toggleAdvancedMcp() {
     advancedMode = !advancedMode;
     const editorEl = document.getElementById('advancedMcpEditor');
@@ -1044,224 +824,39 @@ function toggleAdvancedMcp() {
     const toggleText = document.getElementById('advancedToggleText');
 
     if (advancedMode) {
+        // Generate config from linked servers
+        const config = { mcpServers: {} };
+        linkedMcpServers.forEach(server => {
+            const serverConfig = {};
+            if (server.server_type === 'stdio') {
+                serverConfig.type = 'stdio';
+                serverConfig.command = server.command || '';
+                if (server.args && server.args.length > 0) {
+                    serverConfig.args = server.args;
+                }
+            } else {
+                serverConfig.type = server.server_type || 'http';
+                serverConfig.url = server.url || '';
+                if (server.headers && Object.keys(server.headers).length > 0) {
+                    serverConfig.headers = server.headers;
+                }
+            }
+            if (server.env && Object.keys(server.env).length > 0) {
+                serverConfig.env = server.env;
+            }
+            config.mcpServers[server.name] = serverConfig;
+        });
+        document.getElementById('generated_mcp_config').value = JSON.stringify(config, null, 2);
+
         editorEl.style.display = 'block';
         listEl.style.display = 'none';
         emptyEl.style.display = 'none';
         toggleText.textContent = 'Visual';
     } else {
-        // Parse JSON from textarea back to array
-        try {
-            mcpServers = JSON.parse(document.getElementById('mcp_servers').value || '[]');
-        } catch (e) {
-            alert('Invalid JSON. Please fix the syntax before switching to visual mode.');
-            return;
-        }
         editorEl.style.display = 'none';
         toggleText.textContent = 'Advanced';
         renderMcpServerList();
     }
-}
-
-// Toggle type fields in modal
-function toggleMcpTypeFields() {
-    const isStdio = document.getElementById('mcpTypeStdio').checked;
-    document.getElementById('stdioFields').style.display = isStdio ? 'block' : 'none';
-    document.getElementById('httpFields').style.display = isStdio ? 'none' : 'block';
-}
-
-// Load preset into modal
-function loadMcpPreset(presetName) {
-    const preset = mcpPresets[presetName];
-    if (!preset) return;
-
-    document.getElementById('mcpServerName').value = preset.name;
-
-    if (preset.type === 'stdio') {
-        document.getElementById('mcpTypeStdio').checked = true;
-        document.getElementById('mcpCommand').value = preset.command || '';
-        document.getElementById('mcpArgs').value = (preset.args || []).join(', ');
-    } else if (preset.type === 'sse') {
-        document.getElementById('mcpTypeSse').checked = true;
-        document.getElementById('mcpUrl').value = preset.url || '';
-        document.getElementById('mcpHeaders').value = JSON.stringify(preset.headers || {}, null, 2);
-    } else {
-        document.getElementById('mcpTypeHttp').checked = true;
-        document.getElementById('mcpUrl').value = preset.url || '';
-        document.getElementById('mcpHeaders').value = JSON.stringify(preset.headers || {}, null, 2);
-    }
-    toggleMcpTypeFields();
-
-    // Handle env vars
-    document.getElementById('envVarList').innerHTML = '';
-    if (preset.env) {
-        for (const [key, value] of Object.entries(preset.env)) {
-            addEnvVarRow(key, value);
-        }
-    }
-}
-
-// Add environment variable row
-function addEnvVarRow(key = '', value = '') {
-    const listEl = document.getElementById('envVarList');
-    const row = document.createElement('div');
-    row.className = 'row g-2 mb-2 env-var-row';
-    row.innerHTML = `
-        <div class="col-5">
-            <input type="text" class="form-control form-control-sm env-key" placeholder="KEY" value="${escapeHtml(key)}">
-        </div>
-        <div class="col-5">
-            <input type="text" class="form-control form-control-sm env-value" placeholder="value" value="${escapeHtml(value)}">
-        </div>
-        <div class="col-2">
-            <button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('.env-var-row').remove()">
-                <i class="bi bi-x"></i>
-            </button>
-        </div>
-    `;
-    listEl.appendChild(row);
-}
-
-// Add MCP server from modal
-function addMcpServer() {
-    const name = document.getElementById('mcpServerName').value.trim();
-    if (!name) {
-        alert('Server name is required');
-        return;
-    }
-
-    // Check for duplicate names in inline servers
-    if (mcpServers.some(s => s.name === name)) {
-        alert('A server with this name already exists');
-        return;
-    }
-
-    const isStdio = document.getElementById('mcpTypeStdio').checked;
-    const isSse = document.getElementById('mcpTypeSse').checked;
-
-    let serverType = 'http';
-    if (isStdio) serverType = 'stdio';
-    else if (isSse) serverType = 'sse';
-
-    let server = { name, type: serverType };
-
-    if (isStdio) {
-        const command = document.getElementById('mcpCommand').value.trim();
-        if (!command) {
-            alert('Command is required for STDIO servers');
-            return;
-        }
-        server.command = command;
-
-        const argsStr = document.getElementById('mcpArgs').value.trim();
-        if (argsStr) {
-            server.args = argsStr.split(',').map(a => a.trim()).filter(a => a);
-        }
-    } else {
-        const url = document.getElementById('mcpUrl').value.trim();
-        if (!url) {
-            alert('URL is required for ' + serverType.toUpperCase() + ' servers');
-            return;
-        }
-        server.url = url;
-
-        const headersStr = document.getElementById('mcpHeaders').value.trim();
-        if (headersStr) {
-            try {
-                server.headers = JSON.parse(headersStr);
-            } catch (e) {
-                alert('Invalid JSON in headers');
-                return;
-            }
-        }
-    }
-
-    // Collect env vars
-    const envRows = document.querySelectorAll('.env-var-row');
-    const env = {};
-    envRows.forEach(row => {
-        const key = row.querySelector('.env-key').value.trim();
-        const value = row.querySelector('.env-value').value.trim();
-        if (key) {
-            env[key] = value;
-        }
-    });
-    if (Object.keys(env).length > 0) {
-        server.env = env;
-    }
-
-    const saveToLibrary = document.getElementById('saveToLibrary').checked;
-
-    if (saveToLibrary) {
-        // Save to library via API and link to agent
-        saveServerToLibrary(server);
-    } else {
-        // Add as inline server (legacy)
-        mcpServers.push(server);
-        renderMcpServerList();
-
-        // Close modal and reset form
-        bootstrap.Modal.getInstance(document.getElementById('addMcpModal')).hide();
-        resetMcpModal();
-    }
-}
-
-// Save server to library and link to this agent
-function saveServerToLibrary(server) {
-    const data = {
-        csrf_token: '<?= Flight::csrf()->getToken() ?>',
-        name: server.name,
-        description: server.description || '',
-        server_type: server.type,
-        env: JSON.stringify(server.env || {})
-    };
-
-    if (server.type === 'stdio') {
-        data.command = server.command;
-        data.args = (server.args || []).join(', ');
-    } else {
-        data.url = server.url;
-        data.headers = JSON.stringify(server.headers || {});
-    }
-
-    fetch('/mcpservers/store', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: new URLSearchParams(data)
-    })
-    .then(r => r.json())
-    .then(result => {
-        if (result.success) {
-            // Reload page to show new server in library
-            alert('Server saved to library! The page will reload to show the new server.');
-            window.location.reload();
-        } else {
-            alert(result.message || 'Error saving server to library');
-        }
-    })
-    .catch(err => {
-        alert('Error saving server: ' + err.message);
-    });
-}
-
-// Remove MCP server
-function removeMcpServer(index) {
-    if (confirm('Remove this MCP server?')) {
-        mcpServers.splice(index, 1);
-        renderMcpServerList();
-    }
-}
-
-// Reset modal form
-function resetMcpModal() {
-    document.getElementById('mcpServerName').value = '';
-    document.getElementById('mcpTypeStdio').checked = true;
-    document.getElementById('mcpCommand').value = '';
-    document.getElementById('mcpArgs').value = '';
-    document.getElementById('mcpUrl').value = '';
-    document.getElementById('mcpHeaders').value = '';
-    document.getElementById('envVarList').innerHTML = '';
-    document.getElementById('saveToLibrary').checked = true;
-    toggleMcpTypeFields();
 }
 
 // Escape HTML
@@ -1271,9 +866,6 @@ function escapeHtml(str) {
     div.textContent = str;
     return div.innerHTML;
 }
-
-// Reset modal when closed
-document.getElementById('addMcpModal').addEventListener('hidden.bs.modal', resetMcpModal);
 </script>
 
     <?php elseif ($activeTab === 'hooks'): ?>

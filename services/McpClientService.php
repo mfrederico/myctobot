@@ -392,7 +392,9 @@ class McpClientService {
      * Refresh the list of available tools
      */
     public function refreshTools(): void {
-        if (!($this->capabilities['tools'] ?? false)) {
+        // Check if 'tools' key exists in capabilities (not if it's truthy)
+        // MCP servers return "tools":{} which becomes an empty array in PHP
+        if (!isset($this->capabilities['tools']) && !array_key_exists('tools', $this->capabilities ?? [])) {
             $this->log('debug', 'Server does not expose tools capability');
             return;
         }

@@ -1,4 +1,4 @@
-<div class="container-fluid">
+<div class="container py-4">
     <div class="row">
         <div class="col-md-8 offset-md-2">
             <h1 class="mb-4">Atlassian Connection</h1>

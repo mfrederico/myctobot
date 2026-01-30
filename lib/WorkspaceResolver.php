@@ -239,6 +239,12 @@ class WorkspaceResolver {
             }
         }
 
+        // Set PHP timezone from workspace config (important for consistent time handling)
+        $timezone = $workspaceConfig['app']['timezone'] ?? $workspaceConfig['timezone'] ?? null;
+        if ($timezone) {
+            date_default_timezone_set($timezone);
+        }
+
         // Switch Bean database connection
         try {
             $dbConfig = $workspaceConfig['database'];

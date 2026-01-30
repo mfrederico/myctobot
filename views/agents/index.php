@@ -169,6 +169,11 @@
                             <td>
                                 <?php if ($agent['mcp_count'] > 0): ?>
                                 <span class="badge bg-secondary"><?= $agent['mcp_count'] ?> configured</span>
+                                <?php if (($agent['mcp_token_overhead'] ?? 0) > 0): ?>
+                                <span class="badge bg-success" title="Cumulative token overhead for MCP tool definitions">
+                                    <i class="bi bi-speedometer2"></i> ~<?= number_format($agent['mcp_token_overhead']) ?>
+                                </span>
+                                <?php endif; ?>
                                 <?php else: ?>
                                 <span class="text-muted small">None</span>
                                 <?php endif; ?>

@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2">View Message</h1>
         <a href="/contact/admin" class="btn btn-secondary">

@@ -26,14 +26,18 @@
                             </a>
                             <ul class="dropdown-menu">
                                 <?php foreach ($item['dropdown'] as $subitem): ?>
-                                    <li>
-                                        <a class="dropdown-item" href="<?= $subitem['url'] ?>">
-                                            <?php if (isset($subitem['icon'])): ?>
-                                                <i class="bi bi-<?= $subitem['icon'] ?>"></i>
-                                            <?php endif; ?>
-                                            <?= htmlspecialchars($subitem['label']) ?>
-                                        </a>
-                                    </li>
+                                    <?php if (isset($subitem['divider']) && $subitem['divider']): ?>
+                                        <li><hr class="dropdown-divider"></li>
+                                    <?php else: ?>
+                                        <li>
+                                            <a class="dropdown-item <?= isset($subitem['active']) && $subitem['active'] ? 'active' : '' ?>" href="<?= $subitem['url'] ?>">
+                                                <?php if (isset($subitem['icon'])): ?>
+                                                    <i class="bi bi-<?= $subitem['icon'] ?>"></i>
+                                                <?php endif; ?>
+                                                <?= htmlspecialchars($subitem['label']) ?>
+                                            </a>
+                                        </li>
+                                    <?php endif; ?>
                                 <?php endforeach; ?>
                             </ul>
                         </li>

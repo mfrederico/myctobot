@@ -119,6 +119,33 @@
                     </div>
                 </div>
 
+                <!-- Preferences Card -->
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="border-bottom pb-2 mb-3">
+                            <i class="bi bi-lightning-charge me-2 text-primary"></i>Preferences
+                        </h5>
+
+                        <div class="mb-3">
+                            <label for="preferred_studio" class="form-label fw-semibold">Preferred Studio</label>
+                            <?php $currentStudio = \Flight::getStudio(); ?>
+                            <select class="form-select" id="preferred_studio" name="preferred_studio">
+                                <option value="" <?= empty($currentStudio) ? 'selected' : '' ?>>Ask each time</option>
+                                <option value="developer" <?= $currentStudio === 'developer' ? 'selected' : '' ?>>
+                                    Developer Studio - AI Dev Jobs, Git Repos, Jira Boards
+                                </option>
+                                <option value="commerce" <?= $currentStudio === 'commerce' ? 'selected' : '' ?>>
+                                    Commerce Studio - Shopify Stores, Theme Preview
+                                </option>
+                                <option value="pipeline" <?= $currentStudio === 'pipeline' ? 'selected' : '' ?>>
+                                    Pipeline Studio - Workflows, Automation, MCP Servers
+                                </option>
+                            </select>
+                            <div class="form-text">Choose which studio dashboard to show after login.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Security Card -->
                 <div class="card border-0 shadow-sm mb-4">
                     <div class="card-body p-4">

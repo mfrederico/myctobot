@@ -3,7 +3,7 @@
 require_once __DIR__ . '/../../services/InviteService.php';
 use app\services\InviteService;
 ?>
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h1 class="h2"><i class="bi bi-people"></i> Member Management</h1>
         <a href="/admin/addmember" class="btn btn-primary">

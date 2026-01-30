@@ -256,7 +256,7 @@ class LLMProviderFactory
             return $provider->getConfigSchema();
         }
 
-        return ['type' => 'object', 'properties' => []];
+        return ['type' => 'object', 'properties' => (object) []];
     }
 
     /**

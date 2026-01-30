@@ -5,7 +5,7 @@
  */
 ?>
 
-<div class="container-fluid px-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h3 mb-1">Query Knowledge Base</h1>

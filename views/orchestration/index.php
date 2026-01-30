@@ -2,15 +2,15 @@
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h1 class="h2 mb-1">
-                <i class="bi bi-lightning-charge"></i> Studio
+                <i class="bi bi-lightning-charge"></i> Orchestration
             </h1>
             <p class="text-muted mb-0">AI-powered business orchestration</p>
         </div>
         <div class="d-flex gap-2">
-            <a href="/studio/templates" class="btn btn-outline-primary">
+            <a href="/orchestration/templates" class="btn btn-outline-primary">
                 <i class="bi bi-grid"></i> Browse Templates
             </a>
-            <a href="/studio/wizard" class="btn btn-primary">
+            <a href="/orchestration/wizard" class="btn btn-primary">
                 <i class="bi bi-plus-lg"></i> New Orchestration
             </a>
         </div>
@@ -56,7 +56,7 @@
                     <div class="text-center py-5">
                         <i class="bi bi-inbox display-4 text-muted"></i>
                         <p class="text-muted mt-3 mb-0">No projects yet. Create your first orchestration!</p>
-                        <a href="/studio/templates" class="btn btn-primary mt-3">
+                        <a href="/orchestration/templates" class="btn btn-primary mt-3">
                             <i class="bi bi-grid"></i> Browse Templates
                         </a>
                     </div>
@@ -78,13 +78,13 @@
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <div class="rounded bg-light p-2 me-3">
-                                                <i class="bi <?= htmlspecialchars($project['template_icon']) ?> text-primary"></i>
+                                                <i class="bi <?= htmlspecialchars($project['template_icon'] ?? 'bi-gear') ?> text-primary"></i>
                                             </div>
                                             <div>
-                                                <a href="/studio/project/<?= $project['id'] ?>" class="fw-semibold text-decoration-none">
-                                                    <?= htmlspecialchars($project['name']) ?>
+                                                <a href="/orchestration/project/<?= $project['id'] ?>" class="fw-semibold text-decoration-none">
+                                                    <?= htmlspecialchars($project['name'] ?? 'Untitled') ?>
                                                 </a>
-                                                <small class="d-block text-muted"><?= htmlspecialchars($project['template_name']) ?></small>
+                                                <small class="d-block text-muted"><?= htmlspecialchars($project['template_name'] ?? 'Custom') ?></small>
                                             </div>
                                         </div>
                                     </td>
@@ -107,7 +107,7 @@
                                     </td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
-                                            <a href="/studio/project/<?= $project['id'] ?>" class="btn btn-outline-primary" title="View">
+                                            <a href="/orchestration/project/<?= $project['id'] ?>" class="btn btn-outline-primary" title="View">
                                                 <i class="bi bi-eye"></i>
                                             </a>
                                             <?php if ($project['status'] === 'active' || $project['status'] === 'draft'): ?>
@@ -132,7 +132,7 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0"><i class="bi bi-collection"></i> Templates</h5>
-                    <a href="/studio/templates" class="btn btn-sm btn-outline-primary">View All</a>
+                    <a href="/orchestration/templates" class="btn btn-sm btn-outline-primary">View All</a>
                 </div>
                 <div class="card-body p-0">
                     <?php if (empty($templates)): ?>
@@ -142,14 +142,14 @@
                     <?php else: ?>
                     <div class="list-group list-group-flush">
                         <?php foreach ($templates as $template): ?>
-                        <a href="/studio/wizard/<?= $template['id'] ?>" class="list-group-item list-group-item-action">
+                        <a href="/orchestration/wizard/<?= $template['id'] ?>" class="list-group-item list-group-item-action">
                             <div class="d-flex align-items-center">
                                 <div class="rounded bg-<?= $template['color'] ?> bg-opacity-10 p-2 me-3">
                                     <i class="bi <?= $template['icon'] ?> text-<?= $template['color'] ?>"></i>
                                 </div>
                                 <div class="flex-grow-1">
-                                    <div class="fw-semibold"><?= htmlspecialchars($template['name']) ?></div>
-                                    <small class="text-muted"><?= htmlspecialchars(substr($template['description'], 0, 60)) ?>...</small>
+                                    <div class="fw-semibold"><?= htmlspecialchars($template['name'] ?? 'Template') ?></div>
+                                    <small class="text-muted"><?= htmlspecialchars(substr($template['description'] ?? '', 0, 60)) ?>...</small>
                                 </div>
                                 <i class="bi bi-chevron-right text-muted"></i>
                             </div>
@@ -167,7 +167,7 @@
                 </div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
-                        <a href="/studio/wizard" class="btn btn-outline-primary text-start">
+                        <a href="/orchestration/wizard" class="btn btn-outline-primary text-start">
                             <i class="bi bi-plus-lg me-2"></i> Custom Orchestration
                         </a>
                         <a href="/pipelines" class="btn btn-outline-secondary text-start">
@@ -187,7 +187,7 @@
 function executeProject(projectId) {
     if (!confirm('Run this orchestration now?')) return;
 
-    fetch('/studio/execute/' + projectId, {
+    fetch('/orchestration/execute/' + projectId, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

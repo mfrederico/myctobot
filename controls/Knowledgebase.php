@@ -662,7 +662,7 @@ class Knowledgebase extends BaseControls\Control {
                     'filename' => $originalFilename ?? basename($filePath)
                 ],
                 [
-                    'name' => 'workspace_id',
+                    'name' => 'tenant',
                     'contents' => $workspaceId
                 ],
                 [
@@ -779,7 +779,7 @@ class Knowledgebase extends BaseControls\Control {
             $response = $client->post("{$this->ragServiceUrl}/api/ingest-url", [
                 'json' => [
                     'url' => $url,
-                    'workspace_id' => $workspaceId,
+                    'tenant' => $workspaceId,
                     'doc_id' => $docId
                 ]
             ]);
@@ -802,7 +802,7 @@ class Knowledgebase extends BaseControls\Control {
 
             $response = $client->delete("{$this->ragServiceUrl}/api/documents", [
                 'json' => [
-                    'workspace_id' => $workspaceId,
+                    'tenant' => $workspaceId,
                     'filename' => $filename
                 ]
             ]);
@@ -998,8 +998,25 @@ class Knowledgebase extends BaseControls\Control {
 
             $workspaceSlug = $this->getWorkspaceSlug();
 
+            // Get chat model from associated agent if available
+            $chatModel = null;
+            if ($kb->agent_profile_id) {
+                $agent = Bean::load('aiagents', (int)$kb->agent_profile_id);
+                if ($agent->id) {
+                    $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+                    // Check for Ollama model (used by claude_cli with Ollama backend)
+                    if (!empty($providerConfig['ollama_model'])) {
+                        $chatModel = $providerConfig['ollama_model'];
+                    }
+                    // Fallback to generic model field (used by ollama provider directly)
+                    elseif (!empty($providerConfig['model'])) {
+                        $chatModel = $providerConfig['model'];
+                    }
+                }
+            }
+
             // Send query to RAG service
-            $result = $this->sendQueryToRagService($workspaceSlug, $kb->slug, $query, $options);
+            $result = $this->sendQueryToRagService($workspaceSlug, $kb->slug, $query, $options, $chatModel);
 
             if ($result['success']) {
                 // Map RAG service response fields to expected format
@@ -1030,19 +1047,26 @@ class Knowledgebase extends BaseControls\Control {
     /**
      * Send query to RAG service
      */
-    private function sendQueryToRagService(string $workspaceId, string $kbSlug, string $query, array $options): array {
+    private function sendQueryToRagService(string $workspaceId, string $kbSlug, string $query, array $options, ?string $chatModel = null): array {
         try {
-            $client = new \GuzzleHttp\Client(['timeout' => 60]);
+            $client = new \GuzzleHttp\Client(['timeout' => 120]); // Increased for larger models
+
+            $requestData = [
+                'tenant' => $workspaceId,
+                'kb_slug' => $kbSlug,
+                'query' => $query,
+                'similarity_threshold' => $options['similarity_threshold'],
+                'max_results' => $options['max_results'],
+                'include_metadata' => $options['include_metadata']
+            ];
+
+            // Add chat model if specified
+            if ($chatModel) {
+                $requestData['model'] = $chatModel;
+            }
 
             $response = $client->post("{$this->ragServiceUrl}/api/query", [
-                'json' => [
-                    'workspace_id' => $workspaceId,
-                    'kb_slug' => $kbSlug,
-                    'query' => $query,
-                    'similarity_threshold' => $options['similarity_threshold'],
-                    'max_results' => $options['max_results'],
-                    'include_metadata' => $options['include_metadata']
-                ]
+                'json' => $requestData
             ]);
 
             $result = json_decode($response->getBody()->getContents(), true);

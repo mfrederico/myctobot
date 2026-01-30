@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="row">
         <div class="col-lg-3 col-md-4">
             <!-- Sidebar Navigation Component -->

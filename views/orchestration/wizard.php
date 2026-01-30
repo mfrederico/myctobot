@@ -1,8 +1,8 @@
 <div class="container py-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb mb-3">
-            <li class="breadcrumb-item"><a href="/studio">Studio</a></li>
-            <li class="breadcrumb-item"><a href="/studio/templates">Templates</a></li>
+            <li class="breadcrumb-item"><a href="/orchestration">Studio</a></li>
+            <li class="breadcrumb-item"><a href="/orchestration/templates">Templates</a></li>
             <li class="breadcrumb-item active"><?= htmlspecialchars($title) ?></li>
         </ol>
     </nav>
@@ -203,7 +203,12 @@ function renderConnectionPicker(step) {
     ];
 
     connections.forEach(conn => {
-        const checked = (wizardData[step.variable] || []).includes(conn.id) ? 'checked' : '';
+        // Handle both array (checkbox/multiple) and single value (radio)
+        const selectedValue = wizardData[step.variable];
+        const isSelected = Array.isArray(selectedValue)
+            ? selectedValue.includes(conn.id)
+            : selectedValue === conn.id;
+        const checked = isSelected ? 'checked' : '';
         const disabled = !conn.connected ? 'disabled' : '';
 
         html += `
@@ -275,7 +280,12 @@ function collectStepData() {
         const input = document.querySelector(`[name="${step.variable}"]`);
         if (input) {
             if (input.type === 'checkbox') {
+                // Multiple selection - collect all checked values as array
                 data[step.variable] = Array.from(document.querySelectorAll(`[name="${step.variable}"]:checked`)).map(el => el.value);
+            } else if (input.type === 'radio') {
+                // Single selection - get the checked radio value
+                const checkedRadio = document.querySelector(`[name="${step.variable}"]:checked`);
+                data[step.variable] = checkedRadio ? checkedRadio.value : null;
             } else {
                 data[step.variable] = input.value;
             }
@@ -290,7 +300,7 @@ async function saveStepData() {
     Object.assign(wizardData, stepData);
 
     try {
-        const response = await fetch('/studio/wizardstep', {
+        const response = await fetch('/orchestration/wizardstep', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -337,7 +347,7 @@ async function createProject() {
 
     try {
         // Finalize the project by saving final step and setting name
-        const response = await fetch('/studio/finalize', {
+        const response = await fetch('/orchestration/finalize', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -353,7 +363,7 @@ async function createProject() {
         const result = await response.json();
 
         if (result.success) {
-            window.location.href = '/studio/project/' + result.data.project_id;
+            window.location.href = '/orchestration/project/' + result.data.project_id;
         } else {
             alert('Error: ' + result.message);
             btnCreate.innerHTML = originalText;
@@ -374,7 +384,7 @@ async function getAiAssistance() {
     suggestionsDiv.innerHTML = '<div class="spinner-border spinner-border-sm text-primary"></div> Getting suggestions...';
 
     try {
-        const response = await fetch('/studio/aiassist', {
+        const response = await fetch('/orchestration/aiassist', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

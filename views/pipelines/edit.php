@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <nav aria-label="breadcrumb">
@@ -107,7 +107,15 @@
     <!-- Pipeline Settings Panel (Collapsible) -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#settingsPanel" style="cursor: pointer;">
-            <span><i class="bi bi-gear"></i> Pipeline Settings</span>
+            <span>
+                <i class="bi bi-gear"></i> Pipeline Settings
+                <span class="text-muted">— <?= htmlspecialchars($pipeline['name']) ?></span>
+                <?php if (!empty($pipeline['expose_as_tool'])): ?>
+                <span class="badge bg-info ms-2" title="Exposed as MCP tool: myctobot_<?= htmlspecialchars($pipeline['slug']) ?>">
+                    <i class="bi bi-plug"></i> MCP
+                </span>
+                <?php endif; ?>
+            </span>
             <i class="bi bi-chevron-down"></i>
         </div>
         <div class="collapse" id="settingsPanel">
@@ -215,22 +223,33 @@
                                     <small class="text-muted">Add this as an MCP server to your AI agent</small>
                                 </div>
 
-                                <div class="mb-0">
+                                <div class="mb-3">
                                     <label class="form-label">
                                         Input Schema (JSON)
-                                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()">
-                                            <i class="bi bi-magic"></i> Derive from Steps
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-link p-0 ms-2" onclick="insertSampleSchema()">
-                                            <i class="bi bi-lightning"></i> Insert sample
+                                        <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()" title="Scans Row 1 steps for {context.xxx} variables">
+                                            <i class="bi bi-magic"></i> Set from Row 1
                                         </button>
                                     </label>
-                                    <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="6"
-                                              placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($pipeline['input_schema_json']) ?></textarea>
+                                    <?php
+                                    $schemaJson = $pipeline['input_schema_json'] ?? '';
+                                    if ($schemaJson) {
+                                        $decoded = json_decode($schemaJson);
+                                        if ($decoded !== null) {
+                                            $schemaJson = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                                        }
+                                    }
+                                    ?>
+                                    <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="8"
+                                              placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($schemaJson) ?></textarea>
                                     <small class="text-muted">
                                         JSON Schema defining the tool's input parameters. Properties become available in pipeline context.
                                         <a href="/docs/pipelines#input-schema" target="_blank" class="ms-1"><i class="bi bi-question-circle"></i> Help</a>
                                     </small>
+                                </div>
+
+                                <div class="alert alert-warning mb-0 py-2 small">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    <strong>Note:</strong> Connected AI agents cache tool definitions. After saving changes, agents must restart or reconnect to pick up the updated schema.
                                 </div>
                             </div>
                         </div>
@@ -336,7 +355,7 @@
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-bordered mb-0" id="pipelineGrid">
-                    <thead class="table-light">
+                    <thead class="table-dark">
                         <tr>
                             <th style="width: 60px;" class="text-center">#</th>
                             <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
@@ -778,9 +797,27 @@
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">Context (JSON, optional)</label>
-                    <textarea class="form-control font-monospace" id="triggerContext" rows="4" placeholder='{&#10;  "issue_key": "PROJ-123"&#10;}'></textarea>
+                    <label class="form-label">Context Variables (JSON)</label>
+                    <?php
+                    // Generate context template from input schema if available
+                    $contextTemplate = '';
+                    $inputSchema = json_decode($pipeline['input_schema_json'] ?? '', true);
+                    if (!empty($inputSchema['properties'])) {
+                        $template = [];
+                        foreach ($inputSchema['properties'] as $key => $prop) {
+                            $template[$key] = $prop['description'] ?? "Enter {$key}";
+                        }
+                        $contextTemplate = json_encode($template, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                    }
+                    ?>
+                    <textarea class="form-control font-monospace" id="triggerContext" rows="6"><?= htmlspecialchars($contextTemplate) ?></textarea>
+                    <?php if (!empty($inputSchema['required'])): ?>
+                    <small class="text-muted">
+                        <strong>Required:</strong> <?= htmlspecialchars(implode(', ', $inputSchema['required'])) ?>
+                    </small>
+                    <?php else: ?>
                     <small class="text-muted">Pass initial context/variables to the pipeline</small>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="modal-footer">
@@ -812,12 +849,12 @@
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 .step-cell-empty {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
     transition: all 0.2s;
 }
 .step-cell-empty:hover {
-    background: #e9ecef;
-    border-color: #6c757d !important;
+    background: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color-translucent) !important;
 }
 .border-dashed {
     border-style: dashed !important;
@@ -834,7 +871,7 @@
     transform: scale(0.95);
 }
 .drop-zone.drag-over {
-    background: #cfe2ff !important;
+    background: var(--bs-primary-bg-subtle) !important;
 }
 .drop-zone.drag-over .step-cell-empty {
     border-color: #0d6efd !important;
@@ -849,7 +886,7 @@
 }
 /* Row disabled state */
 tr.row-disabled {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
 }
 tr.row-disabled .step-cell {
     opacity: 0.35;
@@ -895,19 +932,20 @@ tr.row-parallel .row-number-cell::before {
 /* Step type accordion */
 .step-type-option {
     padding: 8px 12px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--bs-border-color);
     border-radius: 6px;
     transition: all 0.15s;
     cursor: pointer;
     position: relative;
+    background: var(--bs-body-bg);
 }
 .step-type-option:hover {
-    background: #f8f9fa;
-    border-color: #6c757d;
+    background: var(--bs-tertiary-bg);
+    border-color: var(--bs-primary);
 }
 .step-type-option.selected {
-    background: #e7f1ff;
-    border-color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
 }
 .step-type-option.selected::after {
     content: '\f26b';
@@ -915,7 +953,7 @@ tr.row-parallel .row-number-cell::before {
     position: absolute;
     top: 8px;
     right: 8px;
-    color: #0d6efd;
+    color: var(--bs-primary);
     font-size: 0.9rem;
 }
 .step-type-option .form-check-input {
@@ -925,11 +963,12 @@ tr.row-parallel .row-number-cell::before {
     cursor: pointer;
 }
 #stepTypeAccordion .accordion-button {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
 }
 #stepTypeAccordion .accordion-button:not(.collapsed) {
-    background: #e7f1ff;
-    color: #0a58ca;
+    background: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
 }
 /* Variable Browser */
 .variable-chip {
@@ -938,24 +977,25 @@ tr.row-parallel .row-number-cell::before {
     padding: 2px 8px;
     font-size: 0.75rem;
     font-family: monospace;
-    background: #fff;
-    border: 1px solid #dee2e6;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
 }
 .variable-chip:hover {
-    background: #e7f1ff;
-    border-color: #0d6efd;
-    color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
+    color: var(--bs-primary);
 }
 .variable-chip.mapped {
-    background: #d1e7dd;
-    border-color: #198754;
+    background: var(--bs-success-bg-subtle);
+    border-color: var(--bs-success);
 }
 .variable-chip.mapped:hover {
-    background: #badbcc;
+    background: var(--bs-success-bg-subtle);
+    filter: brightness(0.9);
 }
 .variable-chip .bi {
     font-size: 0.65rem;
@@ -965,8 +1005,8 @@ tr.row-parallel .row-number-cell::before {
 .step-vars-group {
     margin-bottom: 8px;
     padding: 6px 8px;
-    background: #fff;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
 }
 .step-vars-group .step-name {
@@ -1146,8 +1186,8 @@ td.drop-zone {
 }
 /* Variable Exporter styles */
 .variable-exporter {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 12px;
     font-size: 0.8rem;
@@ -1157,8 +1197,8 @@ td.drop-zone {
     min-height: 200px;
     max-height: 400px;
     overflow-y: auto;
-    background: white;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 8px;
 }
@@ -1167,20 +1207,20 @@ td.drop-zone {
     align-items: center;
     padding: 8px 12px;
     margin: 4px 0;
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.15s;
 }
 .export-path-item:hover {
-    background: #e7f1ff;
-    border-color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
     transform: translateX(2px);
 }
 .export-path-item.exported {
-    background: #d1e7dd;
-    border-color: #198754;
+    background: var(--bs-success-bg-subtle);
+    border-color: var(--bs-success);
 }
 .export-path-item .path-name {
     flex: 1;
@@ -1192,10 +1232,10 @@ td.drop-zone {
 }
 .export-path-item .path-type {
     font-size: 0.7rem;
-    color: #6c757d;
+    color: var(--bs-secondary-color);
     margin-left: 8px;
     padding: 2px 6px;
-    background: #e9ecef;
+    background: var(--bs-tertiary-bg);
     border-radius: 3px;
 }
 .export-path-item .export-check {
@@ -1209,10 +1249,10 @@ td.drop-zone {
     padding: 4px 10px;
     font-size: 0.75rem;
     font-family: monospace;
-    background: #d1e7dd;
-    border: 1px solid #198754;
+    background: var(--bs-success-bg-subtle);
+    border: 1px solid var(--bs-success);
     border-radius: 4px;
-    color: #0f5132;
+    color: var(--bs-success-text-emphasis);
 }
 .exported-var-chip .remove-export {
     margin-left: 6px;
@@ -1222,12 +1262,12 @@ td.drop-zone {
 }
 .exported-var-chip .remove-export:hover {
     opacity: 1;
-    color: #dc3545;
+    color: var(--bs-danger);
 }
 .exported-vars {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid #dee2e6;
+    border-top: 1px solid var(--bs-border-color);
 }
 .exported-vars-list {
     margin-top: 8px;
@@ -1365,11 +1405,11 @@ td.drop-zone {
 }
 /* Keyboard shortcut styling */
 kbd {
-    background: #f4f4f4;
-    border: 1px solid #ccc;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 3px;
-    box-shadow: 0 1px 0 #888;
-    color: #333;
+    box-shadow: 0 1px 0 var(--bs-secondary-color);
+    color: var(--bs-body-color);
     display: inline-block;
     font-size: 0.75rem;
     font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1472,8 +1512,8 @@ kbd {
 
 /* Input preview for parser steps */
 .step-input-preview {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 8px;
     margin-top: 8px;
@@ -1481,15 +1521,15 @@ kbd {
 }
 .step-input-preview-label {
     font-weight: 600;
-    color: #495057;
+    color: var(--bs-secondary-color);
     margin-bottom: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
 }
 .step-input-preview-content {
-    background: #ffffff;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 3px;
     padding: 6px;
     max-height: 150px;
@@ -1515,6 +1555,7 @@ kbd {
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const pipelineId = <?= $pipeline['id'] ?>;
+const initialContextTemplate = <?= json_encode($contextTemplate ?: '{}') ?>;
 let stepModal = null;
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -3294,7 +3335,7 @@ async function deriveSchemaFromSteps() {
             const variables = data.data.variables || [];
 
             if (variables.length === 0) {
-                alert('No {context.xxx} variables found in first-row steps.');
+                alert('No {context.xxx} variables found in Row 1 steps. Add variables like {context.my_param} to your step configs first.');
                 return;
             }
 
@@ -3306,24 +3347,6 @@ async function deriveSchemaFromSteps() {
         console.error('Error deriving schema:', err);
         alert('Failed to derive schema: ' + err.message);
     }
-}
-
-function insertSampleSchema() {
-    const sampleSchema = {
-        "type": "object",
-        "properties": {
-            "message": {
-                "type": "string",
-                "description": "A message to pass to the pipeline"
-            },
-            "options": {
-                "type": "object",
-                "description": "Optional configuration parameters"
-            }
-        },
-        "required": ["message"]
-    };
-    document.getElementById('inputSchemaJson').value = JSON.stringify(sampleSchema, null, 2);
 }
 
 async function saveSettings() {
@@ -3363,7 +3386,7 @@ async function saveSettings() {
 }
 
 function triggerPipeline() {
-    document.getElementById('triggerContext').value = '';
+    document.getElementById('triggerContext').value = initialContextTemplate;
     // Reset modal to normal state
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-play-fill"></i> Run Pipeline';
     document.getElementById('triggerModalSubmit').onclick = confirmTrigger;
@@ -3398,7 +3421,7 @@ async function confirmTrigger() {
 
 function triggerInteractive() {
     // Show same modal but with interactive label
-    document.getElementById('triggerContext').value = '';
+    document.getElementById('triggerContext').value = initialContextTemplate;
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-bug"></i> Interactive/Debug Run';
     document.getElementById('triggerModalSubmit').onclick = confirmTriggerInteractive;
     document.getElementById('triggerModalSubmit').innerHTML = '<i class="bi bi-play-fill"></i> Start Interactive Run';

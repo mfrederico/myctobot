@@ -315,16 +315,62 @@ Flight::map('loadMenu', function() {
     $menu = [];
 
     if (Flight::isLoggedIn()) {
-        // Member menu items (no Home link when logged in)
-        $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
-        $menu[] = ['url' => '/pipelines', 'label' => 'Pipelines', 'icon' => 'diagram-3'];
-        $menu[] = ['url' => '/knowledgebase', 'label' => 'Knowledge Base', 'icon' => 'book'];
-
-        // Enterprise tier - AI Developer
-        $member = Flight::get('member');
-        if ($member && $member->isEnterprise()) {
-            $menu[] = ['url' => '/enterprise', 'label' => 'AI Developer', 'icon' => 'cpu'];
+        // Detect current studio from URL path (takes priority over saved preference)
+        $currentPath = $_SERVER['REQUEST_URI'] ?? '';
+        $urlStudio = null;
+        if (preg_match('#^/studio/(developer|commerce|pipeline)#', $currentPath, $matches)) {
+            $urlStudio = $matches[1];
         }
+
+        // Use URL-detected studio if on a studio page, otherwise use saved preference
+        $activeStudio = $urlStudio ?? Flight::getStudio();
+
+        $studioLabels = [
+            'developer' => 'Developer',
+            'commerce' => 'Commerce',
+            'pipeline' => 'Pipeline'
+        ];
+        $studioIcons = [
+            'developer' => 'code-slash',
+            'commerce' => 'shop',
+            'pipeline' => 'diagram-3'
+        ];
+
+        $studioLabel = $activeStudio ? ($studioLabels[$activeStudio] ?? 'Studio') : 'Studio';
+        $studioIcon = $activeStudio ? ($studioIcons[$activeStudio] ?? 'lightning-charge') : 'lightning-charge';
+
+        $menu[] = [
+            'url' => '/studio',
+            'label' => $studioLabel,
+            'icon' => $studioIcon,
+            'dropdown' => [
+                ['url' => '/studio/developer', 'label' => 'Developer Studio', 'icon' => 'code-slash', 'active' => ($activeStudio === 'developer')],
+                ['url' => '/studio/commerce', 'label' => 'Commerce Studio', 'icon' => 'shop', 'active' => ($activeStudio === 'commerce')],
+                ['url' => '/studio/pipeline', 'label' => 'Pipeline Studio', 'icon' => 'diagram-3', 'active' => ($activeStudio === 'pipeline')],
+                ['divider' => true],
+                ['url' => '/studio/select', 'label' => 'Switch Studio...', 'icon' => 'arrow-left-right']
+            ]
+        ];
+
+        // Studio-specific menu items
+        if ($activeStudio === 'developer') {
+            $menu[] = ['url' => '/enterprise', 'label' => 'AI Dev Jobs', 'icon' => 'cpu'];
+            $menu[] = ['url' => '/settings/repos', 'label' => 'Repositories', 'icon' => 'github'];
+            $menu[] = ['url' => '/settings/boards', 'label' => 'Jira Boards', 'icon' => 'kanban'];
+        } elseif ($activeStudio === 'commerce') {
+            $menu[] = ['url' => '/shopify', 'label' => 'Stores', 'icon' => 'shop'];
+        } elseif ($activeStudio === 'pipeline') {
+            $menu[] = ['url' => '/pipelines', 'label' => 'Pipelines', 'icon' => 'diagram-3'];
+            $menu[] = ['url' => '/mcpservers', 'label' => 'MCP Servers', 'icon' => 'plug'];
+            $menu[] = ['url' => '/orchestration', 'label' => 'Orchestration', 'icon' => 'lightning-charge'];
+        } else {
+            // Default menu when no studio selected
+            $menu[] = ['url' => '/dashboard', 'label' => 'Dashboard', 'icon' => 'speedometer2'];
+            $menu[] = ['url' => '/pipelines', 'label' => 'Pipelines', 'icon' => 'diagram-3'];
+        }
+
+        // Common items
+        $menu[] = ['url' => '/knowledgebase', 'label' => 'Knowledge Base', 'icon' => 'book'];
 
         // Admin menu items
         if (Flight::hasLevel(LEVELS['ADMIN'])) {
@@ -455,4 +501,20 @@ Flight::map('setSystemSetting', function($key, $value) {
     $setting->updatedAt = date('Y-m-d H:i:s');
 
     return Bean::store($setting);
+});
+
+/**
+ * Studio preference helpers
+ * Get/set the user's active studio (developer, commerce, pipeline)
+ */
+Flight::map('getStudio', function() {
+    return Flight::getSetting('active_studio');
+});
+
+Flight::map('setStudio', function($studio) {
+    $valid = ['developer', 'commerce', 'pipeline'];
+    if (!in_array($studio, $valid)) {
+        return false;
+    }
+    return Flight::setSetting('active_studio', $studio);
 });

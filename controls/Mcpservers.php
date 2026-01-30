@@ -453,11 +453,19 @@ class Mcpservers extends BaseControls\Control {
 
             $client->disconnect();
 
+            // Calculate token overhead from tools definitions
+            $toolsJson = json_encode($tools);
+            $toolsByteCount = strlen($toolsJson);
+            // Rough token estimate: ~4 chars per token for typical JSON/English
+            $toolsTokenEstimate = (int) ceil($toolsByteCount / 4);
+
             // Update server with cached info
             $server->server_name = $serverInfo['name'] ?? null;
             $server->server_version = $serverInfo['version'] ?? null;
-            $server->tools_json = json_encode($tools);
+            $server->tools_json = $toolsJson;
             $server->capabilities_json = json_encode($capabilities);
+            $server->tools_byte_count = $toolsByteCount;
+            $server->tools_token_estimate = $toolsTokenEstimate;
             $server->last_connected_at = date('Y-m-d H:i:s');
             $server->last_error = null;
             $server->last_error_at = null;
@@ -467,7 +475,9 @@ class Mcpservers extends BaseControls\Control {
                 'server_info' => $serverInfo,
                 'capabilities' => $capabilities,
                 'tools' => $tools,
-                'tools_count' => count($tools)
+                'tools_count' => count($tools),
+                'tools_byte_count' => $toolsByteCount,
+                'tools_token_estimate' => $toolsTokenEstimate
             ], 'Connection successful');
 
         } catch (\Exception $e) {
@@ -591,6 +601,13 @@ class Mcpservers extends BaseControls\Control {
             'is_shared' => (bool) $server->is_shared,
             'is_active' => (bool) $server->is_active,
             'is_own' => $server->member_id == $this->member->id,
+            'tools' => $server->tools_json ? json_decode($server->tools_json, true) : null,
+            'tools_count' => $server->tools_json ? count(json_decode($server->tools_json, true) ?: []) : null,
+            'tools_byte_count' => $server->tools_byte_count ? (int) $server->tools_byte_count : null,
+            'tools_token_estimate' => $server->tools_token_estimate ? (int) $server->tools_token_estimate : null,
+            'server_name' => $server->server_name,
+            'server_version' => $server->server_version,
+            'last_connected_at' => $server->last_connected_at,
             'created_at' => $server->created_at,
             'updated_at' => $server->updated_at
         ];

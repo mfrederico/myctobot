@@ -407,7 +407,7 @@ class AttachmentService {
             $response = $client->post("{$this->ragServiceUrl}/api/ingest-url", [
                 'json' => [
                     'url' => $url,
-                    'workspace_id' => $workspaceId,
+                    'tenant' => $workspaceId,
                     'kb_slug' => $kbSlug,
                     'filename' => $filename,
                     'mime_type' => $mimeType,

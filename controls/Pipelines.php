@@ -1230,6 +1230,32 @@ class Pipelines extends BaseControls\Control {
         ];
         $this->viewData['stepRunGrid'] = $stepRunGrid;
 
+        // If awaiting input, get the awaiting step info
+        $awaitingStep = null;
+        if ($run->status === 'awaiting_input') {
+            $awaitingStepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                [$run->id]
+            );
+
+            if ($awaitingStepRun) {
+                $token = $awaitingStepRun->awaiting_input_token;
+                $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
+
+                $awaitingStep = [
+                    'step_name' => $awaitingStepRun->step_name,
+                    'prompt' => $awaitingStepRun->awaiting_input_prompt,
+                    'schema' => json_decode($awaitingStepRun->awaiting_input_schema_json ?: '{}', true),
+                    'timeout_at' => $awaitingStepRun->awaiting_input_timeout_at,
+                    'allowed_sources' => json_decode($awaitingStepRun->awaiting_input_sources_json ?: '[]', true),
+                    'form_url' => "{$baseUrl}/pipelines/form/{$run->id}?token={$token}",
+                    'webhook_url' => "{$baseUrl}/pipelines/input/{$run->id}?token={$token}",
+                    'input_token' => $token
+                ];
+            }
+        }
+        $this->viewData['awaitingStep'] = $awaitingStep;
+
         $this->render('pipelines/viewrun', $this->viewData);
     }
 
@@ -2482,6 +2508,311 @@ class Pipelines extends BaseControls\Control {
         Flight::jsonSuccess([
             'variables' => $variables,
             'position' => ['row' => $row, 'col' => $col]
+        ]);
+    }
+
+    // =========================================================================
+    // Await Input Gateway (Multi-turn MCP / Webhook / Form Input)
+    // =========================================================================
+
+    /**
+     * Submit input to a pipeline awaiting external input
+     *
+     * POST /pipelines/input/{run_id}?token={input_token}
+     * Body: JSON input data matching the awaiting_input_schema
+     *
+     * Used by:
+     * - External webhooks
+     * - Form submissions (AJAX)
+     * - Direct API calls
+     *
+     * For MCP, use the continue_pipeline tool in Mcppipelines.php instead.
+     */
+    public function input($params = []) {
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+        $token = $this->getParam('token');
+
+        // Read JSON body
+        $rawBody = file_get_contents('php://input');
+        $inputData = json_decode($rawBody, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            // Try form data
+            $inputData = $_POST;
+            unset($inputData['token']);
+        }
+
+        if (empty($inputData)) {
+            Flight::jsonError('Input data required', 400);
+            return;
+        }
+
+        if (empty($token)) {
+            Flight::jsonError('Input token required', 400);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Find the step that's awaiting input
+        $awaitingStep = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$runId]
+        );
+
+        if (!$awaitingStep) {
+            Flight::jsonError('Pipeline is not awaiting input', 400);
+            return;
+        }
+
+        // Validate token
+        if ($awaitingStep->awaiting_input_token !== $token) {
+            Flight::jsonError('Invalid input token', 403);
+            return;
+        }
+
+        // Check timeout
+        if ($awaitingStep->awaiting_input_timeout_at && strtotime($awaitingStep->awaiting_input_timeout_at) < time()) {
+            Flight::jsonError('Input window has expired', 410);
+            return;
+        }
+
+        // Check allowed sources
+        $allowedSources = json_decode($awaitingStep->awaiting_input_sources_json ?: '[]', true);
+        if (!empty($allowedSources) && !in_array('webhook', $allowedSources) && !in_array('form', $allowedSources)) {
+            Flight::jsonError('Input from this source is not allowed', 403);
+            return;
+        }
+
+        // Resume the pipeline with the input
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+
+        try {
+            $executor = new \app\services\PipelineExecutor($runId);
+            $result = $executor->resumeFromAwaitInput($inputData, $token, 'webhook');
+
+            Flight::jsonSuccess([
+                'resumed' => true,
+                'run_id' => $runId,
+                'status' => $result['status'] ?? 'running',
+                'output' => $result['output'] ?? null,
+                'message' => 'Pipeline resumed with input'
+            ]);
+
+        } catch (\Exception $e) {
+            Flight::jsonError('Resume failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Render a form for pipeline input submission
+     *
+     * GET /pipelines/form/{run_id}?token={input_token}
+     *
+     * Renders a web form based on the awaiting_input_schema_json.
+     * Allows non-technical users to provide input via browser.
+     */
+    public function form($params = []) {
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+        $token = $this->getParam('token');
+
+        if (empty($token)) {
+            $this->render('pipelines/form_error', ['error' => 'Input token required']);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            $this->render('pipelines/form_error', ['error' => 'Run not found']);
+            return;
+        }
+
+        // Find the step that's awaiting input
+        $awaitingStep = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$runId]
+        );
+
+        if (!$awaitingStep) {
+            $this->render('pipelines/form_error', ['error' => 'Pipeline is not awaiting input']);
+            return;
+        }
+
+        // Validate token
+        if ($awaitingStep->awaiting_input_token !== $token) {
+            $this->render('pipelines/form_error', ['error' => 'Invalid or expired link']);
+            return;
+        }
+
+        // Check timeout
+        if ($awaitingStep->awaiting_input_timeout_at && strtotime($awaitingStep->awaiting_input_timeout_at) < time()) {
+            $this->render('pipelines/form_error', ['error' => 'This input window has expired']);
+            return;
+        }
+
+        // Check allowed sources
+        $allowedSources = json_decode($awaitingStep->awaiting_input_sources_json ?: '[]', true);
+        if (!empty($allowedSources) && !in_array('form', $allowedSources)) {
+            $this->render('pipelines/form_error', ['error' => 'Form input is not allowed for this step']);
+            return;
+        }
+
+        // Get schema and context
+        $schema = json_decode($awaitingStep->awaiting_input_schema_json ?: '{}', true);
+        $prompt = $awaitingStep->awaiting_input_prompt ?: 'Please provide the requested information';
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // Get pipeline info for display
+        $pipeline = $run->pipelines;
+
+        $this->render('pipelines/form_input', [
+            'run_id' => $runId,
+            'run_uid' => $run->run_uid,
+            'token' => $token,
+            'schema' => $schema,
+            'prompt' => $prompt,
+            'context' => $context,
+            'pipeline_name' => $pipeline->name ?? 'Pipeline',
+            'step_name' => $awaitingStep->step_name,
+            'timeout_at' => $awaitingStep->awaiting_input_timeout_at
+        ]);
+    }
+
+    /**
+     * Handle form submission for pipeline input
+     *
+     * POST /pipelines/formsubmit/{run_id}
+     *
+     * Processes form submission, resumes pipeline, and shows result page.
+     */
+    public function formsubmit($params = []) {
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+        $token = $this->getParam('token');
+
+        // Get form data
+        $inputData = $_POST;
+        unset($inputData['token']); // Remove token from input data
+
+        if (empty($inputData)) {
+            $this->render('pipelines/form_error', ['error' => 'No input data provided']);
+            return;
+        }
+
+        if (empty($token)) {
+            $this->render('pipelines/form_error', ['error' => 'Input token required']);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            $this->render('pipelines/form_error', ['error' => 'Run not found']);
+            return;
+        }
+
+        // Find the step that's awaiting input
+        $awaitingStep = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$runId]
+        );
+
+        if (!$awaitingStep) {
+            $this->render('pipelines/form_error', ['error' => 'Pipeline is not awaiting input']);
+            return;
+        }
+
+        // Validate token
+        if ($awaitingStep->awaiting_input_token !== $token) {
+            $this->render('pipelines/form_error', ['error' => 'Invalid or expired link']);
+            return;
+        }
+
+        // Resume the pipeline with the input
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+
+        try {
+            $executor = new \app\services\PipelineExecutor($runId);
+            $result = $executor->resumeFromAwaitInput($inputData, $token, 'form');
+
+            // Show success page
+            $pipeline = $run->pipelines;
+
+            $this->render('pipelines/form_success', [
+                'run_id' => $runId,
+                'run_uid' => $run->run_uid,
+                'pipeline_name' => $pipeline->name ?? 'Pipeline',
+                'status' => $result['status'] ?? 'running',
+                'output' => $result['output'] ?? null,
+                'message' => 'Your input has been received'
+            ]);
+
+        } catch (\Exception $e) {
+            $this->render('pipelines/form_error', ['error' => 'Failed to process input: ' . $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Get awaiting input status for a run (AJAX)
+     *
+     * GET /pipelines/awaitingstatus/{run_id}
+     *
+     * Returns info about what input is being awaited.
+     */
+    public function awaitingstatus($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        if ($run->status !== 'awaiting_input') {
+            Flight::jsonSuccess([
+                'awaiting_input' => false,
+                'status' => $run->status
+            ]);
+            return;
+        }
+
+        // Find the step that's awaiting input
+        $awaitingStep = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$runId]
+        );
+
+        if (!$awaitingStep) {
+            Flight::jsonSuccess([
+                'awaiting_input' => false,
+                'status' => $run->status,
+                'note' => 'Run marked as awaiting_input but no step found'
+            ]);
+            return;
+        }
+
+        $schema = json_decode($awaitingStep->awaiting_input_schema_json ?: '{}', true);
+        $allowedSources = json_decode($awaitingStep->awaiting_input_sources_json ?: '[]', true);
+        $token = $awaitingStep->awaiting_input_token;
+
+        // Build URLs
+        $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
+        $formUrl = "{$baseUrl}/pipelines/form/{$runId}?token={$token}";
+        $webhookUrl = "{$baseUrl}/pipelines/input/{$runId}?token={$token}";
+
+        Flight::jsonSuccess([
+            'awaiting_input' => true,
+            'step_name' => $awaitingStep->step_name,
+            'prompt' => $awaitingStep->awaiting_input_prompt,
+            'schema' => $schema,
+            'allowed_sources' => $allowedSources,
+            'timeout_at' => $awaitingStep->awaiting_input_timeout_at,
+            'form_url' => $formUrl,
+            'webhook_url' => $webhookUrl,
+            'input_token' => $token
         ]);
     }
 

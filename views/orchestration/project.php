@@ -1,8 +1,8 @@
 <div class="container py-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb mb-3">
-            <li class="breadcrumb-item"><a href="/studio">Studio</a></li>
-            <li class="breadcrumb-item active"><?= htmlspecialchars($project['name']) ?></li>
+            <li class="breadcrumb-item"><a href="/orchestration">Studio</a></li>
+            <li class="breadcrumb-item active"><?= htmlspecialchars($project['name'] ?? 'Untitled') ?></li>
         </ol>
     </nav>
 
@@ -14,7 +14,7 @@
                 <?php else: ?>
                 <i class="bi bi-gear text-secondary"></i>
                 <?php endif; ?>
-                <?= htmlspecialchars($project['name']) ?>
+                <?= htmlspecialchars($project['name'] ?? 'Untitled') ?>
             </h1>
             <p class="text-muted mb-0">
                 <?= $template ? htmlspecialchars($template['name']) : 'Custom Orchestration' ?>
@@ -52,7 +52,7 @@
                         </button>
                         <?php endif; ?>
 
-                        <a href="/studio/history/<?= $project['id'] ?>" class="btn btn-outline-secondary">
+                        <a href="/orchestration/history/<?= $project['id'] ?>" class="btn btn-outline-secondary">
                             <i class="bi bi-clock-history"></i> History
                         </a>
 
@@ -264,7 +264,7 @@
 function executeProject(projectId) {
     if (!confirm('Run this orchestration now?')) return;
 
-    fetch('/studio/execute/' + projectId, {
+    fetch('/orchestration/execute/' + projectId, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -283,7 +283,7 @@ function executeProject(projectId) {
 }
 
 function pauseProject(projectId) {
-    fetch('/studio/pause/' + projectId, {
+    fetch('/orchestration/pause/' + projectId, {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
     })
@@ -295,7 +295,7 @@ function pauseProject(projectId) {
 }
 
 function resumeProject(projectId) {
-    fetch('/studio/resume/' + projectId, {
+    fetch('/orchestration/resume/' + projectId, {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
     })
@@ -309,14 +309,14 @@ function resumeProject(projectId) {
 function deleteProject(projectId) {
     if (!confirm('Are you sure you want to delete this project? This cannot be undone.')) return;
 
-    fetch('/studio/delete/' + projectId, {
+    fetch('/orchestration/delete/' + projectId, {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            window.location.href = '/studio';
+            window.location.href = '/orchestration';
         } else {
             alert('Error: ' + data.message);
         }

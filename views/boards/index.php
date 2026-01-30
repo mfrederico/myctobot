@@ -1,8 +1,6 @@
-<div class="container-fluid">
-    <div class="row">
-        <div class="col-md-12">
-            <div class="d-flex justify-content-between align-items-center mb-4">
-                <h1>Jira Boards</h1>
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Jira Boards</h1>
                 <div>
                     <a href="/analysis" class="btn btn-outline-secondary me-2">
                         <i class="bi bi-graph-up"></i> Analysis
@@ -15,18 +13,74 @@
                 </div>
             </div>
 
-            <?php if (!$hasAtlassian): ?>
-            <div class="alert alert-warning">
-                <h4 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> Connect Your Jira Account</h4>
-                <p>You need to connect your Atlassian account before you can manage Jira boards.</p>
-                <hr>
-                <?php if ($atlassianConfigured): ?>
-                <a href="/atlassian/connect" class="btn btn-primary">
-                    <i class="bi bi-link-45deg"></i> Connect Atlassian
-                </a>
-                <?php else: ?>
-                <p class="mb-0 text-muted">Atlassian integration is not configured. Please contact the administrator.</p>
-                <?php endif; ?>
+            <?php if (!$hasAtlassian && empty($boards)): ?>
+            <div class="card border-warning mb-4">
+                <div class="card-body">
+                    <h4 class="card-title"><i class="bi bi-exclamation-triangle text-warning"></i> Connect Your Jira Account</h4>
+                    <p class="card-text">You need to connect your Atlassian account before you can manage Jira boards.</p>
+                    <?php if ($atlassianConfigured): ?>
+                    <a href="/atlassian/connect" class="btn btn-primary">
+                        <i class="bi bi-link-45deg"></i> Connect Atlassian
+                    </a>
+                    <?php else: ?>
+                    <p class="mb-0 text-muted">Atlassian integration is not configured. Please contact the administrator.</p>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php elseif (!$hasAtlassian && !empty($boards)): ?>
+            <!-- Orphaned boards - Atlassian disconnected but boards exist -->
+            <div class="card border-warning mb-4">
+                <div class="card-body">
+                    <h4 class="card-title"><i class="bi bi-exclamation-triangle text-warning"></i> Atlassian Disconnected</h4>
+                    <p class="card-text">Your Atlassian account is not connected, but you have existing boards. You can reconnect to restore access, or delete orphaned boards below.</p>
+                    <?php if ($atlassianConfigured): ?>
+                    <a href="/atlassian/connect" class="btn btn-primary">
+                        <i class="bi bi-link-45deg"></i> Reconnect Atlassian
+                    </a>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-secondary text-white">
+                    <i class="bi bi-kanban"></i> Disconnected Boards
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Board</th>
+                                    <th>Project</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($boards as $board): ?>
+                                <tr>
+                                    <td>
+                                        <strong><?= htmlspecialchars($board['board_name']) ?></strong>
+                                    </td>
+                                    <td><code><?= htmlspecialchars($board['project_key']) ?></code></td>
+                                    <td>
+                                        <span class="badge bg-warning text-dark">
+                                            <i class="bi bi-unlink"></i> Disconnected
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                                onclick="removeBoard(<?= $board['id'] ?>, '<?= htmlspecialchars($board['board_name'], ENT_QUOTES) ?>')"
+                                                title="Delete Board">
+                                            <i class="bi bi-trash"></i> Delete
+                                        </button>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
             <?php elseif (empty($boards)): ?>
             <div class="alert alert-info">
@@ -124,9 +178,7 @@
                     </div>
                 </div>
             </div>
-            <?php endif; ?>
-        </div>
-    </div>
+    <?php endif; ?>
 </div>
 
 <script>

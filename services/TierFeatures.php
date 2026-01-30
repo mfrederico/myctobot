@@ -43,22 +43,22 @@ class TierFeatures {
      */
     private static array $features = [
         'free' => [
-            self::FEATURE_PRIORITY_WEIGHTS => false,
-            self::FEATURE_ENGINEERING_GOALS => false,
-            self::FEATURE_CLARITY_ANALYSIS => false,
-            self::FEATURE_STAKEHOLDER_INFO => false,
-            self::FEATURE_IMAGE_ANALYSIS => false,
-            self::FEATURE_REPO_INTEGRATION => false,
-            self::FEATURE_AI_CONFIDENCE => false,
-            self::FEATURE_CUSTOM_PROMPTS => false,
-            self::FEATURE_BATCH_ANALYSIS => false,
-            self::FEATURE_AI_DEVELOPER => false,
-            self::FEATURE_GIT_INTEGRATION => false,
-            self::FEATURE_JIRA_WRITE => false,
-            self::FEATURE_WEBHOOKS => false,
-            self::FEATURE_KNOWLEDGE_BASE => true,      // Basic knowledge base
-            self::FEATURE_KNOWLEDGE_BASE_CHAT => false,
-            self::FEATURE_KNOWLEDGE_BASE_EMAIL => false,
+            self::FEATURE_PRIORITY_WEIGHTS => true,
+            self::FEATURE_ENGINEERING_GOALS => true,
+            self::FEATURE_CLARITY_ANALYSIS => true,
+            self::FEATURE_STAKEHOLDER_INFO => true,
+            self::FEATURE_IMAGE_ANALYSIS => true,
+            self::FEATURE_REPO_INTEGRATION => true,
+            self::FEATURE_AI_CONFIDENCE => true,
+            self::FEATURE_CUSTOM_PROMPTS => true,
+            self::FEATURE_BATCH_ANALYSIS => true,
+            self::FEATURE_AI_DEVELOPER => true,
+            self::FEATURE_GIT_INTEGRATION => true,
+            self::FEATURE_JIRA_WRITE => true,
+            self::FEATURE_WEBHOOKS => true,
+            self::FEATURE_KNOWLEDGE_BASE => true,
+            self::FEATURE_KNOWLEDGE_BASE_CHAT => true,
+            self::FEATURE_KNOWLEDGE_BASE_EMAIL => true,
         ],
         'pro' => [
             self::FEATURE_PRIORITY_WEIGHTS => true,
@@ -103,12 +103,12 @@ class TierFeatures {
      */
     private static array $limits = [
         'free' => [
-            self::LIMIT_BOARDS => 2,
-            self::LIMIT_ANALYSES_PER_DAY => 3,
-            self::LIMIT_DIGEST_RECIPIENTS => 1,
-            self::LIMIT_AI_DEV_JOBS_PER_DAY => 0,
-            self::LIMIT_REPO_CONNECTIONS => 0,
-            self::LIMIT_KNOWLEDGE_BASE_MB => 500, // Increased for testing
+            self::LIMIT_BOARDS => -1,             // Unlimited
+            self::LIMIT_ANALYSES_PER_DAY => -1,   // Unlimited
+            self::LIMIT_DIGEST_RECIPIENTS => -1,  // Unlimited
+            self::LIMIT_AI_DEV_JOBS_PER_DAY => -1, // Unlimited
+            self::LIMIT_REPO_CONNECTIONS => -1,   // Unlimited
+            self::LIMIT_KNOWLEDGE_BASE_MB => 500,
         ],
         'pro' => [
             self::LIMIT_BOARDS => 10,

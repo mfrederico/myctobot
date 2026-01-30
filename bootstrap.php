@@ -18,6 +18,7 @@ use \Monolog\Formatter\LineFormatter;
 class Bootstrap {
     
     private $config;
+    private $configFile;
     private $logger;
     private $cliHandler;
     
@@ -26,10 +27,10 @@ class Bootstrap {
         $this->initAutoloader();
 
         // Resolve workspace from subdomain and load workspace-specific config
-        $configFile = $this->resolveConfigFile($configFile);
+        $this->configFile = $this->resolveConfigFile($configFile);
 
         // Now load configuration (after autoloader so Flight class is available)
-        $this->loadConfig($configFile);
+        $this->loadConfig($this->configFile);
         
         // Check for CLI mode and handle it
         $this->initCLI();
@@ -57,7 +58,7 @@ class Bootstrap {
         }
         
         $this->config = parse_ini_file($configFile, true);
-        
+
         // Set configuration in Flight
         foreach ($this->config as $section => $values) {
             if (is_array($values)) {
@@ -68,6 +69,10 @@ class Bootstrap {
                 Flight::set($section, $values);
             }
         }
+
+        // Set PHP timezone from config
+        $timezone = $this->config['app']['timezone'] ?? $this->config['timezone'] ?? 'UTC';
+        date_default_timezone_set($timezone);
     }
     
     /**
@@ -100,21 +105,14 @@ class Bootstrap {
     private function initLogging() {
 		$config = $this->config;
 
-        // Determine workspace slug for log file naming
-        // Priority: CLI --workspace arg > subdomain > 'default'
-        $workspaceSlug = 'default';
-        if (php_sapi_name() === 'cli') {
-            // Check CLI args for --workspace
-            global $argv;
-            foreach ($argv ?? [] as $arg) {
-                if (preg_match('/^--workspace=(.+)$/', $arg, $m)) {
-                    $workspaceSlug = $m[1];
-                    break;
-                }
-            }
-        } else {
-            // Web request - use subdomain
-            $workspaceSlug = $_SERVER['WORKSPACE'] ?? 'default';
+        // Determine workspace slug: $_SERVER['WORKSPACE'] (set by front controller) or config file name
+        $workspaceSlug = $_SERVER['WORKSPACE'] ?? null;
+        if (!$workspaceSlug && preg_match('/config\.([a-z0-9_]+)\.ini$/', $this->configFile, $m)) {
+            $workspaceSlug = $m[1];
+        }
+
+        if (!$workspaceSlug) {
+            throw new \RuntimeException('Workspace not determined from config file: ' . $this->configFile);
         }
 
         $config['logLevel'] = $this->config['logging']['level'] ?? 'DEBUG';
@@ -136,6 +134,9 @@ class Bootstrap {
 
 		if (empty($config['log.name'])) $config['log.name'] = $workspaceSlug;
 
+        // Store workspace globally so it's accessible throughout the app (CLI and web)
+        Flight::set('workspace', $workspaceSlug);
+
 		// Set up logging for legacy
 		Flight::register('log', 'Monolog\Logger', array($config['log.name']), function($log) use ($config) {
 			// Create logger
@@ -156,7 +157,10 @@ class Bootstrap {
 
 			// Add processor to include workspace ID in every log entry
 			$log->pushProcessor(function ($record) {
-				$workspace = $_SESSION['workspace_slug'] ?? 'default';
+				$workspace = Flight::get('workspace') ?? $_SESSION['workspace_slug'] ?? null;
+				if (!$workspace) {
+					throw new \RuntimeException('Workspace not configured - cannot find conf/config.{workspace}.ini');
+				}
 				$record['extra']['workspace'] = $workspace;
 				return $record;
 			});

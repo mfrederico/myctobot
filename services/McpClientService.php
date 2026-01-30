@@ -392,7 +392,9 @@ class McpClientService {
      * Refresh the list of available tools
      */
     public function refreshTools(): void {
-        if (!($this->capabilities['tools'] ?? false)) {
+        // Check if 'tools' key exists in capabilities (not if it's truthy)
+        // MCP servers return "tools":{} which becomes an empty array in PHP
+        if (!isset($this->capabilities['tools']) && !array_key_exists('tools', $this->capabilities ?? [])) {
             $this->log('debug', 'Server does not expose tools capability');
             return;
         }
@@ -637,10 +639,23 @@ class McpClientService {
             $url = $this->transport['url'];
         }
 
-        $headers = array_merge([
+        // Start with default headers
+        $headers = [
             'Content-Type: application/json',
             'Accept: application/json'
-        ], $this->transport['headers'] ?? []);
+        ];
+
+        // Convert associative headers to cURL format (e.g., 'Authorization' => 'Bearer x' to 'Authorization: Bearer x')
+        $configHeaders = $this->transport['headers'] ?? [];
+        foreach ($configHeaders as $key => $value) {
+            if (is_string($key)) {
+                // Associative: convert to "Key: Value" format
+                $headers[] = "{$key}: {$value}";
+            } else {
+                // Already in string format
+                $headers[] = $value;
+            }
+        }
 
         $this->log('debug', "HTTP POST to: {$url}");
 

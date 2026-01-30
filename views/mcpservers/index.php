@@ -100,12 +100,32 @@ $presets = $presets ?? [];
                         <span class="badge bg-secondary">ENV: <?= htmlspecialchars(implode(', ', array_keys($server['env']))) ?></span>
                     </div>
                     <?php endif; ?>
+
+                    <?php if ($server['tools_count'] !== null): ?>
+                    <div class="mt-2 d-flex gap-2 flex-wrap">
+                        <span class="badge bg-primary" title="Number of tools available">
+                            <i class="bi bi-tools"></i> <?= $server['tools_count'] ?> tools
+                        </span>
+                        <?php if ($server['tools_token_estimate']): ?>
+                        <span class="badge bg-success" title="Estimated token overhead for context window">
+                            <i class="bi bi-speedometer2"></i> ~<?= number_format($server['tools_token_estimate']) ?> tokens
+                        </span>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <div class="card-footer bg-transparent">
                     <div class="d-flex justify-content-between align-items-center">
-                        <button type="button" class="btn btn-sm btn-outline-success" onclick="testConnection(<?= $server['id'] ?>, '<?= htmlspecialchars($server['name'], ENT_QUOTES) ?>')" title="Test Connection">
-                            <i class="bi bi-plug"></i> Test
-                        </button>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-success" onclick="testConnection(<?= $server['id'] ?>, '<?= htmlspecialchars($server['name'], ENT_QUOTES) ?>')" title="Test Connection">
+                                <i class="bi bi-plug"></i> Test
+                            </button>
+                            <?php if ($server['tools_count'] > 0): ?>
+                            <button type="button" class="btn btn-outline-primary" onclick="viewTools(<?= $server['id'] ?>)" title="View Cached Tools">
+                                <i class="bi bi-tools"></i> Tools
+                            </button>
+                            <?php endif; ?>
+                        </div>
                         <?php if ($server['is_own']): ?>
                         <div class="btn-group btn-group-sm">
                             <button type="button" class="btn btn-outline-<?= $server['is_active'] ? 'warning' : 'success' ?>" onclick="toggleActive(<?= $server['id'] ?>)" title="<?= $server['is_active'] ? 'Deactivate' : 'Activate' ?>">
@@ -279,6 +299,25 @@ $presets = $presets ?? [];
                             <tr><th>Name</th><td id="infoServerName">-</td></tr>
                             <tr><th>Version</th><td id="infoServerVersion">-</td></tr>
                         </table>
+                    </div>
+
+                    <div id="tokenOverheadSection" style="display: none;">
+                        <h6><i class="bi bi-speedometer2"></i> Token Overhead</h6>
+                        <div class="alert alert-light border">
+                            <div class="row text-center">
+                                <div class="col-6">
+                                    <div class="fw-bold text-primary fs-4" id="toolsByteCount">-</div>
+                                    <small class="text-muted">Bytes</small>
+                                </div>
+                                <div class="col-6">
+                                    <div class="fw-bold text-success fs-4" id="toolsTokenEstimate">-</div>
+                                    <small class="text-muted">Est. Tokens</small>
+                                </div>
+                            </div>
+                            <p class="small text-muted mb-0 mt-2">
+                                <i class="bi bi-info-circle"></i> Token overhead is the context window cost of including this MCP server's tool definitions.
+                            </p>
+                        </div>
                     </div>
 
                     <div id="toolsSection" style="display: none;">
@@ -533,6 +572,83 @@ function escapeHtml(str) {
 // Reset form when modal closes
 document.getElementById('addServerModal').addEventListener('hidden.bs.modal', resetForm);
 
+// View cached tools (without re-testing)
+function viewTools(serverId) {
+    fetch('/mcpservers/list')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                alert('Error loading server data');
+                return;
+            }
+
+            const server = data.data.find(s => s.id == serverId);
+            if (!server) {
+                alert('Server not found');
+                return;
+            }
+
+            const modal = new bootstrap.Modal(document.getElementById('testResultModal'));
+
+            // Set modal state for cached view
+            document.getElementById('testServerName').textContent = server.name;
+            document.getElementById('testLoading').style.display = 'none';
+            document.getElementById('testResults').style.display = 'block';
+            document.getElementById('testSuccess').style.display = 'block';
+            document.getElementById('testError').style.display = 'none';
+
+            // Server info
+            if (server.server_name || server.server_version) {
+                document.getElementById('serverInfoSection').style.display = 'block';
+                document.getElementById('infoServerName').textContent = server.server_name || '-';
+                document.getElementById('infoServerVersion').textContent = server.server_version || '-';
+            } else {
+                document.getElementById('serverInfoSection').style.display = 'none';
+            }
+
+            // Token overhead
+            if (server.tools_byte_count) {
+                document.getElementById('tokenOverheadSection').style.display = 'block';
+                document.getElementById('toolsByteCount').textContent = server.tools_byte_count.toLocaleString();
+                document.getElementById('toolsTokenEstimate').textContent = server.tools_token_estimate ? '~' + server.tools_token_estimate.toLocaleString() : '-';
+            } else {
+                document.getElementById('tokenOverheadSection').style.display = 'none';
+            }
+
+            // Tools
+            const tools = server.tools || [];
+            if (tools.length > 0) {
+                document.getElementById('toolsSection').style.display = 'block';
+                document.getElementById('toolsCount').textContent = tools.length;
+
+                const toolsList = document.getElementById('toolsList');
+                toolsList.innerHTML = '';
+
+                tools.forEach(tool => {
+                    const item = document.createElement('div');
+                    item.className = 'list-group-item';
+                    item.innerHTML = `
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong class="text-primary">${escapeHtml(tool.name)}</strong>
+                                ${tool.description ? `<p class="mb-0 small text-muted">${escapeHtml(tool.description)}</p>` : ''}
+                            </div>
+                        </div>
+                        ${tool.inputSchema ? `<details class="mt-1"><summary class="small text-muted">Parameters</summary><pre class="small bg-light p-2 mt-1 mb-0">${escapeHtml(JSON.stringify(tool.inputSchema.properties || {}, null, 2))}</pre></details>` : ''}
+                    `;
+                    toolsList.appendChild(item);
+                });
+            } else {
+                document.getElementById('toolsSection').style.display = 'none';
+            }
+
+            modal.show();
+        })
+        .catch(err => {
+            alert('Error: ' + err.message);
+        });
+}
+
 // Test connection
 function testConnection(serverId, serverName) {
     const modal = new bootstrap.Modal(document.getElementById('testResultModal'));
@@ -544,6 +660,7 @@ function testConnection(serverId, serverName) {
     document.getElementById('testSuccess').style.display = 'none';
     document.getElementById('testError').style.display = 'none';
     document.getElementById('serverInfoSection').style.display = 'none';
+    document.getElementById('tokenOverheadSection').style.display = 'none';
     document.getElementById('toolsSection').style.display = 'none';
 
     modal.show();
@@ -563,6 +680,15 @@ function testConnection(serverId, serverName) {
                     document.getElementById('serverInfoSection').style.display = 'block';
                     document.getElementById('infoServerName').textContent = serverInfo.name || '-';
                     document.getElementById('infoServerVersion').textContent = serverInfo.version || '-';
+                }
+
+                // Token Overhead
+                const byteCount = result.data.tools_byte_count;
+                const tokenEstimate = result.data.tools_token_estimate;
+                if (byteCount !== undefined && byteCount !== null) {
+                    document.getElementById('tokenOverheadSection').style.display = 'block';
+                    document.getElementById('toolsByteCount').textContent = byteCount.toLocaleString();
+                    document.getElementById('toolsTokenEstimate').textContent = tokenEstimate ? '~' + tokenEstimate.toLocaleString() : '-';
                 }
 
                 // Tools

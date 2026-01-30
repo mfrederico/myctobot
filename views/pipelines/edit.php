@@ -109,6 +109,7 @@
         <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#settingsPanel" style="cursor: pointer;">
             <span>
                 <i class="bi bi-gear"></i> Pipeline Settings
+                <span class="text-muted">— <?= htmlspecialchars($pipeline['name']) ?></span>
                 <?php if (!empty($pipeline['expose_as_tool'])): ?>
                 <span class="badge bg-info ms-2" title="Exposed as MCP tool: myctobot_<?= htmlspecialchars($pipeline['slug']) ?>">
                     <i class="bi bi-plug"></i> MCP

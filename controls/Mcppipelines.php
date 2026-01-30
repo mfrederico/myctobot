@@ -18,6 +18,17 @@
  *       }
  *     }
  *   }
+ *
+ * TODO: Tool Schema Refresh (notifications/tools/list_changed)
+ * ----------------------------------------------------------------
+ * MCP supports a `notifications/tools/list_changed` notification to inform
+ * clients when the tool list has changed. For HTTP transport this is tricky
+ * since there's no persistent connection. Options to implement:
+ *   1. SSE endpoint - Add Server-Sent Events for real-time notifications
+ *   2. Version header - Return schema version; clients detect changes and re-fetch
+ *   3. WebSocket - Persistent connection for bidirectional notifications
+ * Currently, clients must restart/reconnect to pick up schema changes.
+ * See: https://modelcontextprotocol.io/docs/concepts/notifications
  */
 
 namespace app;

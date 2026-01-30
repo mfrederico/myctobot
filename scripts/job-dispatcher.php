@@ -850,9 +850,8 @@ Task ID: {$issueKey}
 ## Environment
 - Work directory: {$workDir}
 
-## MCP Tools Available
-- playwright MCP - For browser testing and automation
-- myctobot MCP - For scheduling pipelines and accessing the pipeline API
+## MCP Tools
+(See enabled MCP servers below - assigned via agent configuration)
 
 ## Instructions
 Follow the prompt in prompt.txt to complete the task.
@@ -878,8 +877,7 @@ Working on GitHub issue: {$issueKey}
 - GH_TOKEN - Same token for gh CLI
 
 ## MCP Tools
-- github MCP - For posting comments, updating issues, creating PRs
-- playwright MCP - For browser testing
+(See enabled MCP servers below - assigned via agent configuration)
 
 ## CRITICAL: Label Update Rules
 When updating issue labels, you MUST:
@@ -919,8 +917,7 @@ Working on Jira ticket: {$issueKey}
 - JIRA_API_TOKEN - Jira OAuth token for API calls
 
 ## MCP Tools
-- jira MCP - For posting comments, transitions, attachments
-- playwright MCP - For browser testing
+(See enabled MCP servers below - assigned via agent configuration)
 
 ## Instructions
 Follow the prompt in prompt.txt to implement the ticket.
@@ -931,149 +928,99 @@ file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 // ============================================
 // Create .mcp.json for MCP servers
 // ============================================
-// Base servers - Playwright is always included
-$mcpServers = (object) [
-    'playwright' => (object) [
-        'type' => 'stdio',
-        'command' => 'npx',
-        'args' => ['@playwright/mcp@latest'],
-        'env' => new \stdClass()
-    ]
-];
-$enabledMcpServers = ['playwright'];
-$mcpProviderInfo = '';
+// MCP servers are ONLY loaded from the agent's assigned servers (via mcpservers library)
+// No hardcoded defaults - agents must explicitly select their MCP servers
+$mcpServers = new \stdClass();
+$enabledMcpServers = [];
 
-if ($provider === 'pipeline') {
-    // Pipeline provider - use Pipelines MCP for scheduling/spawning other pipelines
-    $mcpWorkspace = $workspace ?? 'default';
-    $pipelinesUrl = "https://{$mcpWorkspace}.myctobot.ai/mcp/pipelines";
-
-    // Use the member's API token for pipeline MCP auth
-    $memberApiToken = $member->api_token ?? '';
-    if ($memberApiToken) {
-        $mcpServers->pipelines = (object) [
-            'type' => 'http',
-            'url' => $pipelinesUrl,
-            'headers' => (object) [
-                'Authorization' => "Bearer {$memberApiToken}"
-            ]
-        ];
-        $enabledMcpServers[] = 'pipelines';
-        $mcpProviderInfo = "Pipelines MCP: HTTP transport ({$pipelinesUrl})";
-    } else {
-        echo "  Warning: No API token for member, pipelines MCP not available\n";
-    }
-} elseif ($provider === 'github') {
-    // GitHub provider - use GitHub MCP (stdio via gh CLI or npx)
-    // The GitHub MCP server uses the GH_TOKEN from environment
-    $mcpServers->github = (object) [
-        'type' => 'stdio',
-        'command' => 'npx',
-        'args' => ['-y', '@modelcontextprotocol/server-github'],
-        'env' => (object) [
-            'GITHUB_PERSONAL_ACCESS_TOKEN' => $githubToken ?? ''
-        ]
-    ];
-    $enabledMcpServers[] = 'github';
-    $mcpProviderInfo = "GitHub MCP: stdio transport (npx @modelcontextprotocol/server-github)";
-} else {
-    // Jira provider - use Jira HTTP MCP
-    // URL pattern: https://{workspace}.myctobot.ai/mcp/jira
-    $mcpWorkspace = $workspace ?? 'default';
-    $mcpHttpUrl = "https://{$mcpWorkspace}.myctobot.ai/mcp/jira";
-    $mcpCredentials = base64_encode("{$memberId}:{$cloudId}");
-    $mcpAgentName = $agentConfig['name'] ?? 'AI Assistant';
-    $mcpServers->jira = (object) [
-        'type' => 'http',
-        'url' => $mcpHttpUrl,
-        'headers' => (object) [
-            'Authorization' => "Basic {$mcpCredentials}",
-            'X-MCP-Agent-Name' => $mcpAgentName
-        ]
-    ];
-    $enabledMcpServers[] = 'jira';
-    $mcpProviderInfo = "MCP Jira: HTTP transport ({$mcpHttpUrl})";
-}
-
-// Add MyCTOBot Jobs MCP for completion callbacks
-// Use $jobUid (from DB) if available, otherwise fall back to $jobId (command line)
+// Build variable substitution context for placeholders in MCP server configs
 $mcpWorkspace = $workspace ?? 'default';
-$mcpJobsUrl = "https://{$mcpWorkspace}.myctobot.ai/mcp/jobs";
 $mcpJobUidForAuth = $jobUid ?: $jobId ?: 'unknown';
-$mcpJobsCredentials = base64_encode("{$memberId}:{$mcpJobUidForAuth}");
-$mcpServers->myctobot = (object) [
-    'type' => 'http',
-    'url' => $mcpJobsUrl,
-    'headers' => (object) [
-        'Authorization' => "Basic {$mcpJobsCredentials}"
-    ]
+$mcpSubstitutions = [
+    '${WORKSPACE}' => $mcpWorkspace,
+    '${MYCTOBOT_API_KEY}' => $member->api_token ?? '',
+    '${GITHUB_TOKEN}' => $githubToken ?? '',
+    '${GH_TOKEN}' => $githubToken ?? '',
+    '${JIRA_API_TOKEN}' => $jiraOAuthToken ?? '',
+    '${JIRA_CLOUD_ID}' => $cloudId ?? '',
+    '${MEMBER_ID}' => (string) $memberId,
+    '${JOB_UID}' => $mcpJobUidForAuth,
+    // Auth patterns for specific endpoints
+    '${JIRA_BASIC_AUTH}' => base64_encode("{$memberId}:{$cloudId}"),
+    '${JOBS_BASIC_AUTH}' => base64_encode("{$memberId}:{$mcpJobUidForAuth}"),
 ];
-$enabledMcpServers[] = 'myctobot';
-echo "  MyCTOBot Jobs MCP: {$mcpJobsUrl} (job_uid: {$mcpJobUidForAuth})\n";
 
-// Merge agent's MCP servers if configured
-if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
-    echo "  Loading MCP servers from agent config...\n";
-    foreach ($agentConfig['mcp_servers'] as $server) {
-        $serverName = $server['name'] ?? 'unnamed';
-        $serverType = $server['type'] ?? 'stdio';
+// Load MCP servers from agent's assigned servers (many-to-many relationship)
+if ($agentBean && $agentBean->id) {
+    $linkedServers = $agentBean->sharedMcpserversList;
 
-        // Substitute environment variable placeholders in env values
-        $serverEnv = $server['env'] ?? [];
-        foreach ($serverEnv as $key => $value) {
-            if (is_string($value)) {
-                // Replace ${GITHUB_TOKEN} or ${GH_TOKEN} with actual token
-                $value = str_replace('${GITHUB_TOKEN}', $githubToken ?? '', $value);
-                $value = str_replace('${GH_TOKEN}', $githubToken ?? '', $value);
-                // Replace ${JIRA_API_TOKEN} with actual Jira token
-                $value = str_replace('${JIRA_API_TOKEN}', $jiraOAuthToken ?? '', $value);
-                $serverEnv[$key] = $value;
+    if (empty($linkedServers)) {
+        echo "  Warning: No MCP servers assigned to agent '{$agentBean->name}'\n";
+        echo "  Assign servers at: /agents/edit/{$agentBean->id}?tab=mcp\n";
+    } else {
+        echo "  Loading " . count($linkedServers) . " MCP servers from agent config...\n";
+
+        foreach ($linkedServers as $server) {
+            if (!$server->is_active) {
+                echo "    - {$server->name} (skipped - inactive)\n";
+                continue;
             }
-        }
 
-        if ($serverType === 'sse') {
-            // SSE transport - for remote MCP servers via Server-Sent Events
-            $serverUrl = $server['url'] ?? '';
-            // Substitute placeholders in URL
-            $serverUrl = str_replace('${WORKSPACE}', $workspace ?? 'default', $serverUrl);
-            $serverUrl = str_replace('${MYCTOBOT_API_KEY}', $member->api_token ?? '', $serverUrl);
+            $serverName = $server->name;
+            $serverType = $server->server_type ?: 'stdio';
 
-            $mcpServers->$serverName = (object) [
-                'url' => $serverUrl,
-                'transport' => 'sse'
-            ];
-        } elseif ($serverType === 'http') {
-            // Substitute placeholders in headers
-            $serverHeaders = $server['headers'] ?? [];
-            foreach ($serverHeaders as $key => $value) {
-                if (is_string($value)) {
-                    // Replace ${MYCTOBOT_API_KEY} with member's API token
-                    $value = str_replace('${MYCTOBOT_API_KEY}', $member->api_token ?? '', $value);
-                    // Also support other tokens in headers
-                    $value = str_replace('${GITHUB_TOKEN}', $githubToken ?? '', $value);
-                    $value = str_replace('${GH_TOKEN}', $githubToken ?? '', $value);
-                    $value = str_replace('${JIRA_API_TOKEN}', $jiraOAuthToken ?? '', $value);
-                    $serverHeaders[$key] = $value;
+            // Helper function to substitute placeholders in a string
+            $substitute = function($value) use ($mcpSubstitutions) {
+                if (!is_string($value)) return $value;
+                return str_replace(
+                    array_keys($mcpSubstitutions),
+                    array_values($mcpSubstitutions),
+                    $value
+                );
+            };
+
+            // Parse and substitute environment variables
+            $serverEnv = json_decode($server->env_json ?: '{}', true) ?: [];
+            foreach ($serverEnv as $key => $value) {
+                $serverEnv[$key] = $substitute($value);
+            }
+
+            if ($serverType === 'sse') {
+                // SSE transport
+                $mcpServers->$serverName = (object) [
+                    'url' => $substitute($server->url),
+                    'transport' => 'sse'
+                ];
+            } elseif ($serverType === 'http') {
+                // HTTP transport - substitute placeholders in headers and URL
+                $serverHeaders = json_decode($server->headers_json ?: '{}', true) ?: [];
+                foreach ($serverHeaders as $key => $value) {
+                    $serverHeaders[$key] = $substitute($value);
                 }
-            }
-            $mcpServers->$serverName = (object) [
-                'type' => 'http',
-                'url' => $server['url'] ?? '',
-                'headers' => (object) $serverHeaders
-            ];
-        } else {
-            // stdio type
-            $mcpServers->$serverName = (object) [
-                'type' => 'stdio',
-                'command' => $server['command'] ?? '',
-                'args' => $server['args'] ?? [],
-                'env' => (object)$serverEnv
-            ];
-        }
 
-        $enabledMcpServers[] = $serverName;
-        echo "    + {$serverName} ({$serverType})\n";
+                $mcpServers->$serverName = (object) [
+                    'type' => 'http',
+                    'url' => $substitute($server->url),
+                    'headers' => (object) $serverHeaders
+                ];
+            } else {
+                // stdio type
+                $serverArgs = json_decode($server->args_json ?: '[]', true) ?: [];
+
+                $mcpServers->$serverName = (object) [
+                    'type' => 'stdio',
+                    'command' => $server->command ?: '',
+                    'args' => $serverArgs,
+                    'env' => (object) $serverEnv
+                ];
+            }
+
+            $enabledMcpServers[] = $serverName;
+            echo "    + {$serverName} ({$serverType})\n";
+        }
     }
+} else {
+    echo "  Warning: No agent configured - no MCP servers will be available\n";
 }
 
 $mcpConfig = ['mcpServers' => $mcpServers];
@@ -1525,8 +1472,12 @@ if ($usePrintMode) {
     // Build the claude command (with or without SSH wrapper)
     if ($workstationConfig && $sshScriptFile) {
         // Add common claude installation paths to PATH for SSH sessions
-        // First create remote dir and sync prompt file
-        $claudeCmd = "ssh -p {$wsPort} {$wsUser}@{$wsHost} 'mkdir -p {$workDir}' && scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt && ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
+        // Create remote dir structure and sync all required files
+        $claudeCmd = "ssh -p {$wsPort} {$wsUser}@{$wsHost} 'mkdir -p {$workDir}/.claude' && " .
+            "scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt && " .
+            "scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$workDir}/.mcp.json 2>/dev/null; " .
+            "scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$workDir}/.claude/settings.json 2>/dev/null; " .
+            "ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
     } else {
         $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt";
     }
@@ -1575,14 +1526,18 @@ BASH;
     if ($workstationConfig && $sshScriptFile) {
         // Create a wrapper script to avoid quote-nesting issues with 'script -c'
         // Add common claude installation paths to PATH for SSH sessions
-        // First create remote dir and sync prompt, then run claude there
+        // Sync all required files: prompt.txt, .mcp.json, .claude/settings.json
         $sshScriptContent = <<<SSHSCRIPT
 #!/bin/bash
 cd {$workDir}
 
-# Create work directory on remote and sync prompt
-ssh -p {$wsPort} {$wsUser}@{$wsHost} "mkdir -p {$workDir}"
+# Create work directory structure on remote
+ssh -p {$wsPort} {$wsUser}@{$wsHost} "mkdir -p {$workDir}/.claude"
+
+# Sync all required files for Claude session
 scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt
+scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$workDir}/.mcp.json 2>/dev/null || true
+scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$workDir}/.claude/settings.json 2>/dev/null || true
 
 # Run claude on remote workstation
 ssh -t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && cd {$workDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""

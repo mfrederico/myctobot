@@ -3858,9 +3858,10 @@ PIPELINE;
         }
 
         // Collect results from completed jobs and update stepOutputs
+        // Note: status can be 'complete' or 'completed' depending on how job was finished
         $completedJobs = Bean::find('aidevjobs',
-            'pipelineruns_id = ? AND status IN (?, ?, ?)',
-            [$this->runId, 'complete', 'pr_created', 'failed']
+            'pipelineruns_id = ? AND status IN (?, ?, ?, ?)',
+            [$this->runId, 'complete', 'completed', 'pr_created', 'failed']
         );
 
         foreach ($completedJobs as $job) {

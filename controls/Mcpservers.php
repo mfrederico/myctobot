@@ -651,12 +651,30 @@ class Mcpservers extends BaseControls\Control {
             ],
             'pipelines' => [
                 'name' => 'pipelines',
-                'description' => 'MyCTOBot Pipeline Tools',
+                'description' => 'MyCTOBot Pipeline Tools - schedule pipelines, spawn agents',
                 'server_type' => 'http',
                 'url' => "{$subdomainUrl}/mcp/pipelines",
                 'headers' => ['Authorization' => 'Bearer ' . ($mcpApiKey ?: 'tk_CREATE_KEY_AT_APIKEYS_WITH_MCP_SCOPE')],
                 'env' => [],
                 'note' => $mcpApiKey ? '' : 'Create an API key at /apikeys with mcp:* scope'
+            ],
+            'myctobot-jobs' => [
+                'name' => 'myctobot-jobs',
+                'description' => 'Job completion callbacks - REQUIRED for AI Dev jobs to signal completion',
+                'server_type' => 'http',
+                'url' => "{$subdomainUrl}/mcp/jobs",
+                'headers' => ['Authorization' => 'Basic ${JOBS_BASIC_AUTH}'],
+                'env' => [],
+                'note' => 'Uses ${JOBS_BASIC_AUTH} placeholder - auto-substituted with member:job_uid at runtime'
+            ],
+            'jira' => [
+                'name' => 'jira',
+                'description' => 'Jira API - comments, transitions, attachments, issue management',
+                'server_type' => 'http',
+                'url' => "{$subdomainUrl}/mcp/jira",
+                'headers' => ['Authorization' => 'Basic ${JIRA_BASIC_AUTH}'],
+                'env' => [],
+                'note' => 'Uses ${JIRA_BASIC_AUTH} placeholder - auto-substituted with member:cloud_id at runtime'
             ],
             'github' => [
                 'name' => 'github',

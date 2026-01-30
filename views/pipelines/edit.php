@@ -222,8 +222,17 @@
                                             <i class="bi bi-magic"></i> Set from Row 1
                                         </button>
                                     </label>
-                                    <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="6"
-                                              placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($pipeline['input_schema_json']) ?></textarea>
+                                    <?php
+                                    $schemaJson = $pipeline['input_schema_json'] ?? '';
+                                    if ($schemaJson) {
+                                        $decoded = json_decode($schemaJson);
+                                        if ($decoded !== null) {
+                                            $schemaJson = json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                                        }
+                                    }
+                                    ?>
+                                    <textarea class="form-control font-monospace" id="inputSchemaJson" name="input_schema_json" rows="8"
+                                              placeholder='{"type": "object", "properties": {...}}'><?= htmlspecialchars($schemaJson) ?></textarea>
                                     <small class="text-muted">
                                         JSON Schema defining the tool's input parameters. Properties become available in pipeline context.
                                         <a href="/docs/pipelines#input-schema" target="_blank" class="ms-1"><i class="bi bi-question-circle"></i> Help</a>

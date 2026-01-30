@@ -812,15 +812,21 @@ $orchestrator = new \app\services\AIDevAgentOrchestrator(
     $agentConfig['name'] ?? 'AI Developer'  // agent name
 );
 
-// Check if a pre-built prompt was provided (from pipeline execution)
+// Check if a pre-built prompt was provided
 $prebuiltPromptFile = $options['prompt-file'] ?? null;
+$workDirPromptFile = "{$workDir}/prompt.txt";
+
 if ($prebuiltPromptFile && file_exists($prebuiltPromptFile)) {
+    // Explicit prompt file provided via CLI
     echo "  Using pre-built prompt from: {$prebuiltPromptFile}\n";
     $prompt = file_get_contents($prebuiltPromptFile);
-    // Clean up the temp file
     unlink($prebuiltPromptFile);
+} elseif ($provider === 'pipeline' && file_exists($workDirPromptFile)) {
+    // Pipeline job - use prompt written by PipelineExecutor
+    echo "  Using pipeline prompt from: {$workDirPromptFile}\n";
+    $prompt = file_get_contents($workDirPromptFile);
 } else {
-    // Build prompt - always use orchestrator pattern for better verification
+    // Build prompt - use orchestrator pattern for Jira/GitHub jobs
     $prompt = $orchestrator->buildOrchestratorPrompt();
 }
 

@@ -2378,30 +2378,50 @@ class PipelineExecutor {
             $userMessage = "{$prompt}\n\n## Pipeline Context\n```json\n{$inputJson}\n```";
         }
 
-        // For runner execution mode, inject inter-agent communication context
+        // For runner execution mode, inject pipeline-specific context and MCP tools
         if ($executionMode === 'runner') {
             $stepName = $config['_step_name'] ?? 'agent';
-            $interAgentContext = <<<INTERAGENT
+            $pipelineName = $this->pipeline->name ?? 'Unknown Pipeline';
+            $pipelineContext = <<<PIPELINE
 
-## Inter-Agent Communication
+# Pipeline Agent Task
 
-You are running as step `{$stepName}` in pipeline run #{$this->runId}.
+You are an AI agent running as step **{$stepName}** in the pipeline "{$pipelineName}".
 
-You have access to MCP tools for communicating with other pipeline steps and agents:
+**Pipeline Run ID:** {$this->runId}
+**Step Name:** {$stepName}
 
-- **send_to_step(run_id, target_step, message)** - Send a message/command to another step's Claude session
-- **get_run_context(run_id)** - Get the shared pipeline context
-- **update_run_context(run_id, key, value)** - Update shared context (other agents will see this)
-- **mark_step_complete(run_id, step_name, output)** - Signal your step is done with optional output
-- **list_run_sessions(run_id)** - See which other agents/sessions are active
+## Your Task
 
-Your pipeline run ID is: {$this->runId}
-Your step name is: {$stepName}
+Complete the task described below. When finished, call `job_complete` to signal completion.
 
-Use these tools to coordinate with other agents when needed.
+## MCP Tools Available
 
-INTERAGENT;
-            $userMessage = $interAgentContext . "\n" . $userMessage;
+### Completion (REQUIRED when done)
+- **job_complete(success, summary)** - Signal your step is complete
+  - `success`: true if task completed successfully, false if failed
+  - `summary`: Brief description of what you accomplished
+
+### Inter-Agent Communication
+- **get_run_context(run_id)** - Get shared pipeline context (data from other steps)
+- **update_run_context(run_id, key, value)** - Store data for other agents to access
+- **list_run_sessions(run_id)** - See which other agents are currently active
+- **send_to_step(run_id, target_step, message)** - Send a message to another running agent
+
+### Other Available Tools
+You also have access to filesystem tools (Read, Write, Edit, Glob, Grep, Bash) and any MCP servers configured for this workspace.
+
+## Important
+
+1. Focus on completing your specific task
+2. Use `update_run_context` to share important results with other agents
+3. **Always call `job_complete(success=true/false, summary="...")` when done**
+4. If you encounter errors, call `job_complete(success=false, summary="Error: ...")`
+
+---
+
+PIPELINE;
+            $userMessage = $pipelineContext . "\n## Task\n\n" . $userMessage;
         }
 
         $this->log('info', "Executing AI agent: {$agent->name}", [

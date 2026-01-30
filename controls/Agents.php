@@ -58,8 +58,14 @@ class Agents extends BaseControls\Control {
 
         $agents = [];
         foreach ($agentBeans as $bean) {
-            // Count linked MCP servers (many-to-many) - this is the new approach
-            $linkedMcpCount = count($bean->sharedMcpserversList);
+            // Count linked MCP servers and calculate cumulative token overhead
+            $linkedMcpServers = $bean->sharedMcpserversList;
+            $linkedMcpCount = count($linkedMcpServers);
+            $mcpTokenOverhead = 0;
+            foreach ($linkedMcpServers as $server) {
+                $mcpTokenOverhead += (int) ($server->tools_token_estimate ?: 0);
+            }
+
             // Fallback to legacy JSON if no linked servers
             $legacyMcpServers = json_decode($bean->mcp_servers ?: '[]', true);
             $mcpCount = $linkedMcpCount > 0 ? $linkedMcpCount : count($legacyMcpServers);
@@ -88,6 +94,7 @@ class Agents extends BaseControls\Control {
                 'provider_config' => $providerConfig,
                 'llm_capabilities' => $llmCapabilities,
                 'mcp_count' => $mcpCount,
+                'mcp_token_overhead' => $mcpTokenOverhead,
                 'hooks_count' => $this->countHooks($hooksConfig),
                 'capabilities_count' => count($capabilities),
                 'repo_count' => $repoCount,

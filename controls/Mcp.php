@@ -354,7 +354,43 @@ class Mcp extends Control {
                 'description' => 'Get information about this MCP gateway',
                 'inputSchema' => [
                     'type' => 'object',
-                    'properties' => [],
+                    'properties' => (object) [],
+                ],
+            ],
+            // Knowledge Base tools
+            [
+                'name' => 'kb_query',
+                'description' => 'Query a knowledge base with a question and get an AI-generated answer based on the documents',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'question' => ['type' => 'string', 'description' => 'The question to ask the knowledge base'],
+                        'kb_slug' => ['type' => 'string', 'description' => 'Optional: specific knowledge base slug to query. If not provided, queries all workspace knowledge.'],
+                        'similarity_threshold' => ['type' => 'number', 'description' => 'Optional: minimum similarity score (0-1, default 0.4)'],
+                        'max_results' => ['type' => 'integer', 'description' => 'Optional: maximum number of source chunks to return (default 5)'],
+                    ],
+                    'required' => ['question'],
+                ],
+            ],
+            [
+                'name' => 'kb_list',
+                'description' => 'List all available knowledge bases in the workspace',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => (object) [],
+                ],
+            ],
+            [
+                'name' => 'kb_search',
+                'description' => 'Search knowledge base documents and return matching chunks without AI interpretation',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'query' => ['type' => 'string', 'description' => 'Search query'],
+                        'kb_slug' => ['type' => 'string', 'description' => 'Optional: specific knowledge base slug to search'],
+                        'limit' => ['type' => 'integer', 'description' => 'Optional: maximum results (default 10)'],
+                    ],
+                    'required' => ['query'],
                 ],
             ],
         ];
@@ -375,6 +411,9 @@ class Mcp extends Control {
             'github_add_labels' => $this->toolGitHubAddLabels($args),
             'github_create_pr' => $this->toolGitHubCreatePR($args),
             'gateway_info' => $this->toolGatewayInfo($args),
+            'kb_query' => $this->toolKbQuery($args),
+            'kb_list' => $this->toolKbList($args),
+            'kb_search' => $this->toolKbSearch($args),
             default => throw new \Exception("Unknown tool: {$name}"),
         };
     }
@@ -550,6 +589,132 @@ class Mcp extends Control {
             'url' => $pr['html_url'],
             'title' => $pr['title'],
             'state' => $pr['state'],
+        ];
+    }
+
+    // =========================================================================
+    // Knowledge Base Tools
+    // =========================================================================
+
+    private function getRagServiceUrl(): string {
+        return getenv('RAG_SERVICE_URL') ?: 'http://localhost:9501';
+    }
+
+    private function toolKbQuery(array $args): array {
+        $question = $args['question'] ?? '';
+        if (!$question) throw new \Exception('question required');
+
+        $kbSlug = $args['kb_slug'] ?? null;
+        $similarityThreshold = $args['similarity_threshold'] ?? 0.4;
+        $maxResults = $args['max_results'] ?? 5;
+
+        // Get chat model from KB's agent if a specific KB is selected
+        $chatModel = null;
+        if ($kbSlug) {
+            $kb = Bean::findOne('knowledgebases', ' slug = ? ', [$kbSlug]);
+            if ($kb && $kb->agent_profile_id) {
+                $agent = Bean::load('aiagents', (int)$kb->agent_profile_id);
+                if ($agent->id) {
+                    $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+                    $chatModel = $providerConfig['ollama_model'] ?? $providerConfig['model'] ?? null;
+                }
+            }
+        }
+
+        $client = new \GuzzleHttp\Client(['timeout' => 120]);
+
+        $requestData = [
+            'tenant' => $this->workspace,
+            'query' => $question,
+            'similarity_threshold' => $similarityThreshold,
+            'max_results' => $maxResults,
+            'include_metadata' => true
+        ];
+
+        if ($kbSlug) {
+            $requestData['kb_slug'] = $kbSlug;
+        }
+
+        if ($chatModel) {
+            $requestData['model'] = $chatModel;
+        }
+
+        $response = $client->post("{$this->getRagServiceUrl()}/api/query", [
+            'json' => $requestData
+        ]);
+
+        $result = json_decode($response->getBody()->getContents(), true);
+
+        if (!$result['success']) {
+            throw new \Exception($result['error'] ?? 'Query failed');
+        }
+
+        return [
+            'answer' => $result['response'] ?? null,
+            'sources' => array_map(fn($s) => [
+                'filename' => $s['filename'] ?? '',
+                'content' => $s['preview'] ?? $s['content'] ?? '',
+                'similarity' => $s['similarity'] ?? $s['score'] ?? 0,
+            ], $result['sources'] ?? []),
+            'context_used' => $result['context_used'] ?? false,
+        ];
+    }
+
+    private function toolKbList(array $args): array {
+        $kbs = Bean::find('knowledgebases', ' ORDER BY name ASC ');
+
+        return [
+            'knowledge_bases' => array_map(fn($kb) => [
+                'id' => $kb->id,
+                'name' => $kb->name,
+                'slug' => $kb->slug,
+                'description' => $kb->description ?? '',
+                'document_count' => $kb->document_count ?? 0,
+            ], $kbs),
+            'count' => count($kbs),
+        ];
+    }
+
+    private function toolKbSearch(array $args): array {
+        $query = $args['query'] ?? '';
+        if (!$query) throw new \Exception('query required');
+
+        $kbSlug = $args['kb_slug'] ?? null;
+        $limit = $args['limit'] ?? 10;
+
+        $client = new \GuzzleHttp\Client(['timeout' => 60]);
+
+        $requestData = [
+            'tenant' => $this->workspace,
+            'query' => $query,
+            'similarity_threshold' => 0.2, // Lower threshold for search
+            'max_results' => $limit,
+            'include_metadata' => true,
+            'search_only' => true // Don't generate AI response
+        ];
+
+        if ($kbSlug) {
+            $requestData['kb_slug'] = $kbSlug;
+        }
+
+        $response = $client->post("{$this->getRagServiceUrl()}/api/query", [
+            'json' => $requestData
+        ]);
+
+        $result = json_decode($response->getBody()->getContents(), true);
+
+        if (!$result['success']) {
+            throw new \Exception($result['error'] ?? 'Search failed');
+        }
+
+        return [
+            'results' => array_map(fn($s) => [
+                'filename' => $s['filename'] ?? '',
+                'content' => $s['content'] ?? '',
+                'similarity' => $s['similarity'] ?? $s['score'] ?? 0,
+                'metadata' => $s['metadata'] ?? [],
+            ], $result['sources'] ?? []),
+            'count' => count($result['sources'] ?? []),
         ];
     }
 

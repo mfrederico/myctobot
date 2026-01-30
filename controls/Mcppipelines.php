@@ -118,7 +118,10 @@ class Mcppipelines extends Control {
      * Handle MCP initialize request
      */
     protected function handleInitialize($id, array $params): void {
-        $this->sendJsonRpcResult([
+        // Authenticate during initialize
+        $authResult = ApiAuthService::authenticate('mcp', 'pipelines');
+
+        $response = [
             'protocolVersion' => '2024-11-05',
             'capabilities' => [
                 'tools' => ['listChanged' => false]
@@ -127,7 +130,16 @@ class Mcppipelines extends Control {
                 'name' => 'myctobot-pipelines',
                 'version' => '1.0.0'
             ]
-        ], $id);
+        ];
+
+        // Add auth info if authenticated
+        if ($authResult['success']) {
+            $this->memberId = $authResult['member']->id;
+            $response['serverInfo']['authenticated'] = true;
+            $response['serverInfo']['member'] = $authResult['member']->email;
+        }
+
+        $this->sendJsonRpcResult($response, $id);
     }
 
     /**
@@ -157,6 +169,12 @@ class Mcppipelines extends Control {
                     'properties' => (object) [],
                     'required' => []
                 ];
+            }
+
+            // CRITICAL: Ensure properties is always an object, not an array
+            // JSON Schema requires {"properties": {}} not {"properties": []}
+            if (isset($inputSchema['properties']) && is_array($inputSchema['properties']) && empty($inputSchema['properties'])) {
+                $inputSchema['properties'] = (object) [];
             }
 
             $tools[] = [
@@ -398,6 +416,12 @@ class Mcppipelines extends Control {
         try {
             $executor = new \app\services\PipelineExecutor($runId);
             $result = $executor->resumeFromAwaitInput($input, $inputToken, 'mcp');
+
+            // Check if resume failed
+            if (isset($result['success']) && $result['success'] === false) {
+                $this->sendJsonRpcError(-32000, $result['error'] ?? 'Resume failed', $id);
+                return;
+            }
 
             // Check if pipeline is now awaiting more input
             $run = Bean::load('pipelineruns', $runId);

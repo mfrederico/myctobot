@@ -107,6 +107,7 @@ class Api extends BaseControls\Control {
                 $parametersSchema = json_decode($tool->parameters_schema ?: '[]', true);
 
                 // Build MCP-compatible input schema
+                // Note: properties starts as array for easy assignment, converted to object if empty
                 $inputSchema = [
                     'type' => 'object',
                     'properties' => [],
@@ -127,6 +128,11 @@ class Api extends BaseControls\Control {
                     if ($param['required'] ?? false) {
                         $inputSchema['required'][] = $param['name'];
                     }
+                }
+
+                // Ensure empty properties is an object {}, not array []
+                if (empty($inputSchema['properties'])) {
+                    $inputSchema['properties'] = (object) [];
                 }
 
                 $tools[] = [

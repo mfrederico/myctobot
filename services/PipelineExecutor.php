@@ -207,6 +207,123 @@ class PipelineExecutor {
     }
 
     /**
+     * Atomically claim a step run for execution using InnoDB row locking
+     *
+     * Prevents race conditions where multiple processes try to execute the same step.
+     * Uses SELECT ... FOR UPDATE to lock the row during the claim check.
+     *
+     * @param int $stepRunId The pipelinesteprun ID to claim
+     * @param array $validStatuses Statuses that are valid for claiming (default: pending, awaiting_input)
+     * @param string $newStatus Status to set when claimed (default: running)
+     * @return array ['claimed' => bool, 'step_run' => array|null, 'reason' => string|null]
+     */
+    public function claimStepForExecution(int $stepRunId, array $validStatuses = ['pending', 'awaiting_input'], string $newStatus = 'running'): array {
+        try {
+            Bean::begin();
+
+            // Lock the row - other transactions will wait
+            $placeholders = implode(',', array_fill(0, count($validStatuses), '?'));
+            $params = array_merge([$stepRunId], $validStatuses);
+
+            $row = Bean::getRow(
+                "SELECT * FROM pipelinestepruns
+                 WHERE id = ? AND status IN ({$placeholders})
+                 FOR UPDATE",
+                $params
+            );
+
+            if (!$row) {
+                Bean::rollback();
+                return [
+                    'claimed' => false,
+                    'step_run' => null,
+                    'reason' => 'Step not found or not in valid status for claiming'
+                ];
+            }
+
+            // Claim it by updating status
+            Bean::exec(
+                "UPDATE pipelinestepruns SET status = ?, started_at = ? WHERE id = ?",
+                [$newStatus, date('Y-m-d H:i:s'), $stepRunId]
+            );
+
+            Bean::commit();
+
+            return [
+                'claimed' => true,
+                'step_run' => $row,
+                'reason' => null
+            ];
+
+        } catch (\Exception $e) {
+            Bean::rollback();
+            $this->log('error', "Failed to claim step run {$stepRunId}: " . $e->getMessage());
+            return [
+                'claimed' => false,
+                'step_run' => null,
+                'reason' => 'Exception: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Claim an awaiting_input step for timeout processing
+     *
+     * Similar to claimStepForExecution but specifically checks timeout_at.
+     *
+     * @param int $stepRunId The pipelinesteprun ID to claim
+     * @return array ['claimed' => bool, 'step_run' => array|null, 'reason' => string|null]
+     */
+    public function claimStepForTimeout(int $stepRunId): array {
+        try {
+            Bean::begin();
+
+            // Lock the row and check it's awaiting_input AND past timeout
+            $row = Bean::getRow(
+                "SELECT * FROM pipelinestepruns
+                 WHERE id = ?
+                   AND status = 'awaiting_input'
+                   AND awaiting_input_timeout_at IS NOT NULL
+                   AND awaiting_input_timeout_at < NOW()
+                 FOR UPDATE",
+                [$stepRunId]
+            );
+
+            if (!$row) {
+                Bean::rollback();
+                return [
+                    'claimed' => false,
+                    'step_run' => null,
+                    'reason' => 'Step not found, not awaiting input, or not yet timed out'
+                ];
+            }
+
+            // Claim it - set to 'timed_out' status so we can distinguish from user input
+            Bean::exec(
+                "UPDATE pipelinestepruns SET status = 'timed_out', updated_at = ? WHERE id = ?",
+                [date('Y-m-d H:i:s'), $stepRunId]
+            );
+
+            Bean::commit();
+
+            return [
+                'claimed' => true,
+                'step_run' => $row,
+                'reason' => null
+            ];
+
+        } catch (\Exception $e) {
+            Bean::rollback();
+            $this->log('error', "Failed to claim step run {$stepRunId} for timeout: " . $e->getMessage());
+            return [
+                'claimed' => false,
+                'step_run' => null,
+                'reason' => 'Exception: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Resume a pipeline that's awaiting external input
      *
      * Called when input arrives from any source (MCP, webhook, form, email).
@@ -248,16 +365,28 @@ class PipelineExecutor {
                 return ['success' => false, 'error' => 'Invalid input token'];
             }
 
-            // Check timeout
-            if ($awaitingStepRun->awaiting_input_timeout_at &&
-                strtotime($awaitingStepRun->awaiting_input_timeout_at) < time()) {
-                return ['success' => false, 'error' => 'Input window has expired'];
-            }
+            // For timeout source, skip the timeout check (cron already verified it)
+            // and the step has already been claimed by claimStepForTimeout
+            $isTimeout = ($source === 'timeout' || !empty($input['_timed_out']));
 
-            // Validate source is allowed
-            $allowedSources = json_decode($awaitingStepRun->awaiting_input_sources_json ?: '[]', true);
-            if (!empty($allowedSources) && !in_array($source, $allowedSources)) {
-                return ['success' => false, 'error' => "Input source '{$source}' is not allowed"];
+            if (!$isTimeout) {
+                // Check timeout for user input
+                if ($awaitingStepRun->awaiting_input_timeout_at &&
+                    strtotime($awaitingStepRun->awaiting_input_timeout_at) < time()) {
+                    return ['success' => false, 'error' => 'Input window has expired'];
+                }
+
+                // Validate source is allowed
+                $allowedSources = json_decode($awaitingStepRun->awaiting_input_sources_json ?: '[]', true);
+                if (!empty($allowedSources) && !in_array($source, $allowedSources)) {
+                    return ['success' => false, 'error' => "Input source '{$source}' is not allowed"];
+                }
+
+                // For user input, atomically claim the step to prevent race with timeout cron
+                $claim = $this->claimStepForExecution($awaitingStepRun->id, ['awaiting_input'], 'running');
+                if (!$claim['claimed']) {
+                    return ['success' => false, 'error' => 'Step already being processed (possibly timed out)'];
+                }
             }
 
             // TODO: Validate input against schema
@@ -285,18 +414,28 @@ class PipelineExecutor {
             $stepOutput = [
                 'output' => $input,
                 'input_source' => $source,
-                'input_received_at' => date('Y-m-d H:i:s')
+                'input_received_at' => date('Y-m-d H:i:s'),
+                'timed_out' => $isTimeout
             ];
             $this->stepOutputs[$step->step_name] = $stepOutput;
             $this->context[$step->step_name] = $stepOutput;
 
             // Clear awaiting state on step run
             $awaitingStepRun->awaiting_input = 0;
-            $awaitingStepRun->status = 'success';
+            $awaitingStepRun->status = $isTimeout ? 'failed' : 'success';
             $awaitingStepRun->output_json = json_encode($stepOutput);
             $awaitingStepRun->completed_at = date('Y-m-d H:i:s');
             $awaitingStepRun->updated_at = date('Y-m-d H:i:s');
-            Bean::store($awaitingStepRun);
+            if (!$isTimeout) {
+                // Only store if not already claimed by claimStepForTimeout
+                Bean::store($awaitingStepRun);
+            } else {
+                // For timeout, just update the output fields (status already set by claimStepForTimeout)
+                Bean::exec(
+                    "UPDATE pipelinestepruns SET awaiting_input = 0, status = 'failed', output_json = ?, completed_at = ?, updated_at = ? WHERE id = ?",
+                    [json_encode($stepOutput), date('Y-m-d H:i:s'), date('Y-m-d H:i:s'), $awaitingStepRun->id]
+                );
+            }
 
             // Update run status to running
             $this->run->status = 'running';
@@ -304,24 +443,60 @@ class PipelineExecutor {
             $this->run->updated_at = date('Y-m-d H:i:s');
             Bean::store($this->run);
 
-            $this->log('info', "Resuming from await_input at step: {$step->step_name}, source: {$source}");
+            $this->log('info', "Resuming from await_input at step: {$step->step_name}, source: {$source}, timed_out: " . ($isTimeout ? 'yes' : 'no'));
 
             // Load step lookups for execution
             $this->loadStepLookups();
 
-            // Find the index of the awaiting step and continue from the next one
+            // Find the index of the awaiting step
             $stepsArray = array_values($this->steps);
-            $resumeIndex = 0;
+            $currentStepIndex = 0;
             foreach ($stepsArray as $idx => $s) {
                 if ($s->id == $step->id) {
-                    $resumeIndex = $idx + 1;
+                    $currentStepIndex = $idx;
                     break;
                 }
             }
 
-            // Continue execution from the next step
-            if ($resumeIndex < count($stepsArray)) {
-                $this->executeStepsFromIndex($resumeIndex, $stepsArray);
+            if ($isTimeout) {
+                // For timeout, use on_failure flow
+                $onFailure = $step->on_failure ?? 'exit';
+                $this->log('info', "Timeout triggered on_failure: {$onFailure}");
+
+                if ($onFailure === 'exit') {
+                    // Mark run as failed
+                    $this->run->status = 'failed';
+                    $this->run->error_message = 'Await input timed out';
+                    $this->run->completed_at = date('Y-m-d H:i:s');
+                    $this->run->updated_at = date('Y-m-d H:i:s');
+                    Bean::store($this->run);
+                } elseif (strpos($onFailure, 'goto:') === 0) {
+                    // Jump to specified step
+                    $targetStepName = substr($onFailure, 5);
+                    $targetStep = $this->stepsByName[$targetStepName] ?? null;
+
+                    if ($targetStep) {
+                        // Find index of target step
+                        foreach ($stepsArray as $idx => $s) {
+                            if ($s->step_name === $targetStepName) {
+                                $this->executeStepsFromIndex($idx, $stepsArray);
+                                break;
+                            }
+                        }
+                    } else {
+                        $this->log('error', "on_failure goto target not found: {$targetStepName}");
+                        $this->run->status = 'failed';
+                        $this->run->error_message = "on_failure goto target not found: {$targetStepName}";
+                        Bean::store($this->run);
+                    }
+                }
+                // 'retry' not applicable for await_input timeout
+            } else {
+                // For user input, continue to next step (on_success flow)
+                $resumeIndex = $currentStepIndex + 1;
+                if ($resumeIndex < count($stepsArray)) {
+                    $this->executeStepsFromIndex($resumeIndex, $stepsArray);
+                }
             }
 
             // Reload run to get final status
@@ -389,6 +564,18 @@ class PipelineExecutor {
                 continue; // Already completed
             }
 
+            // If step was previously failed/completed but we got here via goto, reset it
+            if (in_array($stepRun->status, ['failed', 'awaiting_input'])) {
+                $this->log('info', "Resetting step '{$step->step_name}' from {$stepRun->status} to pending for re-execution");
+                $stepRun->status = 'pending';
+                $stepRun->error_message = null;
+                $stepRun->awaiting_input = 0;
+                $stepRun->awaiting_input_token = null;
+                $stepRun->awaiting_input_timeout_at = null;
+                $stepRun->attempt_number = 0;
+                Bean::store($stepRun);
+            }
+
             // Execute the step
             $success = $this->executeStepWithRetries($step, $stepRun);
 
@@ -401,8 +588,35 @@ class PipelineExecutor {
                     $this->run->completed_at = date('Y-m-d H:i:s');
                     Bean::store($this->run);
                     return;
+                } elseif (strpos($failAction, 'goto:') === 0) {
+                    $targetStepName = substr($failAction, 5);
+                    foreach ($stepsArray as $idx => $s) {
+                        if ($s->step_name === $targetStepName) {
+                            $i = $idx - 1; // Will be incremented by loop
+                            break;
+                        }
+                    }
                 }
                 // For skip/ignore, continue to next step
+            } else {
+                // Handle on_success flow
+                $successAction = $step->on_success ?: 'next_col';
+                if (strpos($successAction, 'goto:') === 0) {
+                    $targetStepName = substr($successAction, 5);
+                    foreach ($stepsArray as $idx => $s) {
+                        if ($s->step_name === $targetStepName) {
+                            $i = $idx - 1; // Will be incremented by loop
+                            break;
+                        }
+                    }
+                } elseif ($successAction === 'exit') {
+                    // Exit the pipeline successfully
+                    $this->run->status = 'completed';
+                    $this->run->completed_at = date('Y-m-d H:i:s');
+                    Bean::store($this->run);
+                    return;
+                }
+                // For 'next_col' or default, continue to next step
             }
 
             // Update progress
@@ -975,11 +1189,15 @@ class PipelineExecutor {
         $allowedSources = $awaitResult['allowed_sources'] ?? ['mcp', 'webhook', 'form'];
 
         // Mark step run as awaiting input with metadata
+        // Use PHP time() for consistency - both storage and comparison use PHP timezone
+        $timeoutAt = date('Y-m-d H:i:s', time() + $timeoutSeconds);
+
+        $stepRun->status = 'awaiting_input';
         $stepRun->awaiting_input = 1;
         $stepRun->awaiting_input_token = $inputToken;
         $stepRun->awaiting_input_schema_json = json_encode($inputSchema);
         $stepRun->awaiting_input_prompt = $prompt;
-        $stepRun->awaiting_input_timeout_at = date('Y-m-d H:i:s', time() + $timeoutSeconds);
+        $stepRun->awaiting_input_timeout_at = $timeoutAt;
         $stepRun->awaiting_input_sources_json = json_encode($allowedSources);
         $stepRun->updated_at = date('Y-m-d H:i:s');
         Bean::store($stepRun);
@@ -1003,7 +1221,7 @@ class PipelineExecutor {
             'prompt' => $prompt,
             'input_schema' => $inputSchema,
             'allowed_sources' => $allowedSources,
-            'timeout_at' => date('Y-m-d H:i:s', time() + $timeoutSeconds),
+            'timeout_at' => $timeoutAt,
             'form_url' => "{$baseUrl}/pipelines/form/{$this->runId}?token={$inputToken}",
             'webhook_url' => "{$baseUrl}/pipelines/input/{$this->runId}?token={$inputToken}",
             'context' => $this->context
@@ -1171,6 +1389,15 @@ class PipelineExecutor {
             $this->context['pipeline_slug'] = $this->pipeline->slug;
             $this->context['started_at'] = date('Y-m-d H:i:s');
             $this->context['trigger_source'] = $this->run->trigger_source;
+
+            // Add workspace and base URL context
+            $workspace = \Flight::get('workspace') ?? $_SERVER['WORKSPACE'] ?? null;
+            if (!$workspace) {
+                throw new \RuntimeException('Workspace not configured');
+            }
+            $this->context['workspace'] = $workspace;
+            $baseUrl = \Flight::get('app.baseurl') ?? "https://{$workspace}.myctobot.ai";
+            $this->context['base_url'] = rtrim($baseUrl, '/');
 
             // Update run status
             $this->run->status = 'running';
@@ -1419,7 +1646,7 @@ class PipelineExecutor {
             }
 
             // Check condition
-            if (!$this->evaluateCondition($step)) {
+            if (!$this->evaluateStepCondition($step)) {
                 $this->log('info', "Step skipped due to condition: {$step->step_name}");
                 $stepRun->status = 'skipped';
                 $stepRun->completed_at = date('Y-m-d H:i:s');
@@ -1522,7 +1749,7 @@ class PipelineExecutor {
         }
 
         // Check condition
-        if (!$this->evaluateCondition($step)) {
+        if (!$this->evaluateStepCondition($step)) {
             $this->log('info', "Step skipped due to condition: {$step->step_name}");
             $stepRun->status = 'skipped';
             $stepRun->completed_at = date('Y-m-d H:i:s');
@@ -2835,6 +3062,13 @@ class PipelineExecutor {
         $delaySeconds = $config['delay_seconds'] ?? 0;
         $delayExpression = $config['delay_expression'] ?? null;
 
+        // Support delay + delay_unit format (from pipeline builder)
+        if ($delaySeconds === 0 && isset($config['delay'])) {
+            $delay = (int) $config['delay'];
+            $delayUnit = (int) ($config['delay_unit'] ?? 3600); // Default to hours
+            $delaySeconds = $delay * $delayUnit;
+        }
+
         // Evaluate delay expression if provided
         if ($delayExpression && $delaySeconds === 0) {
             $delaySeconds = $this->evaluateDelayExpression($delayExpression);
@@ -2854,7 +3088,27 @@ class PipelineExecutor {
             $task->task_type = $taskType;
             $task->scheduled_at = $scheduledAt;
             $task->status = 'pending';
-            $task->payload_json = json_encode($config['payload'] ?? []);
+
+            // Build payload based on task type
+            $payload = $config['payload'] ?? [];
+            if ($taskType === 'execute_pipeline') {
+                // Store pipeline execution details
+                $payload['pipeline_id'] = $config['pipeline_id'] ?? null;
+                $payload['entry_step'] = $config['entry_step'] ?? null;
+                // Substitute variables in input_data
+                $inputData = $config['input_data'] ?? [];
+                if (!empty($inputData)) {
+                    $inputData = json_decode($this->substituteVariables(json_encode($inputData)), true) ?? $inputData;
+                }
+                $payload['input_data'] = $inputData;
+            } elseif ($taskType === 'webhook_call') {
+                // Store webhook details
+                $payload['webhook_url'] = $this->substituteVariables($config['webhook_url'] ?? '');
+                $payload['webhook_method'] = $config['webhook_method'] ?? 'POST';
+                $payload['webhook_headers'] = $config['webhook_headers'] ?? [];
+                $payload['webhook_body'] = $this->substituteVariables($config['webhook_body'] ?? '');
+            }
+            $task->payload_json = json_encode($payload);
 
             // Store revert data - either from config or from input
             $revertData = $config['revert_data'] ?? $input['_revert_state'] ?? [];
@@ -2950,9 +3204,9 @@ class PipelineExecutor {
     }
 
     /**
-     * Evaluate step condition
+     * Evaluate step condition (checks condition_json to decide if step should run)
      */
-    private function evaluateCondition($step): bool {
+    private function evaluateStepCondition($step): bool {
         $conditionJson = $step->condition_json ?? '{}';
         $condition = json_decode($conditionJson, true);
 

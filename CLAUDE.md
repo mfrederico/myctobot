@@ -5,10 +5,34 @@
 **When something isn't working, ALWAYS check the logs BEFORE trying fixes.**
 
 ```bash
-tail -50 log/app-$(date +%Y-%m-%d).log
+tail -50 log/*-$(date +%Y-%m-%d).log
 ```
 
 The logs will tell you exactly what's wrong. Don't guess. Don't try random fixes. Read the error message first.
+
+---
+
+## RULE #2: USE THE CLI TOOL FOR DATABASE OPERATIONS
+
+**When you need to query or update database records, use `scripts/clitool.php` instead of writing inline PHP.**
+
+```bash
+# List all tables in a workspace
+php scripts/clitool.php --workspace=dev --list
+
+# Get a record as JSON
+php scripts/clitool.php --workspace=dev --bean=mcpservers --data='{"id":10}' --getjson
+
+# Update a record
+php scripts/clitool.php --workspace=dev --bean=member --data='{"id":1,"firstname":"Updated"}'
+
+# Create associations
+php scripts/clitool.php --workspace=dev --bean=member --associate=jiraboard --data='{"id":1,"jiraboard_id":5}'
+```
+
+Don't write complex inline PHP scripts with `php -r '...'` - use the CLI tool. It handles bootstrap, workspace selection, and JSON I/O cleanly.
+
+See `php scripts/clitool.php --help` for all options.
 
 ---
 
@@ -423,6 +447,58 @@ MCP uses JSON-RPC 2.0 over HTTP. Here's what ACTUALLY WORKS:
 - `/mcp/pipelines` - Bearer token: `tk_xxx`
 
 **Don't overcomplicate.** Copy working patterns from `scripts/job-dispatcher.php`.
+
+**CRITICAL: PHP Arrays vs JSON Objects**
+
+In JSON Schema and MCP, `properties` MUST be an object `{}`, never an array `[]`.
+PHP's `json_encode()` outputs `[]` for empty arrays but `{}` for objects.
+
+**This causes "Failed to parse JSON" errors in Claude Code and other strict JSON parsers.**
+
+```php
+// WRONG - json_encode outputs "properties": []
+['properties' => []]
+
+// CORRECT - json_encode outputs "properties": {}
+['properties' => (object) []]
+['properties' => new stdClass()]
+```
+
+**Always sanitize when reading from database or user input:**
+```php
+// Empty arrays become objects
+if (is_array($data['properties']) && empty($data['properties'])) {
+    $data['properties'] = (object) [];
+}
+```
+
+**Common places this breaks:**
+- MCP tool `inputSchema`
+- JSON Schema definitions
+- API responses where empty objects are expected
+- Anywhere JavaScript/TypeScript expects `{}` not `[]`
+
+**Use the JsonSchema helper class for automatic fixing:**
+```php
+use app\JsonSchema;
+
+// Automatically fixes properties, definitions, etc. before encoding
+$json = JsonSchema::encode($schema);
+
+// Or fix data before manual encoding
+$fixed = JsonSchema::fix($schema);
+
+// Validate a schema for issues
+$result = JsonSchema::validate($schema);
+if (!$result['valid']) {
+    foreach ($result['errors'] as $error) {
+        $this->logger->warning("Schema issue: {$error}");
+    }
+}
+
+// Create a properly-typed empty schema
+$empty = JsonSchema::emptySchema();
+```
 
 ### Response Methods
 

@@ -107,7 +107,14 @@
     <!-- Pipeline Settings Panel (Collapsible) -->
     <div class="card mb-4">
         <div class="card-header d-flex justify-content-between align-items-center" data-bs-toggle="collapse" data-bs-target="#settingsPanel" style="cursor: pointer;">
-            <span><i class="bi bi-gear"></i> Pipeline Settings</span>
+            <span>
+                <i class="bi bi-gear"></i> Pipeline Settings
+                <?php if (!empty($pipeline['expose_as_tool'])): ?>
+                <span class="badge bg-info ms-2" title="Exposed as MCP tool: myctobot_<?= htmlspecialchars($pipeline['slug']) ?>">
+                    <i class="bi bi-plug"></i> MCP
+                </span>
+                <?php endif; ?>
+            </span>
             <i class="bi bi-chevron-down"></i>
         </div>
         <div class="collapse" id="settingsPanel">

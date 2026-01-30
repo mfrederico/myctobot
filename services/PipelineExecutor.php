@@ -1503,36 +1503,29 @@ class PipelineExecutor {
                 return;
             }
 
-            // Check if this step's row is parallel - if so, run all parallel rows
+            // Check if this step is parallel - if so, run all parallel steps in the same column
             if ($step->run_parallel) {
-                $this->log('info', "Entering parallel execution at row {$step->row}");
+                $parallelCol = (int) $step->col;
+                $this->log('info', "Entering parallel execution at column {$parallelCol}");
                 $completedCount = $this->executeParallelRows($stepsArray, $currentIndex, $completedCount);
 
-                // Find the highest parallel row number that was executed
-                $highestParallelRow = (int) $step->row;
-                foreach ($stepsArray as $checkStep) {
-                    if ($checkStep->run_parallel && (int) $checkStep->row >= (int) $step->row) {
-                        $highestParallelRow = max($highestParallelRow, (int) $checkStep->row);
-                    }
-                }
-
-                // Find next non-parallel step AFTER the highest parallel row
-                $foundNonParallel = false;
+                // Find the next step in the next column (non-parallel or parallel in a different column)
+                $foundNext = false;
                 for ($i = 0; $i < count($stepsArray); $i++) {
                     $checkStep = $stepsArray[$i];
-                    $checkRow = (int) $checkStep->row;
+                    $checkCol = (int) $checkStep->col;
 
-                    // Must be after all parallel rows AND must not be parallel itself
-                    if ($checkRow > $highestParallelRow && !$checkStep->run_parallel) {
+                    // Must be in a column AFTER the parallel column
+                    if ($checkCol > $parallelCol) {
                         $currentIndex = $i;
-                        $foundNonParallel = true;
-                        $this->log('info', "Continuing from non-parallel row {$checkRow} (after parallel rows up to {$highestParallelRow})");
+                        $foundNext = true;
+                        $this->log('info', "Continuing from column {$checkCol} step {$checkStep->step_name} (after parallel column {$parallelCol})");
                         break;
                     }
                 }
 
-                if (!$foundNonParallel) {
-                    // No more non-parallel rows, we're done
+                if (!$foundNext) {
+                    // No more steps after parallel column, we're done
                     $this->completeRun('completed');
                     return;
                 }
@@ -1560,51 +1553,69 @@ class PipelineExecutor {
     }
 
     /**
-     * Execute all consecutive parallel rows starting from the given index
+     * Execute all parallel steps in the same column
      *
-     * A row is considered parallel if ANY step in that row has run_parallel=1.
-     * All steps in a parallel row are executed together.
+     * When a step with run_parallel=1 is encountered, find ALL parallel steps
+     * in that same column (regardless of row) and execute them together.
+     * This enables true parallel agent dispatch: all agents in the same column
+     * are dispatched at once, then execution continues to the next column.
      *
      * @return int Updated completed count
      */
     private function executeParallelRows(array $stepsArray, int $startIndex, int $completedCount): int {
-        $startRow = (int) $stepsArray[$startIndex]->row;
+        $startStep = $stepsArray[$startIndex];
+        $parallelCol = (int) $startStep->col;
 
-        // First pass: identify which rows are parallel (any step with run_parallel=1)
-        $parallelRowNumbers = [];
-        $stepsByRow = [];
-
-        // Group all steps by row number
+        // Find all parallel steps in the same column
+        $parallelSteps = [];
         foreach ($stepsArray as $step) {
-            $row = (int) $step->row;
-            if (!isset($stepsByRow[$row])) {
-                $stepsByRow[$row] = [];
-            }
-            $stepsByRow[$row][] = $step;
-
-            // Mark row as parallel if any step has the flag
-            if ($step->run_parallel && $row >= $startRow) {
-                $parallelRowNumbers[$row] = true;
+            if ($step->run_parallel && (int) $step->col === $parallelCol) {
+                $parallelSteps[] = $step;
             }
         }
 
-        // Collect consecutive parallel rows starting from startRow
-        $parallelRows = [];
-        $currentRow = $startRow;
+        $this->log('info', "Found " . count($parallelSteps) . " parallel steps in column {$parallelCol}");
 
-        while (isset($parallelRowNumbers[$currentRow])) {
-            if (isset($stepsByRow[$currentRow])) {
-                $parallelRows[$currentRow] = $stepsByRow[$currentRow];
+        // Execute all parallel steps (they should all be dispatched without blocking)
+        foreach ($parallelSteps as $step) {
+            $this->log('info', "Executing parallel step: {$step->step_name} (row {$step->row})");
+
+            // Find step run record
+            $stepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND pipelinesteps_id = ? ',
+                [$this->run->id, $step->id]
+            );
+
+            if (!$stepRun) {
+                $this->log('error', "Step run not found for parallel step: {$step->step_name}");
+                continue;
             }
-            $currentRow++;
-        }
 
-        $this->log('info', "Found " . count($parallelRows) . " parallel rows to execute");
+            // Check condition
+            if (!$this->evaluateStepCondition($step)) {
+                $this->log('info', "Parallel step skipped due to condition: {$step->step_name}");
+                $stepRun->status = 'skipped';
+                $stepRun->completed_at = date('Y-m-d H:i:s');
+                $stepRun->updated_at = date('Y-m-d H:i:s');
+                Bean::store($stepRun);
+                $completedCount++;
+                continue;
+            }
 
-        // Execute each parallel row sequentially (true parallelism would need pcntl_fork)
-        foreach ($parallelRows as $rowNum => $rowSteps) {
-            $this->log('info', "Executing parallel row {$rowNum} with " . count($rowSteps) . " steps");
-            $completedCount = $this->executeRowSteps($rowSteps, $completedCount);
+            // Update current step
+            $this->run->current_step_name = $step->step_name;
+            $this->run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($this->run);
+
+            // Execute step (with wait_for_completion=false, this returns quickly)
+            $success = $this->executeStepWithRetries($step, $stepRun);
+
+            if ($success) {
+                $completedCount++;
+                $this->updateProgress($completedCount);
+            }
+            // Note: For parallel steps, we continue even if one fails
+            // The harvest step will collect all results
         }
 
         return $completedCount;
@@ -2630,39 +2641,35 @@ INTERAGENT;
     private function dispatchAgentJob($job, $agent, $runner, string $prompt): array {
         $workspace = $this->context['workspace'] ?? $_SESSION['workspace_slug'] ?? 'default';
 
-        // Build the dispatch command
-        $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
+        // Use TmuxService to spawn the job (same pattern as AIDevJobService)
+        $tmux = new TmuxService($job->member_id, $job->issue_key, null, $workspace);
 
-        $cmd = sprintf(
-            'php %s --issue=%s --job-id=%d --workspace=%s --member=%d',
-            escapeshellarg($scriptPath),
-            escapeshellarg($job->issue_key),
-            $job->id,
-            escapeshellarg($workspace),
-            $job->member_id
-        );
-
-        // Add runner/workstation if specified
-        if ($runner && $runner->host && $runner->host !== 'localhost') {
-            $workstationConfig = json_encode([
-                'host' => $runner->host,
-                'user' => $runner->user ?? 'claudeuser',
-                'port' => $runner->port ?? 22
-            ]);
-            $cmd .= ' --workstation=' . escapeshellarg($workstationConfig);
-        }
-
-        // Write the prompt to a temp file that job-dispatcher can read
-        $promptFile = "/tmp/pipeline-prompt-{$job->id}.txt";
+        // Write prompt to the work directory
+        $promptFile = $tmux->getWorkDir() . '/prompt.txt';
+        @mkdir($tmux->getWorkDir(), 0755, true);
         file_put_contents($promptFile, $prompt);
 
-        // Pass the prompt file and run in print mode for pipeline execution (non-interactive)
-        $cmd .= ' --prompt-file=' . escapeshellarg($promptFile);
-        $cmd .= ' --print';
+        // Build workstation config from runner if specified
+        $workstation = null;
+        if ($runner && $runner->host && $runner->host !== 'localhost') {
+            $workstation = [
+                'host' => $runner->host,
+                'user' => $runner->ssh_user ?? 'claudeuser',
+                'port' => $runner->ssh_port ?? 22
+            ];
+            $this->log('info', 'Using remote workstation', [
+                'runner' => $runner->name,
+                'host' => $runner->host,
+                'port' => $workstation['port']
+            ]);
+        }
 
-        $this->log('info', "Dispatching agent job", [
-            'cmd' => $cmd,
-            'prompt_file' => $promptFile
+        $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
+
+        $this->log('info', "Dispatching agent job via TmuxService", [
+            'issue_key' => $job->issue_key,
+            'workspace' => $workspace,
+            'workstation' => $workstation ? $workstation['host'] : 'local'
         ]);
 
         // Update job status to running
@@ -2671,29 +2678,28 @@ INTERAGENT;
         $job->updated_at = date('Y-m-d H:i:s');
         Bean::store($job);
 
-        // Execute the dispatcher in background
-        $logFile = "/tmp/pipeline-agent-{$job->id}.log";
-        $fullCmd = "nohup {$cmd} > {$logFile} 2>&1 &";
+        // Spawn using TmuxService (handles SSH, tmux creation, etc.)
+        if ($tmux->spawnWithScript($scriptPath, false, $job->job_uid, null, $workspace, 'pipeline', $workstation)) {
+            $this->log('info', 'Agent job spawned successfully', [
+                'session' => $tmux->getSessionName()
+            ]);
 
-        exec($fullCmd, $output, $exitCode);
-
-        // Give it a moment to start
-        usleep(500000);  // 0.5 seconds
-
-        // Check if process started (job should update its status)
-        $job = Bean::load('aidevjobs', $job->id);
-
-        if ($job->status === 'failed') {
             return [
-                'success' => false,
-                'error' => $job->error_message ?: 'Job failed to start'
+                'success' => true,
+                'message' => 'Job dispatched',
+                'session' => $tmux->getSessionName()
             ];
         }
 
+        // Failed to spawn
+        $job->status = 'failed';
+        $job->error_message = 'Failed to spawn tmux session';
+        $job->updated_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
         return [
-            'success' => true,
-            'message' => 'Job dispatched',
-            'log_file' => $logFile
+            'success' => false,
+            'error' => 'Failed to spawn tmux session'
         ];
     }
 
@@ -3801,18 +3807,106 @@ INTERAGENT;
     }
 
     /**
+     * Wait for all running agent jobs for this pipeline run to complete
+     *
+     * @param int $timeout Maximum wait time in seconds
+     */
+    private function waitForAgentJobs(int $timeout = 600): void {
+        $startTime = time();
+        $pollInterval = 5;  // Poll every 5 seconds
+
+        while ((time() - $startTime) < $timeout) {
+            // Find all running jobs for this pipeline run
+            $runningJobs = Bean::find('aidevjobs',
+                'pipelineruns_id = ? AND status IN (?, ?)',
+                [$this->runId, 'pending', 'running']
+            );
+
+            if (empty($runningJobs)) {
+                $this->log('info', "All agent jobs completed");
+                break;
+            }
+
+            $jobCount = count($runningJobs);
+            $elapsed = time() - $startTime;
+            $this->log('debug', "Waiting for {$jobCount} agent jobs", [
+                'elapsed' => $elapsed,
+                'timeout' => $timeout
+            ]);
+
+            sleep($pollInterval);
+        }
+
+        // Collect results from completed jobs and update stepOutputs
+        $completedJobs = Bean::find('aidevjobs',
+            'pipelineruns_id = ? AND status IN (?, ?, ?)',
+            [$this->runId, 'complete', 'pr_created', 'failed']
+        );
+
+        foreach ($completedJobs as $job) {
+            // Extract step name from job key (format: PIPE-{run_id}-{step_name})
+            if (preg_match('/^PIPE-\d+-(.+)$/', $job->issue_key, $matches)) {
+                $stepName = $matches[1];
+
+                // If this step isn't already in stepOutputs, add it
+                if (!isset($this->stepOutputs[$stepName])) {
+                    $result = json_decode($job->last_result_json ?: '{}', true);
+
+                    if ($job->status === 'failed') {
+                        $this->stepOutputs[$stepName] = [
+                            'error' => $job->error_message ?: 'Job failed',
+                            'job_id' => $job->id,
+                            'job_status' => $job->status
+                        ];
+                    } else {
+                        $this->stepOutputs[$stepName] = [
+                            'job_id' => $job->id,
+                            'job_key' => $job->issue_key,
+                            'status' => $job->status,
+                            'pr_url' => $job->pr_url,
+                            'pr_number' => $job->pr_number,
+                            'branch_name' => $job->branch_name,
+                            'result' => $result,
+                            'last_output' => $job->last_output
+                        ];
+                    }
+
+                    // Also add to context
+                    $this->context[$stepName] = $this->stepOutputs[$stepName];
+
+                    $this->log('info', "Harvested agent job result", [
+                        'step' => $stepName,
+                        'status' => $job->status,
+                        'job_id' => $job->id
+                    ]);
+                }
+            }
+        }
+
+        // Update run context with harvested results
+        $this->run->context_json = json_encode($this->context);
+        Bean::store($this->run);
+    }
+
+    /**
      * Execute a harvest step - gather results from parallel rows
+     *
+     * Harvest ALWAYS waits for any running agent jobs to complete before collecting results.
+     * This enables true parallel agent execution: dispatch agents with wait_for_completion=false,
+     * then harvest waits for all of them to finish and collects the results.
      */
     private function executeHarvest(array $config, array $input): array {
         $policy = $config['policy'] ?? 'all_required';
         $onIncomplete = $config['on_incomplete'] ?? 'fail';
         $template = $config['template'] ?? '';
+        $timeout = $config['timeout'] ?? 600;  // Default 10 minutes
 
         $this->log('info', "Executing harvest with policy: {$policy}");
 
+        // First, wait for any running agent jobs for this pipeline run
+        $this->waitForAgentJobs($timeout);
+
         // Collect all step outputs from parallel rows
-        // In a full parallel implementation, we'd wait for spawned processes here
-        // For now, collect what we have in stepOutputs
         $harvested = [];
         $succeeded = 0;
         $failed = 0;

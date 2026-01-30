@@ -1519,7 +1519,8 @@ if ($usePrintMode) {
     // Build the claude command (with or without SSH wrapper)
     if ($workstationConfig && $sshScriptFile) {
         // Add common claude installation paths to PATH for SSH sessions
-        $claudeCmd = "ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
+        // First create remote dir and sync prompt file
+        $claudeCmd = "ssh -p {$wsPort} {$wsUser}@{$wsHost} 'mkdir -p {$workDir}' && scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt && ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
     } else {
         $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt";
     }
@@ -1568,9 +1569,16 @@ BASH;
     if ($workstationConfig && $sshScriptFile) {
         // Create a wrapper script to avoid quote-nesting issues with 'script -c'
         // Add common claude installation paths to PATH for SSH sessions
+        // First create remote dir and sync prompt, then run claude there
         $sshScriptContent = <<<SSHSCRIPT
 #!/bin/bash
 cd {$workDir}
+
+# Create work directory on remote and sync prompt
+ssh -p {$wsPort} {$wsUser}@{$wsHost} "mkdir -p {$workDir}"
+scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt
+
+# Run claude on remote workstation
 ssh -t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && cd {$workDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
 SSHSCRIPT;
         file_put_contents($sshScriptFile, $sshScriptContent);
@@ -1662,26 +1670,25 @@ if ($dryRun) {
 // ============================================
 // When agent has a workstation (runner) configured, use job-executor
 // This runs the job ON the remote workstation instead of SSHing from local
+// EXCEPT: Pipeline jobs always use SSH wrapper (workstation config is passed via CLI)
 $useJobExecutor = false;
 $jobExecutorConfig = \app\services\JobExecutorConfig::getConfig($workspaceSlug);
 $jobExecutorUrl = $jobExecutorConfig['url'];
 $runnersId = null;
 
-// Check if agent has a runner configured
-if ($agentConfig && !empty($agentConfig['runners_id'])) {
+// Pipeline jobs always use SSH wrapper mode (no job-executor)
+// Provider 'pipeline' is set when dispatched from PipelineExecutor
+if ($provider === 'pipeline' || $workstationConfig) {
+    echo "Pipeline/CLI workstation mode - using SSH wrapper (skipping job-executor)\n";
+    $useJobExecutor = false;
+} elseif ($agentConfig && !empty($agentConfig['runners_id'])) {
+    // Check if agent has a runner configured (for non-pipeline jobs)
     $runnersId = (int) $agentConfig['runners_id'];
     $runnerBean = Bean::load('runners', $runnersId);
     if ($runnerBean && $runnerBean->id && $runnerBean->is_active) {
         $useJobExecutor = true;
         echo "Agent has workstation '{$runnerBean->name}' - using job-executor\n";
     }
-}
-
-// Also check if workstation config was passed via CLI
-if ($workstationConfig && !$useJobExecutor) {
-    // CLI workstation passed but no runners_id - find or skip job-executor
-    // For CLI mode, we still use the SSH wrapper approach for now
-    echo "Workstation config from CLI - using SSH wrapper mode\n";
 }
 
 if ($useJobExecutor) {

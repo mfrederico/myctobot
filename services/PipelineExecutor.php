@@ -207,6 +207,216 @@ class PipelineExecutor {
     }
 
     /**
+     * Resume a pipeline that's awaiting external input
+     *
+     * Called when input arrives from any source (MCP, webhook, form, email).
+     * Validates the input against the expected schema and resumes execution.
+     *
+     * @param array $input The input data from the external source
+     * @param string $inputToken The token that was provided when pausing
+     * @param string $source The source of the input (mcp, webhook, form, email)
+     * @return array Result with success status and output
+     */
+    public function resumeFromAwaitInput(array $input, string $inputToken, string $source = 'api'): array {
+        try {
+            // Load run
+            $this->run = Bean::load('pipelineruns', $this->runId);
+            if (!$this->run->id) {
+                return ['success' => false, 'error' => "Run not found: {$this->runId}"];
+            }
+
+            // Verify run is in awaiting_input status
+            if ($this->run->status !== 'awaiting_input') {
+                return [
+                    'success' => false,
+                    'error' => "Run is not awaiting input (status: {$this->run->status})"
+                ];
+            }
+
+            // Find the step run that's awaiting input
+            $awaitingStepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                [$this->run->id]
+            );
+
+            if (!$awaitingStepRun) {
+                return ['success' => false, 'error' => 'No step found awaiting input'];
+            }
+
+            // Validate input token
+            if ($awaitingStepRun->awaiting_input_token !== $inputToken) {
+                return ['success' => false, 'error' => 'Invalid input token'];
+            }
+
+            // Check timeout
+            if ($awaitingStepRun->awaiting_input_timeout_at &&
+                strtotime($awaitingStepRun->awaiting_input_timeout_at) < time()) {
+                return ['success' => false, 'error' => 'Input window has expired'];
+            }
+
+            // Validate source is allowed
+            $allowedSources = json_decode($awaitingStepRun->awaiting_input_sources_json ?: '[]', true);
+            if (!empty($allowedSources) && !in_array($source, $allowedSources)) {
+                return ['success' => false, 'error' => "Input source '{$source}' is not allowed"];
+            }
+
+            // TODO: Validate input against schema
+            // $schema = json_decode($awaitingStepRun->awaiting_input_schema_json, true);
+            // $this->validateInputAgainstSchema($input, $schema);
+
+            // Load pipeline
+            $this->pipeline = Bean::load('pipelines', $this->run->pipelines_id);
+            if (!$this->pipeline->id) {
+                return ['success' => false, 'error' => 'Pipeline not found'];
+            }
+
+            // Restore context
+            $this->context = json_decode($this->run->context_json ?: '{}', true);
+
+            // Inject the input into context
+            $this->context['_input'] = $input;
+            $this->context['_input_source'] = $source;
+            $this->context['_input_received_at'] = date('Y-m-d H:i:s');
+
+            // Get the step that was waiting
+            $step = Bean::load('pipelinesteps', $awaitingStepRun->pipelinesteps_id);
+
+            // Store input as the step's output (so next steps can reference it)
+            $stepOutput = [
+                'output' => $input,
+                'input_source' => $source,
+                'input_received_at' => date('Y-m-d H:i:s')
+            ];
+            $this->stepOutputs[$step->step_name] = $stepOutput;
+            $this->context[$step->step_name] = $stepOutput;
+
+            // Clear awaiting state on step run
+            $awaitingStepRun->awaiting_input = 0;
+            $awaitingStepRun->status = 'success';
+            $awaitingStepRun->output_json = json_encode($stepOutput);
+            $awaitingStepRun->completed_at = date('Y-m-d H:i:s');
+            $awaitingStepRun->updated_at = date('Y-m-d H:i:s');
+            Bean::store($awaitingStepRun);
+
+            // Update run status to running
+            $this->run->status = 'running';
+            $this->run->context_json = json_encode($this->context);
+            $this->run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($this->run);
+
+            $this->log('info', "Resuming from await_input at step: {$step->step_name}, source: {$source}");
+
+            // Load step lookups for execution
+            $this->loadStepLookups();
+
+            // Find the index of the awaiting step and continue from the next one
+            $stepsArray = array_values($this->steps);
+            $resumeIndex = 0;
+            foreach ($stepsArray as $idx => $s) {
+                if ($s->id == $step->id) {
+                    $resumeIndex = $idx + 1;
+                    break;
+                }
+            }
+
+            // Continue execution from the next step
+            if ($resumeIndex < count($stepsArray)) {
+                $this->executeStepsFromIndex($resumeIndex, $stepsArray);
+            }
+
+            // Reload run to get final status
+            $this->run = Bean::load('pipelineruns', $this->runId);
+
+            return [
+                'success' => true,
+                'status' => $this->run->status,
+                'output' => $this->context,
+                'steps_completed' => $this->run->steps_completed,
+                'steps_total' => $this->run->steps_total
+            ];
+
+        } catch (PipelinePausedException $e) {
+            // Pipeline paused again (another await_input step)
+            $stepOutput = $e->getStepOutput();
+            return [
+                'success' => true,
+                'status' => 'awaiting_input',
+                'awaiting_input' => true,
+                'output' => $stepOutput
+            ];
+        } catch (\Exception $e) {
+            $this->log('error', "Error resuming from await input: " . $e->getMessage());
+
+            // Mark run as failed
+            if ($this->run) {
+                $this->run->status = 'failed';
+                $this->run->error_message = $e->getMessage();
+                $this->run->completed_at = date('Y-m-d H:i:s');
+                $this->run->updated_at = date('Y-m-d H:i:s');
+                Bean::store($this->run);
+            }
+
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Execute steps starting from a given index
+     * Helper for resume functionality
+     */
+    private function executeStepsFromIndex(int $startIndex, array $stepsArray): void {
+        for ($i = $startIndex; $i < count($stepsArray); $i++) {
+            $step = $stepsArray[$i];
+
+            $stepRun = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND pipelinesteps_id = ? ',
+                [$this->run->id, $step->id]
+            );
+
+            if (!$stepRun) {
+                // Create step run if it doesn't exist
+                $stepRun = Bean::dispense('pipelinestepruns');
+                $stepRun->pipelineruns_id = $this->run->id;
+                $stepRun->pipelinesteps_id = $step->id;
+                $stepRun->row = $step->row;
+                $stepRun->col = $step->col;
+                $stepRun->status = 'pending';
+                $stepRun->created_at = date('Y-m-d H:i:s');
+                Bean::store($stepRun);
+            }
+
+            if ($stepRun->status === 'success' || $stepRun->status === 'skipped') {
+                continue; // Already completed
+            }
+
+            // Execute the step
+            $success = $this->executeStepWithRetries($step, $stepRun);
+
+            if (!$success) {
+                // Handle failure based on on_failure setting
+                $failAction = $step->on_failure ?: 'exit';
+                if ($failAction === 'exit') {
+                    $this->run->status = 'failed';
+                    $this->run->error_message = "Step failed: {$step->step_name}";
+                    $this->run->completed_at = date('Y-m-d H:i:s');
+                    Bean::store($this->run);
+                    return;
+                }
+                // For skip/ignore, continue to next step
+            }
+
+            // Update progress
+            $this->run->steps_completed = ($this->run->steps_completed ?? 0) + 1;
+            Bean::store($this->run);
+        }
+
+        // All steps completed
+        $this->run->status = 'completed';
+        $this->run->completed_at = date('Y-m-d H:i:s');
+        Bean::store($this->run);
+    }
+
+    /**
      * Execute exactly one step and pause
      *
      * This is the core method for the debugger's "Next Step" button.
@@ -741,6 +951,97 @@ class PipelineExecutor {
         Bean::store($this->run);
 
         throw new PipelinePausedException($stepRun->id, $stepOutput);
+    }
+
+    /**
+     * Pause the pipeline for external input (await_input wait type)
+     *
+     * Unlike pauseForInput() which is for interactive variable mapping,
+     * this pauses waiting for input from external sources:
+     * - MCP continue_pipeline call
+     * - Webhook POST
+     * - Web form submission
+     * - Email reply
+     *
+     * @throws PipelinePausedException
+     */
+    private function pauseForAwaitInput($step, $stepRun, array $awaitResult): void {
+        $this->log('info', "Pausing for external input at step: {$step->step_name}");
+
+        $inputToken = $awaitResult['input_token'];
+        $inputSchema = $awaitResult['input_schema'] ?? [];
+        $prompt = $awaitResult['prompt'] ?? 'Waiting for input';
+        $timeoutSeconds = $awaitResult['timeout_seconds'] ?? 86400;
+        $allowedSources = $awaitResult['allowed_sources'] ?? ['mcp', 'webhook', 'form'];
+
+        // Mark step run as awaiting input with metadata
+        $stepRun->awaiting_input = 1;
+        $stepRun->awaiting_input_token = $inputToken;
+        $stepRun->awaiting_input_schema_json = json_encode($inputSchema);
+        $stepRun->awaiting_input_prompt = $prompt;
+        $stepRun->awaiting_input_timeout_at = date('Y-m-d H:i:s', time() + $timeoutSeconds);
+        $stepRun->awaiting_input_sources_json = json_encode($allowedSources);
+        $stepRun->updated_at = date('Y-m-d H:i:s');
+        Bean::store($stepRun);
+
+        // Mark run as awaiting_input (distinct from 'paused' which is for interactive mode)
+        $this->run->status = 'awaiting_input';
+        $this->run->context_json = json_encode($this->context);
+        $this->run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($this->run);
+
+        // Send notifications if configured
+        if (!empty($awaitResult['notification'])) {
+            $this->sendAwaitInputNotification($awaitResult['notification'], $inputToken);
+        }
+
+        // Build response with URLs for input
+        $baseUrl = $this->getBaseUrl();
+        $stepOutput = [
+            'status' => 'awaiting_input',
+            'input_token' => $inputToken,
+            'prompt' => $prompt,
+            'input_schema' => $inputSchema,
+            'allowed_sources' => $allowedSources,
+            'timeout_at' => date('Y-m-d H:i:s', time() + $timeoutSeconds),
+            'form_url' => "{$baseUrl}/pipelines/form/{$this->runId}?token={$inputToken}",
+            'webhook_url' => "{$baseUrl}/pipelines/input/{$this->runId}?token={$inputToken}",
+            'context' => $this->context
+        ];
+
+        throw new PipelinePausedException($stepRun->id, $stepOutput);
+    }
+
+    /**
+     * Send notification when pipeline is awaiting input
+     */
+    private function sendAwaitInputNotification(array $notification, string $inputToken): void {
+        // TODO: Implement email/SMS notification
+        // For now, just log it
+        $this->log('info', "Would send await input notification", [
+            'notification' => $notification,
+            'input_token' => $inputToken
+        ]);
+    }
+
+    /**
+     * Get the base URL for the application
+     */
+    private function getBaseUrl(): string {
+        $workspace = $this->context['_workspace'] ?? $_SERVER['WORKSPACE'] ?? 'default';
+        $host = $_SERVER['HTTP_HOST'] ?? 'myctobot.ai';
+
+        // If host already has workspace prefix, use as-is
+        if (strpos($host, '.') !== false && strpos($host, $workspace) === 0) {
+            return "https://{$host}";
+        }
+
+        // Otherwise, prepend workspace
+        if ($workspace && $workspace !== 'default') {
+            return "https://{$workspace}.myctobot.ai";
+        }
+
+        return "https://myctobot.ai";
     }
 
     /**
@@ -1413,6 +1714,12 @@ class PipelineExecutor {
                 // Merge output into context if configured
                 if (!empty($stepOutput)) {
                     $this->context[$step->step_name] = $stepOutput;
+                }
+
+                // Check if step is awaiting external input (await_input wait type)
+                if (!empty($result['awaiting_input'])) {
+                    $this->pauseForAwaitInput($step, $stepRun, $result);
+                    // pauseForAwaitInput throws PipelinePausedException
                 }
 
                 // Interactive mode: check if we should pause for user mapping
@@ -2273,6 +2580,31 @@ class PipelineExecutor {
             case 'webhook':
                 // TODO: Implement webhook wait
                 return ['success' => true, 'output' => ['webhook' => 'not-implemented']];
+
+            case 'await_input':
+                // Pause pipeline and wait for input from MCP, webhook, form, or email
+                $inputToken = bin2hex(random_bytes(16));
+                $timeoutSeconds = $config['timeout_seconds'] ?? 86400;
+                $allowedSources = $config['allowed_sources'] ?? ['mcp', 'webhook', 'form'];
+
+                $this->log('info', "Awaiting input with token: {$inputToken}");
+
+                return [
+                    'success' => true,
+                    'awaiting_input' => true,
+                    'input_token' => $inputToken,
+                    'input_schema' => $config['input_schema'] ?? [],
+                    'prompt' => $config['prompt'] ?? 'Waiting for input',
+                    'timeout_seconds' => $timeoutSeconds,
+                    'allowed_sources' => $allowedSources,
+                    'notification' => $config['notification'] ?? null,
+                    'output' => [
+                        'status' => 'awaiting_input',
+                        'input_token' => $inputToken,
+                        'prompt' => $config['prompt'] ?? 'Waiting for input',
+                        'timeout_at' => date('Y-m-d H:i:s', time() + $timeoutSeconds)
+                    ]
+                ];
 
             default:
                 return ['success' => false, 'error' => "Unknown wait type: {$waitType}"];

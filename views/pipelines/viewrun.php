@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <nav aria-label="breadcrumb">
@@ -17,7 +17,8 @@
                     'completed' => 'bi-check-circle text-success',
                     'failed' => 'bi-x-circle text-danger',
                     'paused' => 'bi-pause-circle text-warning',
-                    'cancelled' => 'bi-slash-circle text-dark'
+                    'cancelled' => 'bi-slash-circle text-dark',
+                    'awaiting_input' => 'bi-input-cursor-text text-info'
                 ];
                 $icon = $statusIcons[$run['status']] ?? 'bi-question-circle';
                 ?>
@@ -52,7 +53,8 @@
                                 'completed' => 'success',
                                 'failed' => 'danger',
                                 'paused' => 'warning',
-                                'cancelled' => 'dark'
+                                'cancelled' => 'dark',
+                                'awaiting_input' => 'info'
                             ];
                             $color = $statusColors[$run['status']] ?? 'secondary';
                             ?>
@@ -134,6 +136,52 @@
                     <div class="alert alert-info mt-3 mb-0">
                         <i class="bi bi-arrow-right-circle"></i>
                         <strong>Current Step:</strong> <?= htmlspecialchars($run['current_step_name']) ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if ($run['status'] === 'awaiting_input' && !empty($awaitingStep)): ?>
+                    <div class="alert alert-info mt-3 mb-0">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h6 class="alert-heading">
+                                    <i class="bi bi-input-cursor-text"></i> Awaiting Input
+                                </h6>
+                                <p class="mb-2"><?= nl2br(htmlspecialchars($awaitingStep['prompt'] ?? 'Waiting for external input')) ?></p>
+                                <small class="text-muted">
+                                    Step: <?= htmlspecialchars($awaitingStep['step_name'] ?? '') ?>
+                                    <?php if (!empty($awaitingStep['timeout_at'])): ?>
+                                    | Expires: <?= date('M j, g:i A', strtotime($awaitingStep['timeout_at'])) ?>
+                                    <?php endif; ?>
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <?php if (!empty($awaitingStep['form_url'])): ?>
+                                <a href="<?= htmlspecialchars($awaitingStep['form_url']) ?>" target="_blank" class="btn btn-primary btn-sm mb-1">
+                                    <i class="bi bi-box-arrow-up-right"></i> Open Form
+                                </a>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+
+                        <?php if (!empty($awaitingStep['webhook_url'])): ?>
+                        <hr class="my-2">
+                        <div class="small">
+                            <strong>Webhook URL:</strong>
+                            <div class="input-group input-group-sm">
+                                <input type="text" class="form-control font-monospace" value="<?= htmlspecialchars($awaitingStep['webhook_url']) ?>" readonly id="webhookUrl">
+                                <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('webhookUrl').value)">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($awaitingStep['schema'])): ?>
+                        <details class="mt-2">
+                            <summary class="small text-muted">Expected Input Schema</summary>
+                            <pre class="small bg-light p-2 mt-1 mb-0 rounded"><?= htmlspecialchars(json_encode($awaitingStep['schema'], JSON_PRETTY_PRINT)) ?></pre>
+                        </details>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
                 </div>

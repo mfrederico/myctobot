@@ -164,6 +164,30 @@ class Mcppipelines extends Control {
             ];
         }
 
+        // Add the continue_pipeline tool for multi-turn workflows
+        $tools[] = [
+            'name' => 'continue_pipeline',
+            'description' => 'Continue a paused pipeline by providing the requested input. Use this when a pipeline returns awaiting_input status.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID to continue'
+                    ],
+                    'input_token' => [
+                        'type' => 'string',
+                        'description' => 'The input token returned when pipeline paused'
+                    ],
+                    'input' => [
+                        'type' => 'object',
+                        'description' => 'The input data matching the awaited schema'
+                    ]
+                ],
+                'required' => ['run_id', 'input_token', 'input']
+            ]
+        ];
+
         $this->sendJsonRpcResult(['tools' => $tools], $id);
     }
 
@@ -189,13 +213,114 @@ class Mcppipelines extends Control {
             return;
         }
 
-        // All tools here are pipelines (prefixed with myctobot_)
+        // Handle continue_pipeline tool for multi-turn workflows
+        if ($toolName === 'continue_pipeline') {
+            $this->continuePipeline($arguments, $id);
+            return;
+        }
+
+        // All other tools are pipelines (prefixed with myctobot_)
         if (!str_starts_with($toolName, 'myctobot_')) {
             $this->sendJsonRpcError(-32602, "Unknown tool: {$toolName}", $id);
             return;
         }
 
         $this->executePipeline($toolName, $arguments, $id);
+    }
+
+    /**
+     * Continue a paused pipeline with input
+     *
+     * Called when AI provides input to a pipeline that returned awaiting_input status.
+     * Validates the input token and resumes execution.
+     */
+    private function continuePipeline(array $arguments, $id): void {
+        $runId = $arguments['run_id'] ?? null;
+        $inputToken = $arguments['input_token'] ?? null;
+        $input = $arguments['input'] ?? [];
+
+        if (!$runId) {
+            $this->sendJsonRpcError(-32602, 'run_id is required', $id);
+            return;
+        }
+
+        if (!$inputToken) {
+            $this->sendJsonRpcError(-32602, 'input_token is required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run->id) {
+            $this->sendJsonRpcError(-32602, "Run not found: {$runId}", $id);
+            return;
+        }
+
+        // Verify run is awaiting input
+        if ($run->status !== 'awaiting_input') {
+            $this->sendJsonRpcError(-32602, "Run is not awaiting input (status: {$run->status})", $id);
+            return;
+        }
+
+        // Resume the pipeline
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
+
+        try {
+            $executor = new \app\services\PipelineExecutor($runId);
+            $result = $executor->resumeFromAwaitInput($input, $inputToken, 'mcp');
+
+            // Check if pipeline is now awaiting more input
+            $run = Bean::load('pipelineruns', $runId);
+
+            if ($run->status === 'awaiting_input') {
+                // Find the new awaiting step
+                $awaitingStep = Bean::findOne('pipelinestepruns',
+                    ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                    [$runId]
+                );
+
+                $schema = $awaitingStep ? json_decode($awaitingStep->awaiting_input_schema_json ?: '{}', true) : [];
+
+                $this->sendJsonRpcResult([
+                    'content' => [[
+                        'type' => 'text',
+                        'text' => json_encode([
+                            'status' => 'awaiting_input',
+                            'run_id' => $runId,
+                            'input_token' => $awaitingStep->awaiting_input_token ?? null,
+                            'prompt' => $awaitingStep->awaiting_input_prompt ?? 'Waiting for input',
+                            'input_schema' => $schema,
+                            'output' => $result['output'] ?? null
+                        ], JSON_PRETTY_PRINT)
+                    ]],
+                    'isError' => false
+                ], $id);
+                return;
+            }
+
+            // Pipeline completed or failed
+            $isError = !in_array($run->status, ['completed', 'success']);
+
+            if ($isError) {
+                $this->sendJsonRpcResult([
+                    'content' => [[
+                        'type' => 'text',
+                        'text' => "Pipeline failed: " . ($run->error_message ?: 'Unknown error')
+                    ]],
+                    'isError' => true
+                ], $id);
+            } else {
+                $this->sendJsonRpcResult([
+                    'content' => [[
+                        'type' => 'text',
+                        'text' => json_encode($result['output'] ?? ['status' => 'completed'], JSON_PRETTY_PRINT)
+                    ]],
+                    'isError' => false
+                ], $id);
+            }
+
+        } catch (\Exception $e) {
+            $this->sendJsonRpcError(-32000, 'Resume failed: ' . $e->getMessage(), $id);
+        }
     }
 
     /**
@@ -260,6 +385,38 @@ class Mcppipelines extends Control {
         // Reload run to get final state
         $run = Bean::load('pipelineruns', $runId);
         $context = json_decode($run->context_json ?: '{}', true);
+
+        // Check if pipeline is awaiting input (multi-turn flow)
+        if ($run->status === 'awaiting_input') {
+            $awaitingStep = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input = 1 ',
+                [$runId]
+            );
+
+            $schema = $awaitingStep ? json_decode($awaitingStep->awaiting_input_schema_json ?: '{}', true) : [];
+
+            // Build form/webhook URLs for convenience
+            $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
+            $formUrl = $awaitingStep ? "{$baseUrl}/pipelines/form/{$runId}?token={$awaitingStep->awaiting_input_token}" : null;
+
+            $this->sendJsonRpcResult([
+                'content' => [[
+                    'type' => 'text',
+                    'text' => json_encode([
+                        'status' => 'awaiting_input',
+                        'run_id' => $runId,
+                        'input_token' => $awaitingStep->awaiting_input_token ?? null,
+                        'prompt' => $awaitingStep->awaiting_input_prompt ?? 'Waiting for input',
+                        'input_schema' => $schema,
+                        'timeout_at' => $awaitingStep->awaiting_input_timeout_at ?? null,
+                        'form_url' => $formUrl,
+                        'output' => $context
+                    ], JSON_PRETTY_PRINT)
+                ]],
+                'isError' => false
+            ], $id);
+            return;
+        }
 
         // Get step results for the output
         $stepRuns = Bean::find('pipelinestepruns',

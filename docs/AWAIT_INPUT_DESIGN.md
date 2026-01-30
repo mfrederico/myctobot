@@ -353,16 +353,16 @@ When status = `awaiting_input`, show:
 
 ## Implementation Checklist
 
-1. [ ] Add database fields to pipelineruns
-2. [ ] Add `await_input` case to PipelineExecutor::executeWait()
-3. [ ] Add resumeFromInput() method to PipelineExecutor
-4. [ ] Update wait step config UI with await_input option
-5. [ ] Add /pipelines/input/{run_id} endpoint
-6. [ ] Add /pipelines/form/{run_id} GET/POST endpoints
-7. [ ] Create form_input.php view (renders form from schema)
-8. [ ] Add continue_pipeline tool to Mcppipelines.php
-9. [ ] Update pipeline run view to show awaiting state
-10. [ ] Add input_token to MCP tool definitions for exposed pipelines
+1. [x] Add database fields to pipelineruns (auto-created by RedBeanPHP on pipelinestepruns)
+2. [x] Add `await_input` case to PipelineExecutor::executeWait()
+3. [x] Add resumeFromAwaitInput() method to PipelineExecutor
+4. [x] Update wait step config UI with await_input option
+5. [x] Add /pipelines/input/{run_id} endpoint
+6. [x] Add /pipelines/form/{run_id} GET/POST endpoints
+7. [x] Create form_input.php view (renders form from schema)
+8. [x] Add continue_pipeline tool to Mcppipelines.php
+9. [x] Update pipeline run view to show awaiting state
+10. [x] Add awaiting_input response handling to MCP executePipeline
 11. [ ] Test full flow: MCP start → pause → MCP continue → complete
 12. [ ] Test form flow: MCP start → pause → form submit → complete
 

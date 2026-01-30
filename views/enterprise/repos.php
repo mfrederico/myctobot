@@ -64,6 +64,14 @@
                                 </small>
                                 <div class="mt-2 p-2 bg-light rounded">
                                     <small>
+                                        <?php if ($repo['issues_enabled']): ?>
+                                        <i class="bi bi-github"></i> <strong>To trigger AI Dev:</strong> Add this label to a GitHub Issue:
+                                        <code class="bg-primary text-white px-1 rounded">ai-dev</code>
+                                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+                                                onclick="copyLabel('ai-dev', this)" title="Copy label">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                        <?php else: ?>
                                         <i class="bi bi-tags"></i> <strong>To trigger AI Dev:</strong> Add these Jira labels:
                                         <code id="repoLabel<?= $repo['id'] ?>" class="bg-secondary text-white px-1 rounded ms-1">repo-<?= htmlspecialchars($repo['slug'] ?? $repo['id']) ?></code>
                                         <button type="button" class="btn btn-link btn-sm p-0" onclick="editSlug(<?= $repo['id'] ?>, '<?= htmlspecialchars($repo['slug'] ?? '', ENT_QUOTES) ?>')" title="Edit slug">
@@ -75,6 +83,7 @@
                                                 onclick="copyLabel('repo-<?= htmlspecialchars($repo['slug'] ?? $repo['id']) ?> ai-dev', this)" title="Copy both labels">
                                             <i class="bi bi-clipboard"></i>
                                         </button>
+                                        <?php endif; ?>
                                     </small>
                                 </div>
                             </div>
@@ -174,13 +183,14 @@
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="card-title mb-0">Board Repository Mappings</h5>
-                    <a href="/boards" class="btn btn-sm btn-outline-primary">
+                    <a href="/settings/boards" class="btn btn-sm btn-outline-primary">
                         <i class="bi bi-kanban"></i> Manage Boards
                     </a>
                 </div>
                 <div class="card-body">
                     <p class="text-muted mb-4">
-                        Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{slug}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
+                        <strong>For Jira:</strong> Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{slug}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
+                        <br><small class="text-info"><i class="bi bi-github"></i> <strong>For GitHub Issues:</strong> Just add the <code>ai-dev</code> label directly to an issue — no board mapping needed.</small>
                     </p>
 
                     <?php foreach ($boards as $board):
@@ -206,7 +216,7 @@
                                     <thead class="table-light">
                                         <tr>
                                             <th>Repository</th>
-                                            <th style="width: 240px;">Jira Labels</th>
+                                            <th style="width: 240px;">Trigger Labels</th>
                                             <th style="width: 80px;">Actions</th>
                                         </tr>
                                     </thead>
@@ -223,6 +233,7 @@
                                             $repoSlug = $repo['slug'] ?? $repo['id'];
                                             $repoLabel = 'repo-' . $repoSlug;
                                             $fullLabels = $repoLabel . ' ai-dev';
+                                            $usesGitHubIssues = !empty($repo['issues_enabled']);
                                         ?>
                                         <tr>
                                             <td>
@@ -230,8 +241,21 @@
                                                 <?= htmlspecialchars($repo['repo_owner'] . '/' . $repo['repo_name']) ?>
                                                 <br>
                                                 <small class="text-muted">Branch: <?= htmlspecialchars($repo['default_branch']) ?></small>
+                                                <?php if ($usesGitHubIssues): ?>
+                                                <br><small class="text-info"><i class="bi bi-github"></i> GitHub Issues</small>
+                                                <?php endif; ?>
                                             </td>
                                             <td>
+                                                <?php if ($usesGitHubIssues): ?>
+                                                <div class="d-flex gap-1 align-items-center">
+                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
+                                                    <small class="text-muted">(on GitHub Issue)</small>
+                                                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                                                            onclick="copyLabel('ai-dev', this)" title="Copy label">
+                                                        <i class="bi bi-clipboard"></i>
+                                                    </button>
+                                                </div>
+                                                <?php else: ?>
                                                 <div class="d-flex gap-1 align-items-center">
                                                     <code class="bg-secondary text-white px-2 py-1 rounded"><?= $repoLabel ?></code>
                                                     <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
@@ -240,6 +264,7 @@
                                                         <i class="bi bi-clipboard"></i>
                                                     </button>
                                                 </div>
+                                                <?php endif; ?>
                                             </td>
                                             <td>
                                                 <a href="/github/unmapboard?board_id=<?= $board['id'] ?>&repo_id=<?= $repo['id'] ?>"
@@ -298,11 +323,23 @@
                     ?>
                     <div class="alert alert-info mt-3 mb-0">
                         <i class="bi bi-info-circle"></i>
-                        <strong>How it works:</strong> Add two labels to a Jira ticket to trigger AI Developer:
-                        <ol class="mb-0 mt-2">
-                            <li>Add <code>repo-<?= htmlspecialchars($exampleSlug) ?></code> to specify which repository to use</li>
-                            <li>Add <code>ai-dev</code> to trigger the job</li>
-                        </ol>
+                        <strong>How it works:</strong>
+                        <div class="row mt-2">
+                            <div class="col-md-6">
+                                <strong><i class="bi bi-kanban"></i> Jira Workflow:</strong>
+                                <ol class="mb-0 mt-1 small">
+                                    <li>Add <code>repo-<?= htmlspecialchars($exampleSlug) ?></code> to specify which repository</li>
+                                    <li>Add <code>ai-dev</code> to trigger the job</li>
+                                </ol>
+                            </div>
+                            <div class="col-md-6">
+                                <strong><i class="bi bi-github"></i> GitHub Issues Workflow:</strong>
+                                <ol class="mb-0 mt-1 small">
+                                    <li>Add <code>ai-dev</code> label to a GitHub Issue</li>
+                                    <li>That's it! The repo is already known from the issue.</li>
+                                </ol>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -354,9 +391,13 @@
                         <li>Click <strong>Settings</strong> &rarr; <strong>Webhooks</strong></li>
                         <li>Click <strong>Add webhook</strong></li>
                         <li>Configure:
+                            <?php
+                            $workspace = $_SERVER['WORKSPACE'] ?? null;
+                            $webhookDomain = $workspace ? "{$workspace}.myctobot.ai" : 'myctobot.ai';
+                            ?>
                             <ul class="mb-1">
                                 <li><strong>Payload URL:</strong><br>
-                                    <code class="user-select-all">https://myctobot.ai/webhook/github</code>
+                                    <code class="user-select-all">https://<?= htmlspecialchars($webhookDomain) ?>/webhook/github</code>
                                 </li>
                                 <li><strong>Content type:</strong> <code>application/json</code></li>
                                 <li><strong>Events:</strong> Select "Let me select individual events" then check <strong>Issues</strong> and <strong>Issue comments</strong></li>

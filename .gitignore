@@ -116,3 +116,4 @@ sql/
 database/
 conf/github.ini
 conf/jobexecutor.ini
+.mcp.json

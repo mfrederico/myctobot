@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <h1 class="h2 mb-4">Admin Dashboard</h1>
     
     <div class="row">

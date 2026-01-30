@@ -10,7 +10,7 @@ $this->layout('layouts/app', [
 ]);
 ?>
 
-<div class="container-fluid px-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <nav aria-label="breadcrumb">

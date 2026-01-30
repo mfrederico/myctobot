@@ -1,6 +1,6 @@
 <div class="signup-page">
     <!-- Hero Section -->
-    <div class="container-fluid bg-gradient-primary py-4">
+    <div class="container bg-gradient-primary py-4">
         <div class="container">
             <div class="row align-items-center">
                 <div class="col-lg-6 text-white mb-4 mb-lg-0">

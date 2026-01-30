@@ -129,6 +129,24 @@ class Settings extends BaseControls\Control {
     }
 
     /**
+     * Repository connections page - delegates to Github controller
+     * URL: /settings/repos
+     */
+    public function repos() {
+        $controller = new Github();
+        $controller->repolist();
+    }
+
+    /**
+     * Jira boards page - delegates to Boards controller
+     * URL: /settings/boards
+     */
+    public function boards() {
+        $controller = new Boards();
+        $controller->index();
+    }
+
+    /**
      * Unified connections management page
      * Shows all connected services (Atlassian, GitHub, Anthropic, Shopify, etc.)
      * Also includes profile, stats, and account actions (consolidated settings page)

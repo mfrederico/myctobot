@@ -188,6 +188,42 @@ class Mcppipelines extends Control {
             ]
         ];
 
+        // Add schedule_pipeline tool for scheduling future pipeline runs
+        $tools[] = [
+            'name' => 'schedule_pipeline',
+            'description' => 'Schedule a pipeline to run at a future time. Use this for reminders, delayed actions, or recurring tasks. Examples: "in 1 hour", "at 11:30 EST", "in 30 minutes".',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'pipeline_slug' => [
+                        'type' => 'string',
+                        'description' => 'The pipeline slug to schedule (e.g., "multi-turn-input-test")'
+                    ],
+                    'delay_seconds' => [
+                        'type' => 'integer',
+                        'description' => 'Delay in seconds until the pipeline runs. Use this OR scheduled_time.'
+                    ],
+                    'scheduled_time' => [
+                        'type' => 'string',
+                        'description' => 'ISO 8601 datetime or natural time like "2026-01-30T11:30:00-05:00". Use this OR delay_seconds.'
+                    ],
+                    'input_data' => [
+                        'type' => 'object',
+                        'description' => 'Optional context data to pass to the pipeline'
+                    ],
+                    'entry_step' => [
+                        'type' => 'string',
+                        'description' => 'Optional step name to start execution from (skips earlier steps)'
+                    ],
+                    'description' => [
+                        'type' => 'string',
+                        'description' => 'Optional description of what this scheduled task is for'
+                    ]
+                ],
+                'required' => ['pipeline_slug']
+            ]
+        ];
+
         $this->sendJsonRpcResult(['tools' => $tools], $id);
     }
 
@@ -216,6 +252,12 @@ class Mcppipelines extends Control {
         // Handle continue_pipeline tool for multi-turn workflows
         if ($toolName === 'continue_pipeline') {
             $this->continuePipeline($arguments, $id);
+            return;
+        }
+
+        // Handle schedule_pipeline tool for scheduling future runs
+        if ($toolName === 'schedule_pipeline') {
+            $this->schedulePipeline($arguments, $id);
             return;
         }
 
@@ -452,6 +494,129 @@ class Mcppipelines extends Control {
             'content' => $content,
             'isError' => $isError
         ], $id);
+    }
+
+    /**
+     * Schedule a pipeline to run at a future time
+     *
+     * Creates a scheduled task that will execute the pipeline after the specified delay.
+     * The cron job (scripts/process-scheduled-tasks.php) processes these tasks.
+     *
+     * @param array $arguments {
+     *   pipeline_slug: string - Required. The pipeline slug to schedule
+     *   delay_seconds: int - Delay in seconds (use this OR scheduled_time)
+     *   scheduled_time: string - ISO 8601 datetime (use this OR delay_seconds)
+     *   input_data: object - Optional context data
+     *   entry_step: string - Optional step to start from
+     *   description: string - Optional description
+     * }
+     * @param mixed $id JSON-RPC request ID
+     */
+    private function schedulePipeline(array $arguments, $id): void {
+        $pipelineSlug = $arguments['pipeline_slug'] ?? null;
+        $delaySeconds = $arguments['delay_seconds'] ?? null;
+        $scheduledTime = $arguments['scheduled_time'] ?? null;
+        $inputData = $arguments['input_data'] ?? [];
+        $entryStep = $arguments['entry_step'] ?? null;
+        $description = $arguments['description'] ?? null;
+
+        if (!$pipelineSlug) {
+            $this->sendJsonRpcError(-32602, 'pipeline_slug is required', $id);
+            return;
+        }
+
+        // Find the pipeline
+        $pipeline = Bean::findOne('pipelines', 'slug = ? AND is_active = 1', [$pipelineSlug]);
+        if (!$pipeline) {
+            $this->sendJsonRpcError(-32602, "Pipeline not found or inactive: {$pipelineSlug}", $id);
+            return;
+        }
+
+        // Calculate scheduled_for datetime
+        $scheduledFor = null;
+        if ($delaySeconds !== null && $delaySeconds > 0) {
+            $scheduledFor = date('Y-m-d H:i:s', time() + (int)$delaySeconds);
+        } elseif ($scheduledTime) {
+            // Parse ISO 8601 or other datetime formats
+            $timestamp = strtotime($scheduledTime);
+            if ($timestamp === false || $timestamp <= time()) {
+                $this->sendJsonRpcError(-32602, "Invalid or past scheduled_time: {$scheduledTime}. Use ISO 8601 format like '2026-01-30T11:30:00-05:00' or relative like '+1 hour'.", $id);
+                return;
+            }
+            $scheduledFor = date('Y-m-d H:i:s', $timestamp);
+        } else {
+            $this->sendJsonRpcError(-32602, 'Either delay_seconds or scheduled_time is required', $id);
+            return;
+        }
+
+        // Validate entry_step if provided
+        if ($entryStep) {
+            $stepExists = Bean::findOne('pipelinesteps',
+                'pipelines_id = ? AND step_name = ? AND is_active = 1',
+                [$pipeline->id, $entryStep]
+            );
+            if (!$stepExists) {
+                $this->sendJsonRpcError(-32602, "Entry step not found: {$entryStep}", $id);
+                return;
+            }
+        }
+
+        // Create the scheduled task
+        $task = Bean::dispense('scheduledtasks');
+        $task->task_type = 'execute_pipeline';
+        $task->payload_json = json_encode([
+            'pipeline_id' => $pipeline->id,
+            'pipeline_slug' => $pipelineSlug,
+            'input_data' => $inputData,
+            'entry_step' => $entryStep,
+            'trigger_source' => 'mcp_scheduled'
+        ]);
+        $task->description = $description ?: "Scheduled via MCP: {$pipeline->name}";
+        $task->scheduled_at = $scheduledFor;
+        $task->status = 'pending';
+        $task->member_id = $this->memberId;
+        $task->created_at = date('Y-m-d H:i:s');
+
+        $taskId = Bean::store($task);
+
+        // Calculate human-readable delay
+        $delayReadable = $this->formatDelay(strtotime($scheduledFor) - time());
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'status' => 'scheduled',
+                    'task_id' => $taskId,
+                    'pipeline' => $pipeline->name,
+                    'pipeline_slug' => $pipelineSlug,
+                    'scheduled_for' => $scheduledFor,
+                    'scheduled_for_utc' => gmdate('Y-m-d H:i:s', strtotime($scheduledFor)) . ' UTC',
+                    'delay' => $delayReadable,
+                    'entry_step' => $entryStep,
+                    'description' => $task->description
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    /**
+     * Format seconds as human-readable delay
+     */
+    private function formatDelay(int $seconds): string {
+        if ($seconds < 60) {
+            return "{$seconds} seconds";
+        } elseif ($seconds < 3600) {
+            $minutes = round($seconds / 60);
+            return "{$minutes} minute" . ($minutes > 1 ? 's' : '');
+        } elseif ($seconds < 86400) {
+            $hours = round($seconds / 3600, 1);
+            return "{$hours} hour" . ($hours > 1 ? 's' : '');
+        } else {
+            $days = round($seconds / 86400, 1);
+            return "{$days} day" . ($days > 1 ? 's' : '');
+        }
     }
 
     /**

@@ -114,7 +114,7 @@
                             <td>
                                 <span class="badge bg-info">
                                     <i class="bi <?= $pipeline['trigger_info']['icon'] ?? 'bi-play' ?>"></i>
-                                    <?= $pipeline['trigger_info']['label'] ?? ucfirst($pipeline['trigger_type']) ?>
+                                    <?= $pipeline['trigger_info']['label'] ?? ucfirst($pipeline['trigger_type'] ?? 'manual') ?>
                                 </span>
                             </td>
                         </tr>

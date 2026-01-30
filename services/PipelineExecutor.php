@@ -1142,6 +1142,22 @@ class PipelineExecutor {
                 return true;
             }
 
+            // Check for entry_step - start execution from a specific step
+            $entryStep = $this->run->entry_step ?? null;
+            if ($entryStep && $this->resumeFromStepIndex === null) {
+                $stepsArray = array_values($this->steps);
+                foreach ($stepsArray as $idx => $step) {
+                    if ($step->step_name === $entryStep) {
+                        $this->resumeFromStepIndex = $idx;
+                        $this->log('info', "Starting from entry_step: {$entryStep} (index {$idx})");
+                        break;
+                    }
+                }
+                if ($this->resumeFromStepIndex === null) {
+                    $this->log('warning', "Entry step not found: {$entryStep}, starting from beginning");
+                }
+            }
+
             // Initialize context from pipeline defaults and trigger data
             $defaultContext = json_decode($this->pipeline->default_context_json ?: '{}', true);
             $triggerData = json_decode($this->run->trigger_data_json ?: '{}', true);
@@ -1187,14 +1203,25 @@ class PipelineExecutor {
      * Initialize step run records for all steps
      */
     private function initializeStepRuns(): void {
-        foreach ($this->steps as $step) {
+        $stepsArray = array_values($this->steps);
+        $entryIndex = $this->resumeFromStepIndex ?? 0;
+
+        foreach ($stepsArray as $idx => $step) {
             $stepRun = Bean::dispense('pipelinestepruns');
             $stepRun->pipelineruns = $this->run;
             $stepRun->pipelinesteps = $step;
             $stepRun->step_name = $step->step_name;
             $stepRun->row = $step->row;
             $stepRun->col = $step->col;
-            $stepRun->status = 'pending';
+
+            // Mark steps before entry_step as skipped
+            if ($idx < $entryIndex) {
+                $stepRun->status = 'skipped';
+                $stepRun->error_message = 'Skipped due to entry_step';
+            } else {
+                $stepRun->status = 'pending';
+            }
+
             $stepRun->attempt_number = 1;
             $stepRun->fault_count = 0;
             $stepRun->input_json = '{}';

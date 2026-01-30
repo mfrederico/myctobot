@@ -363,32 +363,109 @@ class ScheduledTaskProcessor
 
     /**
      * Process execute_pipeline task - trigger a pipeline run
+     *
+     * Payload options:
+     *   pipeline_id    - Required. The pipeline ID to execute
+     *   pipeline_slug  - Alternative to pipeline_id. Pipeline slug to execute
+     *   input_data     - Optional context data to pass to the pipeline
+     *   trigger_source - Optional source identifier (default: 'scheduled_task')
+     *   entry_step     - Optional step name to start execution from (skips earlier steps)
      */
     private function processExecutePipeline($task, array $payload): array
     {
         $pipelineId = $payload['pipeline_id'] ?? null;
+        $pipelineSlug = $payload['pipeline_slug'] ?? null;
         $inputData = $payload['input_data'] ?? [];
         $triggerSource = $payload['trigger_source'] ?? 'scheduled_task';
+        $entryStep = $payload['entry_step'] ?? null;
 
-        if (!$pipelineId) {
-            return ['success' => false, 'error' => 'No pipeline_id specified'];
+        // Find pipeline by ID or slug
+        $pipeline = null;
+        if ($pipelineId) {
+            $pipeline = Bean::load('pipelines', $pipelineId);
+        } elseif ($pipelineSlug) {
+            $pipeline = Bean::findOne('pipelines', 'slug = ?', [$pipelineSlug]);
         }
 
-        $pipeline = Bean::load('pipelines', $pipelineId);
-        if (!$pipeline->id) {
-            return ['success' => false, 'error' => "Pipeline not found: {$pipelineId}"];
+        if (!$pipeline || !$pipeline->id) {
+            return ['success' => false, 'error' => 'Pipeline not found: ' . ($pipelineId ?: $pipelineSlug)];
         }
 
-        // Create a new pipeline run
+        if (!$pipeline->is_active) {
+            return ['success' => false, 'error' => "Pipeline is not active: {$pipeline->name}"];
+        }
+
         require_once dirname(__FILE__) . '/PipelineExecutor.php';
 
         try {
-            $executor = new PipelineExecutor($pipeline, $triggerSource);
-            $result = $executor->execute($inputData);
+            // Count steps (accounting for entry_step if specified)
+            $stepCountSql = 'pipelines_id = ? AND is_active = 1';
+            $stepCountParams = [$pipeline->id];
+
+            if ($entryStep) {
+                // Find the entry step's row to only count from there
+                $entryStepBean = Bean::findOne('pipelinesteps',
+                    'pipelines_id = ? AND step_name = ? AND is_active = 1',
+                    [$pipeline->id, $entryStep]
+                );
+                if (!$entryStepBean) {
+                    return ['success' => false, 'error' => "Entry step not found: {$entryStep}"];
+                }
+                $stepCountSql .= ' AND row >= ?';
+                $stepCountParams[] = $entryStepBean->row;
+            }
+
+            $stepCount = Bean::count('pipelinesteps', $stepCountSql, $stepCountParams);
+            if ($stepCount === 0) {
+                return ['success' => false, 'error' => 'Pipeline has no active steps'];
+            }
+
+            // Create the pipeline run
+            $runUid = 'run-' . bin2hex(random_bytes(8));
+
+            $run = Bean::dispense('pipelineruns');
+            $run->run_uid = $runUid;
+            $run->pipelines = $pipeline;
+            $run->member_id = $task->member_id ?? null;
+            $run->trigger_source = $triggerSource;
+            $run->trigger_data_json = json_encode(array_merge($inputData, [
+                'scheduled_task_id' => $task->id,
+                'entry_step' => $entryStep
+            ]));
+            $run->status = 'pending';
+            $run->context_json = json_encode(array_merge(
+                json_decode($pipeline->default_context_json ?: '{}', true),
+                $inputData
+            ));
+            $run->steps_total = $stepCount;
+            $run->steps_completed = 0;
+            $run->progress_percent = 0;
+            $run->entry_step = $entryStep; // Store for executor
+            $run->created_at = date('Y-m-d H:i:s');
+            $run->updated_at = date('Y-m-d H:i:s');
+
+            $runId = Bean::store($run);
+
+            if ($this->verbose) {
+                echo "       Created pipeline run ID: {$runId} (entry: " . ($entryStep ?: 'start') . ")\n";
+            }
+
+            // Execute the pipeline
+            $executor = new PipelineExecutor($runId);
+            $executor->execute();
+
+            // Reload to get final status
+            $run = Bean::load('pipelineruns', $runId);
 
             return [
-                'success' => $result['success'] ?? false,
-                'result' => $result
+                'success' => $run->status === 'completed',
+                'result' => [
+                    'run_id' => $runId,
+                    'run_uid' => $runUid,
+                    'status' => $run->status,
+                    'entry_step' => $entryStep,
+                    'error_message' => $run->error_message
+                ]
             ];
         } catch (\Exception $e) {
             return [

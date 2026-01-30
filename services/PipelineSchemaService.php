@@ -140,20 +140,51 @@ class PipelineSchemaService
                 'type' => 'ai_agent',
                 'category' => 'ai',
                 'label' => 'AI Agent',
-                'description' => 'Run an AI agent (implementation, verification, or custom). Requires configured agents.',
+                'description' => 'Run an AI agent with full MCP tool access. Can use direct API calls or spawn a full Claude CLI session on a runner.',
                 'config_schema' => [
                     'agent_id' => [
                         'type' => 'integer',
                         'required' => true,
                         'description' => 'ID of the configured AI agent to run'
                     ],
+                    'execution_mode' => [
+                        'type' => 'enum',
+                        'values' => ['api', 'runner'],
+                        'default' => 'api',
+                        'description' => 'Execution mode: "api" for direct Claude API call, "runner" for full Claude CLI session with MCP tools on a workstation'
+                    ],
                     'runner_id' => [
                         'type' => 'integer',
-                        'description' => 'Optional: Specific runner to use (defaults to auto-selection)'
+                        'description' => 'Workstation/runner ID for "runner" mode (uses agent default if not specified)'
                     ],
                     'prompt' => [
                         'type' => 'string',
-                        'description' => 'Prompt template. Supports {context.key} and {step_name.output.key} variables'
+                        'required' => true,
+                        'description' => 'Prompt template for the agent. Supports {context.key}, {step_name.output.key}, and {prev.output} variables'
+                    ],
+                    'system_prompt' => [
+                        'type' => 'string',
+                        'description' => 'Optional system prompt override. If not set, uses agent default or pipeline context.'
+                    ],
+                    'include_context' => [
+                        'type' => 'boolean',
+                        'default' => true,
+                        'description' => 'Include full pipeline context in prompt (useful for decision-making agents)'
+                    ],
+                    'wait_for_completion' => [
+                        'type' => 'boolean',
+                        'default' => true,
+                        'description' => 'For runner mode: wait for job completion (true) or fire-and-forget (false)'
+                    ],
+                    'timeout' => [
+                        'type' => 'integer',
+                        'default' => 600,
+                        'description' => 'Max execution time in seconds (default: 10 minutes)'
+                    ],
+                    'json_output' => [
+                        'type' => 'boolean',
+                        'default' => false,
+                        'description' => 'Expect JSON output from agent (will parse response as JSON)'
                     ]
                 ]
             ],

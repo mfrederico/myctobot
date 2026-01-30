@@ -319,6 +319,121 @@ class Mcppipelines extends Control {
             ]
         ];
 
+        // =====================================================
+        // Inter-Agent Communication Tools
+        // =====================================================
+
+        // Send message to another step's resident Claude session
+        $tools[] = [
+            'name' => 'send_to_step',
+            'description' => 'Send a message/command to another step\'s resident Claude session. Use this for inter-agent communication within a pipeline run.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ],
+                    'step_name' => [
+                        'type' => 'string',
+                        'description' => 'The target step name (e.g., "analyze_data", "fetch_customers")'
+                    ],
+                    'message' => [
+                        'type' => 'string',
+                        'description' => 'The message or command to send to the Claude session'
+                    ]
+                ],
+                'required' => ['run_id', 'step_name', 'message']
+            ]
+        ];
+
+        // Get pipeline run context (shared state)
+        $tools[] = [
+            'name' => 'get_run_context',
+            'description' => 'Get the current pipeline run\'s shared context. This is the shared state between all steps and agents.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ],
+                    'key' => [
+                        'type' => 'string',
+                        'description' => 'Optional specific key to retrieve. If omitted, returns entire context.'
+                    ]
+                ],
+                'required' => ['run_id']
+            ]
+        ];
+
+        // Update pipeline run context (shared state)
+        $tools[] = [
+            'name' => 'update_run_context',
+            'description' => 'Update the pipeline run\'s shared context. Use this to share data between agents.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ],
+                    'key' => [
+                        'type' => 'string',
+                        'description' => 'The context key to update'
+                    ],
+                    'value' => [
+                        'description' => 'The value to set (any JSON-serializable type)'
+                    ]
+                ],
+                'required' => ['run_id', 'key', 'value']
+            ]
+        ];
+
+        // Mark step/job as complete
+        $tools[] = [
+            'name' => 'mark_step_complete',
+            'description' => 'Mark the current step as complete. Use this when you\'ve finished your assigned task in a resident session.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ],
+                    'step_name' => [
+                        'type' => 'string',
+                        'description' => 'The step name to mark complete'
+                    ],
+                    'output' => [
+                        'type' => 'object',
+                        'description' => 'Optional output data from this step'
+                    ],
+                    'summary' => [
+                        'type' => 'string',
+                        'description' => 'Brief summary of what was accomplished'
+                    ]
+                ],
+                'required' => ['run_id', 'step_name']
+            ]
+        ];
+
+        // List active sessions for a run
+        $tools[] = [
+            'name' => 'list_run_sessions',
+            'description' => 'List all active Claude sessions for a pipeline run. Shows which agents are currently running.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ]
+                ],
+                'required' => ['run_id']
+            ]
+        ];
+
         $this->sendJsonRpcResult(['tools' => $tools], $id);
     }
 
@@ -365,6 +480,40 @@ class Mcppipelines extends Control {
         // Handle create_pipeline tool for AI pipeline creation
         if ($toolName === 'create_pipeline') {
             $this->createPipeline($arguments, $id);
+            return;
+        }
+
+        // =====================================================
+        // Inter-Agent Communication Tools
+        // =====================================================
+
+        // Send message to another step's session
+        if ($toolName === 'send_to_step') {
+            $this->sendToStep($arguments, $id);
+            return;
+        }
+
+        // Get pipeline run context
+        if ($toolName === 'get_run_context') {
+            $this->getRunContext($arguments, $id);
+            return;
+        }
+
+        // Update pipeline run context
+        if ($toolName === 'update_run_context') {
+            $this->updateRunContext($arguments, $id);
+            return;
+        }
+
+        // Mark step as complete
+        if ($toolName === 'mark_step_complete') {
+            $this->markStepComplete($arguments, $id);
+            return;
+        }
+
+        // List active sessions for a run
+        if ($toolName === 'list_run_sessions') {
+            $this->listRunSessions($arguments, $id);
             return;
         }
 
@@ -1113,6 +1262,281 @@ class Mcppipelines extends Control {
             'content' => [[
                 'type' => 'text',
                 'text' => json_encode($result, JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    // =====================================================
+    // Inter-Agent Communication Methods
+    // =====================================================
+
+    /**
+     * Send a message to another step's resident Claude session
+     */
+    private function sendToStep(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+        $stepName = $arguments['step_name'] ?? '';
+        $message = $arguments['message'] ?? '';
+
+        if (!$runId || !$stepName || !$message) {
+            $this->sendJsonRpcError(-32602, 'run_id, step_name, and message are required', $id);
+            return;
+        }
+
+        // Load the run
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        // Load pipeline for context
+        $pipeline = Bean::load('pipelines', $run->pipelines_id);
+
+        // Use TmuxService to send message
+        $workspace = \Flight::get('workspace') ?? $_SERVER['WORKSPACE'] ?? 'dev';
+        $issueKey = sprintf('PIPE-%d-%s', $runId, $stepName);
+
+        require_once __DIR__ . '/../services/TmuxService.php';
+        $tmuxService = new \app\services\TmuxService(
+            $run->member_id,
+            $issueKey,
+            null,
+            $workspace
+        );
+
+        if (!$tmuxService->exists()) {
+            $this->sendJsonRpcError(-32602, "No active session found for step '{$stepName}' in run {$runId}", $id);
+            return;
+        }
+
+        $result = $tmuxService->sendMessage($message);
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'success' => $result,
+                    'run_id' => $runId,
+                    'step_name' => $stepName,
+                    'session' => $tmuxService->getActiveSessionName(),
+                    'message' => $result ? 'Message sent to session' : 'Failed to send message'
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => !$result
+        ], $id);
+    }
+
+    /**
+     * Get pipeline run context (shared state)
+     */
+    private function getRunContext(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+        $key = $arguments['key'] ?? null;
+
+        if (!$runId) {
+            $this->sendJsonRpcError(-32602, 'run_id is required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        $context = json_decode($run->context_json ?: '{}', true);
+
+        // If specific key requested, return just that
+        if ($key !== null) {
+            $value = $context[$key] ?? null;
+            $this->sendJsonRpcResult([
+                'content' => [[
+                    'type' => 'text',
+                    'text' => json_encode([
+                        'run_id' => $runId,
+                        'key' => $key,
+                        'value' => $value
+                    ], JSON_PRETTY_PRINT)
+                ]],
+                'isError' => false
+            ], $id);
+            return;
+        }
+
+        // Return entire context
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'run_id' => $runId,
+                    'context' => $context
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    /**
+     * Update pipeline run context (shared state)
+     */
+    private function updateRunContext(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+        $key = $arguments['key'] ?? '';
+        $value = $arguments['value'] ?? null;
+
+        if (!$runId || !$key) {
+            $this->sendJsonRpcError(-32602, 'run_id and key are required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        // Update context
+        $context = json_decode($run->context_json ?: '{}', true);
+        $context[$key] = $value;
+        $run->context_json = json_encode($context);
+        $run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($run);
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'success' => true,
+                    'run_id' => $runId,
+                    'key' => $key,
+                    'message' => 'Context updated'
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    /**
+     * Mark a step as complete
+     */
+    private function markStepComplete(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+        $stepName = $arguments['step_name'] ?? '';
+        $output = $arguments['output'] ?? null;
+        $summary = $arguments['summary'] ?? '';
+
+        if (!$runId || !$stepName) {
+            $this->sendJsonRpcError(-32602, 'run_id and step_name are required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        // Find the aidevjob for this step
+        $issueKey = sprintf('PIPE-%d-%s', $runId, $stepName);
+        $job = Bean::findOne('aidevjobs', 'issue_key = ? AND status = ?', [$issueKey, 'running']);
+
+        if ($job) {
+            $job->status = 'complete';
+            $job->completed_at = date('Y-m-d H:i:s');
+            $job->updated_at = date('Y-m-d H:i:s');
+            if ($output) {
+                $job->last_result_json = json_encode($output);
+            }
+            if ($summary) {
+                $existingResult = json_decode($job->last_result_json ?: '{}', true);
+                $existingResult['summary'] = $summary;
+                $job->last_result_json = json_encode($existingResult);
+            }
+            Bean::store($job);
+        }
+
+        // Update run context with step output
+        if ($output) {
+            $context = json_decode($run->context_json ?: '{}', true);
+            $context[$stepName] = [
+                'output' => $output,
+                'completed_at' => date('Y-m-d H:i:s')
+            ];
+            $run->context_json = json_encode($context);
+            $run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($run);
+        }
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'success' => true,
+                    'run_id' => $runId,
+                    'step_name' => $stepName,
+                    'job_id' => $job ? $job->id : null,
+                    'message' => 'Step marked as complete'
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    /**
+     * List active sessions for a pipeline run
+     */
+    private function listRunSessions(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+
+        if (!$runId) {
+            $this->sendJsonRpcError(-32602, 'run_id is required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        $workspace = \Flight::get('workspace') ?? $_SERVER['WORKSPACE'] ?? 'dev';
+        $pattern = "aoe-{$workspace}-PIPE-{$runId}-";
+
+        // List tmux sessions matching the pattern
+        $sessions = [];
+        exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $output);
+        foreach ($output as $session) {
+            if (str_starts_with($session, $pattern)) {
+                // Extract step name from session
+                // Format: aoe-{workspace}-PIPE-{runId}-{step_name}-{hash}
+                // Note: step_name may contain hyphens (e.g., run_agent -> run-agent)
+                // So we remove the prefix and suffix (hash is always last segment)
+                $remainder = substr($session, strlen($pattern));  // e.g., "run-agent-9238e21a"
+                $lastHyphen = strrpos($remainder, '-');
+                $stepNameSanitized = $lastHyphen !== false
+                    ? substr($remainder, 0, $lastHyphen)   // e.g., "run-agent"
+                    : $remainder;
+                // Convert hyphens back to underscores (original step_name format)
+                $stepName = str_replace('-', '_', $stepNameSanitized);
+
+                $sessions[] = [
+                    'session_name' => $session,
+                    'step_name' => $stepName,
+                    'pattern' => $pattern
+                ];
+            }
+        }
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'run_id' => $runId,
+                    'active_sessions' => $sessions,
+                    'count' => count($sessions)
+                ], JSON_PRETTY_PRINT)
             ]],
             'isError' => false
         ], $id);

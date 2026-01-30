@@ -31,6 +31,12 @@ Flight::route('GET /api/health', function() {
 // Auth validation endpoint - used by external services to validate API keys
 Flight::route('POST /api/auth/validate', ['\app\Api', 'validate']);
 
+// Job status update endpoint - used by pipeline runner scripts to mark jobs complete
+Flight::route('POST /api/jobs/complete', function() {
+    $api = new \app\Api();
+    $api->jobs('complete');
+});
+
 // Workstations/Runners endpoint - list active workstations for job execution
 // Requires workspace in URL and API key from workspace's config [api].api_key
 Flight::route('GET /api/workstations/@workspace', ['\app\Api', 'workstations']);

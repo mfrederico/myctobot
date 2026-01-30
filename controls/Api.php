@@ -270,6 +270,148 @@ class Api extends BaseControls\Control {
     }
 
     /**
+     * Simple job status update endpoint for pipeline runner completion
+     * POST /api/jobs/complete
+     *
+     * Uses Basic auth: job_id:job_uid (from pipeline context)
+     * OR Bearer token: tk_xxx (member's API key)
+     *
+     * Required params: job_id, status (complete|failed)
+     * Optional params: summary, last_output
+     */
+    public function jobs($action = null) {
+        $logger = Flight::get('log');
+
+        if ($action !== 'complete') {
+            Flight::jsonError('Unknown action. Use /api/jobs/complete', 400);
+            return;
+        }
+
+        // Get workspace from request
+        $workspace = $this->getParam('workspace')
+            ?? $_SERVER['HTTP_X_WORKSPACE']
+            ?? $_SERVER['WORKSPACE']
+            ?? null;
+
+        if (!$workspace) {
+            Flight::jsonError('Workspace required', 400);
+            return;
+        }
+
+        // Switch to workspace database
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            Flight::jsonError('Invalid workspace', 400);
+            return;
+        }
+
+        // Authenticate - check for Basic auth (job_id:job_uid) or Bearer token
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $memberId = null;
+        $jobId = null;
+
+        if (preg_match('/^Basic\s+(.+)$/i', $authHeader, $matches)) {
+            // Basic auth: job_id:job_uid (used by bash scripts)
+            $decoded = base64_decode($matches[1]);
+            if ($decoded && strpos($decoded, ':') !== false) {
+                [$jobIdStr, $jobUid] = explode(':', $decoded, 2);
+                $jobId = (int) $jobIdStr;
+
+                // Verify job exists and job_uid matches
+                $job = Bean::load('aidevjobs', $jobId);
+                if (!$job || !$job->id || $job->job_uid !== $jobUid) {
+                    Flight::jsonError('Invalid job credentials', 401);
+                    return;
+                }
+                $memberId = $job->member_id;
+            }
+        } elseif (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $matches)) {
+            // Bearer token: tk_xxx (member's API key)
+            $authResult = ApiAuthService::authenticate('api', 'jobs');
+            if (!$authResult['success']) {
+                Flight::jsonError($authResult['error'], $authResult['code']);
+                return;
+            }
+            $memberId = $authResult['member']->id;
+        }
+
+        // Allow unauthenticated for pipeline jobs (they don't have API keys)
+        // But require job_id parameter
+        $jobId = $jobId ?: (int) $this->getParam('job_id');
+        if (!$jobId) {
+            Flight::jsonError('job_id required', 400);
+            return;
+        }
+
+        // Load and verify the job
+        $job = Bean::load('aidevjobs', $jobId);
+        if (!$job || !$job->id) {
+            Flight::jsonError('Job not found', 404);
+            return;
+        }
+
+        // Get status and optional fields
+        $status = $this->getParam('status') ?? 'complete';
+        $summary = $this->getParam('summary') ?? '';
+        $lastOutput = $this->getParam('last_output') ?? '';
+
+        // Update job
+        $job->status = $status;
+        $job->completed_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+
+        if ($summary) {
+            $job->last_result_json = json_encode(['summary' => $summary]);
+        }
+        if ($lastOutput) {
+            $job->last_output = $lastOutput;
+        }
+
+        Bean::store($job);
+
+        $logger->info('Job status updated via API', [
+            'job_id' => $jobId,
+            'status' => $status,
+            'workspace' => $workspace
+        ]);
+
+        // If this is a pipeline job that completed, trigger pipeline continuation
+        $pipelineContinued = false;
+        if ($status === 'complete' && str_starts_with($job->issue_key, 'PIPE-')) {
+            // Extract run ID from issue_key (format: PIPE-{run_id}-{hash})
+            $parts = explode('-', $job->issue_key);
+            if (count($parts) >= 2) {
+                $runId = (int) $parts[1];
+                $run = Bean::load('pipelineruns', $runId);
+
+                if ($run && $run->id && $run->status === 'running') {
+                    $logger->info('Triggering pipeline continuation', [
+                        'run_id' => $runId,
+                        'job_id' => $jobId
+                    ]);
+
+                    // Continue the pipeline in background
+                    $scriptPath = Flight::get('flight.base_path') . '/scripts/cron-scheduled-tasks.php';
+                    $cmd = sprintf(
+                        'php %s --workspace=%s --continue-run=%d > /dev/null 2>&1 &',
+                        escapeshellarg($scriptPath),
+                        escapeshellarg($workspace),
+                        $runId
+                    );
+                    exec($cmd);
+                    $pipelineContinued = true;
+                }
+            }
+        }
+
+        Flight::jsonSuccess([
+            'job_id' => $jobId,
+            'status' => $status,
+            'updated_at' => $job->updated_at,
+            'pipeline_continued' => $pipelineContinued
+        ]);
+    }
+
+    /**
      * Validate an API token for external services
      * POST /api/auth/validate
      *

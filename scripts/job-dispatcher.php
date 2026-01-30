@@ -26,6 +26,7 @@ $options = getopt('', [
     'provider:',  // jira or github
     'aoe-session:',  // AOE session ID (passed from TmuxService)
     'workstation:',  // JSON workstation config: {"host":"...", "user":"...", "port":22}
+    'prompt-file:',  // Pre-built prompt file (for pipeline triggers)
     'attach',
     'repo-path:',
     'print',
@@ -101,11 +102,20 @@ $issueKey = $options['issue'];
 $memberId = isset($options['member']) ? (int)$options['member'] : 3;
 $jobId = $options['job-id'] ?? null;
 $repoIdParam = isset($options['repo']) ? (int)$options['repo'] : null;
-$provider = $options['provider'] ?? 'jira';  // jira or github
+$provider = $options['provider'] ?? 'jira';  // jira, github, or pipeline
 $autoAttach = isset($options['attach']);
 $usePrintMode = isset($options['print']);
 $dryRun = isset($options['dry-run']);
-$skipJira = isset($options['skip-jira']) || $provider === 'github';  // Skip Jira if using GitHub
+$residentMode = false;  // Set true for pipeline jobs with resident Claude
+$pipelineStepName = null;  // For session naming: aoe-{workspace}-PIPE-{run_id}-{step_name}
+
+// Detect pipeline-triggered jobs by PIPE- prefix in issue_key
+$isPipelineJob = str_starts_with($issueKey, 'PIPE-');
+if ($isPipelineJob) {
+    $provider = 'pipeline';
+}
+
+$skipJira = isset($options['skip-jira']) || $provider === 'github' || $provider === 'pipeline';
 $repoPath = $options['repo-path'] ?? null;
 
 // Parse workstation config (for running Claude on remote workstation via SSH)
@@ -277,6 +287,11 @@ if ($provider === 'github') {
         echo "Error fetching GitHub issue: " . $e->getMessage() . "\n";
         exit(1);
     }
+} elseif ($isPipelineJob) {
+    echo "Pipeline-triggered job: {$issueKey}\n";
+    $summary = "Pipeline Task {$issueKey}";
+    $description = "Task triggered by pipeline execution";
+    // For pipeline jobs, the full context is in the prompt-file
 } elseif ($skipJira) {
     echo "Skipping issue API calls (--skip-jira flag)\n";
     $summary = "Test ticket {$issueKey}";
@@ -374,9 +389,71 @@ if (!$member || !$member->id) {
 // Connect to user's database context for repoconnections, jiraboards, aiagents
 UserDatabaseService::connect($memberId);
 
-// Query repoconnections using Bean (user SQLite database)
-// Use specific repo ID if provided (from ai-dev-{id} label), otherwise use first enabled
-if ($repoIdParam) {
+// Pipeline jobs don't require a repo - they get agent directly from aidevjobs
+$repoBean = null;
+$agentConfig = null;
+$agentBean = null;
+$githubToken = '';
+$repoOwner = '';
+$repoName = '';
+$defaultBranch = 'main';
+$cloneUrl = '';
+
+// Initialize job_uid for later use
+$jobUid = '';
+
+if ($isPipelineJob) {
+    echo "Pipeline job - loading agent from job record...\n";
+
+    // Load the existing job record to get agent_id and job_uid
+    $existingJob = Bean::findOne('aidevjobs', 'issue_key = ?', [$issueKey]);
+    if ($existingJob) {
+        $jobUid = $existingJob->job_uid ?? '';  // Store for API auth later
+
+        if ($existingJob->aiagents_id) {
+            $agentBean = Bean::load('aiagents', $existingJob->aiagents_id);
+            if ($agentBean && $agentBean->id && $agentBean->is_active) {
+                $agentConfig = [
+                    'id' => $agentBean->id,
+                    'name' => $agentBean->name,
+                    'provider' => $agentBean->provider ?: 'claude_cli',
+                    'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
+                    'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
+                    'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true),
+                    'runners_id' => $agentBean->runners_id ?? null
+                ];
+                echo "  Agent: {$agentConfig['name']}\n";
+            }
+        }
+
+        // Check for resident mode - Claude stays alive for pipeline duration
+        $queueMeta = json_decode($existingJob->queue_metadata ?? '{}', true);
+        $residentMode = $queueMeta['resident_mode'] ?? false;
+        $pipelineStepName = $queueMeta['step_name'] ?? null;
+
+        if ($residentMode) {
+            // Resident mode: override --print flag to keep Claude interactive
+            $usePrintMode = false;
+            echo "  Mode: Resident (Claude stays alive for pipeline)\n";
+        } else {
+            echo "  Mode: Task (single execution)\n";
+        }
+        if ($pipelineStepName) {
+            echo "  Step: {$pipelineStepName}\n";
+        }
+    }
+
+    // Try to get GitHub token from settings anyway (might be needed for some MCP servers)
+    $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+    if ($githubSetting && !empty($githubSetting->setting_value)) {
+        try {
+            $encryption = new EncryptionService();
+            $githubToken = $encryption->decrypt($githubSetting->setting_value);
+        } catch (Exception $e) {
+            // Not critical for pipeline jobs
+        }
+    }
+} elseif ($repoIdParam) {
     echo "  Using specific repo ID: {$repoIdParam}\n";
     $repoBean = Bean::load('repoconnections', $repoIdParam);
     if (!$repoBean || !$repoBean->id) {
@@ -391,11 +468,10 @@ if ($repoIdParam) {
     }
 }
 
-// Load agent configuration for this repo (via association)
-$agentConfig = null;
-$agentBean = $repoBean->aiagents;
-if ($agentBean && $agentBean->id) {
-    // Agent found via association
+// For non-pipeline jobs, load agent from repo association and configure repo
+if (!$isPipelineJob && $repoBean) {
+    // Load agent configuration for this repo (via association)
+    $agentBean = $repoBean->aiagents;
     if ($agentBean && $agentBean->id && $agentBean->is_active) {
         $agentConfig = [
             'id' => $agentBean->id,
@@ -411,6 +487,41 @@ if ($agentBean && $agentBean->id) {
             $providerLabel .= ' + Ollama';
         }
         echo "  Agent: {$agentConfig['name']} ({$providerLabel})\n";
+    }
+
+    // Extract repo settings
+    $repoOwner = $repoBean->repo_owner;
+    $repoName = $repoBean->repo_name;
+    $defaultBranch = $repoBean->default_branch ?? 'main';
+    $cloneUrl = $repoBean->clone_url;
+
+    // Get GitHub token - check repoconnections first
+    if (!empty($repoBean->access_token)) {
+        try {
+            $encryption = new EncryptionService();
+            $githubToken = $encryption->decrypt($repoBean->access_token);
+            echo "  GitHub Token (from repo): ****" . substr($githubToken, -4) . "\n";
+        } catch (Exception $e) {
+            echo "  Warning: Could not decrypt repo GitHub token\n";
+        }
+    }
+}
+
+// Fall back to enterprisesettings.github_token if no token yet
+if (empty($githubToken)) {
+    $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
+    if ($githubSetting && !empty($githubSetting->setting_value)) {
+        try {
+            $encryption = new EncryptionService();
+            $githubToken = $encryption->decrypt($githubSetting->setting_value);
+            if (!$isPipelineJob) {
+                echo "  GitHub Token (from settings): ****" . substr($githubToken, -4) . "\n";
+            }
+        } catch (Exception $e) {
+            if (!$isPipelineJob) {
+                echo "  Warning: Could not decrypt settings GitHub token\n";
+            }
+        }
     }
 }
 
@@ -428,117 +539,78 @@ if (!$agentConfig) {
             'runners_id' => $defaultAgent->runners_id ?? null
         ];
         echo "  Agent: {$agentConfig['name']} (default)\n";
-        $agentBean = $defaultAgent;  // For later use
+        $agentBean = $defaultAgent;
     } else {
         echo "  Agent: None (using built-in defaults)\n";
     }
 }
 
-$repoOwner = $repoBean->repo_owner;
-$repoName = $repoBean->repo_name;
-$defaultBranch = $repoBean->default_branch ?? 'main';
-$cloneUrl = $repoBean->clone_url;
-
-// Get GitHub token - check repoconnections first, then fall back to enterprisesettings
-$githubToken = '';
-if (!empty($repoBean->access_token)) {
-    try {
-        $encryption = new EncryptionService();
-        $githubToken = $encryption->decrypt($repoBean->access_token);
-        echo "  GitHub Token (from repo): ****" . substr($githubToken, -4) . "\n";
-    } catch (Exception $e) {
-        echo "  Warning: Could not decrypt repo GitHub token\n";
-    }
-}
-// Fall back to enterprisesettings.github_token if repo doesn't have one
-if (empty($githubToken)) {
-    $githubSetting = Bean::findOne('enterprisesettings', 'setting_key = ?', ['github_token']);
-    if ($githubSetting && !empty($githubSetting->setting_value)) {
-        try {
-            $encryption = new EncryptionService();
-            $githubToken = $encryption->decrypt($githubSetting->setting_value);
-            echo "  GitHub Token (from settings): ****" . substr($githubToken, -4) . "\n";
-        } catch (Exception $e) {
-            echo "  Warning: Could not decrypt settings GitHub token\n";
-        }
-    }
-}
-
-// ============================================
-// Get Jira Credentials
-// ============================================
-$jiraHost = "https://api.atlassian.com/ex/jira/{$cloudId}";
+// Jira credentials and repo cloning - only for non-pipeline jobs
+$jiraHost = '';
 $jiraEmail = '';
 $jiraToken = '';
 $jiraOAuthToken = '';
 $jiraSiteUrl = '';
-
-try {
-    $atlassianToken = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1) AND cloud_uid = ?', [$memberId, $cloudId]);
-    if ($atlassianToken) {
-        $jiraEmail = $atlassianToken->email ?? '';
-        // Get the site URL for ticket links
-        $siteUrl = $atlassianToken->site_url ?? '';
-        if ($siteUrl) {
-            $jiraSiteUrl = rtrim($siteUrl, '/');
-        }
-        // Get OAuth token for API calls
-        $jiraOAuthToken = AtlassianAuth::getValidToken($memberId, $cloudId);
-        echo "  Jira Host: {$jiraHost}\n";
-        echo "  Jira Email: {$jiraEmail}\n";
-        if ($jiraSiteUrl) {
-            echo "  Jira Site: {$jiraSiteUrl}\n";
-        }
-    }
-} catch (Exception $e) {
-    echo "  Warning: Could not get Jira credentials: " . $e->getMessage() . "\n";
-}
-
-echo "  Repo: {$repoOwner}/{$repoName}\n";
-echo "  Branch: {$defaultBranch}\n\n";
-
-// ============================================
-// Pre-clone the repository
-// ============================================
-echo "Cloning repository...\n";
 $repoDir = "{$workDir}/repo";
-if (!empty($githubToken)) {
-    $cloneCmd = "git clone https://{$githubToken}@github.com/{$repoOwner}/{$repoName}.git " . escapeshellarg($repoDir) . " 2>&1";
-    exec($cloneCmd, $cloneOutput, $cloneExitCode);
-    if ($cloneExitCode === 0) {
-        echo "  Repository cloned successfully\n";
-        // Checkout default branch
-        exec("git -C " . escapeshellarg($repoDir) . " checkout " . escapeshellarg($defaultBranch) . " 2>&1");
+
+if (!$isPipelineJob) {
+    // Get Jira Credentials
+    $jiraHost = "https://api.atlassian.com/ex/jira/{$cloudId}";
+    try {
+        $atlassianToken = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1) AND cloud_uid = ?', [$memberId, $cloudId]);
+        if ($atlassianToken) {
+            $jiraEmail = $atlassianToken->email ?? '';
+            $siteUrl = $atlassianToken->site_url ?? '';
+            if ($siteUrl) {
+                $jiraSiteUrl = rtrim($siteUrl, '/');
+            }
+            $jiraOAuthToken = AtlassianAuth::getValidToken($memberId, $cloudId);
+            echo "  Jira Host: {$jiraHost}\n";
+            echo "  Jira Email: {$jiraEmail}\n";
+            if ($jiraSiteUrl) {
+                echo "  Jira Site: {$jiraSiteUrl}\n";
+            }
+        }
+    } catch (Exception $e) {
+        echo "  Warning: Could not get Jira credentials: " . $e->getMessage() . "\n";
+    }
+
+    echo "  Repo: {$repoOwner}/{$repoName}\n";
+    echo "  Branch: {$defaultBranch}\n\n";
+
+    // Pre-clone the repository
+    echo "Cloning repository...\n";
+    if (!empty($githubToken) && !empty($repoOwner) && !empty($repoName)) {
+        $cloneCmd = "git clone https://{$githubToken}@github.com/{$repoOwner}/{$repoName}.git " . escapeshellarg($repoDir) . " 2>&1";
+        exec($cloneCmd, $cloneOutput, $cloneExitCode);
+        if ($cloneExitCode === 0) {
+            echo "  Repository cloned successfully\n";
+            exec("git -C " . escapeshellarg($repoDir) . " checkout " . escapeshellarg($defaultBranch) . " 2>&1");
+        } else {
+            echo "  Warning: Clone failed - " . implode("\n", $cloneOutput) . "\n";
+        }
     } else {
-        echo "  Warning: Clone failed - " . implode("\n", $cloneOutput) . "\n";
+        echo "  Warning: No GitHub token or repo info, cannot pre-clone\n";
+    }
+
+    // Add MyCTOBot generated files to .gitignore
+    if (is_dir($repoDir)) {
+        $gitignorePath = "{$repoDir}/.gitignore";
+        $ignorePatterns = ['# MyCTOBot generated files', '.mcp.json', '.claude/', 'send-checkpoint.sh', 'ssh-claude.sh', ''];
+        $existingIgnore = file_exists($gitignorePath) ? file_get_contents($gitignorePath) : '';
+        $newPatterns = [];
+        foreach ($ignorePatterns as $pattern) {
+            if (!empty($pattern) && strpos($existingIgnore, $pattern) === false) {
+                $newPatterns[] = $pattern;
+            }
+        }
+        if (!empty($newPatterns)) {
+            file_put_contents($gitignorePath, "\n" . implode("\n", $newPatterns) . "\n", FILE_APPEND);
+            echo "  Added MyCTOBot patterns to .gitignore\n";
+        }
     }
 } else {
-    echo "  Warning: No GitHub token, cannot pre-clone\n";
-}
-
-// Add MyCTOBot generated files to .gitignore (prevents accidental commits)
-if (is_dir($repoDir)) {
-    $gitignorePath = "{$repoDir}/.gitignore";
-    $ignorePatterns = [
-        '# MyCTOBot generated files',
-        '.mcp.json',
-        '.claude/',
-        'send-checkpoint.sh',
-        'ssh-claude.sh',
-        ''
-    ];
-    $existingIgnore = file_exists($gitignorePath) ? file_get_contents($gitignorePath) : '';
-    $newPatterns = [];
-    foreach ($ignorePatterns as $pattern) {
-        if (!empty($pattern) && strpos($existingIgnore, $pattern) === false) {
-            $newPatterns[] = $pattern;
-        }
-    }
-    if (!empty($newPatterns)) {
-        $appendContent = "\n" . implode("\n", $newPatterns) . "\n";
-        file_put_contents($gitignorePath, $appendContent, FILE_APPEND);
-        echo "  Added MyCTOBot patterns to .gitignore\n";
-    }
+    echo "  Pipeline job - skipping repo clone\n";
 }
 echo "\n";
 
@@ -740,8 +812,17 @@ $orchestrator = new \app\services\AIDevAgentOrchestrator(
     $agentConfig['name'] ?? 'AI Developer'  // agent name
 );
 
-// Build prompt - always use orchestrator pattern for better verification
-$prompt = $orchestrator->buildOrchestratorPrompt();
+// Check if a pre-built prompt was provided (from pipeline execution)
+$prebuiltPromptFile = $options['prompt-file'] ?? null;
+if ($prebuiltPromptFile && file_exists($prebuiltPromptFile)) {
+    echo "  Using pre-built prompt from: {$prebuiltPromptFile}\n";
+    $prompt = file_get_contents($prebuiltPromptFile);
+    // Clean up the temp file
+    unlink($prebuiltPromptFile);
+} else {
+    // Build prompt - always use orchestrator pattern for better verification
+    $prompt = $orchestrator->buildOrchestratorPrompt();
+}
 
 // Save prompt
 $promptFile = "{$workDir}/prompt.txt";
@@ -750,8 +831,29 @@ echo "  Prompt saved to: {$promptFile}\n";
 echo "  Prompt length: " . strlen($prompt) . " chars\n\n";
 
 // Create CLAUDE.md for the session (provider-aware)
-$ticketType = ($provider === 'github') ? 'GitHub issue' : 'Jira ticket';
-if ($provider === 'github') {
+$ticketType = ($provider === 'github') ? 'GitHub issue' : (($provider === 'pipeline') ? 'Pipeline task' : 'Jira ticket');
+if ($provider === 'pipeline') {
+    $claudeMd = <<<MD
+# Pipeline Agent Session
+
+Task ID: {$issueKey}
+
+## Task Description
+{$summary}
+
+## Environment
+- Work directory: {$workDir}
+
+## MCP Tools Available
+- playwright MCP - For browser testing and automation
+- myctobot MCP - For scheduling pipelines and accessing the pipeline API
+
+## Instructions
+Follow the prompt in prompt.txt to complete the task.
+
+Your output will be captured and passed back to the pipeline as the step result.
+MD;
+} elseif ($provider === 'github') {
     $claudeMd = <<<MD
 # Local AI Developer Session
 
@@ -835,7 +937,27 @@ $mcpServers = (object) [
 $enabledMcpServers = ['playwright'];
 $mcpProviderInfo = '';
 
-if ($provider === 'github') {
+if ($provider === 'pipeline') {
+    // Pipeline provider - use Pipelines MCP for scheduling/spawning other pipelines
+    $mcpWorkspace = $workspace ?? 'default';
+    $pipelinesUrl = "https://{$mcpWorkspace}.myctobot.ai/mcp/pipelines";
+
+    // Use the member's API token for pipeline MCP auth
+    $memberApiToken = $member->api_token ?? '';
+    if ($memberApiToken) {
+        $mcpServers->pipelines = (object) [
+            'type' => 'http',
+            'url' => $pipelinesUrl,
+            'headers' => (object) [
+                'Authorization' => "Bearer {$memberApiToken}"
+            ]
+        ];
+        $enabledMcpServers[] = 'pipelines';
+        $mcpProviderInfo = "Pipelines MCP: HTTP transport ({$pipelinesUrl})";
+    } else {
+        echo "  Warning: No API token for member, pipelines MCP not available\n";
+    }
+} elseif ($provider === 'github') {
     // GitHub provider - use GitHub MCP (stdio via gh CLI or npx)
     // The GitHub MCP server uses the GH_TOKEN from environment
     $mcpServers->github = (object) [
@@ -868,9 +990,11 @@ if ($provider === 'github') {
 }
 
 // Add MyCTOBot Jobs MCP for completion callbacks
+// Use $jobUid (from DB) if available, otherwise fall back to $jobId (command line)
 $mcpWorkspace = $workspace ?? 'default';
 $mcpJobsUrl = "https://{$mcpWorkspace}.myctobot.ai/mcp/jobs";
-$mcpJobsCredentials = base64_encode("{$memberId}:{$jobId}");
+$mcpJobUidForAuth = $jobUid ?: $jobId ?: 'unknown';
+$mcpJobsCredentials = base64_encode("{$memberId}:{$mcpJobUidForAuth}");
 $mcpServers->myctobot = (object) [
     'type' => 'http',
     'url' => $mcpJobsUrl,
@@ -879,7 +1003,7 @@ $mcpServers->myctobot = (object) [
     ]
 ];
 $enabledMcpServers[] = 'myctobot';
-echo "  MyCTOBot Jobs MCP: {$mcpJobsUrl}\n";
+echo "  MyCTOBot Jobs MCP: {$mcpJobsUrl} (job_uid: {$mcpJobUidForAuth})\n";
 
 // Merge agent's MCP servers if configured
 if ($agentConfig && !empty($agentConfig['mcp_servers'])) {
@@ -1066,9 +1190,10 @@ echo "SHOPIFY_CLI_THEME_TOKEN: ****\${SHOPIFY_CLI_THEME_TOKEN: -4}"
 SHOPIFY_ECHO;
 }
 
-// Get API key for cleanup endpoint auth
-$webhookUrl = Flight::get('baseurl') ?? 'https://myctobot.ai';
+// Get base URL and API key from config
+$baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? "https://{$workspace}.myctobot.ai";
 $apiKey = Flight::get('api.api_key') ?? '';
+$webhookUrl = $baseUrl;
 
 // Hook environment variables for multi-workspace support
 $hookEnvSection = <<<HOOK_ENV
@@ -1076,7 +1201,9 @@ $hookEnvSection = <<<HOOK_ENV
 # MyCTOBot Hook Environment Variables (for multi-workspace hooks)
 export MYCTOBOT_APP_ROOT="{$baseDir}"
 export MYCTOBOT_WORKSPACE="{$workspace}"
+export MYCTOBOT_BASEURL="{$baseUrl}"
 export MYCTOBOT_JOB_ID="{$jobId}"
+export MYCTOBOT_JOB_UID="{$jobUid}"
 export MYCTOBOT_ISSUE_KEY="{$issueKey}"
 export MYCTOBOT_MEMBER_ID="{$memberId}"
 export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
@@ -1104,7 +1231,18 @@ if (file_exists($finishJobSrc)) {
 $providerEnvSection = '';
 $providerEchoSection = '';
 
-if ($provider === 'github') {
+if ($provider === 'pipeline') {
+    // Pipeline provider - minimal environment, no Jira/GitHub specifics needed
+    $providerEnvSection = <<<PROVIDER_ENV
+export MYCTOBOT_PROVIDER="pipeline"
+export GITHUB_TOKEN="{$githubToken}"
+export GH_TOKEN="{$githubToken}"
+PROVIDER_ENV;
+
+    $providerEchoSection = <<<PROVIDER_ECHO
+echo "Provider: Pipeline"
+PROVIDER_ECHO;
+} elseif ($provider === 'github') {
     // GitHub provider - only GitHub token needed
     $providerEnvSection = <<<PROVIDER_ENV
 export GITHUB_TOKEN="{$githubToken}"
@@ -1229,20 +1367,27 @@ echo ""
 echo "==========================================="
 echo ""
 
-# Repo was pre-cloned by PHP, verify it exists
-if [[ ! -d "{$workDir}/repo" ]]; then
-    echo "ERROR: Repository not found at {$workDir}/repo"
-    echo "Clone may have failed. Check the startup logs."
-    exit 1
+# For pipeline jobs, work directory is the root (no repo needed)
+# For Jira/GitHub jobs, verify repo was cloned
+WORK_DIR="{$workDir}"
+if [[ "\$MYCTOBOT_PROVIDER" == "pipeline" ]]; then
+    echo "Pipeline job - working in {$workDir}"
+    # No repo needed for pipeline jobs
+else
+    if [[ ! -d "{$workDir}/repo" ]]; then
+        echo "ERROR: Repository not found at {$workDir}/repo"
+        echo "Clone may have failed. Check the startup logs."
+        exit 1
+    fi
+    WORK_DIR="{$workDir}/repo"
+    # Copy support files to repo directory (Claude runs from there after cd repo)
+    cp -f "{$workDir}/.mcp.json" "{$workDir}/repo/.mcp.json" 2>/dev/null || true
+    cp -f "{$workDir}/send-checkpoint.sh" "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
+    chmod +x "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
 fi
 mkdir -p "{$workDir}/attachments" 2>/dev/null
 
-# Copy support files to repo directory (Claude runs from there after cd repo)
-cp -f "{$workDir}/.mcp.json" "{$workDir}/repo/.mcp.json" 2>/dev/null || true
-cp -f "{$workDir}/send-checkpoint.sh" "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
-chmod +x "{$workDir}/repo/send-checkpoint.sh" 2>/dev/null || true
-
-cd {$workDir}
+cd "\$WORK_DIR"
 
 BASH;
 
@@ -1263,7 +1408,7 @@ cleanup_labels() {
     fi
 
     # Use main domain to avoid subdomain redirect losing POST data
-    local api_url="https://myctobot.ai/jobs/cleanup?workspace=$MYCTOBOT_WORKSPACE"
+    local api_url="$MYCTOBOT_BASEURL/jobs/cleanup?workspace=$MYCTOBOT_WORKSPACE"
     local response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
         -H "X-API-Key: $MYCTOBOT_API_KEY" \
         -H "Content-Type: application/x-www-form-urlencoded" \
@@ -1303,6 +1448,17 @@ do_cleanup() {
 
     echo ""
     echo "=== Session Cleanup ==="
+
+    # For pipeline jobs, mark the job as complete via API
+    if [[ "$MYCTOBOT_PROVIDER" == "pipeline" ]]; then
+        echo "Marking pipeline job as complete..."
+        # Use Basic auth with job_id:job_uid for verification
+        local auth=$(echo -n "$MYCTOBOT_JOB_ID:$MYCTOBOT_JOB_UID" | base64)
+        curl -s -X POST "$MYCTOBOT_BASEURL/api/jobs/complete" \
+            -H "Authorization: Basic $auth" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "workspace=$MYCTOBOT_WORKSPACE&job_id=$MYCTOBOT_JOB_ID&status=complete" 2>/dev/null || true
+    fi
 
     # Remove job labels via API
     # cleanup_labels
@@ -1386,6 +1542,24 @@ ps -eo pid,ppid,args | grep -E "playwright|mcp-server-playwright" | awk '\$2 == 
     kill \$pid 2>/dev/null || true
 done
 BASH;
+
+    // Only kill tmux session if NOT in resident mode
+    if (!$residentMode) {
+        $envScript .= <<<'BASH'
+
+# Kill the tmux session to clean up (works for both local and remote SSH)
+echo "Terminating tmux session: $AOE_SESSION_NAME"
+tmux kill-session -t "$AOE_SESSION_NAME" 2>/dev/null || exit 0
+BASH;
+    } else {
+        $envScript .= <<<'BASH'
+
+# RESIDENT MODE: Session stays alive for pipeline duration
+echo "Resident mode - Claude session stays alive"
+echo "Pipeline will send more commands as needed"
+echo "Session: $AOE_SESSION_NAME"
+BASH;
+    }
 } else {
     // Interactive TUI mode - pass prompt as argument (not -p flag) to show TUI
     $logFile = "{$workDir}/session.log";
@@ -1423,12 +1597,32 @@ echo "=== Claude Session Ended ==="
 # Claude handles Jira/GitHub updates via MCP tools (job_complete, add_comment)
 BASH;
 
-    // Final cleanup - session ends immediately after Claude exits
+    // Final cleanup - session ends immediately after Claude exits (unless resident mode)
     $envScript .= <<<CLEANUP_BASH
 
 # Trigger cleanup (trap will handle it, but call explicitly for immediate feedback)
 do_cleanup
 CLEANUP_BASH;
+
+    // Only kill tmux session if NOT in resident mode
+    if (!$residentMode) {
+        $envScript .= <<<'BASH'
+
+# Kill the tmux session to clean up (works for both local and remote SSH)
+echo "Terminating tmux session: $AOE_SESSION_NAME"
+tmux kill-session -t "$AOE_SESSION_NAME" 2>/dev/null || exit 0
+BASH;
+    } else {
+        $envScript .= <<<'BASH'
+
+# RESIDENT MODE: Session stays alive for pipeline duration
+echo ""
+echo "=== Resident Claude Session Ready ==="
+echo "Session: $AOE_SESSION_NAME"
+echo "Pipeline will send additional commands as needed."
+echo "Type commands or wait for pipeline instructions..."
+BASH;
+    }
 }
 
 $envScriptPath = "{$workDir}/run-claude.sh";

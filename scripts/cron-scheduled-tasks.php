@@ -31,7 +31,7 @@ $baseDir = dirname($scriptDir);
 chdir($baseDir);
 
 // Parse command line options
-$options = getopt('', ['verbose', 'dry-run', 'script', 'workspace:', 'help']);
+$options = getopt('', ['verbose', 'dry-run', 'script', 'workspace:', 'continue-run:', 'help']);
 
 if (isset($options['help'])) {
     echo "MyCTOBot Scheduled Tasks Processor\n\n";
@@ -70,6 +70,57 @@ use \app\Bean;
 
 // Load the service
 require_once $baseDir . '/services/ScheduledTaskProcessor.php';
+require_once $baseDir . '/services/PipelineExecutor.php';
+
+// Handle --continue-run option (used by job completion webhook to resume pipelines)
+$continueRunId = isset($options['continue-run']) ? (int) $options['continue-run'] : null;
+if ($continueRunId && $specificWorkspace) {
+    if ($verbose) {
+        echo "Continuing pipeline run {$continueRunId} in workspace {$specificWorkspace}\n";
+    }
+
+    // Switch to workspace database
+    \app\WorkspaceResolver::switchDatabase($specificWorkspace);
+
+    // Load the run
+    $run = Bean::load('pipelineruns', $continueRunId);
+    if (!$run || !$run->id) {
+        echo "Error: Pipeline run {$continueRunId} not found\n";
+        exit(1);
+    }
+
+    if ($run->status !== 'running') {
+        if ($verbose) {
+            echo "Run {$continueRunId} is not in 'running' status (current: {$run->status}), skipping\n";
+        }
+        exit(0);
+    }
+
+    // Load the pipeline
+    $pipeline = Bean::load('pipelines', $run->pipelines_id);
+    if (!$pipeline || !$pipeline->id) {
+        echo "Error: Pipeline not found for run {$continueRunId}\n";
+        exit(1);
+    }
+
+    // Continue execution
+    $executor = new \app\services\PipelineExecutor($pipeline, $run->member_id, $specificWorkspace);
+
+    // Decode context from run
+    $context = json_decode($run->context_json, true) ?: [];
+
+    // Continue from current step
+    $result = $executor->continueRun($run, $context);
+
+    if ($verbose) {
+        echo "Pipeline continuation result: " . ($result['success'] ? 'success' : 'failed') . "\n";
+        if (isset($result['error'])) {
+            echo "Error: {$result['error']}\n";
+        }
+    }
+
+    exit($result['success'] ? 0 : 1);
+}
 
 try {
     // Discover workspaces to process

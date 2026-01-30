@@ -16,6 +16,7 @@ use \app\Bean;
 use \RedBeanPHP\R as R;
 use \app\services\AnthropicKeyService;
 use \app\services\LLMProviders\OllamaProvider;
+use \app\services\TmuxService;
 
 /**
  * Exception thrown when a pipeline pauses for user input in interactive mode
@@ -47,6 +48,7 @@ class PipelineExecutor {
     private $steps = [];
     private array $context = [];
     private array $stepOutputs = [];
+    private ?array $previousStepOutput = null;  // For {prev.output} substitution
     private $logger;
 
     // Column name mappings
@@ -1975,6 +1977,7 @@ class PipelineExecutor {
 
                 // Store output for reference by other steps
                 $this->stepOutputs[$step->step_name] = $stepOutput;
+                $this->previousStepOutput = $stepOutput;  // Track for {prev.xxx} substitution
 
                 // Merge output into context if configured
                 if (!empty($stepOutput)) {
@@ -2037,6 +2040,9 @@ class PipelineExecutor {
                 return $this->executeScript($config, $input, $timeout);
 
             case 'ai_agent':
+                // Pass step info for session naming
+                $config['_step_name'] = $step->step_name;
+                $config['_step_id'] = $step->id;
                 return $this->executeAIAgent($config, $input, $timeout);
 
             case 'webhook_out':
@@ -2333,10 +2339,12 @@ class PipelineExecutor {
      */
     private function executeAIAgent(array $config, array $input, int $timeout): array {
         $agentId = $config['agent_id'] ?? null;
+        $executionMode = $config['execution_mode'] ?? 'api';
         $prompt = $config['prompt'] ?? '';
         $systemPrompt = $config['system_prompt'] ?? 'You are a helpful assistant processing pipeline data. Analyze the input and respond with structured JSON when appropriate.';
         $maxTokens = (int)($config['max_tokens'] ?? 4096);
-        $includeInput = $config['include_input'] ?? true;
+        $includeContext = $config['include_context'] ?? $config['include_input'] ?? true;
+        $jsonOutput = $config['json_output'] ?? false;
 
         if (empty($agentId)) {
             return ['success' => false, 'error' => 'Agent ID required'];
@@ -2348,64 +2356,345 @@ class PipelineExecutor {
             return ['success' => false, 'error' => 'Agent not found'];
         }
 
-        // Get agent's provider configuration
-        $provider = $agent->provider ?: 'claude_api';
-        $providerConfig = json_decode($agent->provider_config ?: '{}', true);
-
         // Substitute variables in prompts
         $prompt = $this->substituteVariables($prompt);
         $systemPrompt = $this->substituteVariables($systemPrompt);
 
-        // Build user message with input data if requested
+        // Build user message with context data if requested
         $userMessage = $prompt;
-        if ($includeInput && !empty($input)) {
+        if ($includeContext && !empty($input)) {
             $inputJson = json_encode($input, JSON_PRETTY_PRINT);
-            $userMessage = "{$prompt}\n\n## Input Data\n```json\n{$inputJson}\n```";
+            $userMessage = "{$prompt}\n\n## Pipeline Context\n```json\n{$inputJson}\n```";
+        }
+
+        // For runner execution mode, inject inter-agent communication context
+        if ($executionMode === 'runner') {
+            $stepName = $config['_step_name'] ?? 'agent';
+            $interAgentContext = <<<INTERAGENT
+
+## Inter-Agent Communication
+
+You are running as step `{$stepName}` in pipeline run #{$this->runId}.
+
+You have access to MCP tools for communicating with other pipeline steps and agents:
+
+- **send_to_step(run_id, target_step, message)** - Send a message/command to another step's Claude session
+- **get_run_context(run_id)** - Get the shared pipeline context
+- **update_run_context(run_id, key, value)** - Update shared context (other agents will see this)
+- **mark_step_complete(run_id, step_name, output)** - Signal your step is done with optional output
+- **list_run_sessions(run_id)** - See which other agents/sessions are active
+
+Your pipeline run ID is: {$this->runId}
+Your step name is: {$stepName}
+
+Use these tools to coordinate with other agents when needed.
+
+INTERAGENT;
+            $userMessage = $interAgentContext . "\n" . $userMessage;
         }
 
         $this->log('info', "Executing AI agent: {$agent->name}", [
-            'provider' => $provider,
-            'provider_config' => $providerConfig,
+            'execution_mode' => $executionMode,
             'prompt_length' => strlen($userMessage)
         ]);
 
-        // Route to appropriate provider based on agent configuration
+        // Route based on execution mode
+        if ($executionMode === 'runner') {
+            // Full Claude CLI session on a runner with MCP tools
+            return $this->executeAIAgentOnRunner($agent, $config, $userMessage, $timeout);
+        }
+
+        // API mode - direct LLM call
+        $provider = $agent->provider ?: 'claude_api';
+        $providerConfig = json_decode($agent->provider_config ?: '{}', true);
+
         try {
             // Check for Ollama provider (direct or via claude_cli with use_ollama)
             $useOllama = ($provider === 'ollama') ||
                          ($provider === 'claude_cli' && !empty($providerConfig['use_ollama']));
 
             if ($useOllama) {
-                return $this->executeOllamaAgent($agent, $provider, $providerConfig, $userMessage, $systemPrompt, $timeout);
-            }
-
-            // Claude API provider
-            if ($provider === 'claude_api') {
+                $result = $this->executeOllamaAgent($agent, $provider, $providerConfig, $userMessage, $systemPrompt, $timeout);
+            } elseif ($provider === 'claude_api') {
                 $model = $config['model'] ?? $providerConfig['model'] ?? 'claude-sonnet-4-20250514';
-                return $this->executeClaudeApiAgent($agent, $model, $userMessage, $systemPrompt, $maxTokens, $timeout);
-            }
-
-            // claude_cli without use_ollama - this requires the Claude CLI which isn't available in pipeline context
-            if ($provider === 'claude_cli') {
+                $result = $this->executeClaudeApiAgent($agent, $model, $userMessage, $systemPrompt, $maxTokens, $timeout);
+            } elseif ($provider === 'claude_cli') {
+                // For claude_cli provider without use_ollama, suggest using runner mode
                 return [
                     'success' => false,
-                    'error' => "Agent '{$agent->name}' is configured to use Claude CLI, but claude_cli provider requires " .
-                               "either 'use_ollama' to be enabled in provider config, or switch the agent to 'claude_api' " .
-                               "or 'ollama' provider for pipeline execution."
+                    'error' => "Agent '{$agent->name}' uses Claude CLI. Set execution_mode: 'runner' to run " .
+                               "on a workstation with full MCP tool access, or configure 'use_ollama' for API mode."
+                ];
+            } else {
+                return [
+                    'success' => false,
+                    'error' => "Unsupported provider '{$provider}'. Use execution_mode: 'runner' for full CLI sessions."
                 ];
             }
 
-            // Unsupported provider
-            return [
-                'success' => false,
-                'error' => "Unsupported provider '{$provider}' for agent '{$agent->name}'. " .
-                           "Supported providers for pipelines: ollama, claude_api, claude_cli (with use_ollama enabled)"
-            ];
+            // Parse JSON output if requested
+            if ($jsonOutput && $result['success'] && isset($result['output']['response'])) {
+                $response = $result['output']['response'];
+                // Try to extract JSON from response
+                if (preg_match('/```json\s*([\s\S]*?)\s*```/', $response, $matches)) {
+                    $jsonStr = $matches[1];
+                } else {
+                    $jsonStr = $response;
+                }
+                $parsed = json_decode($jsonStr, true);
+                if ($parsed !== null) {
+                    $result['output']['parsed'] = $parsed;
+                }
+            }
+
+            return $result;
 
         } catch (\Exception $e) {
             $this->log('error', "AI agent exception: {$e->getMessage()}");
             return ['success' => false, 'error' => "AI agent exception: {$e->getMessage()}"];
         }
+    }
+
+    /**
+     * Execute AI agent on a runner using full Claude CLI with MCP tools
+     *
+     * This spawns a complete Claude Code session on a workstation, giving the agent
+     * access to all configured MCP servers. The agent can:
+     * - Call MCP tools (Shopify, GitHub, other pipelines, etc.)
+     * - Create files, run commands
+     * - Spawn other pipelines via schedule_pipeline MCP tool
+     *
+     * @param object $agent The AI agent bean
+     * @param array $config Step configuration
+     * @param string $prompt The fully-substituted prompt
+     * @param int $timeout Max execution time in seconds
+     * @return array Result with success, output, etc.
+     */
+    private function executeAIAgentOnRunner($agent, array $config, string $prompt, int $timeout): array {
+        $runnerId = $config['runner_id'] ?? $agent->runners_id ?? null;
+        $waitForCompletion = $config['wait_for_completion'] ?? true;
+
+        $this->log('info', "Executing agent on runner", [
+            'agent' => $agent->name,
+            'runner_id' => $runnerId,
+            'wait' => $waitForCompletion,
+            'timeout' => $timeout
+        ]);
+
+        // Load runner if specified
+        $runner = null;
+        if ($runnerId) {
+            $runner = Bean::load('runners', $runnerId);
+            if (!$runner->id) {
+                return ['success' => false, 'error' => "Runner {$runnerId} not found"];
+            }
+        }
+
+        // Create a unique job identifier for this pipeline step
+        // Format: PIPE-{run_id}-{step_name} for clear session naming
+        $stepName = $config['_step_name'] ?? 'agent';
+        $jobKey = sprintf('PIPE-%d-%s', $this->runId, $stepName);
+        $jobUid = 'pipe-' . $this->runId . '-' . bin2hex(random_bytes(8));
+
+        // Create aidevjobs record
+        $job = Bean::dispense('aidevjobs');
+        $job->job_uid = $jobUid;
+        $job->issue_key = $jobKey;
+        $job->aiagents_id = $agent->id;
+        $job->runners_id = $runnerId;
+        $job->member_id = $this->run->member_id;
+        $job->boards_id = null;  // Not a Jira job
+        $job->trigger_source = 'pipeline:' . ($this->pipeline->slug ?? $this->pipeline->id);
+        $job->pipelineruns_id = $this->runId;
+        $job->status = 'pending';
+        $job->phase = 'pipeline-agent';
+        $job->run_count = 0;
+        $job->prompt = $prompt;
+        $job->queue_metadata = json_encode([
+            'pipeline_id' => $this->pipeline->id,
+            'pipeline_name' => $this->pipeline->name,
+            'run_id' => $this->runId,
+            'run_uid' => $this->run->run_uid,
+            'step_name' => $stepName,
+            'step_id' => $config['_step_id'] ?? null,
+            'resident_mode' => true,  // Claude stays alive for pipeline duration
+            'context' => $this->context
+        ]);
+        $job->created_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+
+        $jobId = Bean::store($job);
+
+        $this->log('info', "Created AI dev job", ['job_id' => $jobId, 'job_key' => $jobKey]);
+
+        // Dispatch the job to the runner
+        $dispatchResult = $this->dispatchAgentJob($job, $agent, $runner, $prompt);
+
+        if (!$dispatchResult['success']) {
+            $job->status = 'failed';
+            $job->error_message = $dispatchResult['error'];
+            $job->updated_at = date('Y-m-d H:i:s');
+            Bean::store($job);
+            return $dispatchResult;
+        }
+
+        // If not waiting for completion, return immediately
+        if (!$waitForCompletion) {
+            return [
+                'success' => true,
+                'output' => [
+                    'job_id' => $jobId,
+                    'job_key' => $jobKey,
+                    'status' => 'dispatched',
+                    'message' => 'Agent job dispatched, not waiting for completion'
+                ]
+            ];
+        }
+
+        // Poll for completion
+        $startTime = time();
+        $pollInterval = 5;  // seconds
+
+        while ((time() - $startTime) < $timeout) {
+            sleep($pollInterval);
+
+            // Reload job to check status
+            $job = Bean::load('aidevjobs', $jobId);
+
+            $this->log('debug', "Polling agent job status", [
+                'job_id' => $jobId,
+                'status' => $job->status,
+                'elapsed' => time() - $startTime
+            ]);
+
+            if (in_array($job->status, ['complete', 'pr_created', 'failed'])) {
+                break;
+            }
+        }
+
+        // Final status check
+        $job = Bean::load('aidevjobs', $jobId);
+
+        if ($job->status === 'failed') {
+            return [
+                'success' => false,
+                'error' => $job->error_message ?: 'Agent job failed',
+                'output' => [
+                    'job_id' => $jobId,
+                    'job_key' => $jobKey,
+                    'status' => $job->status,
+                    'last_output' => $job->last_output
+                ]
+            ];
+        }
+
+        if (!in_array($job->status, ['complete', 'pr_created'])) {
+            return [
+                'success' => false,
+                'error' => "Agent job timed out after {$timeout}s (status: {$job->status})",
+                'output' => [
+                    'job_id' => $jobId,
+                    'job_key' => $jobKey,
+                    'status' => $job->status
+                ]
+            ];
+        }
+
+        // Parse result
+        $result = json_decode($job->last_result_json ?: '{}', true);
+
+        return [
+            'success' => true,
+            'output' => [
+                'job_id' => $jobId,
+                'job_key' => $jobKey,
+                'status' => $job->status,
+                'pr_url' => $job->pr_url,
+                'pr_number' => $job->pr_number,
+                'branch_name' => $job->branch_name,
+                'result' => $result,
+                'last_output' => $job->last_output
+            ]
+        ];
+    }
+
+    /**
+     * Dispatch an agent job to a runner
+     *
+     * @param object $job The aidevjobs bean
+     * @param object $agent The aiagents bean
+     * @param object|null $runner The runners bean (null for local)
+     * @param string $prompt The prompt text
+     * @return array Result with success status
+     */
+    private function dispatchAgentJob($job, $agent, $runner, string $prompt): array {
+        $workspace = $this->context['workspace'] ?? $_SESSION['workspace_slug'] ?? 'default';
+
+        // Build the dispatch command
+        $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
+
+        $cmd = sprintf(
+            'php %s --issue=%s --job-id=%d --workspace=%s --member=%d',
+            escapeshellarg($scriptPath),
+            escapeshellarg($job->issue_key),
+            $job->id,
+            escapeshellarg($workspace),
+            $job->member_id
+        );
+
+        // Add runner/workstation if specified
+        if ($runner && $runner->host && $runner->host !== 'localhost') {
+            $workstationConfig = json_encode([
+                'host' => $runner->host,
+                'user' => $runner->user ?? 'claudeuser',
+                'port' => $runner->port ?? 22
+            ]);
+            $cmd .= ' --workstation=' . escapeshellarg($workstationConfig);
+        }
+
+        // Write the prompt to a temp file that job-dispatcher can read
+        $promptFile = "/tmp/pipeline-prompt-{$job->id}.txt";
+        file_put_contents($promptFile, $prompt);
+
+        // Pass the prompt file and run in print mode for pipeline execution (non-interactive)
+        $cmd .= ' --prompt-file=' . escapeshellarg($promptFile);
+        $cmd .= ' --print';
+
+        $this->log('info', "Dispatching agent job", [
+            'cmd' => $cmd,
+            'prompt_file' => $promptFile
+        ]);
+
+        // Update job status to running
+        $job->status = 'running';
+        $job->started_at = date('Y-m-d H:i:s');
+        $job->updated_at = date('Y-m-d H:i:s');
+        Bean::store($job);
+
+        // Execute the dispatcher in background
+        $logFile = "/tmp/pipeline-agent-{$job->id}.log";
+        $fullCmd = "nohup {$cmd} > {$logFile} 2>&1 &";
+
+        exec($fullCmd, $output, $exitCode);
+
+        // Give it a moment to start
+        usleep(500000);  // 0.5 seconds
+
+        // Check if process started (job should update its status)
+        $job = Bean::load('aidevjobs', $job->id);
+
+        if ($job->status === 'failed') {
+            return [
+                'success' => false,
+                'error' => $job->error_message ?: 'Job failed to start'
+            ];
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Job dispatched',
+            'log_file' => $logFile
+        ];
     }
 
     /**
@@ -2760,7 +3049,9 @@ class PipelineExecutor {
         // Context is available separately for variable substitution
         $inputData = trim($input['stdin'] ?? '');
 
-        if (empty($inputData)) {
+        // PHP expressions can generate data without input (like generators)
+        // Only require input for jq and regex which transform existing data
+        if (empty($inputData) && $parserType !== 'php') {
             return ['success' => false, 'error' => 'No input data available. Set Input Source to "STDIN from previous step" or "Get from specific step".'];
         }
 
@@ -2815,6 +3106,39 @@ class PipelineExecutor {
                     'stdout' => trim($stdout),
                     'stderr' => trim($stderr)
                 ];
+
+            case 'php':
+                // PHP expression evaluator - can generate or transform data
+                // Expression should be a PHP statement that returns a value
+                // Available variables: $input (the input data), $context (pipeline context)
+                try {
+                    $context = $input['context'] ?? [];
+                    $evalInput = $inputData ? json_decode($inputData, true) : null;
+
+                    // Create a closure to isolate the eval scope
+                    $evalFn = function($input, $context, $expression) {
+                        // The expression should return a value
+                        return eval($expression);
+                    };
+
+                    $result = $evalFn($evalInput, $context, $expression);
+
+                    // Ensure we return an array
+                    if (!is_array($result)) {
+                        $result = ['value' => $result];
+                    }
+
+                    return [
+                        'success' => true,
+                        'output' => $result,
+                        'stdout' => json_encode($result)
+                    ];
+                } catch (\Throwable $e) {
+                    return [
+                        'success' => false,
+                        'error' => 'PHP eval error: ' . $e->getMessage()
+                    ];
+                }
 
             case 'regex':
                 // PHP regex
@@ -3255,9 +3579,20 @@ class PipelineExecutor {
         }, $template);
 
         // Replace step output variables {step_name.xxx}
+        // Also handles special {prev.xxx} to reference the previous step's output
         $template = preg_replace_callback('/\{([a-z_][a-z0-9_]*)\.([^}]+)\}/', function($matches) {
             $stepName = $matches[1];
             $path = $matches[2];
+
+            // Handle {prev.xxx} - reference the previous step's output
+            if ($stepName === 'prev' && $this->previousStepOutput !== null) {
+                $value = $this->getNestedValue($this->previousStepOutput, $path);
+                $this->log('debug', "Substituting prev variable", [
+                    'path' => $path,
+                    'found' => $value !== null
+                ]);
+                return $value ?? '';
+            }
 
             if (!isset($this->stepOutputs[$stepName])) {
                 $this->log('warning', "Step output not found for substitution", [
@@ -3333,6 +3668,9 @@ class PipelineExecutor {
         $this->run->context_json = json_encode($this->context);
         $this->run->updated_at = date('Y-m-d H:i:s');
         Bean::store($this->run);
+
+        // Kill all resident Claude sessions for this pipeline run
+        $this->killAllResidentSessions();
 
         $this->log('info', "Run completed with status: {$status}");
     }
@@ -4234,5 +4572,102 @@ class PipelineExecutor {
         ];
 
         return $types[$ext] ?? 'application/octet-stream';
+    }
+
+    // =====================================================
+    // Resident Session Management (uses TmuxService)
+    // =====================================================
+
+    /**
+     * Get TmuxService for a step's resident session
+     *
+     * @param string $stepName The step name
+     * @return TmuxService|null Service instance if session exists
+     */
+    public function getResidentSession(string $stepName): ?TmuxService {
+        $workspace = $this->context['workspace'] ?? 'dev';
+        $issueKey = sprintf('PIPE-%d-%s', $this->runId, $stepName);
+
+        $service = new TmuxService(
+            $this->run->member_id,
+            $issueKey,
+            null,
+            $workspace
+        );
+
+        return $service->exists() ? $service : null;
+    }
+
+    /**
+     * Send a command to a resident Claude session
+     *
+     * @param string $stepName The step name (session identifier)
+     * @param string $command The command/prompt to send
+     * @return array Result with success status
+     */
+    public function sendToResidentSession(string $stepName, string $command): array {
+        $service = $this->getResidentSession($stepName);
+
+        if (!$service) {
+            return [
+                'success' => false,
+                'error' => "No resident session found for step: {$stepName}"
+            ];
+        }
+
+        $result = $service->sendMessage($command);
+
+        $this->log('info', "Sent command to resident session", [
+            'step_name' => $stepName,
+            'session' => $service->getActiveSessionName(),
+            'command_length' => strlen($command),
+            'result' => $result
+        ]);
+
+        return [
+            'success' => $result,
+            'session' => $service->getActiveSessionName(),
+            'message' => $result ? 'Command sent' : 'Failed to send'
+        ];
+    }
+
+    /**
+     * Kill all resident sessions for this pipeline run
+     * Called when pipeline completes or fails
+     */
+    public function killAllResidentSessions(): void {
+        $workspace = $this->context['workspace'] ?? 'dev';
+        $pattern = "aoe-{$workspace}-PIPE-{$this->runId}-";
+
+        exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $output);
+        foreach ($output as $session) {
+            if (str_starts_with($session, $pattern)) {
+                exec("tmux kill-session -t " . escapeshellarg($session) . " 2>/dev/null");
+                $this->log('info', "Killed resident session", ['session' => $session]);
+            }
+        }
+    }
+
+    /**
+     * Check if a resident session exists for a step
+     */
+    public function hasResidentSession(string $stepName): bool {
+        return $this->getResidentSession($stepName) !== null;
+    }
+
+    /**
+     * Get status of a resident session
+     */
+    public function getResidentSessionStatus(string $stepName): ?array {
+        $service = $this->getResidentSession($stepName);
+        return $service ? $service->getStatus() : null;
+    }
+
+    /**
+     * Capture output from a resident session
+     */
+    public function captureResidentSessionOutput(string $stepName, int $lines = 50): ?string {
+        $service = $this->getResidentSession($stepName);
+        return $service ? $service->captureSnapshot($lines) : null;
     }
 }

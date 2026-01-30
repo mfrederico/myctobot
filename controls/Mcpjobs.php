@@ -474,7 +474,7 @@ class Mcpjobs extends Control {
                 'pr_url' => $prUrl
             ];
         } else {
-            // Completed but no PR (maybe research task)
+            // Completed but no PR (maybe research task or pipeline agent)
             AIDevStatusService::updateStatus(
                 $this->memberId,
                 $jobId,
@@ -482,6 +482,13 @@ class Mcpjobs extends Control {
                 100,
                 'completed'
             );
+
+            // Trigger post-completion actions (including pipeline continuation)
+            $this->triggerPostCompletionActions($jobId, [
+                'success' => $success,
+                'summary' => $summary,
+                'files_changed' => $filesChanged
+            ]);
 
             return [
                 'status' => 'completed',
@@ -661,6 +668,12 @@ class Mcpjobs extends Control {
             $boardId = $jobData['board_id'] ?? 0;
             $cloudId = $jobData['cloud_uid'] ?? '';
 
+            // Check if this is a pipeline job - if so, trigger pipeline continuation
+            $pipelineRunId = $jobData['pipelineruns_id'] ?? null;
+            if ($pipelineRunId) {
+                $this->triggerPipelineContinuation($pipelineRunId, $jobId, $result);
+            }
+
             if (empty($issueKey)) {
                 return;
             }
@@ -691,6 +704,67 @@ class Mcpjobs extends Control {
             }
         } catch (\Exception $e) {
             $this->logger->error('Error in post-completion actions', [
+                'job_uid' => $jobId,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Trigger pipeline continuation when a pipeline job completes
+     */
+    private function triggerPipelineContinuation(int $runId, string $jobId, array $result): void {
+        try {
+            $this->logger->info('Pipeline job completed, triggering continuation', [
+                'run_id' => $runId,
+                'job_uid' => $jobId
+            ]);
+
+            // Load the pipeline run
+            $run = Bean::load('pipelineruns', $runId);
+            if (!$run || !$run->id) {
+                $this->logger->warning('Pipeline run not found for continuation', ['run_id' => $runId]);
+                return;
+            }
+
+            // Only continue if run is still in 'running' status
+            if ($run->status !== 'running') {
+                $this->logger->info('Pipeline run not in running status, skipping continuation', [
+                    'run_id' => $runId,
+                    'status' => $run->status
+                ]);
+                return;
+            }
+
+            // Store job result in run context for next step to access
+            $context = json_decode($run->context_json ?: '{}', true);
+            $context['_last_job_result'] = $result;
+            $context['_last_job_uid'] = $jobId;
+            $run->context_json = json_encode($context);
+            $run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($run);
+
+            // Trigger continuation via cron script (non-blocking)
+            $workspace = $this->workspace ?: 'dev';
+            $scriptPath = dirname(__DIR__) . '/scripts/cron-scheduled-tasks.php';
+            $cmd = sprintf(
+                'php %s --script --workspace=%s --continue-run=%d >> %s/log/pipeline-continuation.log 2>&1 &',
+                escapeshellarg($scriptPath),
+                escapeshellarg($workspace),
+                $runId,
+                dirname(__DIR__)
+            );
+
+            exec($cmd);
+
+            $this->logger->info('Pipeline continuation triggered', [
+                'run_id' => $runId,
+                'workspace' => $workspace
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error triggering pipeline continuation', [
+                'run_id' => $runId,
                 'job_uid' => $jobId,
                 'error' => $e->getMessage()
             ]);

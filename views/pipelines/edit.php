@@ -792,9 +792,27 @@
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">Context (JSON, optional)</label>
-                    <textarea class="form-control font-monospace" id="triggerContext" rows="4" placeholder='{&#10;  "issue_key": "PROJ-123"&#10;}'></textarea>
+                    <label class="form-label">Context Variables (JSON)</label>
+                    <?php
+                    // Generate context template from input schema if available
+                    $contextTemplate = '';
+                    $inputSchema = json_decode($pipeline['input_schema_json'] ?? '', true);
+                    if (!empty($inputSchema['properties'])) {
+                        $template = [];
+                        foreach ($inputSchema['properties'] as $key => $prop) {
+                            $template[$key] = $prop['description'] ?? "Enter {$key}";
+                        }
+                        $contextTemplate = json_encode($template, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+                    }
+                    ?>
+                    <textarea class="form-control font-monospace" id="triggerContext" rows="6"><?= htmlspecialchars($contextTemplate) ?></textarea>
+                    <?php if (!empty($inputSchema['required'])): ?>
+                    <small class="text-muted">
+                        <strong>Required:</strong> <?= htmlspecialchars(implode(', ', $inputSchema['required'])) ?>
+                    </small>
+                    <?php else: ?>
                     <small class="text-muted">Pass initial context/variables to the pipeline</small>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1532,6 +1550,7 @@ kbd {
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const pipelineId = <?= $pipeline['id'] ?>;
+const initialContextTemplate = <?= json_encode($contextTemplate ?: '{}') ?>;
 let stepModal = null;
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -3362,7 +3381,7 @@ async function saveSettings() {
 }
 
 function triggerPipeline() {
-    document.getElementById('triggerContext').value = '';
+    document.getElementById('triggerContext').value = initialContextTemplate;
     // Reset modal to normal state
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-play-fill"></i> Run Pipeline';
     document.getElementById('triggerModalSubmit').onclick = confirmTrigger;
@@ -3397,7 +3416,7 @@ async function confirmTrigger() {
 
 function triggerInteractive() {
     // Show same modal but with interactive label
-    document.getElementById('triggerContext').value = '';
+    document.getElementById('triggerContext').value = initialContextTemplate;
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-bug"></i> Interactive/Debug Run';
     document.getElementById('triggerModalSubmit').onclick = confirmTriggerInteractive;
     document.getElementById('triggerModalSubmit').innerHTML = '<i class="bi bi-play-fill"></i> Start Interactive Run';

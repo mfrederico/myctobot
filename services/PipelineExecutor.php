@@ -1543,7 +1543,18 @@ class PipelineExecutor {
             $completedCount++;
             $this->updateProgress($completedCount);
 
-            $nextAction = $step->on_success ?: 'next_col';
+            // Check if step returned a _goto directive (used by condition/switch steps)
+            $stepOutput = $this->stepOutputs[$step->step_name]['output'] ?? [];
+            $gotoDirective = $stepOutput['_goto'] ?? null;
+
+            if (!empty($gotoDirective)) {
+                // Use the _goto directive from step output
+                $nextAction = 'goto:' . $gotoDirective;
+                $this->log('info', "Following _goto directive: {$gotoDirective}");
+            } else {
+                $nextAction = $step->on_success ?: 'next_col';
+            }
+
             $nextIndex = $this->resolveNextStep($step, $nextAction, $stepsArray, $currentIndex);
 
             if ($nextIndex === -1) {
@@ -1830,6 +1841,12 @@ class PipelineExecutor {
 
             case 'file_write':
                 return $this->executeFileWrite($config, $input);
+
+            case 'condition':
+                return $this->executeCondition($config, $input);
+
+            case 'switch':
+                return $this->executeSwitch($config, $input);
 
             default:
                 return [
@@ -2636,6 +2653,167 @@ class PipelineExecutor {
             default:
                 return ['success' => false, 'error' => "Unknown wait type: {$waitType}"];
         }
+    }
+
+    /**
+     * Execute a condition step - evaluate condition and return goto directive
+     *
+     * Returns a _goto directive in output that the executor will follow.
+     * This allows if/then/else branching in pipelines.
+     *
+     * Config options:
+     *   left      - Left side of comparison (supports variable substitution)
+     *   operator  - Comparison operator (equals, not_equals, greater_than, etc.)
+     *   right     - Right side of comparison (supports variable substitution)
+     *   then_goto - Step to go to if condition is TRUE (step name or row.col)
+     *   else_goto - Step to go to if condition is FALSE (step name or row.col)
+     */
+    private function executeCondition(array $config, array $input): array {
+        $left = $this->substituteVariables($config['left'] ?? '');
+        $operator = $config['operator'] ?? 'equals';
+        $right = $this->substituteVariables($config['right'] ?? '');
+        $thenGoto = $config['then_goto'] ?? null;
+        $elseGoto = $config['else_goto'] ?? null;
+
+        // Evaluate the condition
+        $result = $this->evaluateCondition($left, $operator, $right);
+
+        $this->log('info', "Condition: '{$left}' {$operator} '{$right}' = " . ($result ? 'TRUE' : 'FALSE'));
+
+        // Determine which branch to take
+        $gotoTarget = $result ? $thenGoto : $elseGoto;
+
+        return [
+            'success' => true,
+            'output' => [
+                'condition_result' => $result,
+                'left_value' => $left,
+                'operator' => $operator,
+                'right_value' => $right,
+                'branch_taken' => $result ? 'then' : 'else',
+                '_goto' => $gotoTarget  // Special directive for executor
+            ]
+        ];
+    }
+
+    /**
+     * Evaluate a condition expression
+     */
+    private function evaluateCondition(string $left, string $operator, string $right): bool {
+        // Convert to appropriate types for comparison
+        $leftNum = is_numeric($left) ? floatval($left) : null;
+        $rightNum = is_numeric($right) ? floatval($right) : null;
+
+        switch ($operator) {
+            case 'equals':
+                return $left === $right || ($leftNum !== null && $rightNum !== null && $leftNum === $rightNum);
+
+            case 'not_equals':
+                return $left !== $right && !($leftNum !== null && $rightNum !== null && $leftNum === $rightNum);
+
+            case 'greater_than':
+                if ($leftNum !== null && $rightNum !== null) {
+                    return $leftNum > $rightNum;
+                }
+                return strcmp($left, $right) > 0;
+
+            case 'less_than':
+                if ($leftNum !== null && $rightNum !== null) {
+                    return $leftNum < $rightNum;
+                }
+                return strcmp($left, $right) < 0;
+
+            case 'greater_equal':
+                if ($leftNum !== null && $rightNum !== null) {
+                    return $leftNum >= $rightNum;
+                }
+                return strcmp($left, $right) >= 0;
+
+            case 'less_equal':
+                if ($leftNum !== null && $rightNum !== null) {
+                    return $leftNum <= $rightNum;
+                }
+                return strcmp($left, $right) <= 0;
+
+            case 'contains':
+                return strpos($left, $right) !== false;
+
+            case 'not_contains':
+                return strpos($left, $right) === false;
+
+            case 'starts_with':
+                return strpos($left, $right) === 0;
+
+            case 'ends_with':
+                return substr($left, -strlen($right)) === $right;
+
+            case 'is_empty':
+                return empty($left) || $left === 'null' || $left === 'false';
+
+            case 'is_not_empty':
+                return !empty($left) && $left !== 'null' && $left !== 'false';
+
+            case 'is_true':
+                return in_array(strtolower($left), ['true', '1', 'yes', 'on'], true);
+
+            case 'is_false':
+                return in_array(strtolower($left), ['false', '0', 'no', 'off', ''], true) || empty($left);
+
+            case 'regex':
+                return preg_match('/' . $right . '/', $left) === 1;
+
+            default:
+                $this->log('warning', "Unknown operator: {$operator}, defaulting to equals");
+                return $left === $right;
+        }
+    }
+
+    /**
+     * Execute a switch step - evaluate value against multiple cases
+     *
+     * Like a switch/case statement. Matches value against cases and returns goto directive.
+     *
+     * Config options:
+     *   value   - Value to switch on (supports variable substitution)
+     *   cases   - Object mapping values to goto targets: {"value1": "step1", "value2": "step2"}
+     *   default - Step to go to if no case matches
+     */
+    private function executeSwitch(array $config, array $input): array {
+        $value = $this->substituteVariables($config['value'] ?? '');
+        $cases = $config['cases'] ?? [];
+        $defaultGoto = $config['default'] ?? null;
+
+        $this->log('info', "Switch on value: '{$value}'");
+
+        // Find matching case
+        $matchedCase = null;
+        $gotoTarget = null;
+
+        foreach ($cases as $caseValue => $caseGoto) {
+            if ($value === (string)$caseValue) {
+                $matchedCase = $caseValue;
+                $gotoTarget = $caseGoto;
+                break;
+            }
+        }
+
+        // Use default if no match
+        if ($gotoTarget === null) {
+            $matchedCase = '_default';
+            $gotoTarget = $defaultGoto;
+        }
+
+        $this->log('info', "Switch matched case: '{$matchedCase}' -> goto:{$gotoTarget}");
+
+        return [
+            'success' => true,
+            'output' => [
+                'switch_value' => $value,
+                'matched_case' => $matchedCase,
+                'available_cases' => array_keys($cases),
+                '_goto' => $gotoTarget  // Special directive for executor
+            ]
+        ];
     }
 
     /**

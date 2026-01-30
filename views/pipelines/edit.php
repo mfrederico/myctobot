@@ -1,4 +1,4 @@
-<div class="container-fluid py-4">
+<div class="container py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <nav aria-label="breadcrumb">
@@ -336,7 +336,7 @@
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table table-bordered mb-0" id="pipelineGrid">
-                    <thead class="table-light">
+                    <thead class="table-dark">
                         <tr>
                             <th style="width: 60px;" class="text-center">#</th>
                             <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
@@ -812,12 +812,12 @@
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 .step-cell-empty {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
     transition: all 0.2s;
 }
 .step-cell-empty:hover {
-    background: #e9ecef;
-    border-color: #6c757d !important;
+    background: var(--bs-tertiary-bg);
+    border-color: var(--bs-border-color-translucent) !important;
 }
 .border-dashed {
     border-style: dashed !important;
@@ -834,7 +834,7 @@
     transform: scale(0.95);
 }
 .drop-zone.drag-over {
-    background: #cfe2ff !important;
+    background: var(--bs-primary-bg-subtle) !important;
 }
 .drop-zone.drag-over .step-cell-empty {
     border-color: #0d6efd !important;
@@ -849,7 +849,7 @@
 }
 /* Row disabled state */
 tr.row-disabled {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
 }
 tr.row-disabled .step-cell {
     opacity: 0.35;
@@ -895,19 +895,20 @@ tr.row-parallel .row-number-cell::before {
 /* Step type accordion */
 .step-type-option {
     padding: 8px 12px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--bs-border-color);
     border-radius: 6px;
     transition: all 0.15s;
     cursor: pointer;
     position: relative;
+    background: var(--bs-body-bg);
 }
 .step-type-option:hover {
-    background: #f8f9fa;
-    border-color: #6c757d;
+    background: var(--bs-tertiary-bg);
+    border-color: var(--bs-primary);
 }
 .step-type-option.selected {
-    background: #e7f1ff;
-    border-color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
 }
 .step-type-option.selected::after {
     content: '\f26b';
@@ -915,7 +916,7 @@ tr.row-parallel .row-number-cell::before {
     position: absolute;
     top: 8px;
     right: 8px;
-    color: #0d6efd;
+    color: var(--bs-primary);
     font-size: 0.9rem;
 }
 .step-type-option .form-check-input {
@@ -925,11 +926,12 @@ tr.row-parallel .row-number-cell::before {
     cursor: pointer;
 }
 #stepTypeAccordion .accordion-button {
-    background: #f8f9fa;
+    background: var(--bs-secondary-bg);
+    color: var(--bs-body-color);
 }
 #stepTypeAccordion .accordion-button:not(.collapsed) {
-    background: #e7f1ff;
-    color: #0a58ca;
+    background: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
 }
 /* Variable Browser */
 .variable-chip {
@@ -938,24 +940,25 @@ tr.row-parallel .row-number-cell::before {
     padding: 2px 8px;
     font-size: 0.75rem;
     font-family: monospace;
-    background: #fff;
-    border: 1px solid #dee2e6;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
 }
 .variable-chip:hover {
-    background: #e7f1ff;
-    border-color: #0d6efd;
-    color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
+    color: var(--bs-primary);
 }
 .variable-chip.mapped {
-    background: #d1e7dd;
-    border-color: #198754;
+    background: var(--bs-success-bg-subtle);
+    border-color: var(--bs-success);
 }
 .variable-chip.mapped:hover {
-    background: #badbcc;
+    background: var(--bs-success-bg-subtle);
+    filter: brightness(0.9);
 }
 .variable-chip .bi {
     font-size: 0.65rem;
@@ -965,8 +968,8 @@ tr.row-parallel .row-number-cell::before {
 .step-vars-group {
     margin-bottom: 8px;
     padding: 6px 8px;
-    background: #fff;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
 }
 .step-vars-group .step-name {
@@ -1146,8 +1149,8 @@ td.drop-zone {
 }
 /* Variable Exporter styles */
 .variable-exporter {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 12px;
     font-size: 0.8rem;
@@ -1157,8 +1160,8 @@ td.drop-zone {
     min-height: 200px;
     max-height: 400px;
     overflow-y: auto;
-    background: white;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 8px;
 }
@@ -1167,20 +1170,20 @@ td.drop-zone {
     align-items: center;
     padding: 8px 12px;
     margin: 4px 0;
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 6px;
     cursor: pointer;
     transition: all 0.15s;
 }
 .export-path-item:hover {
-    background: #e7f1ff;
-    border-color: #0d6efd;
+    background: var(--bs-primary-bg-subtle);
+    border-color: var(--bs-primary);
     transform: translateX(2px);
 }
 .export-path-item.exported {
-    background: #d1e7dd;
-    border-color: #198754;
+    background: var(--bs-success-bg-subtle);
+    border-color: var(--bs-success);
 }
 .export-path-item .path-name {
     flex: 1;
@@ -1192,10 +1195,10 @@ td.drop-zone {
 }
 .export-path-item .path-type {
     font-size: 0.7rem;
-    color: #6c757d;
+    color: var(--bs-secondary-color);
     margin-left: 8px;
     padding: 2px 6px;
-    background: #e9ecef;
+    background: var(--bs-tertiary-bg);
     border-radius: 3px;
 }
 .export-path-item .export-check {
@@ -1209,10 +1212,10 @@ td.drop-zone {
     padding: 4px 10px;
     font-size: 0.75rem;
     font-family: monospace;
-    background: #d1e7dd;
-    border: 1px solid #198754;
+    background: var(--bs-success-bg-subtle);
+    border: 1px solid var(--bs-success);
     border-radius: 4px;
-    color: #0f5132;
+    color: var(--bs-success-text-emphasis);
 }
 .exported-var-chip .remove-export {
     margin-left: 6px;
@@ -1222,12 +1225,12 @@ td.drop-zone {
 }
 .exported-var-chip .remove-export:hover {
     opacity: 1;
-    color: #dc3545;
+    color: var(--bs-danger);
 }
 .exported-vars {
     margin-top: 12px;
     padding-top: 12px;
-    border-top: 1px solid #dee2e6;
+    border-top: 1px solid var(--bs-border-color);
 }
 .exported-vars-list {
     margin-top: 8px;
@@ -1365,11 +1368,11 @@ td.drop-zone {
 }
 /* Keyboard shortcut styling */
 kbd {
-    background: #f4f4f4;
-    border: 1px solid #ccc;
+    background: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 3px;
-    box-shadow: 0 1px 0 #888;
-    color: #333;
+    box-shadow: 0 1px 0 var(--bs-secondary-color);
+    color: var(--bs-body-color);
     display: inline-block;
     font-size: 0.75rem;
     font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -1472,8 +1475,8 @@ kbd {
 
 /* Input preview for parser steps */
 .step-input-preview {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 4px;
     padding: 8px;
     margin-top: 8px;
@@ -1481,15 +1484,15 @@ kbd {
 }
 .step-input-preview-label {
     font-weight: 600;
-    color: #495057;
+    color: var(--bs-secondary-color);
     margin-bottom: 4px;
     display: flex;
     align-items: center;
     gap: 6px;
 }
 .step-input-preview-content {
-    background: #ffffff;
-    border: 1px solid #e9ecef;
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
     border-radius: 3px;
     padding: 6px;
     max-height: 150px;

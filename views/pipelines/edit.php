@@ -223,7 +223,7 @@
                                     <small class="text-muted">Add this as an MCP server to your AI agent</small>
                                 </div>
 
-                                <div class="mb-0">
+                                <div class="mb-3">
                                     <label class="form-label">
                                         Input Schema (JSON)
                                         <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="deriveSchemaFromSteps()" title="Scans Row 1 steps for {context.xxx} variables">
@@ -245,6 +245,11 @@
                                         JSON Schema defining the tool's input parameters. Properties become available in pipeline context.
                                         <a href="/docs/pipelines#input-schema" target="_blank" class="ms-1"><i class="bi bi-question-circle"></i> Help</a>
                                     </small>
+                                </div>
+
+                                <div class="alert alert-warning mb-0 py-2 small">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    <strong>Note:</strong> Connected AI agents cache tool definitions. After saving changes, agents must restart or reconnect to pick up the updated schema.
                                 </div>
                             </div>
                         </div>

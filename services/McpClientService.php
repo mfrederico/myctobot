@@ -639,10 +639,23 @@ class McpClientService {
             $url = $this->transport['url'];
         }
 
-        $headers = array_merge([
+        // Start with default headers
+        $headers = [
             'Content-Type: application/json',
             'Accept: application/json'
-        ], $this->transport['headers'] ?? []);
+        ];
+
+        // Convert associative headers to cURL format (e.g., 'Authorization' => 'Bearer x' to 'Authorization: Bearer x')
+        $configHeaders = $this->transport['headers'] ?? [];
+        foreach ($configHeaders as $key => $value) {
+            if (is_string($key)) {
+                // Associative: convert to "Key: Value" format
+                $headers[] = "{$key}: {$value}";
+            } else {
+                // Already in string format
+                $headers[] = $value;
+            }
+        }
 
         $this->log('debug', "HTTP POST to: {$url}");
 

@@ -2,7 +2,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb mb-3">
             <li class="breadcrumb-item"><a href="/orchestration">Studio</a></li>
-            <li class="breadcrumb-item active"><?= htmlspecialchars($project['name']) ?></li>
+            <li class="breadcrumb-item active"><?= htmlspecialchars($project['name'] ?? 'Untitled') ?></li>
         </ol>
     </nav>
 
@@ -14,7 +14,7 @@
                 <?php else: ?>
                 <i class="bi bi-gear text-secondary"></i>
                 <?php endif; ?>
-                <?= htmlspecialchars($project['name']) ?>
+                <?= htmlspecialchars($project['name'] ?? 'Untitled') ?>
             </h1>
             <p class="text-muted mb-0">
                 <?= $template ? htmlspecialchars($template['name']) : 'Custom Orchestration' ?>

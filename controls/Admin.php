@@ -689,7 +689,6 @@ class Admin extends Control {
 
         $this->viewData['title'] = 'Create Runner';
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
-        $this->viewData['mcpServers'] = $this->getMergedMcpServers();
         $this->render('admin/runner_form', $this->viewData);
     }
 
@@ -772,7 +771,6 @@ class Admin extends Control {
         $this->viewData['title'] = 'Edit Runner';
         $this->viewData['runner'] = $runner;
         $this->viewData['sshKeys'] = \app\services\SSHKeyService::getKeys();
-        $this->viewData['mcpServers'] = $this->getMergedMcpServers();
         $this->render('admin/runner_form', $this->viewData);
     }
 

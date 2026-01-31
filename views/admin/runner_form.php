@@ -238,66 +238,47 @@
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">Capabilities (MCP Servers)</label>
+                                <label class="form-label">Workstation Features</label>
+                                <?php
+                                $capabilities = isset($runner['capabilities'])
+                                    ? (is_string($runner['capabilities']) ? json_decode($runner['capabilities'], true) : $runner['capabilities'])
+                                    : [];
+                                if (!is_array($capabilities)) {
+                                    $capabilities = [];
+                                }
+                                // Available workstation features
+                                $availableFeatures = [
+                                    'playwright' => ['label' => 'Playwright', 'icon' => 'browser-chrome', 'desc' => 'Browser automation & testing'],
+                                    'docker' => ['label' => 'Docker', 'icon' => 'box', 'desc' => 'Container support'],
+                                    'gpu' => ['label' => 'GPU', 'icon' => 'gpu-card', 'desc' => 'GPU acceleration (CUDA/ROCm)'],
+                                    'ollama' => ['label' => 'Ollama', 'icon' => 'robot', 'desc' => 'Local LLM inference'],
+                                    'database' => ['label' => 'Database Tools', 'icon' => 'database', 'desc' => 'MySQL/PostgreSQL clients'],
+                                    'nodejs' => ['label' => 'Node.js', 'icon' => 'filetype-js', 'desc' => 'Node.js runtime'],
+                                    'python' => ['label' => 'Python', 'icon' => 'filetype-py', 'desc' => 'Python runtime'],
+                                    'php' => ['label' => 'PHP', 'icon' => 'filetype-php', 'desc' => 'PHP runtime'],
+                                ];
+                                ?>
                                 <div class="row">
-                                    <?php
-                                    $capabilities = isset($runner['capabilities'])
-                                        ? (is_string($runner['capabilities']) ? json_decode($runner['capabilities'], true) : $runner['capabilities'])
-                                        : [];
-                                    // For new runners, auto-select required servers
-                                    if (!isset($runner) && empty($capabilities)) {
-                                        $capabilities = [];
-                                        foreach ($mcpServers as $server) {
-                                            if (!empty($server['is_required'])) {
-                                                $capabilities[] = $server['name'];
-                                            }
-                                        }
-                                    }
-                                    if (!empty($mcpServers)):
-                                        foreach ($mcpServers as $server):
-                                            $serverName = $server['name'];
-                                            $serverDesc = $server['description'] ?? $serverName;
-                                            $isRequired = !empty($server['is_required']);
-                                            $isBuiltin = !empty($server['is_builtin']);
-                                            $isChecked = $isRequired || in_array($serverName, $capabilities ?? []);
-                                    ?>
+                                    <?php foreach ($availableFeatures as $featureKey => $feature): ?>
                                     <div class="col-md-4 col-6">
                                         <div class="form-check">
                                             <input class="form-check-input" type="checkbox"
-                                                   id="cap_<?= htmlspecialchars($serverName) ?>"
+                                                   id="cap_<?= $featureKey ?>"
                                                    name="capabilities[]"
-                                                   value="<?= htmlspecialchars($serverName) ?>"
-                                                   <?= $isChecked ? 'checked' : '' ?>
-                                                   <?= $isRequired ? 'disabled' : '' ?>>
-                                            <?php if ($isRequired): ?>
-                                            <!-- Hidden input to ensure required values are submitted -->
-                                            <input type="hidden" name="capabilities[]" value="<?= htmlspecialchars($serverName) ?>">
-                                            <?php endif; ?>
-                                            <label class="form-check-label" for="cap_<?= htmlspecialchars($serverName) ?>">
-                                                <?= htmlspecialchars($serverDesc) ?>
-                                                <?php if ($isRequired): ?>
-                                                <span class="badge bg-primary ms-1" title="Required - cannot be disabled">required</span>
-                                                <?php elseif ($isBuiltin): ?>
-                                                <span class="badge bg-secondary ms-1" title="Built-in MCP server">built-in</span>
-                                                <?php endif; ?>
+                                                   value="<?= $featureKey ?>"
+                                                   <?= in_array($featureKey, $capabilities) ? 'checked' : '' ?>>
+                                            <label class="form-check-label" for="cap_<?= $featureKey ?>">
+                                                <i class="bi bi-<?= $feature['icon'] ?>"></i>
+                                                <?= $feature['label'] ?>
+                                                <div class="text-muted small"><?= $feature['desc'] ?></div>
                                             </label>
                                         </div>
                                     </div>
-                                    <?php
-                                        endforeach;
-                                    else:
-                                    ?>
-                                    <div class="col-12">
-                                        <p class="text-muted mb-0">
-                                            No MCP servers configured.
-                                            <a href="/mcpservers">Add MCP servers</a> to enable capabilities.
-                                        </p>
-                                    </div>
-                                    <?php endif; ?>
+                                    <?php endforeach; ?>
                                 </div>
                                 <div class="form-text mt-2">
-                                    <i class="bi bi-info-circle"></i> Required servers are always enabled for core functionality.
-                                    Built-in servers are pre-configured and don't require setup.
+                                    <i class="bi bi-info-circle"></i> Select features available on this workstation.
+                                    Agents can be configured to require specific features.
                                 </div>
                             </div>
                         </div>
@@ -990,13 +971,5 @@ async function runDiagnostic() {
 }
 <?php endif; ?>
 
-// Form validation
-document.getElementById('runnerForm').addEventListener('submit', function(e) {
-    const capabilities = document.querySelectorAll('input[name="capabilities[]"]:checked');
-    if (capabilities.length === 0) {
-        e.preventDefault();
-        alert('Please select at least one capability.');
-        return false;
-    }
-});
+// Form validation (features are optional, no validation needed)
 </script>

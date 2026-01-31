@@ -248,7 +248,7 @@ class RunnerService {
     }
 
     /**
-     * Get runner stats
+     * Get runner stats from aidevjobs table
      */
     public static function getRunnerStats(int $runnerId): array {
         $stats = Bean::getRow("
@@ -257,9 +257,9 @@ class RunnerService {
                 SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running_jobs,
                 SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_jobs,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_jobs,
-                SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) as queued_jobs
-            FROM runnerjobs
-            WHERE runner_id = ?
+                SUM(CASE WHEN status IN ('queued', 'pending') THEN 1 ELSE 0 END) as queued_jobs
+            FROM aidevjobs
+            WHERE runners_id = ?
         ", [$runnerId]);
 
         return $stats ?: [
@@ -276,7 +276,7 @@ class RunnerService {
      */
     public static function getRunningJobCount(int $runnerId): int {
         return (int) Bean::getCell(
-            "SELECT COUNT(*) FROM runnerjobs WHERE runner_id = ? AND status = 'running'",
+            "SELECT COUNT(*) FROM aidevjobs WHERE runners_id = ? AND status = 'running'",
             [$runnerId]
         );
     }

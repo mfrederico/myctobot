@@ -126,6 +126,9 @@ class Mcpservers extends BaseControls\Control {
         }
         $server->env_json = json_encode($env);
 
+        // Prompt additions (injected into CLAUDE.md when this server is used)
+        $server->prompt_additions = trim($input['prompt_additions'] ?? '');
+
         Bean::store($server);
 
         Flight::jsonSuccess($this->formatServer($server), 'MCP server created');
@@ -212,6 +215,11 @@ class Mcpservers extends BaseControls\Control {
         // Sharing flag (only owner can change)
         if (isset($input['is_shared']) && $server->member_id == $this->member->id) {
             $server->is_shared = $input['is_shared'] ? 1 : 0;
+        }
+
+        // Prompt additions (injected into CLAUDE.md when this server is used)
+        if (isset($input['prompt_additions'])) {
+            $server->prompt_additions = trim($input['prompt_additions']);
         }
 
         Bean::store($server);
@@ -598,6 +606,7 @@ class Mcpservers extends BaseControls\Control {
             'url' => $server->url,
             'headers' => json_decode($server->headers_json ?: '{}', true),
             'env' => json_decode($server->env_json ?: '{}', true),
+            'prompt_additions' => $server->prompt_additions ?? '',
             'is_shared' => (bool) $server->is_shared,
             'is_active' => (bool) $server->is_active,
             'is_own' => $server->member_id == $this->member->id,

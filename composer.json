@@ -54,7 +54,8 @@
             "lib/CachedDatabaseAdapter.php",
             "lib/WorkspaceResolver.php",
             "lib/Bean.php",
-            "lib/TmuxManager.php"
+            "lib/TmuxManager.php",
+            "lib/VariableSubstitution.php"
         ]
     },
     "autoload-dev": {

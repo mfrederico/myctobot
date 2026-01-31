@@ -1,7 +1,6 @@
 <?php
 $bean = \RedBeanPHP\R::dispense('aiagents');
-$bean->member = $member;
-$bean->created_by_member_id = $member;
+$bean->member = $member;  // Sets member_id via RedBeanPHP association
 $bean->created_by_name = 'Schema User';
 $bean->name = 'Default Agent';
 $bean->description = 'Schema agent description';

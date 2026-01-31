@@ -258,6 +258,24 @@ $presets = $presets ?? [];
                             <i class="bi bi-plus"></i> Add Environment Variable
                         </button>
                     </div>
+
+                    <!-- Prompt Additions -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Prompt Additions</label>
+                        <textarea class="form-control font-monospace" id="serverPromptAdditions" name="prompt_additions" rows="6"
+                            placeholder="Additional instructions injected into CLAUDE.md when this MCP server is used.
+
+Supports variable substitution:
+{context.issue_key} - Current issue key
+{context.workspace} - Workspace slug
+{context.repo} - Repository path
+{context.branch} - Current branch
+{context.agent_name} - Agent name"></textarea>
+                        <div class="form-text">
+                            These instructions are added to the agent's CLAUDE.md file when this MCP server is assigned.
+                            Use <code>{context.variable}</code> for dynamic values.
+                        </div>
+                    </div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -403,6 +421,7 @@ function resetForm() {
     document.getElementById('serverId').value = '';
     document.getElementById('serverForm').reset();
     document.getElementById('envVarList').innerHTML = '';
+    document.getElementById('serverPromptAdditions').value = '';
     document.getElementById('typeStdio').checked = true;
     toggleTypeFields();
     document.getElementById('modalTitle').textContent = 'Add MCP Server';
@@ -446,6 +465,9 @@ function editServer(serverId) {
                         }
                     }
 
+                    // Load prompt additions
+                    document.getElementById('serverPromptAdditions').value = server.prompt_additions || '';
+
                     document.getElementById('modalTitle').textContent = 'Edit MCP Server';
                     document.getElementById('saveButtonText').textContent = 'Update Server';
                     document.getElementById('presetSection').style.display = 'none';
@@ -480,7 +502,8 @@ function saveServer() {
         name: document.getElementById('serverName').value,
         description: document.getElementById('serverDescription').value,
         server_type: serverType,
-        env: JSON.stringify(envVars)
+        env: JSON.stringify(envVars),
+        prompt_additions: document.getElementById('serverPromptAdditions').value
     };
 
     if (isStdio) {

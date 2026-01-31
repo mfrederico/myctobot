@@ -19,7 +19,7 @@
         </h1>
         <div>
             <a href="/admin/runners" class="btn btn-outline-secondary me-2">
-                <i class="bi bi-arrow-left"></i> Back to Runners
+                <i class="bi bi-arrow-left"></i> Workstations 
             </a>
             <button type="button" class="btn btn-success me-2" onclick="openAgentSetupWizard()">
                 <i class="bi bi-magic"></i> Setup Wizard

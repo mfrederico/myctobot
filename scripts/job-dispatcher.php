@@ -175,7 +175,7 @@ $aoeSession->projectPath = $workDir;
 
 // Look up cloudId from member's Atlassian connection (or shared)
 $cloudId = null;
-if ($provider === 'jira') {
+if ($provider === 'jira' && !$skipJira) {
     $atlassianTokenCheck = Bean::findOne('atlassiantoken', '(member_id = ? OR is_shared = 1)', [$memberId]);
     if ($atlassianTokenCheck) {
         $cloudId = $atlassianTokenCheck->cloud_uid;

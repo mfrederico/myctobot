@@ -50,6 +50,7 @@ $options = getopt('', [
     'pipeline:',
     'pipeline-id:',
     'run-id:',
+    'member:',
     'resume',
     'mappings:',
     'passthrough',
@@ -68,6 +69,7 @@ if (isset($options['help'])) {
     echo "  --pipeline      Pipeline slug to run\n";
     echo "  --pipeline-id   Pipeline ID to run (alternative to slug)\n";
     echo "  --run-id        Existing run ID to execute\n";
+    echo "  --member        Member ID for the run (default: 1)\n";
     echo "  --resume        Resume a paused interactive run\n";
     echo "  --mappings      JSON array of field mappings for resume\n";
     echo "  --passthrough   Pass entire output to context (for resume)\n";
@@ -88,6 +90,7 @@ $workspace = $options['workspace'] ?? null;
 $pipelineSlug = $options['pipeline'] ?? null;
 $pipelineId = $options['pipeline-id'] ?? null;
 $runId = $options['run-id'] ?? null;
+$memberId = $options['member'] ?? 1;  // Default to member 1 for CLI
 $isResume = isset($options['resume']);
 $mappingsJson = $options['mappings'] ?? '[]';
 $passthrough = isset($options['passthrough']);
@@ -139,6 +142,9 @@ try {
 
     // Initialize bootstrap
     $bootstrap = new \app\Bootstrap($configFile);
+
+    // Disable query caching for CLI to avoid stale data in long-running processes
+    Bean::disableCache();
 
     if ($verbose) {
         echo "Bootstrap initialized\n";
@@ -261,7 +267,7 @@ try {
     $run = Bean::dispense('pipelineruns');
     $run->run_uid = $runUid;
     $run->pipelines_id = $pipeline->id;
-    $run->member_id = null; // CLI execution has no member
+    $run->member_id = (int) $memberId;
     $run->trigger_source = 'cli';
     $run->trigger_data_json = json_encode($context);
     $run->status = 'pending';

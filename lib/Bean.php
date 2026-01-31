@@ -669,13 +669,21 @@ class Bean {
      */
     public static function enableCache(): void {
         self::$cacheEnabled = true;
+        // Also enable RedBeanPHP's internal QueryWriter cache
+        if (R::hasDatabase('default')) {
+            R::getWriter()->setUseCache(true);
+        }
     }
 
     /**
-     * Disable query caching
+     * Disable query caching (recommended for CLI scripts)
      */
     public static function disableCache(): void {
         self::$cacheEnabled = false;
+        // Also disable RedBeanPHP's internal QueryWriter cache
+        if (R::hasDatabase('default')) {
+            R::getWriter()->setUseCache(false);
+        }
     }
 
     /**
@@ -706,7 +714,9 @@ class Bean {
      */
     private static function getCachePrefix(): string {
         if (self::$cachePrefix === null) {
-            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
+            // Use WORKSPACE instead of HTTP_HOST for CLI/web consistency
+            $workspace = $_SERVER['WORKSPACE'] ?? 'default';
+            $siteId = md5(__DIR__ . '_' . $workspace);
             self::$cachePrefix = "bean_{$siteId}_";
         }
         return self::$cachePrefix;

@@ -13,6 +13,7 @@
 namespace app\services;
 
 use \app\Bean;
+use \app\TmuxManager;
 use \RedBeanPHP\R as R;
 use \app\services\AnthropicKeyService;
 use \app\services\LLMProviders\OllamaProvider;
@@ -3834,8 +3835,62 @@ PIPELINE;
     private function waitForAgentJobs(int $timeout = 600): void {
         $startTime = time();
         $pollInterval = 5;  // Poll every 5 seconds
+        $exitedSessions = [];  // Track sessions we've sent /exit to
+        $workspace = $this->context['workspace'] ?? 'dev';
 
         while ((time() - $startTime) < $timeout) {
+            // Clear APCu cache to ensure fresh data from database
+            // Both Bean (bean_*) and CachedDatabaseAdapter (rdb_*) use APCu
+            if (function_exists('apcu_clear_cache')) {
+                apcu_clear_cache();
+            }
+
+            // Check for jobs that completed in DB but tmux session still running
+            // Send /exit to terminate Claude gracefully
+            $completedJobs = Bean::find('aidevjobs',
+                'pipelineruns_id = ? AND status IN (?, ?, ?, ?)',
+                [$this->runId, 'complete', 'completed', 'pr_created', 'failed']
+            );
+
+            foreach ($completedJobs as $job) {
+                if (preg_match('/^PIPE-\d+-(.+)$/', $job->issue_key, $matches)) {
+                    $stepName = $matches[1];
+
+                    if (!isset($exitedSessions[$stepName])) {
+                        // Find tmux session for this step
+                        $sessionPattern = "aoe-{$workspace}-PIPE-{$this->runId}-" . TmuxManager::sanitizeForSessionName($stepName);
+                        $allSessions = TmuxManager::listSessions("aoe-{$workspace}-PIPE-{$this->runId}");
+
+                        foreach ($allSessions as $sess) {
+                            if (str_starts_with($sess['name'], $sessionPattern)) {
+                                $sessionName = $sess['name'];
+
+                                // Check if Claude is idle (not showing "esc to interrupt")
+                                $paneContent = TmuxManager::capture($sessionName, 20);
+                                $isWorking = str_contains($paneContent, 'esc to interrupt');
+
+                                if (!$isWorking) {
+                                    $this->log('info', "Claude idle, sending /exit", [
+                                        'step' => $stepName,
+                                        'session' => $sessionName
+                                    ]);
+
+                                    // Send Escape, /exit, Enter with delays
+                                    TmuxManager::sendKeys($sessionName, 'Escape');
+                                    usleep(500000);
+                                    TmuxManager::sendKeys($sessionName, '/exit', true);
+                                    usleep(500000);
+                                    TmuxManager::sendKeys($sessionName, 'Enter');
+
+                                    $exitedSessions[$stepName] = true;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Find all running jobs for this pipeline run
             $runningJobs = Bean::find('aidevjobs',
                 'pipelineruns_id = ? AND status IN (?, ?)',
@@ -3844,6 +3899,8 @@ PIPELINE;
 
             if (empty($runningJobs)) {
                 $this->log('info', "All agent jobs completed");
+                // Give sessions a moment to process /exit
+                sleep(2);
                 break;
             }
 
@@ -4757,8 +4814,26 @@ PIPELINE;
         exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $output);
         foreach ($output as $session) {
             if (str_starts_with($session, $pattern)) {
+                // Send Escape, /exit, Enter separately to gracefully terminate Claude CLI
+                $escapedSession = escapeshellarg($session);
+                exec("tmux send-keys -t {$escapedSession} Escape 2>/dev/null");
+                exec("tmux send-keys -t {$escapedSession} '/exit' 2>/dev/null");
+                exec("tmux send-keys -t {$escapedSession} Enter 2>/dev/null");
+                $this->log('info', "Sent /exit to resident session", ['session' => $session]);
+            }
+        }
+
+        // Wait a moment for Claude to exit gracefully
+        if (!empty($output)) {
+            sleep(2);
+        }
+
+        // Kill any sessions that didn't exit gracefully
+        exec("tmux list-sessions -F '#{session_name}' 2>/dev/null", $remaining);
+        foreach ($remaining as $session) {
+            if (str_starts_with($session, $pattern)) {
                 exec("tmux kill-session -t " . escapeshellarg($session) . " 2>/dev/null");
-                $this->log('info', "Killed resident session", ['session' => $session]);
+                $this->log('info', "Force killed resident session", ['session' => $session]);
             }
         }
     }

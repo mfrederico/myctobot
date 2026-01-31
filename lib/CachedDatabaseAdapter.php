@@ -37,7 +37,10 @@ class CachedDatabaseAdapter extends DBAdapter {
         parent::__construct($database);
 
         // Generate unique prefix for multi-workspace safety
-        $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
+        // IMPORTANT: Use consistent prefix across CLI and web contexts
+        // so cache invalidation from web APIs is seen by CLI cron processes
+        $workspace = $_SERVER['WORKSPACE'] ?? 'default';
+        $siteId = md5(__DIR__ . '_' . $workspace);
         $this->cachePrefix = "rdb_{$siteId}_";
 
         // Get config if available
@@ -341,7 +344,14 @@ class CachedDatabaseAdapter extends DBAdapter {
      * Check if APCu is available
      */
     private function hasAPCu() {
-        return function_exists('apcu_fetch') && ini_get('apc.enabled');
+        if (!function_exists('apcu_fetch') || !ini_get('apc.enabled')) {
+            return false;
+        }
+        // In CLI, also check apc.enable_cli
+        if (php_sapi_name() === 'cli' && !ini_get('apc.enable_cli')) {
+            return false;
+        }
+        return true;
     }
 
     /**

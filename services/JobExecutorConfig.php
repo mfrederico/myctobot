@@ -228,7 +228,7 @@ class JobExecutorConfig {
             $logPath = dirname(__DIR__) . '/log/agent-test-' . date('Y-m-d') . '.log';
 
             $cmd = sprintf(
-                'nohup php %s --issue=%s --member=%d --workspace=%s --job-id=%d --workstation=%s >> %s 2>&1 &',
+                'nohup php %s --issue=%s --member=%d --workspace=%s --job-id=%d --workstation=%s --skip-jira >> %s 2>&1 &',
                 escapeshellarg($scriptPath),
                 escapeshellarg($job->issue_key),
                 $memberId,

@@ -279,13 +279,18 @@ The caching system is designed for multi-workspace environments:
 
 Each installation gets unique cache keys based on:
 - Installation directory path
-- Domain name (HTTP_HOST)
+- Workspace slug (WORKSPACE environment variable)
 - MD5 hash combination
 
 ```php
-$siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
+$workspace = $_SERVER['WORKSPACE'] ?? 'default';
+$siteId = md5(__DIR__ . '_' . $workspace);
 $cacheKey = "tiknix_{$siteId}_" . md5($sql . serialize($params));
 ```
+
+**Important**: Using `$_SERVER['WORKSPACE']` instead of `$_SERVER['HTTP_HOST']` ensures
+cache consistency between CLI and web contexts. This allows cache invalidation from
+web APIs (like job_complete) to be properly seen by CLI cron processes.
 
 ### Benefits:
 - No cache collisions between sites

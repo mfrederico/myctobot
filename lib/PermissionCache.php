@@ -51,8 +51,10 @@ class PermissionCache {
      */
     private static function getCacheKey() {
         if (self::$CACHE_KEY === null) {
-            // Create unique key based on installation path and version
-            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli'));
+            // Create unique key based on installation path and workspace
+            // Use WORKSPACE instead of HTTP_HOST for CLI/web consistency
+            $workspace = $_SERVER['WORKSPACE'] ?? 'default';
+            $siteId = md5(__DIR__ . '_' . $workspace);
             $version = self::getCacheVersion();
             self::$CACHE_KEY = "tiknix_{$siteId}_permissions_v{$version}";
             self::$STATS_KEY = "tiknix_{$siteId}_stats";

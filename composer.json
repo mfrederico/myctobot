@@ -53,7 +53,8 @@
             "lib/MarkdownParser.php",
             "lib/CachedDatabaseAdapter.php",
             "lib/WorkspaceResolver.php",
-            "lib/Bean.php"
+            "lib/Bean.php",
+            "lib/TmuxManager.php"
         ]
     },
     "autoload-dev": {

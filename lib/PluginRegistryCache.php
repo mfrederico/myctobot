@@ -88,8 +88,9 @@ class PluginRegistryCache {
     private static function getCacheKey() {
         if (self::$CACHE_KEY === null) {
             // Create unique key based on installation path, workspace, and version
+            // Use WORKSPACE instead of HTTP_HOST for CLI/web consistency
             $workspaceSlug = self::getWorkspaceSlug();
-            $siteId = md5(__DIR__ . '_' . ($_SERVER['HTTP_HOST'] ?? 'cli') . '_' . $workspaceSlug);
+            $siteId = md5(__DIR__ . '_' . $workspaceSlug);
             $version = self::getCacheVersion();
             self::$CACHE_KEY = "myctobot_{$siteId}_plugins_v{$version}";
             self::$STATS_KEY = "myctobot_{$siteId}_plugin_stats";

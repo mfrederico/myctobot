@@ -13,27 +13,26 @@
 namespace app;
 
 use \Flight;
+use Aoe\Tmux\TmuxService;
 
 class TmuxManager {
 
     /**
      * Sanitize a string for use in tmux session names
      *
+     * Delegates to TmuxService::sanitize() for consistency across the codebase.
      * Removes/replaces characters that are invalid in tmux session names:
      * - Colons (:) - used for window:pane notation
      * - Periods (.) - can cause issues in some contexts
      * - Hash (#) - starts a comment in some contexts
      * - Slashes (/) - path separator, not valid in names
+     * - Underscores preserved for pipeline step correlation
      *
      * @param string $component The string to sanitize
      * @return string Sanitized string safe for tmux session names
      */
     public static function sanitizeForSessionName(string $component): string {
-        // Replace invalid characters with hyphens
-        $sanitized = preg_replace('/[^a-zA-Z0-9_-]/', '-', $component);
-        // Collapse multiple hyphens
-        $sanitized = preg_replace('/-+/', '-', $sanitized);
-        return trim($sanitized, '-');
+        return TmuxService::sanitize($component);
     }
 
     /**

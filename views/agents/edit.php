@@ -346,9 +346,10 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
 
             const status = data.data?.status || data.status;
 
-            if (status === 'running') {
+            if (status === 'running' || status === 'pending' || status === 'validated') {
                 // Still running, update message
-                const msg = data.data?.message || data.message || 'Running...';
+                const phase = data.data?.phase || '';
+                const msg = data.data?.message || data.message || (phase ? `Phase: ${phase}` : 'Running...');
                 const spinnerDiv = document.querySelector('#agentTestResults .spinner-border');
                 if (spinnerDiv) {
                     spinnerDiv.parentElement.querySelector('p').textContent = msg;

@@ -206,55 +206,44 @@ class JobExecutorConfig {
             ];
             $job->mcp_config_json = json_encode($mcpConfig);
 
-            \app\Bean::store($job);
+            $jobId = \app\Bean::store($job);
 
-            \Flight::get('log')->info('Created agent test job for job-executor', [
+            \Flight::get('log')->info('Created agent test job', [
                 'job_uid' => $jobUid,
+                'job_id' => $jobId,
                 'agent_id' => $agentId,
                 'runner_id' => $workstationId,
                 'workspace' => $workspace,
             ]);
 
-            // Submit to job-executor (PING)
-            $jobExecutorUrl = self::getUrl($workspace);
-            $submitUrl = rtrim($jobExecutorUrl, '/') . '/api/jobs/submit';
-            $callbackUrl = SiteConfig::getWorkspaceUrl($workspace) . '/api/jobexecutor';
-            $verifySsl = self::shouldVerifySsl($workspace);
-
-            $ch = curl_init($submitUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_HTTPHEADER => [
-                    'Content-Type: application/json',
-                    'Accept: application/json',
-                ],
-                CURLOPT_POSTFIELDS => json_encode([
-                    'workspace' => $workspace,
-                    'job_uid' => $jobUid,
-                    'callback_url' => $callbackUrl,
-                ]),
-                CURLOPT_TIMEOUT => 30,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_SSL_VERIFYPEER => $verifySsl,
-                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
+            // Build workstation JSON for job-dispatcher
+            $workstationJson = json_encode([
+                'host' => $runner['host'],
+                'user' => $runner['ssh_user'] ?? 'claudeuser',
+                'port' => (int) ($runner['ssh_port'] ?? 22),
             ]);
 
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $curlError = curl_error($ch);
-            curl_close($ch);
+            // Spawn job-dispatcher.php in background
+            $scriptPath = dirname(__DIR__) . '/scripts/job-dispatcher.php';
+            $logPath = dirname(__DIR__) . '/log/agent-test-' . date('Y-m-d') . '.log';
 
-            if ($curlError) {
-                \app\Bean::trash($job);
-                return ['success' => false, 'error' => "Connection to job-executor failed: {$curlError}"];
-            }
+            $cmd = sprintf(
+                'nohup php %s --issue=%s --member=%d --workspace=%s --job-id=%d --workstation=%s >> %s 2>&1 &',
+                escapeshellarg($scriptPath),
+                escapeshellarg($job->issue_key),
+                $memberId,
+                escapeshellarg($workspace),
+                $jobId,
+                escapeshellarg($workstationJson),
+                escapeshellarg($logPath)
+            );
 
-            if ($httpCode !== 200) {
-                \app\Bean::trash($job);
-                $result = json_decode($response, true);
-                return ['success' => false, 'error' => $result['error'] ?? "Job-executor returned HTTP {$httpCode}"];
-            }
+            exec($cmd);
+
+            \Flight::get('log')->info('Spawned job-dispatcher for agent test', [
+                'job_uid' => $jobUid,
+                'cmd' => $cmd,
+            ]);
 
             // Parse provider config for display
             $providerConfig = json_decode($agent->provider_config ?: '{}', true);
@@ -264,7 +253,7 @@ class JobExecutorConfig {
                 'test_id' => $testId,
                 'job_uid' => $jobUid,
                 'status' => 'started',
-                'message' => 'Agent test submitted to job-executor',
+                'message' => 'Agent test started via job-dispatcher',
                 'agent' => [
                     'name' => $agent->name,
                     'provider' => $agent->provider ?: 'claude_cli',

@@ -4027,64 +4027,12 @@ PIPELINE;
             'failed' => $failed
         ];
 
-        // Build output
+        // Build output - harvest is data-agnostic, just collects step outputs
         $output = array_merge(['_harvest' => $harvestMeta], $harvested);
 
-        // Apply template if provided (must be valid jq expression)
+        // Template field is informational only (label/description), not processed
         if (!empty($template)) {
-            // Skip invalid templates (jq syntax, not Jinja/Twig)
-            if (strpos($template, '{{') !== false || strpos($template, '}}') !== false) {
-                $this->log('warning', "Harvest template appears to be Jinja/Twig syntax, not jq. Skipping template.");
-            } else {
-                // Use jq to transform the output with timeout
-                $tempInput = json_encode($output);
-                $descriptors = [
-                    0 => ['pipe', 'r'],
-                    1 => ['pipe', 'w'],
-                    2 => ['pipe', 'w'],
-                ];
-
-                // Use timeout command to prevent hanging (5 second timeout)
-                $process = proc_open(['timeout', '5', 'jq', $template], $descriptors, $pipes, '/tmp', null);
-                if (is_resource($process)) {
-                    // Set non-blocking on output pipes to prevent deadlock
-                    stream_set_blocking($pipes[1], false);
-                    stream_set_blocking($pipes[2], false);
-
-                    fwrite($pipes[0], $tempInput);
-                    fclose($pipes[0]);
-
-                    // Read with timeout
-                    $stdout = '';
-                    $stderr = '';
-                    $startTime = time();
-                    while (time() - $startTime < 6) {
-                        $stdout .= stream_get_contents($pipes[1]);
-                        $stderr .= stream_get_contents($pipes[2]);
-
-                        $status = proc_get_status($process);
-                        if (!$status['running']) {
-                            break;
-                        }
-                        usleep(10000); // 10ms
-                    }
-
-                    fclose($pipes[1]);
-                    fclose($pipes[2]);
-                    $exitCode = proc_close($process);
-
-                    if ($exitCode === 0) {
-                        $templated = json_decode(trim($stdout), true);
-                        if ($templated !== null) {
-                            $output = array_merge(['_harvest' => $harvestMeta], $templated);
-                        }
-                    } elseif ($exitCode === 124) {
-                        $this->log('warning', "Harvest template jq timed out after 5 seconds");
-                    } else {
-                        $this->log('warning', "Harvest template jq failed (exit {$exitCode}): " . trim($stderr));
-                    }
-                }
-            }
+            $this->log('debug', "Harvest label: {$template}");
         }
 
         // Handle incomplete case

@@ -686,10 +686,11 @@ class Mcppipelines extends Control {
         $logPath = __DIR__ . '/../log/pipeline-' . date('Y-m-d') . '.log';
 
         $cmd = sprintf(
-            'nohup php %s --workspace=%s --run-id=%d >> %s 2>&1 &',
+            'nohup php %s --workspace=%s --run-id=%d --member=%d >> %s 2>&1 &',
             escapeshellarg($scriptPath),
             escapeshellarg($this->workspace),
             $runId,
+            $this->memberId,
             escapeshellarg($logPath)
         );
 

@@ -451,6 +451,26 @@ class PipelineExecutor {
             // Load step lookups for execution
             $this->loadStepLookups();
 
+            // Restore all step outputs from database so {prev} and {step_name} substitutions work
+            $completedStepRuns = Bean::find('pipelinestepruns',
+                ' pipelineruns_id = ? AND status = ? ORDER BY id ASC ',
+                [$this->run->id, 'success']
+            );
+            foreach ($completedStepRuns as $csr) {
+                $stepDef = Bean::load('pipelinesteps', $csr->pipelinesteps_id);
+                if ($stepDef && $stepDef->step_name) {
+                    $output = json_decode($csr->output_json ?: '{}', true);
+                    $this->stepOutputs[$stepDef->step_name] = $output;
+                    $this->previousStepOutput = $output; // Last one becomes {prev}
+                    // Also update context if not already set
+                    if (!isset($this->context[$stepDef->step_name])) {
+                        $this->context[$stepDef->step_name] = $output;
+                    }
+                }
+            }
+            // Set prev to the await_input step output (most recent)
+            $this->previousStepOutput = $this->stepOutputs[$step->step_name] ?? $this->previousStepOutput;
+
             // Find the index of the awaiting step
             $stepsArray = array_values($this->steps);
             $currentStepIndex = 0;
@@ -572,6 +592,15 @@ class PipelineExecutor {
                                     ($step->step_type === 'wait' && ($stepConfig['wait_type'] ?? '') === 'await_input');
 
                 if (!$isAwaitInputStep) {
+                    // Restore step output so {prev} substitution works for next step
+                    if (!empty($stepRun->output_json)) {
+                        $output = json_decode($stepRun->output_json, true);
+                        $this->stepOutputs[$step->step_name] = $output;
+                        $this->previousStepOutput = $output; // Set as prev for next step
+                        if (!isset($this->context[$step->step_name])) {
+                            $this->context[$step->step_name] = $output;
+                        }
+                    }
                     continue; // Already completed, skip non-await_input steps
                 }
 

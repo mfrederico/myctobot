@@ -816,7 +816,21 @@ $orchestrator = new \app\services\AIDevAgentOrchestrator(
 $prebuiltPromptFile = $options['prompt-file'] ?? null;
 $workDirPromptFile = "{$workDir}/prompt.txt";
 
-if ($prebuiltPromptFile && file_exists($prebuiltPromptFile)) {
+// Check if this is an agent test with a pre-set prompt in the job
+$isAgentTest = str_starts_with($issueKey, 'TEST-AGENT');
+$jobPrompt = null;
+if ($isAgentTest && $jobId) {
+    $testJob = Bean::findOne('aidevjobs', 'id = ?', [(int)$jobId]);
+    if ($testJob && !empty($testJob->prompt)) {
+        $jobPrompt = $testJob->prompt;
+    }
+}
+
+if ($jobPrompt) {
+    // Agent test - use the prompt set when the test job was created
+    echo "  Using agent test prompt from job record\n";
+    $prompt = $jobPrompt;
+} elseif ($prebuiltPromptFile && file_exists($prebuiltPromptFile)) {
     // Explicit prompt file provided via CLI
     echo "  Using pre-built prompt from: {$prebuiltPromptFile}\n";
     $prompt = file_get_contents($prebuiltPromptFile);

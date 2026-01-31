@@ -86,6 +86,7 @@ class Pipelines extends BaseControls\Control {
                 'trigger_type' => $p->trigger_type,
                 'trigger_info' => self::TRIGGER_TYPES[$p->trigger_type] ?? null,
                 'is_active' => (bool) $p->is_active,
+                'is_system' => (bool) $p->is_system,
                 'run_count' => $p->run_count ?? 0,
                 'last_run_at' => $p->last_run_at,
                 'success_rate' => $successRate,
@@ -331,6 +332,7 @@ class Pipelines extends BaseControls\Control {
             'trigger_config' => $triggerConfig,
             'default_context' => $defaultContext,
             'is_active' => (bool) $pipeline->is_active,
+            'is_system' => (bool) $pipeline->is_system,
             'run_count' => $pipeline->run_count,
             'last_run_at' => $pipeline->last_run_at,
             'expose_as_tool' => (bool) $pipeline->expose_as_tool,
@@ -461,6 +463,12 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
+        // Prevent deletion of system pipelines
+        if ($pipeline->is_system) {
+            Flight::jsonError('System pipelines cannot be deleted', 403);
+            return;
+        }
+
         // Delete all steps
         $steps = Bean::find('pipelinesteps', 'pipelines_id = ?', [$pipeline->id]);
         foreach ($steps as $step) {
@@ -502,6 +510,13 @@ class Pipelines extends BaseControls\Control {
         $pipeline = Bean::findOne('pipelines', 'id = ?', [$pipelineId]);
         if (!$pipeline) {
             Flight::jsonError('Pipeline not found', 404);
+            return;
+        }
+
+        // Prevent modification of system pipelines unless explicitly unlocked
+        $systemUnlocked = $this->getParam('system_unlocked') === '1' || $this->getParam('system_unlocked') === 'true';
+        if ($pipeline->is_system && !$systemUnlocked) {
+            Flight::jsonError('System pipelines cannot be modified. Unlock the pipeline first.', 403);
             return;
         }
 
@@ -623,6 +638,14 @@ class Pipelines extends BaseControls\Control {
 
         $pipelineId = (int) ($this->opId() ?? $this->getParam('pipeline_id') ?? 0);
         $stepId = (int) $this->getParam('step_id', 0);
+
+        // Check if pipeline is a system pipeline
+        $pipeline = Bean::load('pipelines', $pipelineId);
+        $systemUnlocked = $this->getParam('system_unlocked') === '1' || $this->getParam('system_unlocked') === 'true';
+        if ($pipeline->is_system && !$systemUnlocked) {
+            Flight::jsonError('Cannot modify steps in system pipelines. Unlock first.', 403);
+            return;
+        }
 
         $step = Bean::findOne('pipelinesteps', 'id = ? AND pipelines_id = ?', [$stepId, $pipelineId]);
         if (!$step) {

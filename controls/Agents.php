@@ -179,7 +179,7 @@ class Agents extends BaseControls\Control {
 
         // Create agent (workspace-level - track who created it)
         $agent = Bean::dispense('aiagents');
-        $agent->created_by_member_id = $memberId;
+        $agent->member_id = $memberId;
         $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
         $agent->description = $description;
@@ -210,6 +210,10 @@ class Agents extends BaseControls\Control {
                 $agent->runners_id = (int)$workstationId;
             }
         }
+
+        // Save default working directory (optional - where agent runs on the workstation)
+        $defaultWorkDir = trim($this->getParam('default_work_dir', ''));
+        $agent->default_work_dir = $defaultWorkDir ?: null;
 
         // If setting as default, unset other defaults (workspace-level)
         if ($isDefault) {
@@ -265,7 +269,7 @@ class Agents extends BaseControls\Control {
 
         // Create agent (workspace-level - track who created it)
         $agent = Bean::dispense('aiagents');
-        $agent->created_by_member_id = $memberId;
+        $agent->member_id = $memberId;
         $agent->created_by_name = $this->member->display_name ?? $this->member->email;
         $agent->name = $name;
         $agent->description = $description;
@@ -369,7 +373,8 @@ class Agents extends BaseControls\Control {
             'is_active' => (bool) $agent->is_active,
             'is_default' => (bool) $agent->is_default,
             'anthropickeys_id' => $agent->anthropickeys_id,
-            'runners_id' => $agent->runners_id
+            'runners_id' => $agent->runners_id,
+            'default_work_dir' => $agent->default_work_dir
         ];
         $this->viewData['availableMcpServers'] = $availableServers;
 
@@ -512,6 +517,10 @@ class Agents extends BaseControls\Control {
                 $agent->runners_id = (int)$workstationId;
             }
         }
+
+        // Update default working directory
+        $defaultWorkDir = trim($this->getParam('default_work_dir', ''));
+        $agent->default_work_dir = $defaultWorkDir ?: null;
     }
 
     /**
@@ -688,16 +697,18 @@ class Agents extends BaseControls\Control {
      * workstation SSH connection for a hello-world test.
      */
     /**
-     * Run agent test via job-executor pipeline
+     * Run agent test via Agent Test pipeline
      * POST /agents/testagent/{agent_id}
      *
-     * Uses the same job-executor pipeline as workstation tests for unified execution.
-     * Creates a job in aidevjobs, submits to job-executor, which runs in tmux via aoe-php.
+     * Triggers the 'agent-test' pipeline which:
+     * 1. Spawns the agent with a test prompt
+     * 2. Waits for job completion (harvest step)
+     * 3. Terminates the session gracefully (reaper step)
      */
     public function testagent($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        require_once __DIR__ . '/../services/JobExecutorConfig.php';
+        require_once __DIR__ . '/../services/PipelineExecutor.php';
 
         $agentId = (int) ($this->opId() ?? $this->getParam('agent_id') ?? 0);
         $workstationId = (int) ($this->getParam('workstation_id') ?? 0);
@@ -708,14 +719,94 @@ class Agents extends BaseControls\Control {
         }
 
         $memberId = $this->member->id ?? 1;
-        $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
 
-        $result = \app\services\JobExecutorConfig::submitTestJob($agentId, $workstationId, $memberId, $workspaceSlug);
+        // Find the agent-test pipeline
+        $pipeline = Bean::findOne('pipelines', 'slug = ? AND is_active = 1', ['agent-test']);
+        if (!$pipeline) {
+            // Fallback to legacy method if pipeline doesn't exist
+            require_once __DIR__ . '/../services/JobExecutorConfig.php';
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+            $result = \app\services\JobExecutorConfig::submitTestJob($agentId, $workstationId, $memberId, $workspaceSlug);
+            if ($result['success']) {
+                Flight::jsonSuccess($result);
+            } else {
+                Flight::jsonError($result['error'] ?? 'Test submission failed', 500);
+            }
+            return;
+        }
 
-        if ($result['success']) {
-            Flight::jsonSuccess($result);
-        } else {
-            Flight::jsonError($result['error'] ?? 'Test submission failed', 500);
+        // Create pipeline run with context
+        try {
+            $stepCount = Bean::count('pipelinesteps', 'pipelines_id = ? AND is_active = 1', [$pipeline->id]);
+            if ($stepCount === 0) {
+                Flight::jsonError('Agent test pipeline has no active steps', 400);
+                return;
+            }
+
+            $runUid = 'agent-test-' . bin2hex(random_bytes(8));
+
+            // Build context: merge default context with test arguments
+            $defaultContext = json_decode($pipeline->default_context_json ?: '{}', true);
+            $triggerData = [
+                'agent_id' => $agentId,
+                'runner_id' => $workstationId,
+            ];
+            $context = array_merge($defaultContext, $triggerData);
+
+            $run = Bean::dispense('pipelineruns');
+            $run->run_uid = $runUid;
+            $run->pipelines = $pipeline;
+            $run->member_id = $memberId;
+            $run->trigger_source = 'agent_test';
+            $run->trigger_data_json = json_encode($triggerData);
+            $run->status = 'pending';
+            $run->context_json = json_encode($context);
+            $run->steps_total = $stepCount;
+            $run->steps_completed = 0;
+            $run->progress_percent = 0;
+            $run->created_at = date('Y-m-d H:i:s');
+            $run->updated_at = date('Y-m-d H:i:s');
+
+            $runId = Bean::store($run);
+
+            // Update pipeline stats
+            $pipeline->run_count = ($pipeline->run_count ?? 0) + 1;
+            $pipeline->last_run_at = date('Y-m-d H:i:s');
+            Bean::store($pipeline);
+
+            // Execute asynchronously - spawn background process using runpipe.php
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+            $scriptPath = dirname(__DIR__) . '/scripts/runpipe.php';
+            $logPath = dirname(__DIR__) . '/log/agent-test-' . date('Y-m-d') . '.log';
+
+            $cmd = sprintf(
+                'nohup php %s --workspace=%s --run-id=%d >> %s 2>&1 &',
+                escapeshellarg($scriptPath),
+                escapeshellarg($workspaceSlug),
+                $runId,
+                escapeshellarg($logPath)
+            );
+            exec($cmd);
+
+            $this->logger->info("Agent test pipeline started", [
+                'run_id' => $runId,
+                'run_uid' => $runUid,
+                'agent_id' => $agentId,
+                'workstation_id' => $workstationId,
+                'cmd' => $cmd
+            ]);
+
+            Flight::jsonSuccess([
+                'success' => true,
+                'test_id' => 'pipeline-' . $runId,
+                'run_id' => $runId,
+                'run_uid' => $runUid,
+                'status' => 'started',
+                'message' => 'Agent test started via pipeline',
+            ]);
+        } catch (\Exception $e) {
+            Flight::get('log')->error('Agent test pipeline failed', ['error' => $e->getMessage()]);
+            Flight::jsonError('Test failed: ' . $e->getMessage(), 500);
         }
     }
 
@@ -736,6 +827,101 @@ class Agents extends BaseControls\Control {
 
         if (empty($testId)) {
             Flight::jsonError('Test ID is required', 400);
+            return;
+        }
+
+        // Check if this is a pipeline-based test
+        if (str_starts_with($testId, 'pipeline-')) {
+            $runId = (int) substr($testId, strlen('pipeline-'));
+            $run = Bean::load('pipelineruns', $runId);
+
+            if (!$run || !$run->id) {
+                Flight::jsonError('Pipeline run not found', 404);
+                return;
+            }
+
+            $status = $run->status ?? 'pending';
+            $context = json_decode($run->context_json ?: '{}', true);
+
+            // Calculate duration
+            $durationMs = null;
+            if ($run->started_at && ($run->completed_at || $run->updated_at)) {
+                $startTime = strtotime($run->started_at);
+                $endTime = strtotime($run->completed_at ?? $run->updated_at);
+                if ($startTime && $endTime) {
+                    $durationMs = ($endTime - $startTime) * 1000;
+                }
+            }
+
+            // Get step run details
+            $stepRuns = Bean::find('pipelinestepruns', ' pipelineruns_id = ? ORDER BY id ASC ', [$runId]);
+            $steps = [];
+            foreach ($stepRuns as $sr) {
+                $steps[$sr->step_name] = [
+                    'status' => $sr->status,
+                    'output' => json_decode($sr->output_json ?: '{}', true),
+                    'error' => $sr->error_message,
+                ];
+            }
+
+            // Check for spawn_agent step to get job info
+            $jobUid = null;
+            $workDir = null;
+            if (isset($steps['spawn_agent']['output']['job_key'])) {
+                $jobUid = $steps['spawn_agent']['output']['job_key'];
+                // Also check for aidevjobs record
+                $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$jobUid]);
+                if ($job && $job->runners_id) {
+                    $runner = Bean::load('runners', $job->runners_id);
+                    if ($runner && $runner->id) {
+                        $sshUser = $runner->ssh_user ?? 'claudeuser';
+                        $workDir = "/home/{$sshUser}/jobs/{$jobUid}";
+                    }
+                }
+            }
+
+            // Map pipeline status to test status
+            $testStatus = match ($status) {
+                'completed' => 'completed',
+                'failed' => 'failed',
+                'running' => 'running',
+                'awaiting_input' => 'running',
+                default => 'pending',
+            };
+
+            $response = [
+                'test_id' => $testId,
+                'status' => $testStatus,
+                'run_id' => $runId,
+                'run_uid' => $run->run_uid,
+                'job_uid' => $jobUid,
+                'work_dir' => $workDir,
+                'duration_ms' => $durationMs,
+                'started_at' => $run->started_at,
+                'completed_at' => $run->completed_at,
+                'steps_completed' => (int) $run->steps_completed,
+                'steps_total' => (int) $run->steps_total,
+                'steps' => $steps,
+                'source' => 'pipeline',
+            ];
+
+            if ($status === 'completed') {
+                $response['success'] = true;
+                $response['message'] = 'Test completed successfully via pipeline';
+            } elseif ($status === 'failed') {
+                $response['success'] = false;
+                $response['error'] = $run->error_message ?? 'Pipeline failed';
+            }
+
+            // Auto-send /exit when test completes via pipeline reaper step
+            // The reaper step should handle this, but if needed can be triggered manually
+            if ($sendExit && $jobUid && in_array($status, ['completed', 'failed'])) {
+                $exitResult = \app\services\JobExecutorConfig::sendExit($jobUid);
+                $response['exit_sent'] = $exitResult['success'] ?? false;
+                $response['exit_message'] = $exitResult['message'] ?? $exitResult['error'] ?? null;
+            }
+
+            Flight::jsonSuccess($response);
             return;
         }
 

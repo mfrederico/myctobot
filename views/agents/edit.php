@@ -142,6 +142,19 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     </div>
                 </div>
 
+                <!-- Default Working Directory -->
+                <div class="mb-3">
+                    <label class="form-label">Default Working Directory</label>
+                    <input type="text" class="form-control font-monospace" name="default_work_dir" id="default_work_dir"
+                           value="<?= htmlspecialchars($agent['default_work_dir'] ?? '') ?>"
+                           placeholder="~/jobs/{job_uid}">
+                    <div class="form-text">
+                        Default directory on the workstation where this agent runs.
+                        Examples: <code>/var/www/html/mysite</code>, <code>~/projects/myapp</code><br>
+                        Leave empty to use <code>~/jobs/{job_uid}</code>. Pipelines can override this per-step.
+                    </div>
+                </div>
+
                 <div class="row">
                     <div class="col-md-6">
                         <div class="form-check mb-3">
@@ -221,10 +234,13 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
                     testSelect.innerHTML = '<option value="">-- Select a workstation --</option>';
 
                     data.data.workstations.forEach(ws => {
-                        // Test dropdown
+                        // Test dropdown - pre-select assigned workstation
                         const testOpt = document.createElement('option');
                         testOpt.value = ws.id;
                         testOpt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        if (ws.id == currentWorkstationId) {
+                            testOpt.selected = true;
+                        }
                         testSelect.appendChild(testOpt);
 
                         // Assignment dropdown
@@ -269,9 +285,11 @@ $mcpToolDescription = $agent['mcp_tool_description'] ?? '';
             // Start the test (async)
             const formData = new FormData();
             formData.append('workstation_id', workstationId);
+            formData.append('csrf_token', '<?= Flight::csrf()->getToken() ?>');
 
             const response = await fetch('/agents/testagent/<?= $agentId ?>', {
                 method: 'POST',
+                headers: { 'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>' },
                 body: formData
             });
             const data = await response.json();

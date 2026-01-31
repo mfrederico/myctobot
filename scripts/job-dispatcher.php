@@ -168,9 +168,23 @@ if ($aoeSessionId) {
 // Session name format: aoe-{workspace}-{issue}-{shortId}
 $sessionName = $aoeSession->getTmuxName();
 $safeIssueKey = AoeTmux::sanitize($issueKey);
-$workDir = "/tmp/{$sessionName}";
 
-// Update session with actual work directory
+// Determine work directory based on whether we're running on a remote workstation
+// Local staging dir is used for building files before SCP to remote
+$localStagingDir = "/tmp/{$sessionName}";
+$remoteWorkDir = null;  // Set later if workstation is configured
+
+if ($workstationConfig) {
+    // For remote runners, use ~/jobs/{job_uid} on the runner
+    // The job_uid will be set after we load/create the job record
+    // For now, use session name as fallback, will be updated later
+    $remoteWorkDir = "~/jobs/{$sessionName}";
+}
+
+// workDir is the effective directory - local staging for file creation
+$workDir = $localStagingDir;
+
+// Update session with actual work directory (local for now, remote path set in SSH commands)
 $aoeSession->projectPath = $workDir;
 
 // Look up cloudId from member's Atlassian connection (or shared)
@@ -399,8 +413,22 @@ $repoName = '';
 $defaultBranch = 'main';
 $cloneUrl = '';
 
-// Initialize job_uid for later use
+// Initialize job_uid for later use - load from job record if --job-id provided
 $jobUid = '';
+if ($jobId) {
+    // Load job_uid from job record (needed for MCP auth substitution)
+    $jobRecord = Bean::findOne('aidevjobs', 'id = ? OR job_uid = ?', [(int)$jobId, $jobId]);
+    if ($jobRecord) {
+        $jobUid = $jobRecord->job_uid ?? '';
+        echo "  Job UID: {$jobUid}\n";
+
+        // Update remote work dir with actual job_uid
+        if ($workstationConfig && $jobUid) {
+            $remoteWorkDir = "~/jobs/{$jobUid}";
+            echo "  Remote work dir: {$remoteWorkDir}\n";
+        }
+    }
+}
 
 if ($isPipelineJob) {
     echo "Pipeline job - loading agent from job record...\n";
@@ -410,6 +438,7 @@ if ($isPipelineJob) {
     if ($existingJob) {
         $jobUid = $existingJob->job_uid ?? '';  // Store for API auth later
 
+        // Load agent if available
         if ($existingJob->aiagents_id) {
             $agentBean = Bean::load('aiagents', $existingJob->aiagents_id);
             if ($agentBean && $agentBean->id && $agentBean->is_active) {
@@ -420,7 +449,8 @@ if ($isPipelineJob) {
                     'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
                     'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
                     'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true),
-                    'runners_id' => $agentBean->runners_id ?? null
+                    'runners_id' => $agentBean->runners_id ?? null,
+                    'default_work_dir' => $agentBean->default_work_dir ?? null
                 ];
                 echo "  Agent: {$agentConfig['name']}\n";
             }
@@ -430,6 +460,31 @@ if ($isPipelineJob) {
         $queueMeta = json_decode($existingJob->queue_metadata ?? '{}', true);
         $residentMode = $queueMeta['resident_mode'] ?? false;
         $pipelineStepName = $queueMeta['step_name'] ?? null;
+
+        // Determine remote work dir using fallback chain:
+        // 1. Step config working_dir (from pipeline)
+        // 2. Agent default_work_dir
+        // 3. Fallback to ~/jobs/{job_uid}
+        if ($workstationConfig && $jobUid) {
+            $stepWorkDir = $queueMeta['context']['working_dir'] ?? $queueMeta['working_dir'] ?? null;
+            $agentWorkDir = $agentConfig['default_work_dir'] ?? null;
+
+            // Substitute {job_uid} in working_dir values (not available at pipeline execution time)
+            $substituteJobUid = function($dir) use ($jobUid) {
+                return str_replace('{job_uid}', $jobUid, $dir ?? '');
+            };
+
+            if (!empty($stepWorkDir)) {
+                $remoteWorkDir = $substituteJobUid($stepWorkDir);
+                echo "  Remote work dir: {$remoteWorkDir} (from step config)\n";
+            } elseif (!empty($agentWorkDir)) {
+                $remoteWorkDir = $substituteJobUid($agentWorkDir);
+                echo "  Remote work dir: {$remoteWorkDir} (from agent default)\n";
+            } else {
+                $remoteWorkDir = "~/jobs/{$jobUid}";
+                echo "  Remote work dir: {$remoteWorkDir} (default)\n";
+            }
+        }
 
         if ($residentMode) {
             // Resident mode: override --print flag to keep Claude interactive
@@ -480,7 +535,8 @@ if (!$isPipelineJob && $repoBean) {
             'provider_config' => json_decode($agentBean->provider_config ?: '{}', true),
             'mcp_servers' => json_decode($agentBean->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($agentBean->hooks_config ?: '{}', true),
-            'runners_id' => $agentBean->runners_id ?? null
+            'runners_id' => $agentBean->runners_id ?? null,
+            'default_work_dir' => $agentBean->default_work_dir ?? null
         ];
         $providerLabel = $agentConfig['provider'];
         if (!empty($agentConfig['provider_config']['use_ollama'])) {
@@ -536,7 +592,8 @@ if (!$agentConfig) {
             'provider_config' => json_decode($defaultAgent->provider_config ?: '{}', true),
             'mcp_servers' => json_decode($defaultAgent->mcp_servers ?: '[]', true),
             'hooks_config' => json_decode($defaultAgent->hooks_config ?: '{}', true),
-            'runners_id' => $defaultAgent->runners_id ?? null
+            'runners_id' => $defaultAgent->runners_id ?? null,
+            'default_work_dir' => $defaultAgent->default_work_dir ?? null
         ];
         echo "  Agent: {$agentConfig['name']} (default)\n";
         $agentBean = $defaultAgent;
@@ -839,6 +896,26 @@ if ($jobPrompt) {
     // Pipeline job - use prompt written by PipelineExecutor
     echo "  Using pipeline prompt from: {$workDirPromptFile}\n";
     $prompt = file_get_contents($workDirPromptFile);
+
+    // Inject job_uid and working_dir into the Pipeline Context JSON block
+    // These aren't available when PipelineExecutor creates the prompt
+    if ($jobUid && preg_match('/## Pipeline Context\s*```json\s*(\{[^`]+\})\s*```/s', $prompt, $matches)) {
+        $contextJson = json_decode($matches[1], true);
+        if ($contextJson && isset($contextJson['context'])) {
+            $contextJson['context']['job_uid'] = $jobUid;
+            $contextJson['context']['session_name'] = $sessionName;
+            if (!empty($remoteWorkDir)) {
+                $contextJson['context']['working_dir'] = $remoteWorkDir;
+            }
+            $updatedJson = json_encode($contextJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            $prompt = preg_replace(
+                '/## Pipeline Context\s*```json\s*\{[^`]+\}\s*```/s',
+                "## Pipeline Context\n```json\n{$updatedJson}\n```",
+                $prompt
+            );
+            echo "  Injected job_uid and working_dir into prompt context\n";
+        }
+    }
 } else {
     // Build prompt - use orchestrator pattern for Jira/GitHub jobs
     $prompt = $orchestrator->buildOrchestratorPrompt();
@@ -946,6 +1023,7 @@ file_put_contents("{$workDir}/CLAUDE.md", $claudeMd);
 // No hardcoded defaults - agents must explicitly select their MCP servers
 $mcpServers = new \stdClass();
 $enabledMcpServers = [];
+$promptAdditions = [];  // Collect prompt_additions from each MCP server
 
 // Build variable substitution context for placeholders in MCP server configs
 $mcpWorkspace = $workspace ?? 'default';
@@ -963,6 +1041,28 @@ $mcpSubstitutions = [
     '${JIRA_BASIC_AUTH}' => base64_encode("{$memberId}:{$cloudId}"),
     '${JOBS_BASIC_AUTH}' => base64_encode("{$memberId}:{$mcpJobUidForAuth}"),
 ];
+
+// Build context for prompt_additions substitution (using VariableSubstitution class)
+$promptContext = [
+    'issue_key' => $issueKey,
+    'workspace' => $workspaceSlug,
+    'member_id' => $memberId,
+    'repo' => $repoDir ?? '',
+    'branch' => $defaultBranch ?? '',
+    'agent_name' => $agentConfig['name'] ?? 'AI Developer',
+    'repo_owner' => $repoOwner ?? '',
+    'repo_name' => $repoName ?? '',
+    'provider' => $provider,
+];
+
+// Add job-specific context if available from job record
+if ($jobId) {
+    $contextJob = Bean::findOne('aidevjobs', 'id = ? OR job_uid = ?', [(int)$jobId, $jobId]);
+    if ($contextJob && !empty($contextJob->context_json)) {
+        $jobContext = json_decode($contextJob->context_json, true) ?: [];
+        $promptContext = array_merge($promptContext, $jobContext);
+    }
+}
 
 // Load MCP servers from agent's assigned servers (many-to-many relationship)
 if ($agentBean && $agentBean->id) {
@@ -1031,6 +1131,16 @@ if ($agentBean && $agentBean->id) {
 
             $enabledMcpServers[] = $serverName;
             echo "    + {$serverName} ({$serverType})\n";
+
+            // Collect prompt_additions if present
+            if (!empty($server->prompt_additions)) {
+                $substituted = \app\VariableSubstitution::substitute(
+                    $server->prompt_additions,
+                    $promptContext
+                );
+                $promptAdditions[] = "### {$serverName}\n\n{$substituted}";
+                echo "      → Has prompt additions\n";
+            }
         }
     }
 } else {
@@ -1045,7 +1155,6 @@ if (is_dir($repoDir)) {
     copy("{$workDir}/.mcp.json", "{$repoDir}/.mcp.json");
     echo "  MCP config copied to repo directory\n";
 }
-echo "  {$mcpProviderInfo}\n";
 
 // ============================================
 // Update CLAUDE.md with actual MCP tools list
@@ -1061,6 +1170,14 @@ $claudeMdContent = preg_replace(
     "## MCP Tools\n{$mcpToolsList}\n",
     $claudeMdContent
 );
+
+// Inject prompt_additions from MCP servers (if any)
+if (!empty($promptAdditions)) {
+    $promptAdditionsSection = "\n## MCP Server Instructions\n\n" . implode("\n\n---\n\n", $promptAdditions) . "\n";
+    $claudeMdContent .= $promptAdditionsSection;
+    echo "  Added prompt additions from " . count($promptAdditions) . " MCP server(s)\n";
+}
+
 file_put_contents("{$workDir}/CLAUDE.md", $claudeMdContent);
 echo "  Updated CLAUDE.md with " . count($enabledMcpServers) . " MCP tools\n";
 
@@ -1457,8 +1574,7 @@ if (!empty($ollamaModel)) {
 }
 
 // Build SSH wrapper if workstation is configured
-// When SSH is used, Claude runs on the remote host but the work directory must be accessible
-// (via NFS, same path structure, or localhost)
+// When SSH is used, Claude runs on the remote host in ~/jobs/{job_uid}
 $sshPrefix = '';
 $sshSuffix = '';
 $sshScriptFile = '';
@@ -1476,6 +1592,7 @@ if ($workstationConfig) {
         // This script will be executed inside 'script -c' command
         $sshScriptFile = "{$workDir}/ssh-claude.sh";
         echo "Workstation: {$wsUser}@{$wsHost}:{$wsPort}\n";
+        echo "Remote work dir: {$remoteWorkDir}\n";
     }
 }
 
@@ -1486,12 +1603,13 @@ if ($usePrintMode) {
     // Build the claude command (with or without SSH wrapper)
     if ($workstationConfig && $sshScriptFile) {
         // Add common claude installation paths to PATH for SSH sessions
-        // Create remote dir structure and sync all required files
-        $claudeCmd = "ssh -p {$wsPort} {$wsUser}@{$wsHost} 'mkdir -p {$workDir}/.claude' && " .
-            "scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt && " .
-            "scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$workDir}/.mcp.json 2>/dev/null; " .
-            "scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$workDir}/.claude/settings.json 2>/dev/null; " .
-            "ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$workDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
+        // Create remote dir structure in ~/jobs/{job_uid} and sync all required files
+        $claudeCmd = "ssh -p {$wsPort} {$wsUser}@{$wsHost} 'mkdir -p {$remoteWorkDir}/.claude' && " .
+            "scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$remoteWorkDir}/prompt.txt && " .
+            "scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.mcp.json 2>/dev/null; " .
+            "scp -P {$wsPort} CLAUDE.md {$wsUser}@{$wsHost}:{$remoteWorkDir}/CLAUDE.md 2>/dev/null; " .
+            "scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.claude/settings.json 2>/dev/null; " .
+            "ssh -t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && cd {$remoteWorkDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
     } else {
         $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt";
     }
@@ -1540,21 +1658,22 @@ BASH;
     if ($workstationConfig && $sshScriptFile) {
         // Create a wrapper script to avoid quote-nesting issues with 'script -c'
         // Add common claude installation paths to PATH for SSH sessions
-        // Sync all required files: prompt.txt, .mcp.json, .claude/settings.json
+        // Sync all required files: prompt.txt, .mcp.json, CLAUDE.md, .claude/settings.json
         $sshScriptContent = <<<SSHSCRIPT
 #!/bin/bash
 cd {$workDir}
 
-# Create work directory structure on remote
-ssh -p {$wsPort} {$wsUser}@{$wsHost} "mkdir -p {$workDir}/.claude"
+# Create work directory structure on remote (using ~/jobs/{job_uid} or custom path)
+ssh -p {$wsPort} {$wsUser}@{$wsHost} "mkdir -p {$remoteWorkDir}/.claude"
 
 # Sync all required files for Claude session
-scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$workDir}/prompt.txt
-scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$workDir}/.mcp.json 2>/dev/null || true
-scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$workDir}/.claude/settings.json 2>/dev/null || true
+scp -P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$remoteWorkDir}/prompt.txt
+scp -P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.mcp.json 2>/dev/null || true
+scp -P {$wsPort} CLAUDE.md {$wsUser}@{$wsHost}:{$remoteWorkDir}/CLAUDE.md 2>/dev/null || true
+scp -P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.claude/settings.json 2>/dev/null || true
 
 # Run claude on remote workstation
-ssh -t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && cd {$workDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
+ssh -t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && cd {$remoteWorkDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
 SSHSCRIPT;
         file_put_contents($sshScriptFile, $sshScriptContent);
         chmod($sshScriptFile, 0755);

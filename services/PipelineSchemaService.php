@@ -157,6 +157,10 @@ class PipelineSchemaService
                         'type' => 'integer',
                         'description' => 'Workstation/runner ID for "runner" mode (uses agent default if not specified)'
                     ],
+                    'working_dir' => [
+                        'type' => 'string',
+                        'description' => 'Remote working directory for runner mode. Falls back to agent default, then ~/jobs/{job_uid}. Supports variables like {context.work_dir}'
+                    ],
                     'prompt' => [
                         'type' => 'string',
                         'required' => true,
@@ -501,6 +505,42 @@ class PipelineSchemaService
                         'description' => 'Step name when no case matches (empty = continue to next step)'
                     ]
                 ]
+            ],
+
+            'reaper' => [
+                'type' => 'reaper',
+                'category' => 'flow',
+                'label' => 'Session Reaper',
+                'description' => 'Gracefully terminate Claude CLI sessions by sending /exit command. Use after AI agent steps complete to clean up resident sessions.',
+                'config_schema' => [
+                    'job_uid' => [
+                        'type' => 'string',
+                        'description' => 'Specific job UID to reap. Supports variables: {context.job_uid}, {spawn_agent.output.job_uid}'
+                    ],
+                    'session_pattern' => [
+                        'type' => 'string',
+                        'description' => 'Tmux session name pattern to match (e.g., "aidev-*" or "pipeline-123-*")'
+                    ],
+                    'step_names' => [
+                        'type' => 'array',
+                        'description' => 'Array of step names whose sessions to reap (e.g., ["agent_step", "analyze_step"])'
+                    ],
+                    'wait_for_idle' => [
+                        'type' => 'boolean',
+                        'default' => true,
+                        'description' => 'Wait for Claude to be idle before sending /exit (checks for prompt)'
+                    ],
+                    'force_kill' => [
+                        'type' => 'boolean',
+                        'default' => false,
+                        'description' => 'Force kill the tmux session if /exit does not terminate it gracefully'
+                    ],
+                    'timeout' => [
+                        'type' => 'integer',
+                        'default' => 30,
+                        'description' => 'Seconds to wait for graceful shutdown before force kill (if enabled)'
+                    ]
+                ]
             ]
         ];
     }
@@ -567,6 +607,12 @@ class PipelineSchemaService
 
             // Skip validation if field is not provided and not required
             if ($value === null || $value === '') {
+                continue;
+            }
+
+            // Skip type validation for variable substitution syntax
+            // Variables like {context.agent_id} will be resolved at runtime
+            if (is_string($value) && preg_match('/\{[^}]+\}/', $value)) {
                 continue;
             }
 

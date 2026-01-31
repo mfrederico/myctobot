@@ -10,6 +10,17 @@
             <h1 class="h2 mb-0">
                 <i class="bi bi-diagram-3"></i>
                 <?= $pipeline ? 'Edit: ' . htmlspecialchars($pipeline['name']) : 'Create Pipeline' ?>
+                <?php if (!empty($pipeline['is_system'])): ?>
+                <span id="systemBadgeLocked" class="badge bg-secondary ms-2" title="System pipeline - locked for editing">
+                    <i class="bi bi-lock-fill"></i> System
+                </span>
+                <button type="button" id="unlockSystemBtn" class="btn btn-sm btn-outline-warning ms-2" onclick="unlockSystemPipeline()" title="Currently locked - click to unlock">
+                    <i class="bi bi-lock-fill"></i> Unlock
+                </button>
+                <button type="button" id="lockSystemBtn" class="btn btn-sm btn-outline-secondary ms-2" style="display: none;" onclick="lockSystemPipeline()" title="Currently unlocked - click to lock">
+                    <i class="bi bi-unlock-fill"></i> Lock
+                </button>
+                <?php endif; ?>
             </h1>
         </div>
         <div>
@@ -358,12 +369,33 @@
                     <thead class="table-dark">
                         <tr>
                             <th style="width: 60px;" class="text-center">#</th>
-                            <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
-                            <th class="text-center column-header" style="min-width: 200px; cursor: pointer;"
+                            <?php
+                            // Calculate which columns are parallel
+                            $parallelColumns = [];
+                            foreach ($stepGrid as $row => $cols) {
+                                foreach ($cols as $col => $step) {
+                                    if (!empty($step['run_parallel'])) {
+                                        $parallelColumns[$col] = true;
+                                    }
+                                }
+                            }
+                            ?>
+                            <?php foreach ($pipeline['columns'] as $colIndex => $colName):
+                                $isParallelCol = isset($parallelColumns[$colIndex]);
+                            ?>
+                            <th class="text-center column-header <?= $isParallelCol ? 'column-parallel' : '' ?>"
+                                style="min-width: 200px;"
                                 data-col-index="<?= $colIndex ?>"
-                                ondblclick="renameColumn(<?= $colIndex ?>, this)"
-                                title="Double-click to rename">
-                                <span class="column-name"><?= htmlspecialchars($colName) ?></span>
+                                data-parallel="<?= $isParallelCol ? '1' : '0' ?>">
+                                <div class="d-flex align-items-center justify-content-center gap-2">
+                                    <span class="column-name cursor-pointer" ondblclick="renameColumn(<?= $colIndex ?>, this.closest('th'))" title="Double-click to rename"><?= htmlspecialchars($colName) ?></span>
+                                    <button type="button"
+                                            class="btn btn-sm p-0 column-parallel-toggle <?= $isParallelCol ? 'active' : '' ?>"
+                                            onclick="toggleColumnParallel(<?= $colIndex ?>, this)"
+                                            title="<?= $isParallelCol ? 'Parallel: Steps run concurrently. Click to disable.' : 'Click to enable parallel execution for this column' ?>">
+                                        <i class="bi <?= $isParallelCol ? 'bi-lightning-fill text-warning' : 'bi-lightning text-muted' ?>"></i>
+                                    </button>
+                                </div>
                             </th>
                             <?php endforeach; ?>
                             <th style="width: 80px;" class="text-center align-middle">
@@ -388,13 +420,15 @@
                                     <button type="button"
                                             class="btn btn-sm p-0 row-parallel-toggle <?= $rowParallel ? 'active' : '' ?>"
                                             onclick="toggleRowParallel(<?= $row ?>, this)"
-                                            title="<?= $rowParallel ? 'Parallel ON: This row runs concurrently with other parallel rows. Click to disable.' : 'Click to enable parallel execution for this row' ?>">
+                                            title="<?= $rowParallel ? 'Parallel ON: Steps in this column run concurrently. Click to disable.' : 'Click to enable parallel execution for steps in this column' ?>">
                                         <i class="bi <?= $rowParallel ? 'bi-lightning-fill text-warning' : 'bi-lightning text-muted' ?>" style="font-size: 0.75rem;"></i>
                                     </button>
                                 </div>
                             </td>
-                            <?php foreach ($pipeline['columns'] as $colIndex => $colName): ?>
-                            <td class="p-2 drop-zone" data-row="<?= $row ?>" data-col="<?= $colIndex ?>"
+                            <?php foreach ($pipeline['columns'] as $colIndex => $colName):
+                                $isParallelCol = isset($parallelColumns[$colIndex]);
+                            ?>
+                            <td class="p-2 drop-zone<?= $isParallelCol ? ' parallel-col' : '' ?>" data-row="<?= $row ?>" data-col="<?= $colIndex ?>"
                                 ondragover="handleDragOver(event)" ondrop="handleDrop(event, <?= $row ?>, <?= $colIndex ?>)"
                                 ondragleave="handleDragLeave(event)">
                                 <?php if (isset($stepGrid[$row][$colIndex])): ?>
@@ -412,7 +446,10 @@
                                             <i class="bi <?= $step['type_info']['icon'] ?? 'bi-square' ?> me-1"></i>
                                             <strong class="small"><?= htmlspecialchars($step['label']) ?></strong>
                                         </div>
-                                        <code class="small text-muted"><?= htmlspecialchars($step['step_name']) ?></code>
+                                        <div class="d-flex align-items-center gap-1">
+                                            <code class="small text-muted"><?= htmlspecialchars($step['step_name']) ?></code>
+                                            <span class="badge bg-<?= $step['type_info']['color'] ?? 'secondary' ?>" style="font-size: 0.6rem;"><?= htmlspecialchars($step['step_type']) ?></span>
+                                        </div>
                                         <?php if (!empty($step['condition'])): ?>
                                         <div class="mt-1">
                                             <span class="badge bg-warning text-dark" style="font-size: 0.65rem;">
@@ -507,6 +544,13 @@
 
                     <div class="mb-3">
                         <label class="form-label">Step Type</label>
+                        <div id="currentStepTypeDisplay" class="alert alert-info py-2 mb-2" style="display: none;">
+                            <div class="d-flex align-items-center">
+                                <i id="currentStepTypeIcon" class="bi bi-square me-2"></i>
+                                <strong id="currentStepTypeLabel">-</strong>
+                                <span id="currentStepTypeBadge" class="badge bg-secondary ms-2">-</span>
+                            </div>
+                        </div>
                         <div class="accordion accordion-flush" id="stepTypeAccordion">
                             <?php $catIndex = 0; foreach ($stepTypesGrouped as $catKey => $category): $catIndex++; ?>
                             <div class="accordion-item">
@@ -765,7 +809,7 @@
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" name="run_parallel" id="stepRunParallel">
                                 <label class="form-check-label" for="stepRunParallel">Run Row in Parallel</label>
-                                <small class="d-block text-muted">This row runs concurrently with other parallel rows</small>
+                                <small class="d-block text-muted">Steps in this column run concurrently with other parallel steps</small>
                             </div>
                         </div>
                     </div>
@@ -910,8 +954,9 @@ tr.row-parallel .row-number-cell::before {
     width: 3px;
     background: #ffc107;
 }
-/* Row parallel toggle button */
+/* Row parallel toggle button (deprecated - use column toggle) */
 .row-parallel-toggle {
+    display: none; /* Hide row-level toggle in favor of column-level */
     border: none;
     background: transparent;
     opacity: 0.4;
@@ -924,6 +969,29 @@ tr.row-parallel .row-number-cell::before {
 }
 .row-parallel-toggle.active {
     opacity: 1;
+}
+/* Column parallel toggle button */
+.column-parallel-toggle {
+    border: none;
+    background: transparent;
+    opacity: 0.6;
+    transition: all 0.2s;
+    line-height: 1;
+}
+.column-parallel-toggle:hover {
+    opacity: 1;
+    transform: scale(1.2);
+}
+.column-parallel-toggle.active {
+    opacity: 1;
+}
+/* Parallel column styling */
+.column-parallel {
+    background: rgba(255, 193, 7, 0.25) !important;
+}
+/* Cells in parallel columns */
+td[data-col].parallel-col {
+    background: rgba(255, 193, 7, 0.1);
 }
 .row-number-cell .row-num {
     font-size: 0.85rem;
@@ -1555,8 +1623,62 @@ kbd {
 <script>
 const csrfToken = '<?= Flight::csrf()->getToken() ?>';
 const pipelineId = <?= $pipeline['id'] ?>;
+const isSystemPipeline = <?= !empty($pipeline['is_system']) ? 'true' : 'false' ?>;
+// Check sessionStorage for unlock state (persists across page reloads)
+let systemPipelineLocked = isSystemPipeline && sessionStorage.getItem('pipeline_' + pipelineId + '_unlocked') !== 'true';
 const initialContextTemplate = <?= json_encode($contextTemplate ?: '{}') ?>;
 let stepModal = null;
+
+// Unlock/Lock system pipeline for editing
+function unlockSystemPipeline() {
+    if (!isSystemPipeline) return;
+
+    if (!confirm('⚠️ Warning: This is a system pipeline used for core functionality.\n\nModifying it could have unintended consequences and break features like agent testing.\n\nAre you sure you want to unlock it for editing?')) {
+        return;
+    }
+
+    systemPipelineLocked = false;
+    sessionStorage.setItem('pipeline_' + pipelineId + '_unlocked', 'true');
+    document.getElementById('systemBadgeLocked').style.display = 'none';
+    document.getElementById('unlockSystemBtn').style.display = 'none';
+    document.getElementById('lockSystemBtn').style.display = 'inline-block';
+    showToast('System pipeline unlocked for editing', 'warning');
+}
+
+function lockSystemPipeline() {
+    if (!isSystemPipeline) return;
+
+    systemPipelineLocked = true;
+    sessionStorage.removeItem('pipeline_' + pipelineId + '_unlocked');
+    document.getElementById('systemBadgeLocked').style.display = 'inline-block';
+    document.getElementById('unlockSystemBtn').style.display = 'inline-block';
+    document.getElementById('lockSystemBtn').style.display = 'none';
+    showToast('System pipeline locked', 'info');
+}
+
+// Initialize UI state for system pipelines (runs on page load)
+document.addEventListener('DOMContentLoaded', function() {
+    if (isSystemPipeline && !systemPipelineLocked) {
+        // Already unlocked from sessionStorage - update UI to match
+        document.getElementById('systemBadgeLocked').style.display = 'none';
+        document.getElementById('unlockSystemBtn').style.display = 'none';
+        document.getElementById('lockSystemBtn').style.display = 'inline-block';
+    }
+});
+
+// Step type metadata for UI display
+const stepTypeInfo = <?php
+$stepTypeInfoJs = [];
+foreach ($stepTypes as $type => $info) {
+    $stepTypeInfoJs[$type] = [
+        'label' => $info['label'],
+        'icon' => $info['icon'],
+        'color' => $info['color'],
+        'category' => $info['category']
+    ];
+}
+echo json_encode($stepTypeInfoJs);
+?>;
 
 document.addEventListener('DOMContentLoaded', function() {
     stepModal = new bootstrap.Modal(document.getElementById('stepModal'));
@@ -1711,6 +1833,38 @@ function onStepTypeChange(type) {
     const selectedOption = document.querySelector('.step-type-option:has(#type_' + type + ')');
     if (selectedOption) {
         selectedOption.classList.add('selected');
+    }
+
+    // Update current step type display
+    const info = stepTypeInfo[type];
+    if (info) {
+        const display = document.getElementById('currentStepTypeDisplay');
+        display.style.display = 'block';
+        display.className = 'alert alert-' + info.color + '-subtle py-2 mb-2 border border-' + info.color;
+        document.getElementById('currentStepTypeIcon').className = 'bi ' + info.icon + ' me-2 text-' + info.color;
+        document.getElementById('currentStepTypeLabel').textContent = info.label;
+        const badge = document.getElementById('currentStepTypeBadge');
+        badge.textContent = type;
+        badge.className = 'badge bg-' + info.color + ' ms-2';
+
+        // Expand the correct accordion section
+        const category = info.category;
+        const accordionItem = document.getElementById('stepCat_' + category);
+        if (accordionItem) {
+            // Collapse all accordion items first
+            document.querySelectorAll('#stepTypeAccordion .accordion-collapse').forEach(item => {
+                item.classList.remove('show');
+            });
+            document.querySelectorAll('#stepTypeAccordion .accordion-button').forEach(btn => {
+                btn.classList.add('collapsed');
+            });
+            // Expand the correct one
+            accordionItem.classList.add('show');
+            const button = accordionItem.previousElementSibling?.querySelector('.accordion-button');
+            if (button) {
+                button.classList.remove('collapsed');
+            }
+        }
     }
 }
 
@@ -2172,6 +2326,10 @@ function getFlowControlValue(which) {
 }
 
 function addStep(row, col) {
+    if (systemPipelineLocked) {
+        showToast('System pipeline is locked. Click "Unlock" to enable editing.', 'warning');
+        return;
+    }
     document.getElementById('stepModalTitleText').textContent = 'Add Step';
     document.getElementById('stepId').value = '0';
     document.getElementById('stepRow').value = row;
@@ -2274,9 +2432,37 @@ function populateConfig(type, config) {
 
     switch (type) {
         case 'ai_agent':
-            document.querySelector('[name="config_agent_id"]').value = config.agent_id || '';
-            document.querySelector('[name="config_runner_id"]').value = config.runner_id || '';
+            // Check if agent_id is a variable
+            const agentId = config.agent_id || '';
+            const agentSelect = document.querySelector('[name="config_agent_id"]');
+            const agentVarInput = document.getElementById('agentIdVariableInput');
+            if (agentId && agentId.toString().includes('{')) {
+                agentSelect.value = '_variable';
+                agentVarInput.style.display = 'block';
+                document.querySelector('[name="config_agent_id_variable"]').value = agentId;
+            } else {
+                agentSelect.value = agentId;
+                agentVarInput.style.display = 'none';
+            }
+            // Check if runner_id is a variable
+            const runnerId = config.runner_id || '';
+            const runnerSelect = document.querySelector('[name="config_runner_id"]');
+            const runnerVarInput = document.getElementById('runnerIdVariableInput');
+            if (runnerId && runnerId.toString().includes('{')) {
+                runnerSelect.value = '_variable';
+                runnerVarInput.style.display = 'block';
+                document.querySelector('[name="config_runner_id_variable"]').value = runnerId;
+            } else {
+                runnerSelect.value = runnerId;
+                runnerVarInput.style.display = 'none';
+            }
+            document.querySelector('[name="config_execution_mode"]').value = config.execution_mode || 'api';
+            // Set working_dir for ai_agent (different from direct_exec working_dir)
+            const aiAgentWorkingDir = document.querySelector('#config_ai_agent [name="config_working_dir"]');
+            if (aiAgentWorkingDir) aiAgentWorkingDir.value = config.working_dir || '';
             document.querySelector('[name="config_prompt"]').value = config.prompt || '';
+            document.getElementById('agentWaitForCompletion').checked = config.wait_for_completion !== false;
+            document.getElementById('agentJsonOutput').checked = config.json_output || false;
             break;
         case 'direct_exec':
             document.querySelector('[name="config_command"]').value = config.command || '';
@@ -2307,6 +2493,14 @@ function populateConfig(type, config) {
             document.querySelector('[name="config_harvest_policy"]').value = config.policy || 'all_required';
             document.querySelector('[name="config_harvest_on_incomplete"]').value = config.on_incomplete || 'fail';
             document.querySelector('[name="config_harvest_template"]').value = config.template || '';
+            break;
+        case 'reaper':
+            document.querySelector('[name="config_reaper_job_uid"]').value = config.job_uid || '';
+            document.querySelector('[name="config_reaper_session_pattern"]').value = config.session_pattern || '';
+            document.querySelector('[name="config_reaper_timeout"]').value = config.timeout || 30;
+            document.querySelector('[name="config_reaper_wait_for_idle"]').checked = config.wait_for_idle !== false;
+            document.querySelector('[name="config_reaper_force_kill"]').checked = config.force_kill || false;
+            document.querySelector('[name="config_reaper_step_names"]').value = Array.isArray(config.step_names) ? config.step_names.join(', ') : (config.step_names || '');
             break;
         case 'mcp_call':
             document.querySelector('[name="config_mcp_server_id"]').value = config.mcp_server_id || '';
@@ -2358,10 +2552,26 @@ function buildConfig() {
 
     switch (type) {
         case 'ai_agent':
+            // Get agent_id - use variable if selected
+            let agentIdVal = document.querySelector('[name="config_agent_id"]').value;
+            if (agentIdVal === '_variable') {
+                agentIdVal = document.querySelector('[name="config_agent_id_variable"]').value;
+            }
+            // Get runner_id - use variable if selected
+            let runnerIdVal = document.querySelector('[name="config_runner_id"]').value;
+            if (runnerIdVal === '_variable') {
+                runnerIdVal = document.querySelector('[name="config_runner_id_variable"]').value;
+            }
+            // Get working_dir from ai_agent config panel
+            const aiAgentWorkDir = document.querySelector('#config_ai_agent [name="config_working_dir"]');
             config = {
-                agent_id: document.querySelector('[name="config_agent_id"]').value,
-                runner_id: document.querySelector('[name="config_runner_id"]').value,
-                prompt: document.querySelector('[name="config_prompt"]').value
+                agent_id: agentIdVal,
+                runner_id: runnerIdVal,
+                execution_mode: document.querySelector('[name="config_execution_mode"]').value,
+                working_dir: aiAgentWorkDir ? aiAgentWorkDir.value : '',
+                prompt: document.querySelector('[name="config_prompt"]').value,
+                wait_for_completion: document.getElementById('agentWaitForCompletion').checked,
+                json_output: document.getElementById('agentJsonOutput').checked
             };
             break;
         case 'direct_exec':
@@ -2408,6 +2618,18 @@ function buildConfig() {
                 policy: document.querySelector('[name="config_harvest_policy"]').value,
                 on_incomplete: document.querySelector('[name="config_harvest_on_incomplete"]').value,
                 template: document.querySelector('[name="config_harvest_template"]').value
+            };
+            break;
+        case 'reaper':
+            const stepNamesStr = document.querySelector('[name="config_reaper_step_names"]').value;
+            const stepNames = stepNamesStr ? stepNamesStr.split(',').map(s => s.trim()).filter(s => s) : [];
+            config = {
+                job_uid: document.querySelector('[name="config_reaper_job_uid"]').value,
+                session_pattern: document.querySelector('[name="config_reaper_session_pattern"]').value,
+                timeout: parseInt(document.querySelector('[name="config_reaper_timeout"]').value) || 30,
+                wait_for_idle: document.querySelector('[name="config_reaper_wait_for_idle"]').checked,
+                force_kill: document.querySelector('[name="config_reaper_force_kill"]').checked,
+                step_names: stepNames.length > 0 ? stepNames : undefined
             };
             break;
         case 'mcp_call':
@@ -2464,6 +2686,10 @@ function buildConfig() {
 }
 
 async function saveStep() {
+    if (systemPipelineLocked) {
+        showToast('System pipeline is locked. Click "Unlock" to enable editing.', 'warning');
+        return;
+    }
     const form = document.getElementById('stepForm');
     const stepType = document.querySelector('[name="step_type"]:checked')?.value;
 
@@ -2495,7 +2721,8 @@ async function saveStep() {
         on_failure: getFlowControlValue('failure'),
         timeout_seconds: document.querySelector('[name="timeout_seconds"]').value,
         is_active: document.getElementById('stepIsActive').checked ? '1' : '0',
-        run_parallel: document.getElementById('stepRunParallel').checked ? '1' : '0'
+        run_parallel: document.getElementById('stepRunParallel').checked ? '1' : '0',
+        system_unlocked: (isSystemPipeline && !systemPipelineLocked) ? '1' : '0'
     });
 
     try {
@@ -2732,6 +2959,10 @@ function resetCellStatesFrom(fromStepId) {
 }
 
 async function deleteStep() {
+    if (systemPipelineLocked) {
+        showToast('System pipeline is locked. Click "Unlock" to enable editing.', 'warning');
+        return;
+    }
     const stepId = document.getElementById('stepId').value;
 
     if (!confirm('Are you sure you want to delete this step?')) {
@@ -2739,13 +2970,14 @@ async function deleteStep() {
     }
 
     try {
+        const systemUnlockedVal = (isSystemPipeline && !systemPipelineLocked) ? '1' : '0';
         const response = await fetch('/pipelines/deletestep/' + pipelineId, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'X-CSRF-Token': csrfToken
             },
-            body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&step_id=' + stepId
+            body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&step_id=' + stepId + '&system_unlocked=' + systemUnlockedVal
         });
 
         const result = await response.json();
@@ -2788,8 +3020,8 @@ async function toggleRowParallel(row, buttonEl) {
     tr.classList.toggle('row-parallel', newValue);
     tr.dataset.parallel = newValue ? '1' : '0';
     buttonEl.title = newValue
-        ? 'Parallel ON: This row runs concurrently with other parallel rows. Click to disable.'
-        : 'Click to enable parallel execution for this row';
+        ? 'Parallel ON: Steps in this column run concurrently. Click to disable.'
+        : 'Click to enable parallel execution for steps in this column';
 
     // Update each step in the row
     for (const cell of stepCells) {
@@ -2815,21 +3047,79 @@ async function toggleRowParallel(row, buttonEl) {
     showToast(`Row ${row + 1} parallel mode ${newValue ? 'enabled' : 'disabled'}`, 'success');
 }
 
+/**
+ * Toggle parallel execution for an entire column
+ * This updates all steps in the column to have run_parallel enabled/disabled
+ */
+async function toggleColumnParallel(col, buttonEl) {
+    const th = document.querySelector(`th[data-col-index="${col}"]`);
+    if (!th) return;
+
+    const currentlyParallel = th.dataset.parallel === '1';
+    const newValue = !currentlyParallel;
+
+    // Find all steps in this column
+    const stepCells = document.querySelectorAll(`td[data-col="${col}"] .step-cell[data-step-id]`);
+
+    // Update header visual immediately
+    buttonEl.classList.toggle('active', newValue);
+    const icon = buttonEl.querySelector('i');
+    if (icon) {
+        icon.className = newValue ? 'bi bi-lightning-fill text-warning' : 'bi bi-lightning text-muted';
+    }
+    th.classList.toggle('column-parallel', newValue);
+    th.dataset.parallel = newValue ? '1' : '0';
+    buttonEl.title = newValue
+        ? 'Parallel: Steps run concurrently. Click to disable.'
+        : 'Click to enable parallel execution for this column';
+
+    // Update all cells in this column to have visual indicator
+    document.querySelectorAll(`td[data-col="${col}"]`).forEach(td => {
+        td.classList.toggle('parallel-col', newValue);
+    });
+
+    // Update each step in the column
+    for (const cell of stepCells) {
+        const stepId = cell.dataset.stepId;
+        try {
+            await fetch('/pipelines/updatestepparallel/' + pipelineId, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: new URLSearchParams({
+                    csrf_token: csrfToken,
+                    step_id: stepId,
+                    run_parallel: newValue ? '1' : '0'
+                })
+            });
+        } catch (err) {
+            console.error('Failed to update step parallel:', err);
+        }
+    }
+
+    const colName = th.querySelector('.column-name')?.textContent || `Column ${col + 1}`;
+    showToast(`${colName} parallel mode ${newValue ? 'enabled' : 'disabled'}`, 'success');
+}
+
 function addRow() {
     const tbody = document.querySelector('#pipelineGrid tbody');
     const rows = tbody.querySelectorAll('tr[data-row]');
     const newRowNum = rows.length; // 0-indexed, so length is the next row
 
-    // Count columns from header
-    const columnCount = document.querySelectorAll('.column-header').length;
+    // Get column headers to check for parallel columns
+    const columnHeaders = document.querySelectorAll('.column-header');
+    const columnCount = columnHeaders.length;
 
     // Build new row HTML
     let rowHtml = `<tr data-row="${newRowNum}">`;
     rowHtml += `<td class="text-center text-muted align-middle">${newRowNum + 1}</td>`;
 
     for (let col = 0; col < columnCount; col++) {
+        const isParallel = columnHeaders[col]?.dataset.parallel === '1';
         rowHtml += `
-            <td class="p-2 drop-zone" data-row="${newRowNum}" data-col="${col}"
+            <td class="p-2 drop-zone${isParallel ? ' parallel-col' : ''}" data-row="${newRowNum}" data-col="${col}"
                 ondragover="handleDragOver(event)" ondrop="handleDrop(event, ${newRowNum}, ${col})"
                 ondragleave="handleDragLeave(event)">
                 <div class="step-cell-empty border border-dashed rounded p-3 text-center text-muted"
@@ -3163,6 +3453,10 @@ document.addEventListener('click', function(e) {
 });
 
 async function deleteRow(row) {
+    if (systemPipelineLocked) {
+        showToast('System pipeline is locked. Click "Unlock" to enable editing.', 'warning');
+        return;
+    }
     // Find all steps in this row
     const rowElement = document.querySelector(`tr[data-row="${row}"]`);
     if (!rowElement) return;

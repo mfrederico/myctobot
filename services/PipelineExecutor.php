@@ -2093,6 +2093,9 @@ class PipelineExecutor {
             case 'switch':
                 return $this->executeSwitch($config, $input);
 
+            case 'reaper':
+                return $this->executeReaper($config, $input);
+
             default:
                 return [
                     'success' => false,
@@ -2350,7 +2353,15 @@ class PipelineExecutor {
      * Supported providers: ollama, claude_cli (with optional use_ollama), claude_api
      */
     private function executeAIAgent(array $config, array $input, int $timeout): array {
-        $agentId = $config['agent_id'] ?? null;
+        // Substitute variables in agent_id and runner_id (they may be {context.xxx})
+        $agentIdRaw = $config['agent_id'] ?? null;
+        $agentId = $this->substituteVariables((string) $agentIdRaw);
+
+        // Also substitute runner_id if present
+        if (isset($config['runner_id'])) {
+            $config['runner_id'] = $this->substituteVariables((string) $config['runner_id']);
+        }
+
         $executionMode = $config['execution_mode'] ?? 'api';
         $prompt = $config['prompt'] ?? '';
         $systemPrompt = $config['system_prompt'] ?? 'You are a helpful assistant processing pipeline data. Analyze the input and respond with structured JSON when appropriate.';
@@ -2363,9 +2374,9 @@ class PipelineExecutor {
         }
 
         // Load agent
-        $agent = Bean::load('aiagents', $agentId);
+        $agent = Bean::load('aiagents', (int) $agentId);
         if (!$agent->id) {
-            return ['success' => false, 'error' => 'Agent not found'];
+            return ['success' => false, 'error' => "Agent not found (ID: {$agentId})"];
         }
 
         // Substitute variables in prompts
@@ -2542,6 +2553,12 @@ PIPELINE;
         $job->phase = 'pipeline-agent';
         $job->run_count = 0;
         $job->prompt = $prompt;
+        // Get working_dir from step config - do NOT substitute here
+        // {job_uid} isn't available until job is created, so job-dispatcher handles substitution
+        $workingDir = isset($config['working_dir']) && !empty($config['working_dir'])
+            ? $config['working_dir']
+            : null;
+
         $job->queue_metadata = json_encode([
             'pipeline_id' => $this->pipeline->id,
             'pipeline_name' => $this->pipeline->name,
@@ -2549,6 +2566,7 @@ PIPELINE;
             'run_uid' => $this->run->run_uid,
             'step_name' => $stepName,
             'step_id' => $config['_step_id'] ?? null,
+            'working_dir' => $workingDir,  // Step-level working directory override
             'resident_mode' => true,  // Claude stays alive for pipeline duration
             'context' => $this->context
         ]);
@@ -4807,5 +4825,196 @@ PIPELINE;
     public function captureResidentSessionOutput(string $stepName, int $lines = 50): ?string {
         $service = $this->getResidentSession($stepName);
         return $service ? $service->captureSnapshot($lines) : null;
+    }
+
+    /**
+     * Execute a reaper step - sends /exit to Claude sessions to terminate them gracefully
+     *
+     * Config options:
+     *   job_uid          - Specific job UID to reap (looks up tmux session from job)
+     *   session_pattern  - Tmux session name pattern to match (e.g., "aoe-dev-TEST-*")
+     *   step_names       - Array of step names to reap (for pipeline runs)
+     *   wait_for_idle    - Wait for Claude to be idle before sending /exit (default: true)
+     *   force_kill       - Kill session if /exit doesn't work after timeout (default: false)
+     *   timeout          - Seconds to wait for graceful exit (default: 30)
+     *
+     * The reaper sends: Escape, Escape, /exit, Enter
+     * This ensures Claude exits cleanly even if in the middle of output.
+     */
+    private function executeReaper(array $config, array $input): array {
+        $jobUid = $config['job_uid'] ?? null;
+        $sessionPattern = $config['session_pattern'] ?? null;
+        $stepNames = $config['step_names'] ?? [];
+        $waitForIdle = $config['wait_for_idle'] ?? true;
+        $forceKill = $config['force_kill'] ?? false;
+        $timeout = $config['timeout'] ?? 30;
+        $workspace = $this->context['workspace'] ?? 'dev';
+
+        // Substitute variables in job_uid and session_pattern
+        if ($jobUid) {
+            $jobUid = $this->substituteVariables($jobUid);
+        }
+        if ($sessionPattern) {
+            $sessionPattern = $this->substituteVariables($sessionPattern);
+        }
+
+        $this->log('info', 'Executing reaper step', [
+            'job_uid' => $jobUid,
+            'session_pattern' => $sessionPattern,
+            'step_names' => $stepNames,
+            'force_kill' => $forceKill
+        ]);
+
+        $reaped = [];
+        $failed = [];
+
+        // Method 1: Reap by job_uid - look up the job and find its session
+        if ($jobUid) {
+            $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$jobUid]);
+            if ($job) {
+                // Try to find tmux session by various naming patterns
+                $patterns = [
+                    "aoe-{$workspace}-" . TmuxManager::sanitizeForSessionName($job->issue_key),
+                    "aoe-{$workspace}-PIPE-" . ($job->pipelineruns_id ?? 'x'),
+                ];
+
+                foreach ($patterns as $pattern) {
+                    $sessions = TmuxManager::listSessions($pattern);
+                    foreach ($sessions as $sess) {
+                        $result = $this->reapSession($sess['name'], $waitForIdle, $forceKill, $timeout);
+                        if ($result['success']) {
+                            $reaped[] = $sess['name'];
+                        } else {
+                            $failed[] = ['session' => $sess['name'], 'error' => $result['error']];
+                        }
+                    }
+                }
+            } else {
+                $this->log('warning', "Job not found for reaping", ['job_uid' => $jobUid]);
+            }
+        }
+
+        // Method 2: Reap by session pattern
+        if ($sessionPattern) {
+            $sessions = TmuxManager::listSessions($sessionPattern);
+            foreach ($sessions as $sess) {
+                $result = $this->reapSession($sess['name'], $waitForIdle, $forceKill, $timeout);
+                if ($result['success']) {
+                    $reaped[] = $sess['name'];
+                } else {
+                    $failed[] = ['session' => $sess['name'], 'error' => $result['error']];
+                }
+            }
+        }
+
+        // Method 3: Reap by step names (for pipeline runs)
+        if (!empty($stepNames)) {
+            foreach ($stepNames as $stepName) {
+                $sessionPrefix = "aoe-{$workspace}-PIPE-{$this->runId}-" . TmuxManager::sanitizeForSessionName($stepName);
+                $sessions = TmuxManager::listSessions($sessionPrefix);
+                foreach ($sessions as $sess) {
+                    $result = $this->reapSession($sess['name'], $waitForIdle, $forceKill, $timeout);
+                    if ($result['success']) {
+                        $reaped[] = $sess['name'];
+                    } else {
+                        $failed[] = ['session' => $sess['name'], 'error' => $result['error']];
+                    }
+                }
+            }
+        }
+
+        // Method 4: If no specific target, reap all sessions for this pipeline run
+        if (!$jobUid && !$sessionPattern && empty($stepNames) && $this->runId) {
+            $sessions = TmuxManager::listSessions("aoe-{$workspace}-PIPE-{$this->runId}");
+            foreach ($sessions as $sess) {
+                $result = $this->reapSession($sess['name'], $waitForIdle, $forceKill, $timeout);
+                if ($result['success']) {
+                    $reaped[] = $sess['name'];
+                } else {
+                    $failed[] = ['session' => $sess['name'], 'error' => $result['error']];
+                }
+            }
+        }
+
+        $this->log('info', 'Reaper completed', [
+            'reaped_count' => count($reaped),
+            'failed_count' => count($failed)
+        ]);
+
+        return [
+            'success' => empty($failed),
+            'output' => [
+                'reaped' => $reaped,
+                'failed' => $failed,
+                'total_reaped' => count($reaped),
+                'total_failed' => count($failed)
+            ]
+        ];
+    }
+
+    /**
+     * Reap a single tmux session by sending /exit
+     */
+    private function reapSession(string $sessionName, bool $waitForIdle, bool $forceKill, int $timeout): array {
+        $this->log('debug', "Reaping session: {$sessionName}");
+
+        // Check if session exists
+        if (!TmuxManager::sessionExists($sessionName)) {
+            return ['success' => true, 'message' => 'Session already terminated'];
+        }
+
+        // Optionally wait for Claude to be idle
+        if ($waitForIdle) {
+            $startTime = time();
+            while ((time() - $startTime) < $timeout) {
+                $paneContent = TmuxManager::capture($sessionName, 20);
+                $isWorking = str_contains($paneContent, 'esc to interrupt');
+
+                if (!$isWorking) {
+                    break;
+                }
+
+                $this->log('debug', "Waiting for Claude to be idle", ['session' => $sessionName]);
+                sleep(2);
+            }
+        }
+
+        // Send Escape, Escape, /exit, Enter sequence
+        TmuxManager::sendKeys($sessionName, 'Escape');
+        usleep(300000);  // 300ms
+        TmuxManager::sendKeys($sessionName, 'Escape');
+        usleep(300000);  // 300ms
+        TmuxManager::sendKeys($sessionName, '/exit', true);
+        usleep(300000);  // 300ms
+        TmuxManager::sendKeys($sessionName, 'Enter');
+
+        // Wait for session to terminate
+        $exitStartTime = time();
+        while ((time() - $exitStartTime) < 10) {
+            usleep(500000);  // 500ms
+            if (!TmuxManager::sessionExists($sessionName)) {
+                $this->log('info', "Session terminated gracefully", ['session' => $sessionName]);
+                return ['success' => true, 'message' => 'Terminated gracefully'];
+            }
+        }
+
+        // Force kill if requested and session still exists
+        if ($forceKill && TmuxManager::sessionExists($sessionName)) {
+            $this->log('warning', "Force killing session", ['session' => $sessionName]);
+            TmuxManager::killSession($sessionName);
+
+            if (!TmuxManager::sessionExists($sessionName)) {
+                return ['success' => true, 'message' => 'Force killed'];
+            } else {
+                return ['success' => false, 'error' => 'Failed to kill session'];
+            }
+        }
+
+        // Session still exists but we didn't force kill
+        if (TmuxManager::sessionExists($sessionName)) {
+            return ['success' => false, 'error' => 'Session did not terminate after /exit'];
+        }
+
+        return ['success' => true, 'message' => 'Terminated'];
     }
 }

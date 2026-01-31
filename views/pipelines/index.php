@@ -94,6 +94,9 @@
                     <span>
                         <i class="bi bi-<?= $pipeline['trigger_info']['icon'] ?? 'diagram-3' ?> text-primary"></i>
                         <strong><?= htmlspecialchars($pipeline['name']) ?></strong>
+                        <?php if (!empty($pipeline['is_system'])): ?>
+                        <i class="bi bi-lock-fill text-secondary ms-1" title="System Pipeline - Protected from deletion"></i>
+                        <?php endif; ?>
                     </span>
                     <span class="badge <?= $pipeline['is_active'] ? 'bg-success' : 'bg-secondary' ?>">
                         <?= $pipeline['is_active'] ? 'Active' : 'Inactive' ?>
@@ -161,9 +164,15 @@
                             <i class="bi bi-play-fill"></i>
                         </button>
                         <?php endif; ?>
+                        <?php if (!empty($pipeline['is_system'])): ?>
+                        <button class="btn btn-outline-secondary btn-sm" disabled title="System pipelines cannot be deleted">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        <?php else: ?>
                         <button class="btn btn-outline-danger btn-sm" onclick="deletePipeline(<?= $pipeline['id'] ?>, '<?= htmlspecialchars(addslashes($pipeline['name'])) ?>')" title="Delete">
                             <i class="bi bi-trash"></i>
                         </button>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

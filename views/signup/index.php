@@ -240,9 +240,20 @@
 .signup-card {
     border-radius: 16px;
     background: white;
+    color: #212529;
+}
+.signup-card .card-title,
+.signup-card .form-label,
+.signup-card p {
+    color: #212529;
+}
+.signup-card .text-muted {
+    color: #6c757d !important;
 }
 .signup-card .form-control {
     border-radius: 8px;
+    color: #212529;
+    background-color: #fff;
 }
 .signup-card .form-control:focus {
     border-color: #0d6efd;
@@ -275,6 +286,12 @@
     justify-content: center;
     font-size: 24px;
     margin-bottom: 16px;
+}
+.feature-card h5 {
+    color: #212529;
+}
+.feature-card p {
+    color: #6c757d;
 }
 
 /* Screenshots */
@@ -358,6 +375,9 @@
 .workflow-step {
     text-align: center;
     padding: 24px;
+}
+.workflow-step h5 {
+    color: #212529;
 }
 .step-number {
     width: 48px;

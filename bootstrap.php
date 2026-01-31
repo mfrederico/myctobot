@@ -111,6 +111,11 @@ class Bootstrap {
             $workspaceSlug = $m[1];
         }
 
+        // Default config (conf/config.ini) uses "default" as workspace
+        if (!$workspaceSlug && basename($this->configFile) === 'config.ini') {
+            $workspaceSlug = 'default';
+        }
+
         if (!$workspaceSlug) {
             throw new \RuntimeException('Workspace not determined from config file: ' . $this->configFile);
         }

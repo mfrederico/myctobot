@@ -563,11 +563,30 @@ class PipelineExecutor {
                 Bean::store($stepRun);
             }
 
+            // Check if we should skip this step
             if ($stepRun->status === 'success' || $stepRun->status === 'skipped') {
-                continue; // Already completed
+                // Special case: await_input steps should be re-executed when looped back to
+                // This enables conversational flows where the same await_input step runs multiple times
+                $stepConfig = json_decode($step->config_json ?: '{}', true);
+                $isAwaitInputStep = ($step->step_type === 'await_input') ||
+                                    ($step->step_type === 'wait' && ($stepConfig['wait_type'] ?? '') === 'await_input');
+
+                if (!$isAwaitInputStep) {
+                    continue; // Already completed, skip non-await_input steps
+                }
+
+                // Reset await_input step for re-execution (allows conversation loops)
+                $this->log('info', "Re-enabling await_input step '{$step->step_name}' for conversation loop");
+                $stepRun->status = 'pending';
+                $stepRun->awaiting_input = 0;
+                $stepRun->awaiting_input_token = null;
+                $stepRun->awaiting_input_timeout_at = null;
+                $stepRun->output_json = null;
+                $stepRun->completed_at = null;
+                Bean::store($stepRun);
             }
 
-            // If step was previously failed/completed but we got here via goto, reset it
+            // If step was previously failed but we got here via goto, reset it
             if (in_array($stepRun->status, ['failed', 'awaiting_input'])) {
                 $this->log('info', "Resetting step '{$step->step_name}' from {$stepRun->status} to pending for re-execution");
                 $stepRun->status = 'pending';
@@ -2014,9 +2033,19 @@ class PipelineExecutor {
                 return true;
             } else {
                 $stepRun->fault_count = ($stepRun->fault_count ?? 0) + 1;
-                $stepRun->error_message = $result['error'] ?? 'Unknown error';
                 $stepRun->stderr = $result['stderr'] ?? null;
                 $stepRun->exit_code = $result['exit_code'] ?? null;
+
+                // Build meaningful error message including stderr if available
+                $errorMsg = $result['error'] ?? '';
+                if (empty($errorMsg) && !empty($stepRun->stderr)) {
+                    // Use stderr as the error message if no explicit error
+                    $errorMsg = trim($stepRun->stderr);
+                } elseif (!empty($errorMsg) && !empty($stepRun->stderr) && strpos($errorMsg, $stepRun->stderr) === false) {
+                    // Append stderr if it adds new info
+                    $errorMsg .= "\n" . trim($stepRun->stderr);
+                }
+                $stepRun->error_message = $errorMsg ?: 'Unknown error (no output captured)';
                 $stepRun->updated_at = date('Y-m-d H:i:s');
 
                 $this->log('warning', "Step failed: {$step->step_name} - {$stepRun->error_message}");
@@ -4959,7 +4988,7 @@ PIPELINE;
         $this->log('debug', "Reaping session: {$sessionName}");
 
         // Check if session exists
-        if (!TmuxManager::sessionExists($sessionName)) {
+        if (!TmuxManager::exists($sessionName)) {
             return ['success' => true, 'message' => 'Session already terminated'];
         }
 
@@ -4992,18 +5021,18 @@ PIPELINE;
         $exitStartTime = time();
         while ((time() - $exitStartTime) < 10) {
             usleep(500000);  // 500ms
-            if (!TmuxManager::sessionExists($sessionName)) {
+            if (!TmuxManager::exists($sessionName)) {
                 $this->log('info', "Session terminated gracefully", ['session' => $sessionName]);
                 return ['success' => true, 'message' => 'Terminated gracefully'];
             }
         }
 
         // Force kill if requested and session still exists
-        if ($forceKill && TmuxManager::sessionExists($sessionName)) {
+        if ($forceKill && TmuxManager::exists($sessionName)) {
             $this->log('warning', "Force killing session", ['session' => $sessionName]);
-            TmuxManager::killSession($sessionName);
+            TmuxManager::kill($sessionName);
 
-            if (!TmuxManager::sessionExists($sessionName)) {
+            if (!TmuxManager::exists($sessionName)) {
                 return ['success' => true, 'message' => 'Force killed'];
             } else {
                 return ['success' => false, 'error' => 'Failed to kill session'];
@@ -5011,7 +5040,7 @@ PIPELINE;
         }
 
         // Session still exists but we didn't force kill
-        if (TmuxManager::sessionExists($sessionName)) {
+        if (TmuxManager::exists($sessionName)) {
             return ['success' => false, 'error' => 'Session did not terminate after /exit'];
         }
 

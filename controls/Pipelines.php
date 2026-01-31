@@ -2642,13 +2642,15 @@ class Pipelines extends BaseControls\Control {
         $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
         $token = $this->getParam('token');
 
-        if (empty($token)) {
-            $this->render('pipelines/form_error', ['error' => 'Input token required']);
-            return;
+        // Support run_uid lookup (for friendlier URLs)
+        if (!$runId && $this->opId()) {
+            $run = Bean::findOne('pipelineruns', 'run_uid = ?', [$this->opId()]);
+            $runId = $run ? $run->id : 0;
+        } else {
+            $run = Bean::load('pipelineruns', $runId);
         }
 
-        $run = Bean::load('pipelineruns', $runId);
-        if (!$run->id) {
+        if (!$run || !$run->id) {
             $this->render('pipelines/form_error', ['error' => 'Run not found']);
             return;
         }
@@ -2656,7 +2658,7 @@ class Pipelines extends BaseControls\Control {
         // Find the step that's awaiting input
         $awaitingStep = Bean::findOne('pipelinestepruns',
             ' pipelineruns_id = ? AND awaiting_input = 1 ',
-            [$runId]
+            [$run->id]
         );
 
         if (!$awaitingStep) {
@@ -2664,9 +2666,23 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
-        // Validate token
-        if ($awaitingStep->awaiting_input_token !== $token) {
-            $this->render('pipelines/form_error', ['error' => 'Invalid or expired link']);
+        // Authentication: token OR logged-in session
+        $authenticated = false;
+
+        // Method 1: Token-based auth (for email links, external access)
+        if (!empty($token) && $awaitingStep->awaiting_input_token === $token) {
+            $authenticated = true;
+        }
+
+        // Method 2: Session-based auth (logged-in workspace member)
+        if (!$authenticated && $this->member && $this->member->id) {
+            // User is logged in - allow access if they're a workspace member
+            // Optionally could check if they own the run: $run->member_id === $this->member->id
+            $authenticated = true;
+        }
+
+        if (!$authenticated) {
+            $this->render('pipelines/form_error', ['error' => 'Input token required or login to continue']);
             return;
         }
 
@@ -2692,9 +2708,9 @@ class Pipelines extends BaseControls\Control {
         $pipeline = $run->pipelines;
 
         $this->render('pipelines/form_input', [
-            'run_id' => $runId,
+            'run_id' => $run->id,
             'run_uid' => $run->run_uid,
-            'token' => $token,
+            'token' => $token ?? '',
             'schema' => $schema,
             'prompt' => $prompt,
             'context' => $context,
@@ -2715,22 +2731,25 @@ class Pipelines extends BaseControls\Control {
         $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
         $token = $this->getParam('token');
 
+        // Support run_uid lookup
+        if (!$runId && $this->opId()) {
+            $run = Bean::findOne('pipelineruns', 'run_uid = ?', [$this->opId()]);
+            $runId = $run ? $run->id : 0;
+        } else {
+            $run = Bean::load('pipelineruns', $runId);
+        }
+
         // Get form data
         $inputData = $_POST;
         unset($inputData['token']); // Remove token from input data
+        unset($inputData['csrf_token']); // Remove CSRF token from input data
 
         if (empty($inputData)) {
             $this->render('pipelines/form_error', ['error' => 'No input data provided']);
             return;
         }
 
-        if (empty($token)) {
-            $this->render('pipelines/form_error', ['error' => 'Input token required']);
-            return;
-        }
-
-        $run = Bean::load('pipelineruns', $runId);
-        if (!$run->id) {
+        if (!$run || !$run->id) {
             $this->render('pipelines/form_error', ['error' => 'Run not found']);
             return;
         }
@@ -2738,7 +2757,7 @@ class Pipelines extends BaseControls\Control {
         // Find the step that's awaiting input
         $awaitingStep = Bean::findOne('pipelinestepruns',
             ' pipelineruns_id = ? AND awaiting_input = 1 ',
-            [$runId]
+            [$run->id]
         );
 
         if (!$awaitingStep) {
@@ -2746,20 +2765,67 @@ class Pipelines extends BaseControls\Control {
             return;
         }
 
-        // Validate token
-        if ($awaitingStep->awaiting_input_token !== $token) {
-            $this->render('pipelines/form_error', ['error' => 'Invalid or expired link']);
+        // Authentication: token OR logged-in session
+        $authenticated = false;
+
+        // Method 1: Token-based auth (for email links, external access)
+        if (!empty($token) && $awaitingStep->awaiting_input_token === $token) {
+            $authenticated = true;
+        }
+
+        // Method 2: Session-based auth (logged-in workspace member)
+        if (!$authenticated && $this->member && $this->member->id) {
+            $authenticated = true;
+        }
+
+        if (!$authenticated) {
+            $this->render('pipelines/form_error', ['error' => 'Input token required or login to continue']);
             return;
         }
+
+        // Use the actual token from the awaiting step (for session-based auth, token might be empty)
+        $actualToken = $awaitingStep->awaiting_input_token;
+
+        // Add user's message to the chat before resuming
+        $userMessage = $inputData['message'] ?? $inputData['instructions'] ?? $inputData['response'] ?? null;
+        if ($userMessage) {
+            $context = json_decode($run->context_json ?: '{}', true);
+            if (!isset($context['_messages'])) {
+                $context['_messages'] = [];
+            }
+            $context['_messages'][] = [
+                'role' => 'user',
+                'message' => $userMessage,
+                'timestamp' => date('Y-m-d H:i:s')
+            ];
+            $run->context_json = json_encode($context);
+            Bean::store($run);
+        }
+
+        // Check if this is an AJAX request
+        $isAjax = !empty($inputData['ajax']) || $this->getParam('ajax');
+        unset($inputData['ajax']);
 
         // Resume the pipeline with the input
         require_once __DIR__ . '/../services/PipelineExecutor.php';
 
         try {
-            $executor = new \app\services\PipelineExecutor($runId);
-            $result = $executor->resumeFromAwaitInput($inputData, $token, 'form');
+            $executor = new \app\services\PipelineExecutor($run->id);
+            $result = $executor->resumeFromAwaitInput($inputData, $actualToken, 'form');
 
-            // Show success page
+            if ($isAjax) {
+                // Return JSON for AJAX requests
+                Flight::json([
+                    'success' => true,
+                    'run_id' => $runId,
+                    'run_uid' => $run->run_uid,
+                    'status' => $result['status'] ?? 'running',
+                    'message' => 'Input received'
+                ]);
+                return;
+            }
+
+            // Show success page for regular form submissions
             $pipeline = $run->pipelines;
 
             $this->render('pipelines/form_success', [
@@ -2772,8 +2838,88 @@ class Pipelines extends BaseControls\Control {
             ]);
 
         } catch (\Exception $e) {
+            if ($isAjax) {
+                Flight::json([
+                    'success' => false,
+                    'error' => 'Failed to process input: ' . $e->getMessage()
+                ], 500);
+                return;
+            }
             $this->render('pipelines/form_error', ['error' => 'Failed to process input: ' . $e->getMessage()]);
         }
+    }
+
+    /**
+     * Get chat messages for a pipeline run (AJAX polling)
+     *
+     * GET /pipelines/messages/{run_id}
+     *
+     * Returns the _messages array from the run context for chat display.
+     */
+    public function messages($params = []) {
+        $runId = (int) ($this->opId() ?? $this->getParam('run_id') ?? 0);
+        $token = $this->getParam('token');
+
+        // Support run_uid lookup
+        if (!$runId && $this->opId()) {
+            $run = Bean::findOne('pipelineruns', 'run_uid = ?', [$this->opId()]);
+            $runId = $run ? $run->id : 0;
+        } else {
+            $run = Bean::load('pipelineruns', $runId);
+        }
+
+        if (!$run || !$run->id) {
+            Flight::jsonError('Run not found', 404);
+            return;
+        }
+
+        // Authentication: token OR logged-in session
+        $authenticated = false;
+        if (!empty($token)) {
+            $awaitingStep = Bean::findOne('pipelinestepruns',
+                ' pipelineruns_id = ? AND awaiting_input_token = ? ',
+                [$run->id, $token]
+            );
+            if ($awaitingStep) {
+                $authenticated = true;
+            }
+        }
+        if (!$authenticated && $this->member && $this->member->id) {
+            $authenticated = true;
+        }
+
+        if (!$authenticated) {
+            Flight::jsonError('Unauthorized', 401);
+            return;
+        }
+
+        // Get messages from context
+        $context = json_decode($run->context_json ?: '{}', true);
+        $messages = $context['_messages'] ?? [];
+
+        // Also get agent job status if available
+        $agentStatus = null;
+        $jobId = $context['spawn_agent']['output']['job_id'] ?? null;
+        if ($jobId) {
+            $job = Bean::load('aidevjobs', $jobId);
+            if ($job && $job->id) {
+                $agentStatus = [
+                    'status' => $job->status,
+                    'message' => $job->current_step,
+                    'progress' => $job->progress ?? 0,
+                    'updated_at' => $job->updated_at
+                ];
+            }
+        }
+
+        Flight::jsonSuccess([
+            'run_id' => $run->id,
+            'run_uid' => $run->run_uid,
+            'status' => $run->status,
+            'messages' => $messages,
+            'agent_status' => $agentStatus,
+            'updated_at' => $run->updated_at
+        ]);
     }
 
     /**

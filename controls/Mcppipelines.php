@@ -434,6 +434,26 @@ class Mcppipelines extends Control {
             ]
         ];
 
+        // Post a message to the pipeline chat
+        $tools[] = [
+            'name' => 'post_message',
+            'description' => 'Post a status update or message to the pipeline chat. Use this to communicate progress to the user.',
+            'inputSchema' => [
+                'type' => 'object',
+                'properties' => [
+                    'run_id' => [
+                        'type' => 'integer',
+                        'description' => 'The pipeline run ID'
+                    ],
+                    'message' => [
+                        'type' => 'string',
+                        'description' => 'The message to post'
+                    ]
+                ],
+                'required' => ['run_id', 'message']
+            ]
+        ];
+
         $this->sendJsonRpcResult(['tools' => $tools], $id);
     }
 
@@ -514,6 +534,12 @@ class Mcppipelines extends Control {
         // List active sessions for a run
         if ($toolName === 'list_run_sessions') {
             $this->listRunSessions($arguments, $id);
+            return;
+        }
+
+        // Post a message to pipeline chat
+        if ($toolName === 'post_message') {
+            $this->postMessage($arguments, $id);
             return;
         }
 
@@ -704,7 +730,7 @@ class Mcppipelines extends Control {
 
         // Build status URL for polling
         $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
-        $statusUrl = "{$baseUrl}/pipelines/status/{$runId}";
+        $statusUrl = "{$baseUrl}/pipelines/viewrun/{$runId}";
 
         // Return immediately with run info
         $this->sendJsonRpcResult([
@@ -1500,6 +1526,73 @@ class Mcppipelines extends Control {
                     'run_id' => $runId,
                     'active_sessions' => $sessions,
                     'count' => count($sessions)
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
+        ], $id);
+    }
+
+    /**
+     * Post a message to the pipeline chat
+     *
+     * Stores messages in the run context under _messages array.
+     * Used by agents to communicate status updates to users.
+     */
+    private function postMessage(array $arguments, $id): void {
+        $runId = (int) ($arguments['run_id'] ?? 0);
+        $message = $arguments['message'] ?? '';
+
+        if (!$runId || empty($message)) {
+            $this->sendJsonRpcError(-32602, 'run_id and message are required', $id);
+            return;
+        }
+
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            $this->sendJsonRpcError(-32602, "Pipeline run {$runId} not found", $id);
+            return;
+        }
+
+        // Get current context and messages
+        $context = json_decode($run->context_json ?: '{}', true);
+        if (!isset($context['_messages'])) {
+            $context['_messages'] = [];
+        }
+
+        // Add the new message
+        $context['_messages'][] = [
+            'role' => 'agent',
+            'message' => $message,
+            'timestamp' => date('Y-m-d H:i:s')
+        ];
+
+        // Keep only last 50 messages to prevent bloat
+        if (count($context['_messages']) > 50) {
+            $context['_messages'] = array_slice($context['_messages'], -50);
+        }
+
+        // Save context
+        $run->context_json = json_encode($context);
+        $run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($run);
+
+        // Reset timeout on the awaiting step (extend by 24 hours from now)
+        $awaitingStep = Bean::findOne('pipelinestepruns',
+            ' pipelineruns_id = ? AND awaiting_input = 1 ',
+            [$run->id]
+        );
+        if ($awaitingStep) {
+            $awaitingStep->expires_at = date('Y-m-d H:i:s', strtotime('+24 hours'));
+            Bean::store($awaitingStep);
+        }
+
+        $this->sendJsonRpcResult([
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'success' => true,
+                    'run_id' => $runId,
+                    'message_count' => count($context['_messages'])
                 ], JSON_PRETTY_PRINT)
             ]],
             'isError' => false

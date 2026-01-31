@@ -359,6 +359,20 @@ class Mcpjobs extends Control {
                     ],
                     'required' => ['success']
                 ]
+            ],
+            [
+                'name' => 'post_message',
+                'description' => 'Post a chat message to the pipeline. Use this to respond conversationally to user instructions. The message will appear in the pipeline chat interface.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'message' => [
+                            'type' => 'string',
+                            'description' => 'The message to post to the chat'
+                        ]
+                    ],
+                    'required' => ['message']
+                ]
             ]
         ];
 
@@ -398,6 +412,10 @@ class Mcpjobs extends Control {
 
                 case 'job_checkpoint':
                     $result = $this->toolJobCheckpoint($args);
+                    break;
+
+                case 'post_message':
+                    $result = $this->toolPostMessage($args);
                     break;
 
                 default:
@@ -649,6 +667,93 @@ class Mcpjobs extends Control {
             'job_uid' => $jobId,
             'pr_url' => $prUrl,
             'session_alive' => true
+        ];
+    }
+
+    /**
+     * Tool: post_message - Post a chat message to the pipeline
+     *
+     * If the job is associated with a pipeline run, this adds a message
+     * to the pipeline's chat context for display in the web UI.
+     */
+    private function toolPostMessage(array $args): array {
+        $message = $args['message'] ?? '';
+        $jobId = $args['job_uid'] ?? $this->jobId ?? '';
+
+        if (empty($message)) {
+            throw new \InvalidArgumentException('message is required');
+        }
+
+        if (empty($jobId)) {
+            throw new \InvalidArgumentException('job_uid is required');
+        }
+
+        // Find the job to get pipeline run association
+        $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$jobId]);
+        if (!$job) {
+            throw new \InvalidArgumentException("Job not found: {$jobId}");
+        }
+
+        // Check if job is associated with a pipeline run
+        $runId = $job->pipelineruns_id ?? null;
+        if (!$runId) {
+            // Try to extract from issue_key (e.g., "PIPE-340-spawn_agent")
+            if (preg_match('/^PIPE-(\d+)-/', $job->issue_key, $matches)) {
+                $runId = (int) $matches[1];
+            }
+        }
+
+        if (!$runId) {
+            return [
+                'success' => false,
+                'message' => 'Job is not associated with a pipeline run. Message not posted.',
+                'job_uid' => $jobId
+            ];
+        }
+
+        // Load the pipeline run
+        $run = Bean::load('pipelineruns', $runId);
+        if (!$run || !$run->id) {
+            return [
+                'success' => false,
+                'message' => "Pipeline run {$runId} not found",
+                'job_uid' => $jobId
+            ];
+        }
+
+        // Add message to context
+        $context = json_decode($run->context_json ?: '{}', true);
+        if (!isset($context['_messages'])) {
+            $context['_messages'] = [];
+        }
+
+        $context['_messages'][] = [
+            'role' => 'agent',
+            'message' => $message,
+            'timestamp' => date('Y-m-d H:i:s')
+        ];
+
+        // Keep only last 50 messages
+        if (count($context['_messages']) > 50) {
+            $context['_messages'] = array_slice($context['_messages'], -50);
+        }
+
+        $run->context_json = json_encode($context);
+        $run->updated_at = date('Y-m-d H:i:s');
+        Bean::store($run);
+
+        $this->logger->info('Chat message posted to pipeline', [
+            'job_uid' => $jobId,
+            'run_id' => $runId,
+            'message_length' => strlen($message)
+        ]);
+
+        return [
+            'success' => true,
+            'message' => 'Message posted to pipeline chat',
+            'job_uid' => $jobId,
+            'run_id' => $runId,
+            'message_count' => count($context['_messages'])
         ];
     }
 

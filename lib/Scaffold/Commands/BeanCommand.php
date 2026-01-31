@@ -43,6 +43,12 @@ class BeanCommand {
             case 'list':
                 $this->listRecords($beanName, $data);
                 break;
+            case 'find':
+                $this->findRecords($beanName, $data);
+                break;
+            case 'findone':
+                $this->findOneRecord($beanName, $data);
+                break;
             default:
                 $this->error("Unknown operation: {$operation}");
         }
@@ -151,6 +157,85 @@ class BeanCommand {
         }
 
         echo json_encode($export, JSON_PRETTY_PRINT) . "\n";
+    }
+
+    /**
+     * Find records by arbitrary field conditions
+     *
+     * @param string $beanName Bean/table name
+     * @param array $data Field => value pairs to match
+     */
+    public function findRecords(string $beanName, array $data): void {
+        if (empty($data)) {
+            $this->error("--data with field conditions is required for --find");
+            return;
+        }
+
+        // Extract special options
+        $limit = (int) ($data['_limit'] ?? 20);
+        $orderBy = $data['_order'] ?? 'id DESC';
+        unset($data['_limit'], $data['_order']);
+
+        // Build WHERE clause from remaining data
+        $conditions = [];
+        $bindings = [];
+        foreach ($data as $field => $value) {
+            if ($value === null) {
+                $conditions[] = "{$field} IS NULL";
+            } else {
+                $conditions[] = "{$field} = ?";
+                $bindings[] = $value;
+            }
+        }
+
+        $where = implode(' AND ', $conditions);
+        $sql = "{$where} ORDER BY {$orderBy} LIMIT {$limit}";
+
+        $beans = Bean::find($beanName, $sql, $bindings);
+
+        if (empty($beans)) {
+            echo "No records found.\n";
+            return;
+        }
+
+        $records = array_map(fn($b) => $b->export(), $beans);
+        echo json_encode($records, JSON_PRETTY_PRINT) . "\n";
+    }
+
+    /**
+     * Find single record by arbitrary field conditions
+     *
+     * @param string $beanName Bean/table name
+     * @param array $data Field => value pairs to match
+     */
+    public function findOneRecord(string $beanName, array $data): void {
+        if (empty($data)) {
+            $this->error("--data with field conditions is required for --findone");
+            return;
+        }
+
+        // Build WHERE clause
+        $conditions = [];
+        $bindings = [];
+        foreach ($data as $field => $value) {
+            if ($value === null) {
+                $conditions[] = "{$field} IS NULL";
+            } else {
+                $conditions[] = "{$field} = ?";
+                $bindings[] = $value;
+            }
+        }
+
+        $where = implode(' AND ', $conditions);
+
+        $bean = Bean::findOne($beanName, $where, $bindings);
+
+        if (!$bean) {
+            echo "No record found.\n";
+            return;
+        }
+
+        echo json_encode($bean->export(), JSON_PRETTY_PRINT) . "\n";
     }
 
     /**

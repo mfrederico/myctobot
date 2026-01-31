@@ -43,6 +43,8 @@ $options = getopt('', [
     'data:',
     'associate:',
     'getjson',
+    'find',
+    'findone',
     'scaffold:',
     'wizard',
     'list',
@@ -138,6 +140,10 @@ if (isset($options['bean'])) {
 
     if (isset($options['getjson'])) {
         $manager->runBeanCommand('export', $beanName, $data);
+    } elseif (isset($options['find'])) {
+        $manager->runBeanCommand('find', $beanName, $data);
+    } elseif (isset($options['findone'])) {
+        $manager->runBeanCommand('findone', $beanName, $data);
     } elseif (isset($options['associate'])) {
         $manager->runBeanCommand('associate', $beanName, $data, $options['associate']);
     } elseif (!empty($data)) {
@@ -170,7 +176,9 @@ OPTIONS:
   --bean=NAME        Bean/table name for operations
   --data=JSON        JSON data for bean operations
   --associate=NAME   Associate bean with another (many-to-many)
-  --getjson          Export bean as JSON
+  --getjson          Export bean as JSON (requires id in data)
+  --find             Find records by any field(s) in data (returns array)
+  --findone          Find single record by any field(s) in data
   --scaffold=PARTS   Generate files (model,control,view,api,all)
   --verbose          Show detailed output
   --dry-run          Show what would be done without writing files
@@ -188,9 +196,17 @@ EXAMPLES:
   php scripts/clitool.php --workspace=gwt --bean=member \\
       --associate=jiraboard --data='{"id":1,"jiraboard_id":5}'
 
-  # Export bean as JSON
+  # Export bean as JSON (by ID)
   php scripts/clitool.php --workspace=gwt --bean=member \\
       --data='{"id":1}' --getjson
+
+  # Find records by any field (returns array)
+  php scripts/clitool.php --workspace=gwt --bean=pipelinerunlogs \\
+      --data='{"input_token":"abc123"}' --findone
+
+  # Find multiple records with limit/order options
+  php scripts/clitool.php --workspace=gwt --bean=pipelineruns \\
+      --data='{"status":"running","_limit":10,"_order":"created_at DESC"}' --find
 
   # Scaffold model, controller, and views from existing table
   php scripts/clitool.php --workspace=gwt --bean=product \\

@@ -56,11 +56,13 @@
                         <td>
                             <?php
                             $triggerIcon = 'bi-hand-index';
-                            if (strpos($run['trigger_source'], 'webhook') === 0) $triggerIcon = 'bi-link-45deg';
-                            if ($run['trigger_source'] === 'cron') $triggerIcon = 'bi-clock';
+                            $triggerSource = $run['trigger_source'] ?? '';
+                            if (strpos($triggerSource, 'webhook') === 0) $triggerIcon = 'bi-link-45deg';
+                            if ($triggerSource === 'cron') $triggerIcon = 'bi-clock';
+                            if ($triggerSource === 'mcp') $triggerIcon = 'bi-robot';
                             ?>
                             <i class="bi <?= $triggerIcon ?>"></i>
-                            <?= htmlspecialchars($run['trigger_source']) ?>
+                            <?= htmlspecialchars($triggerSource ?: 'manual') ?>
                         </td>
                         <td>
                             <?php

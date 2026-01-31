@@ -681,80 +681,43 @@ class Mcppipelines extends Control {
         $pipeline->last_run_at = date('Y-m-d H:i:s');
         Bean::store($pipeline);
 
-        // Execute synchronously
-        require_once __DIR__ . '/../services/PipelineExecutor.php';
-        $executor = new \app\services\PipelineExecutor($runId);
-        $executor->execute();
+        // Spawn background process to execute the pipeline
+        $scriptPath = __DIR__ . '/../scripts/runpipe.php';
+        $logPath = __DIR__ . '/../log/pipeline-' . date('Y-m-d') . '.log';
 
-        // Reload run to get final state
-        $run = Bean::load('pipelineruns', $runId);
-        $context = json_decode($run->context_json ?: '{}', true);
-
-        // Check if pipeline is awaiting input (multi-turn flow)
-        if ($run->status === 'awaiting_input') {
-            $awaitingStep = Bean::findOne('pipelinestepruns',
-                ' pipelineruns_id = ? AND awaiting_input = 1 ',
-                [$runId]
-            );
-
-            $schema = $awaitingStep ? json_decode($awaitingStep->awaiting_input_schema_json ?: '{}', true) : [];
-
-            // Build form/webhook URLs for convenience
-            $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
-            $formUrl = $awaitingStep ? "{$baseUrl}/pipelines/form/{$runId}?token={$awaitingStep->awaiting_input_token}" : null;
-
-            $this->sendJsonRpcResult([
-                'content' => [[
-                    'type' => 'text',
-                    'text' => json_encode([
-                        'status' => 'awaiting_input',
-                        'run_id' => $runId,
-                        'input_token' => $awaitingStep->awaiting_input_token ?? null,
-                        'prompt' => $awaitingStep->awaiting_input_prompt ?? 'Waiting for input',
-                        'input_schema' => $schema,
-                        'timeout_at' => $awaitingStep->awaiting_input_timeout_at ?? null,
-                        'form_url' => $formUrl,
-                        'output' => $context
-                    ], JSON_PRETTY_PRINT)
-                ]],
-                'isError' => false
-            ], $id);
-            return;
-        }
-
-        // Get step results for the output
-        $stepRuns = Bean::find('pipelinestepruns',
-            ' pipelineruns_id = ? ORDER BY id ASC ',
-            [$runId]
+        $cmd = sprintf(
+            'nohup php %s --workspace=%s --run-id=%d >> %s 2>&1 &',
+            escapeshellarg($scriptPath),
+            escapeshellarg($this->workspace),
+            $runId,
+            escapeshellarg($logPath)
         );
 
-        $lastOutput = null;
-        foreach ($stepRuns as $sr) {
-            if ($sr->status === 'success' && !empty($sr->output_json)) {
-                $lastOutput = json_decode($sr->output_json, true);
-            }
-        }
+        exec($cmd);
 
-        // MCP tool result format
-        $isError = $run->status !== 'completed';
-        $content = [];
+        $this->logger->info("Pipeline {$slug} started in background", [
+            'run_id' => $runId,
+            'run_uid' => $runUid,
+            'cmd' => $cmd
+        ]);
 
-        if ($isError) {
-            $content[] = [
-                'type' => 'text',
-                'text' => "Pipeline execution failed: " . ($run->error_message ?: 'Unknown error')
-            ];
-        } else {
-            $resultText = json_encode($lastOutput ?? $context, JSON_PRETTY_PRINT);
-            $content[] = [
-                'type' => 'text',
-                'text' => $resultText
-            ];
-        }
+        // Build status URL for polling
+        $baseUrl = rtrim($_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'], '/');
+        $statusUrl = "{$baseUrl}/pipelines/status/{$runId}";
 
+        // Return immediately with run info
         $this->sendJsonRpcResult([
-            'content' => $content,
-            'isError' => $isError
+            'content' => [[
+                'type' => 'text',
+                'text' => json_encode([
+                    'status' => 'running',
+                    'run_id' => $runId,
+                    'run_uid' => $runUid,
+                    'message' => "Pipeline '{$pipeline->name}' started in background. Use get_run_context with run_id={$runId} to check status and results.",
+                    'status_url' => $statusUrl
+                ], JSON_PRETTY_PRINT)
+            ]],
+            'isError' => false
         ], $id);
     }
 

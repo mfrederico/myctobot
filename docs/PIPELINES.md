@@ -432,3 +432,79 @@ Content-Type: application/json
   }
 }
 ```
+
+## Background Execution
+
+When pipelines are triggered via MCP tools, they execute in the background. This prevents blocking the MCP caller (Claude) while long-running steps complete.
+
+### How It Works
+
+1. MCP tool call received (e.g., `myctobot_flash_sale`)
+2. Pipeline run is created with `status: pending`
+3. Background process spawned via `scripts/runpipe.php`
+4. MCP response returns immediately with run info
+5. Caller polls for completion using `get_run_context`
+
+### MCP Response Format
+
+When you call an MCP pipeline tool, you immediately receive:
+
+```json
+{
+  "status": "running",
+  "run_id": 123,
+  "run_uid": "run-abc123def456",
+  "message": "Pipeline 'Flash Sale' started in background. Use get_run_context with run_id=123 to check status and results.",
+  "status_url": "https://workspace.myctobot.ai/pipelines/status/123"
+}
+```
+
+### Polling for Results
+
+Use the `get_run_context` MCP tool to check status:
+
+```json
+{
+  "name": "get_run_context",
+  "arguments": {
+    "run_id": 123
+  }
+}
+```
+
+The context includes the current run status and all step outputs.
+
+### CLI Execution
+
+For direct CLI execution (cron, scripts), use `scripts/runpipe.php`:
+
+```bash
+# Run by slug
+php scripts/runpipe.php --workspace=gwt --pipeline=my-pipeline
+
+# Run by ID
+php scripts/runpipe.php --workspace=gwt --pipeline-id=123
+
+# Execute existing run
+php scripts/runpipe.php --workspace=gwt --run-id=456
+
+# With context data
+php scripts/runpipe.php --workspace=gwt --pipeline=my-pipeline --context='{"key":"value"}'
+
+# Verbose output
+php scripts/runpipe.php --workspace=gwt --pipeline=my-pipeline --verbose
+```
+
+### Stuck Run Recovery
+
+The cron job `scripts/cron-await-timeouts.php` handles stuck runs:
+
+1. **Awaiting input timeouts** - Steps waiting for user input past their `timeout_at`
+2. **Stuck running steps** - Steps in `running` status longer than their `timeout_seconds`
+
+Each step honors its configured `timeout_seconds` (default: 300s). If a background process crashes, the cron marks the step and run as failed.
+
+**Crontab entry:**
+```
+* * * * * cd /path/to/myctobot && php scripts/cron-await-timeouts.php --script >> log/cron-timeouts.log 2>&1
+```

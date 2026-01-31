@@ -133,6 +133,60 @@ try {
                 }
             }
 
+            // Check for stuck "running" step runs (background process may have crashed)
+            // Honor each step's configured timeout_seconds (default 300s if not set)
+            $stuckSteps = Bean::getAll(
+                "SELECT psr.id as step_run_id, psr.pipelineruns_id, psr.step_name, psr.started_at,
+                        ps.timeout_seconds, pr.run_uid, p.name as pipeline_name
+                 FROM pipelinestepruns psr
+                 JOIN pipelineruns pr ON psr.pipelineruns_id = pr.id
+                 JOIN pipelines p ON pr.pipelines_id = p.id
+                 JOIN pipelinesteps ps ON psr.pipelinesteps_id = ps.id
+                 WHERE psr.status = 'running'
+                   AND psr.started_at IS NOT NULL
+                   AND psr.started_at < DATE_SUB(NOW(), INTERVAL COALESCE(ps.timeout_seconds, 300) SECOND)
+                 ORDER BY psr.started_at ASC
+                 LIMIT 50"
+            );
+
+            if (!empty($stuckSteps)) {
+                if ($verbose) echo "  Found " . count($stuckSteps) . " stuck step(s)\n";
+
+                foreach ($stuckSteps as $row) {
+                    $timeoutSecs = $row['timeout_seconds'] ?? 300;
+                    if ($verbose) {
+                        echo "  -> Step {$row['step_run_id']}: {$row['pipeline_name']} / {$row['step_name']} (started: {$row['started_at']}, timeout: {$timeoutSecs}s)\n";
+                    }
+
+                    if ($dryRun) {
+                        echo "     [DRY RUN] Would mark step and run as failed\n";
+                        $totalProcessed++;
+                        continue;
+                    }
+
+                    // Mark step run as failed
+                    $stepRun = Bean::load('pipelinestepruns', $row['step_run_id']);
+                    $stepRun->status = 'failed';
+                    $stepRun->error_message = "Step timed out after {$timeoutSecs}s (process may have crashed)";
+                    $stepRun->completed_at = date('Y-m-d H:i:s');
+                    $stepRun->updated_at = date('Y-m-d H:i:s');
+                    Bean::store($stepRun);
+
+                    // Mark parent run as failed
+                    $run = Bean::load('pipelineruns', $row['pipelineruns_id']);
+                    $run->status = 'failed';
+                    $run->error_message = "Step '{$row['step_name']}' timed out after {$timeoutSecs}s";
+                    $run->completed_at = date('Y-m-d H:i:s');
+                    $run->updated_at = date('Y-m-d H:i:s');
+                    Bean::store($run);
+
+                    if ($verbose) echo "     Marked step and run as failed\n";
+                    $totalProcessed++;
+                }
+            } elseif ($verbose) {
+                echo "  No stuck steps.\n";
+            }
+
         } catch (\Exception $e) {
             echo "  Error: " . $e->getMessage() . "\n";
             $totalErrors++;

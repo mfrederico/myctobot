@@ -601,7 +601,27 @@ class PipelineExecutor {
                             $this->context[$step->step_name] = $output;
                         }
                     }
-                    continue; // Already completed, skip non-await_input steps
+
+                    // IMPORTANT: When skipping a completed step, respect its on_success goto
+                    // This ensures conversation loops work correctly on resume
+                    $successAction = $step->on_success ?: 'next_col';
+                    if (strpos($successAction, 'goto:') === 0) {
+                        $targetStepName = substr($successAction, 5);
+                        foreach ($stepsArray as $idx => $s) {
+                            if ($s->step_name === $targetStepName) {
+                                $i = $idx - 1; // Will be incremented by loop, then process target
+                                break;
+                            }
+                        }
+                    } elseif ($successAction === 'exit') {
+                        // Step was completed and exited - mark run as completed
+                        $this->run->status = 'completed';
+                        $this->run->completed_at = date('Y-m-d H:i:s');
+                        Bean::store($this->run);
+                        return;
+                    }
+                    // For 'next_col' or default, continue to next step in array
+                    continue;
                 }
 
                 // Reset await_input step for re-execution (allows conversation loops)

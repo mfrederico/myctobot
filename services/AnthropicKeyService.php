@@ -131,4 +131,44 @@ class AnthropicKeyService {
 
         return self::getKeyBean($memberId);
     }
+
+    /**
+     * Test an Anthropic API key by making a minimal API call
+     *
+     * @param int $keyId Key ID to test
+     * @return array ['success' => bool, 'message' => string, 'error' => string|null]
+     */
+    public static function testKey(int $keyId): array {
+        $key = Bean::load('anthropickeys', $keyId);
+
+        if (!$key || !$key->id) {
+            return ['success' => false, 'error' => 'Key not found'];
+        }
+
+        $apiKey = EncryptionService::decrypt($key->api_key);
+        $model = $key->model ?? 'claude-sonnet-4-20250514';
+
+        try {
+            $client = new \GuzzleHttp\Client([
+                'base_uri' => 'https://api.anthropic.com',
+                'headers' => [
+                    'x-api-key' => $apiKey,
+                    'anthropic-version' => '2023-06-01',
+                    'Content-Type' => 'application/json',
+                ],
+            ]);
+
+            $client->post('/v1/messages', [
+                'json' => [
+                    'model' => $model,
+                    'max_tokens' => 10,
+                    'messages' => [['role' => 'user', 'content' => 'Hi']],
+                ],
+            ]);
+
+            return ['success' => true, 'message' => 'API key is valid!'];
+        } catch (\Exception $e) {
+            return ['success' => false, 'error' => $e->getMessage()];
+        }
+    }
 }

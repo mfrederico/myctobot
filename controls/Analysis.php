@@ -524,61 +524,6 @@ class Analysis extends BaseControls\Control {
     }
 
     /**
-     * Generate markdown section for clarification items
-     */
-    private function generateClarificationMarkdown(array $clarifications, ?string $jiraSiteUrl = null): string {
-        if (empty($clarifications)) {
-            return '';
-        }
-
-        $md = "\n\n## Tickets Needing Clarification\n\n";
-        $md .= "The following tickets have low clarity scores and may need stakeholder input before work can begin.\n\n";
-
-        foreach ($clarifications as $item) {
-            $ticketLink = $jiraSiteUrl
-                ? "[{$item['key']}](" . rtrim($jiraSiteUrl, '/') . '/browse/' . $item['key'] . ")"
-                : $item['key'];
-
-            $scoreClass = $item['clarity_score'] < 4 ? '🔴' : ($item['clarity_score'] < 6 ? '🟡' : '🟢');
-
-            $md .= "### {$scoreClass} {$ticketLink} - {$item['summary']}\n\n";
-            $md .= "| Attribute | Value |\n";
-            $md .= "|-----------|-------|\n";
-            $md .= "| Clarity Score | **{$item['clarity_score']}/10** |\n";
-            $md .= "| Reporter | {$item['reporter_name']} |\n";
-            if (!empty($item['reporter_email'])) {
-                $md .= "| Email | {$item['reporter_email']} |\n";
-            }
-            $md .= "| Type | {$item['type']} |\n";
-            $md .= "| Priority | {$item['priority']} |\n\n";
-
-            if (!empty($item['assessment'])) {
-                $md .= "**Assessment**: {$item['assessment']}\n\n";
-            }
-
-            if (!empty($item['missing_elements'])) {
-                $md .= "**Missing Elements**:\n";
-                foreach ($item['missing_elements'] as $element) {
-                    $md .= "- {$element}\n";
-                }
-                $md .= "\n";
-            }
-
-            if (!empty($item['suggested_questions'])) {
-                $md .= "**Suggested Questions for Stakeholder**:\n";
-                foreach ($item['suggested_questions'] as $question) {
-                    $md .= "- {$question}\n";
-                }
-                $md .= "\n";
-            }
-
-            $md .= "---\n\n";
-        }
-
-        return $md;
-    }
-
-    /**
      * Runner digest analysis endpoint
      * POST /analysis/runnerdigest
      *

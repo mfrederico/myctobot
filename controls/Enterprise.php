@@ -258,47 +258,19 @@ class Enterprise extends BaseControls\Control {
     public function testkey($params = []) {
         if (!$this->requireEnterprise()) return;
 
-        $keyId = $this->opId() ?? null;
+        $keyId = (int) ($this->opId() ?? 0);
         if (!$keyId) {
             Flight::json(['success' => false, 'error' => 'No key specified']);
             return;
         }
 
-                try {
-            $key = Bean::load('anthropickeys', $keyId);
-            if (!$key || !$key->id) {
-                                Flight::json(['success' => false, 'error' => 'Key not found']);
-                return;
-            }
+        $result = AnthropicKeyService::testKey($keyId);
 
-            $apiKey = EncryptionService::decrypt($key->api_key);
-            $model = $key->model ?? 'claude-sonnet-4-20250514';
-
-            
-            // Test the key
-            $client = new \GuzzleHttp\Client([
-                'base_uri' => 'https://api.anthropic.com',
-                'headers' => [
-                    'x-api-key' => $apiKey,
-                    'anthropic-version' => '2023-06-01',
-                    'Content-Type' => 'application/json',
-                ],
-            ]);
-
-            $response = $client->post('/v1/messages', [
-                'json' => [
-                    'model' => $model,
-                    'max_tokens' => 10,
-                    'messages' => [['role' => 'user', 'content' => 'Hi']]
-                ]
-            ]);
-
-            Flight::json(['success' => true, 'message' => 'API key is valid!']);
-
-        } catch (\Exception $e) {
-                        $this->logger->warning('Anthropic API key test failed', ['error' => $e->getMessage()]);
-            Flight::json(['success' => false, 'error' => $e->getMessage()]);
+        if (!$result['success']) {
+            $this->logger->warning('Anthropic API key test failed', ['error' => $result['error']]);
         }
+
+        Flight::json($result);
     }
 
     // ========================================
@@ -1010,20 +982,13 @@ class Enterprise extends BaseControls\Control {
 
         // Get runners available to this member
         $memberRunners = RunnerService::getMemberRunners($this->member->id);
-
         if (empty($memberRunners)) {
             $memberRunners = RunnerService::getDefaultRunners();
         }
 
-        // Add health status
-        foreach ($memberRunners as &$runner) {
-            $runner['stats'] = RunnerService::getRunnerStats($runner['id']);
-            $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
-        }
-
         $this->json([
             'success' => true,
-            'runners' => $memberRunners
+            'runners' => RunnerService::enrichRunners($memberRunners)
         ]);
     }
 

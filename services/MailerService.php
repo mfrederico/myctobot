@@ -112,24 +112,7 @@ class MailerService {
      * Basic markdown to HTML conversion
      */
     private function markdownToHtml(string $markdown): string {
-        $html = htmlspecialchars($markdown);
-
-        // Headers
-        $html = preg_replace('/^### (.+)$/m', '<h3>$1</h3>', $html);
-        $html = preg_replace('/^## (.+)$/m', '<h2>$1</h2>', $html);
-        $html = preg_replace('/^# (.+)$/m', '<h1>$1</h1>', $html);
-
-        // Bold and italic
-        $html = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $html);
-        $html = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $html);
-
-        // Links
-        $html = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2">$1</a>', $html);
-
-        // Line breaks
-        $html = nl2br($html);
-
-        return $html;
+        return \app\MarkdownParser::parseBasic($markdown);
     }
 
     /**

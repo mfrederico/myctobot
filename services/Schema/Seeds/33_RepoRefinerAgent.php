@@ -51,17 +51,30 @@ $pipeline->created_at = date('Y-m-d H:i:s');
 $pipeline->updated_at = date('Y-m-d H:i:s');
 \RedBeanPHP\R::store($pipeline);
 
-// Step 1: Clone Repository (col 0)
+// Step 1: Bootstrap Remote Environment (col 0)
+// This runs ON THE REMOTE WORKSTATION (not locally) to prepare the environment
+// The bootstrap clones the repo and sets up the working directory on the runner
 $step = \RedBeanPHP\R::dispense('pipelinesteps');
 $step->pipelines_id = $pipeline->id;
-$step->step_name = 'clone_repo';
-$step->label = 'Clone Repository';
+$step->step_name = 'bootstrap_remote';
+$step->label = 'Bootstrap Remote';
 $step->row = 0;
 $step->col = 0;
 $step->step_type = 'direct_exec';
 $step->config_json = json_encode([
-    'command' => 'rm -rf /tmp/repo-refiner-{run_uid} && git clone {context.repo_url} /tmp/repo-refiner-{run_uid} && cd /tmp/repo-refiner-{run_uid} && git status',
-    'working_dir' => '/tmp'
+    // Bootstrap script runs on remote workstation via SSH
+    'workstation_id' => '{context.runner_id}',
+    'command' => implode(' && ', [
+        // Clean up any previous run
+        'rm -rf ~/jobs/repo-refiner-{run_uid}',
+        // Create fresh working directory
+        'mkdir -p ~/jobs/repo-refiner-{run_uid}',
+        // Clone the repository (GIT_TERMINAL_PROMPT=0 prevents hanging on auth prompts)
+        'GIT_TERMINAL_PROMPT=0 git clone {context.repo_url} ~/jobs/repo-refiner-{run_uid}',
+        // Show status for logging
+        'cd ~/jobs/repo-refiner-{run_uid} && git status && pwd && ls -la'
+    ]),
+    'working_dir' => '~'
 ]);
 $step->input_source = 'context';
 $step->input_config_json = '[]';
@@ -76,7 +89,8 @@ $step->updated_at = date('Y-m-d H:i:s');
 \RedBeanPHP\R::store($step);
 
 // Step 2: Spawn Agent (col 1, row 0)
-// TODO: agent_id and runner_id must be configured for each workspace
+// NOTE: agent_id and runner_id must be configured for each workspace via context
+// The agent runs on the same remote workstation where bootstrap_remote prepared the repo
 $step = \RedBeanPHP\R::dispense('pipelinesteps');
 $step->pipelines_id = $pipeline->id;
 $step->step_name = 'spawn_agent';
@@ -88,8 +102,9 @@ $step->config_json = json_encode([
     'agent_id' => '{context.agent_id}',
     'execution_mode' => 'runner',
     'runner_id' => '{context.runner_id}',
-    'working_dir' => '/tmp/repo-refiner-{run_uid}',
-    'prompt' => "You are working on refining a codebase. The repository has been cloned to your current directory.\n\nFirst, explore the codebase structure and understand what it does. Then wait for instructions.\n\nInitial instructions (if any): {context.initial_instructions}\n\nWhen you receive new instructions via the pipeline, implement them carefully. After each major change, commit your work with descriptive messages.\n\nUse the `job_checkpoint` MCP tool periodically to report your progress.\n\nIMPORTANT: Stay active and wait for instructions. Do not exit until told to.",
+    // Use same path as bootstrap_remote (~/jobs/repo-refiner-{run_uid} on the runner)
+    'working_dir' => '~/jobs/repo-refiner-{run_uid}',
+    'prompt' => "You are working on refining a codebase. The repository has already been cloned to your current directory.\n\nFirst, explore the codebase structure and understand what it does. Then wait for instructions.\n\nInitial instructions (if any): {context.initial_instructions}\n\nWhen you receive new instructions via the pipeline, implement them carefully. After each major change, commit your work with descriptive messages.\n\nUse the `job_checkpoint` MCP tool periodically to report your progress.\n\nIMPORTANT: Stay active and wait for instructions. Do not exit until told to.",
     'wait_for_completion' => false
 ]);
 $step->input_source = 'context';
@@ -198,7 +213,7 @@ $step->config_json = json_encode([
 $step->input_source = 'context';
 $step->input_config_json = '[]';
 $step->condition_json = '{}';
-$step->on_success = 'next_col';
+$step->on_success = 'goto:check_if_complete';  // Must go to condition check, not next_col
 $step->on_failure = 'exit';
 $step->timeout_seconds = 300;
 $step->is_active = true;
@@ -216,7 +231,9 @@ $step->row = 1;
 $step->col = 2;
 $step->step_type = 'condition';
 $step->config_json = json_encode([
-    'left' => '{prev.output.action}',
+    // Use {context._input.action} to check the user's input from context
+    // _input is stored in $this->context, not $this->stepOutputs
+    'left' => '{context._input.action}',
     'operator' => 'equals',
     'right' => 'complete',
     'then_goto' => 'send_completion_email',

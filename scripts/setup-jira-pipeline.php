@@ -80,7 +80,6 @@ if (!$agent) {
     echo "Creating AI agent: Jira Analyzer\n";
     $agent = Bean::dispense('aiagents');
     $agent->member_id = $member->id;
-    $agent->created_by_member_id = $member->id;
     $agent->created_by_name = $member->username;
     $agent->name = 'Jira Analyzer';
     $agent->description = 'Analyzes Jira webhook events and provides insights';

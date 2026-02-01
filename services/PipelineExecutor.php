@@ -515,10 +515,36 @@ class PipelineExecutor {
                 }
                 // 'retry' not applicable for await_input timeout
             } else {
-                // For user input, continue to next step (on_success flow)
-                $resumeIndex = $currentStepIndex + 1;
-                if ($resumeIndex < count($stepsArray)) {
-                    $this->executeStepsFromIndex($resumeIndex, $stepsArray);
+                // For user input, follow on_success directive
+                $successAction = $step->on_success ?: 'next_col';
+                $this->log('info', "Following on_success for await_input: {$successAction}");
+
+                if (strpos($successAction, 'goto:') === 0) {
+                    // Jump to specified step
+                    $targetStepName = substr($successAction, 5);
+                    $targetStep = $this->stepsByName[$targetStepName] ?? null;
+
+                    if ($targetStep) {
+                        foreach ($stepsArray as $idx => $s) {
+                            if ($s->step_name === $targetStepName) {
+                                $this->executeStepsFromIndex($idx, $stepsArray);
+                                break;
+                            }
+                        }
+                    } else {
+                        $this->log('error', "on_success goto target not found: {$targetStepName}");
+                    }
+                } elseif ($successAction === 'exit') {
+                    // Mark run as completed
+                    $this->run->status = 'completed';
+                    $this->run->completed_at = date('Y-m-d H:i:s');
+                    Bean::store($this->run);
+                } else {
+                    // Default: continue to next step in array
+                    $resumeIndex = $currentStepIndex + 1;
+                    if ($resumeIndex < count($stepsArray)) {
+                        $this->executeStepsFromIndex($resumeIndex, $stepsArray);
+                    }
                 }
             }
 
@@ -661,24 +687,97 @@ class PipelineExecutor {
                     return;
                 } elseif (strpos($failAction, 'goto:') === 0) {
                     $targetStepName = substr($failAction, 5);
+                    $targetIdx = null;
                     foreach ($stepsArray as $idx => $s) {
                         if ($s->step_name === $targetStepName) {
-                            $i = $idx - 1; // Will be incremented by loop
+                            $targetIdx = $idx;
                             break;
                         }
+                    }
+                    if ($targetIdx !== null) {
+                        // Reset step runs if backward goto (same logic as success path)
+                        if ($targetIdx <= $i) {
+                            for ($resetIdx = $targetIdx; $resetIdx <= $i; $resetIdx++) {
+                                if (isset($stepsArray[$resetIdx])) {
+                                    $loopStep = $stepsArray[$resetIdx];
+                                    $loopStepRun = Bean::findOne('pipelinestepruns',
+                                        ' pipelineruns_id = ? AND pipelinesteps_id = ? ORDER BY id DESC ',
+                                        [$this->run->id, $loopStep->id]
+                                    );
+                                    if ($loopStepRun && in_array($loopStepRun->status, ['success', 'awaiting_input', 'skipped'])) {
+                                        $loopStepRun->status = 'pending';
+                                        $loopStepRun->output_json = null;
+                                        $loopStepRun->awaiting_input = 0;
+                                        $loopStepRun->awaiting_input_token = null;
+                                        Bean::store($loopStepRun);
+                                        unset($this->stepOutputs[$loopStep->step_name]);
+                                    }
+                                }
+                            }
+                        }
+                        $i = $targetIdx - 1;
                     }
                 }
                 // For skip/ignore, continue to next step
             } else {
-                // Handle on_success flow
-                $successAction = $step->on_success ?: 'next_col';
+                // Check if step returned a _goto directive (used by condition/switch steps)
+                $stepOutput = $this->stepOutputs[$step->step_name]['output'] ?? [];
+                $gotoDirective = $stepOutput['_goto'] ?? null;
+
+                if (!empty($gotoDirective)) {
+                    // Use the _goto directive from step output
+                    $successAction = 'goto:' . $gotoDirective;
+                    $this->log('info', "Following _goto directive from step output: {$gotoDirective}");
+                } else {
+                    // Handle on_success flow
+                    $successAction = $step->on_success ?: 'next_col';
+                }
+
                 if (strpos($successAction, 'goto:') === 0) {
                     $targetStepName = substr($successAction, 5);
+                    $targetIdx = null;
                     foreach ($stepsArray as $idx => $s) {
                         if ($s->step_name === $targetStepName) {
-                            $i = $idx - 1; // Will be incremented by loop
+                            $targetIdx = $idx;
                             break;
                         }
+                    }
+
+                    if ($targetIdx !== null) {
+                        // CRITICAL: Detect backward goto (loop) and reset step runs
+                        // This enables conversation loops like: wait_for_input -> process -> goto:wait_for_input
+                        if ($targetIdx <= $i) {
+                            $this->log('info', "Backward goto detected in executeStepsFromIndex: {$step->step_name} -> {$targetStepName}");
+
+                            // Reset step runs for ALL steps from target onwards (they need fresh execution)
+                            for ($resetIdx = $targetIdx; $resetIdx <= $i; $resetIdx++) {
+                                if (isset($stepsArray[$resetIdx])) {
+                                    $loopStep = $stepsArray[$resetIdx];
+                                    $loopStepRun = Bean::findOne('pipelinestepruns',
+                                        ' pipelineruns_id = ? AND pipelinesteps_id = ? ORDER BY id DESC ',
+                                        [$this->run->id, $loopStep->id]
+                                    );
+                                    if ($loopStepRun && in_array($loopStepRun->status, ['success', 'awaiting_input', 'skipped'])) {
+                                        $loopStepRun->status = 'pending';
+                                        $loopStepRun->output_json = null;
+                                        $loopStepRun->error_message = null;
+                                        $loopStepRun->started_at = null;
+                                        $loopStepRun->completed_at = null;
+                                        $loopStepRun->awaiting_input = 0;
+                                        $loopStepRun->awaiting_input_token = null;
+                                        Bean::store($loopStepRun);
+                                        $this->log('debug', "Reset step run for loop: {$loopStep->step_name}");
+
+                                        // Clear from step outputs cache
+                                        unset($this->stepOutputs[$loopStep->step_name]);
+                                        if (isset($this->context[$loopStep->step_name])) {
+                                            unset($this->context[$loopStep->step_name]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        $i = $targetIdx - 1; // Will be incremented by loop
                     }
                 } elseif ($successAction === 'exit') {
                     // Exit the pipeline successfully
@@ -1608,7 +1707,44 @@ class PipelineExecutor {
                 $this->completeRun($result['status'], $result['message'] ?? null);
                 return;
             } elseif ($result['action'] === 'continue') {
-                $currentIndex = $result['nextIndex'];
+                $nextIndex = $result['nextIndex'];
+
+                // CRITICAL: Detect backward goto (loop) and reset step runs for loop iteration
+                // This enables conversation loops like: wait_for_input -> process -> send_ack -> goto:wait_for_input
+                if ($nextIndex < $currentIndex) {
+                    $this->log('info', "Backward goto detected: index {$currentIndex} -> {$nextIndex}, resetting loop steps");
+
+                    // Reset step runs for ALL steps from target onwards (including target - they need fresh execution)
+                    for ($i = $nextIndex; $i <= $currentIndex; $i++) {
+                        if (isset($stepsArray[$i])) {
+                            $loopStep = $stepsArray[$i];
+                            // Find and reset the step run
+                            $stepRun = Bean::findOne('pipelinestepruns',
+                                ' pipelineruns_id = ? AND pipelinesteps_id = ? ORDER BY id DESC ',
+                                [$this->run->id, $loopStep->id]
+                            );
+                            if ($stepRun && in_array($stepRun->status, ['success', 'awaiting_input', 'skipped'])) {
+                                // Reset to pending so it will re-execute fresh
+                                $stepRun->status = 'pending';
+                                $stepRun->output_json = null;
+                                $stepRun->error_message = null;
+                                $stepRun->started_at = null;
+                                $stepRun->completed_at = null;
+                                $stepRun->input_token = null;  // Clear input token for await_input steps
+                                Bean::store($stepRun);
+                                $this->log('debug', "Reset step run for loop: {$loopStep->step_name}");
+
+                                // Also clear from step outputs cache
+                                unset($this->stepOutputs[$loopStep->step_name]);
+                                if (isset($this->context[$loopStep->step_name])) {
+                                    unset($this->context[$loopStep->step_name]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                $currentIndex = $nextIndex;
                 $completedCount = $result['completedCount'];
             }
         }
@@ -2202,7 +2338,13 @@ class PipelineExecutor {
         // Use !empty() to handle both null and empty strings
         $workingDir = !empty($config['working_dir']) ? $config['working_dir'] : '/tmp';
         $executor = !empty($config['executor']) ? $config['executor'] : '/bin/bash -c';
-        $workstationId = $config['workstation_id'] ?? null;
+
+        // Substitute variables in workstation_id (may be {context.runner_id}) and cast to int
+        $workstationIdRaw = $config['workstation_id'] ?? null;
+        $workstationId = null;
+        if (!empty($workstationIdRaw)) {
+            $workstationId = (int) $this->substituteVariables((string) $workstationIdRaw);
+        }
 
         if (empty($command)) {
             return ['success' => false, 'error' => 'No command specified'];
@@ -2256,8 +2398,12 @@ class PipelineExecutor {
             }
         }
 
-        // Check if working directory exists
-        if (!is_dir($workingDir)) {
+        // For SSH execution, working_dir is a remote path - use /tmp locally for proc_open
+        // For local execution, validate the working directory exists
+        $procOpenCwd = $workingDir;
+        if ($isRemoteExecution) {
+            $procOpenCwd = '/tmp';  // SSH runs locally, the remote workdir is handled by the command itself
+        } elseif (!is_dir($workingDir)) {
             return [
                 'success' => false,
                 'error' => "Working directory does not exist: '{$workingDir}'. " .
@@ -2279,10 +2425,10 @@ class PipelineExecutor {
         if (!empty($executor)) {
             // Parse executor into array parts (e.g., "/bin/bash -c" → ['/bin/bash', '-c'])
             $executorParts[] = $command;
-            $process = @proc_open($executorParts, $descriptors, $pipes, $workingDir, null);
+            $process = @proc_open($executorParts, $descriptors, $pipes, $procOpenCwd, null);
         } else {
             // Direct execution - split command into parts
-            $process = @proc_open($commandParts, $descriptors, $pipes, $workingDir, null);
+            $process = @proc_open($commandParts, $descriptors, $pipes, $procOpenCwd, null);
         }
 
         if (!is_resource($process)) {
@@ -3718,19 +3864,32 @@ PIPELINE;
                 return $value ?? '';
             }
 
-            if (!isset($this->stepOutputs[$stepName])) {
-                $this->log('warning', "Step output not found for substitution", [
+            // First check stepOutputs, then fall back to context
+            // This allows {_input.action} to work since _input is stored in context
+            $sourceData = null;
+            $sourceType = 'stepOutput';
+
+            if (isset($this->stepOutputs[$stepName])) {
+                $sourceData = $this->stepOutputs[$stepName];
+            } elseif (isset($this->context[$stepName])) {
+                // Fall back to context (e.g., for _input which is stored in context)
+                $sourceData = $this->context[$stepName];
+                $sourceType = 'context';
+            } else {
+                $this->log('warning', "Variable not found for substitution", [
                     'step_name' => $stepName,
                     'path' => $path,
-                    'available_steps' => array_keys($this->stepOutputs)
+                    'available_steps' => array_keys($this->stepOutputs),
+                    'available_context' => array_keys($this->context)
                 ]);
                 return '';
             }
 
-            $value = $this->getNestedValue($this->stepOutputs[$stepName], $path);
-            $this->log('debug', "Substituting step variable", [
+            $value = $this->getNestedValue($sourceData, $path);
+            $this->log('debug', "Substituting variable from {$sourceType}", [
                 'step_name' => $stepName,
                 'path' => $path,
+                'source' => $sourceType,
                 'found' => $value !== null,
                 'value_preview' => $value !== null ? substr((string)$value, 0, 100) : 'NULL'
             ]);

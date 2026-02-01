@@ -2631,10 +2631,11 @@ PIPELINE;
         $job->phase = 'pipeline-agent';
         $job->run_count = 0;
         $job->prompt = $prompt;
-        // Get working_dir from step config - do NOT substitute here
-        // {job_uid} isn't available until job is created, so job-dispatcher handles substitution
+        // Get working_dir from step config
+        // Substitute {run_uid} and context variables here, but leave {job_uid} for job-dispatcher
+        // since job_uid isn't available until after the job is created
         $workingDir = isset($config['working_dir']) && !empty($config['working_dir'])
-            ? $config['working_dir']
+            ? $this->substituteVariables($config['working_dir'])
             : null;
 
         $job->queue_metadata = json_encode([

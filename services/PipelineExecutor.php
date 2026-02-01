@@ -74,9 +74,58 @@ class PipelineExecutor {
     private ?string $runDirectory = null;
     private const RUN_FILES_BASE = '/tmp/pipeline-runs';
 
+    // Performance timing (enabled via setTimingEnabled)
+    private bool $timingEnabled = false;
+    private array $timings = [];
+
     public function __construct(int $runId, $logger = null) {
         $this->runId = $runId;
         $this->logger = $logger;
+    }
+
+    /**
+     * Enable performance timing instrumentation
+     */
+    public function setTimingEnabled(bool $enabled = true): self {
+        $this->timingEnabled = $enabled;
+        return $this;
+    }
+
+    /**
+     * Record a timing checkpoint
+     */
+    private function timing(string $label): void {
+        if (!$this->timingEnabled) return;
+        $this->timings[] = [
+            'label' => $label,
+            'time' => microtime(true),
+            'memory' => memory_get_usage(true)
+        ];
+    }
+
+    /**
+     * Get timing report
+     */
+    public function getTimingReport(): array {
+        if (empty($this->timings)) return [];
+
+        $report = [];
+        $start = $this->timings[0]['time'];
+        $prevTime = $start;
+
+        foreach ($this->timings as $i => $t) {
+            $elapsed = ($t['time'] - $start) * 1000;
+            $delta = ($t['time'] - $prevTime) * 1000;
+            $report[] = [
+                'label' => $t['label'],
+                'elapsed_ms' => round($elapsed, 2),
+                'delta_ms' => round($delta, 2),
+                'memory_mb' => round($t['memory'] / 1024 / 1024, 2)
+            ];
+            $prevTime = $t['time'];
+        }
+
+        return $report;
     }
 
     /**
@@ -338,9 +387,12 @@ class PipelineExecutor {
      * @return array Result with success status and output
      */
     public function resumeFromAwaitInput(array $input, string $inputToken, string $source = 'api'): array {
+        $this->timing('resume_start');
         try {
             // Load run
+            $this->timing('load_run_start');
             $this->run = Bean::load('pipelineruns', $this->runId);
+            $this->timing('load_run_end');
             if (!$this->run->id) {
                 return ['success' => false, 'error' => "Run not found: {$this->runId}"];
             }
@@ -449,9 +501,12 @@ class PipelineExecutor {
             $this->log('info', "Resuming from await_input at step: {$step->step_name}, source: {$source}, timed_out: " . ($isTimeout ? 'yes' : 'no'));
 
             // Load step lookups for execution
+            $this->timing('load_step_lookups_start');
             $this->loadStepLookups();
+            $this->timing('load_step_lookups_end');
 
             // Restore all step outputs from database so {prev} and {step_name} substitutions work
+            $this->timing('restore_outputs_start');
             $completedStepRuns = Bean::find('pipelinestepruns',
                 ' pipelineruns_id = ? AND status = ? ORDER BY id ASC ',
                 [$this->run->id, 'success']
@@ -470,6 +525,7 @@ class PipelineExecutor {
             }
             // Set prev to the await_input step output (most recent)
             $this->previousStepOutput = $this->stepOutputs[$step->step_name] ?? $this->previousStepOutput;
+            $this->timing('restore_outputs_end');
 
             // Find the index of the awaiting step
             $stepsArray = array_values($this->steps);
@@ -527,7 +583,9 @@ class PipelineExecutor {
                     if ($targetStep) {
                         foreach ($stepsArray as $idx => $s) {
                             if ($s->step_name === $targetStepName) {
+                                $this->timing('execute_steps_start');
                                 $this->executeStepsFromIndex($idx, $stepsArray);
+                                $this->timing('execute_steps_end');
                                 break;
                             }
                         }
@@ -1664,11 +1722,14 @@ class PipelineExecutor {
             $iterations++;
             $step = $stepsArray[$currentIndex];
 
-            // Check if run was cancelled
-            $this->run = Bean::load('pipelineruns', $this->runId);
-            if ($this->run->status === 'cancelled') {
-                $this->log('info', 'Run was cancelled, stopping execution');
-                return;
+            // Check if run was cancelled (only every 5 iterations to reduce DB load)
+            // Cancellation is not time-critical - a few seconds delay is acceptable
+            if ($iterations % 5 === 1) {
+                $this->run = Bean::load('pipelineruns', $this->runId);
+                if ($this->run->status === 'cancelled') {
+                    $this->log('info', 'Run was cancelled, stopping execution');
+                    return;
+                }
             }
 
             // Check if this step is parallel - if so, run all parallel steps in the same column
@@ -1846,10 +1907,12 @@ class PipelineExecutor {
             $iterations++;
             $step = $rowStepsArray[$colIndex];
 
-            // Check if run was cancelled
-            $this->run = Bean::load('pipelineruns', $this->runId);
-            if ($this->run->status === 'cancelled') {
-                return $completedCount;
+            // Check if run was cancelled (only every 5 iterations to reduce DB load)
+            if ($iterations % 5 === 1) {
+                $this->run = Bean::load('pipelineruns', $this->runId);
+                if ($this->run->status === 'cancelled') {
+                    return $completedCount;
+                }
             }
 
             $stepRun = Bean::findOne('pipelinestepruns',
@@ -3827,25 +3890,15 @@ PIPELINE;
     /**
      * Substitute variables in a string
      * Supports: {context.key}, {step_name.output.key}, {step_name.stdout}
+     *
+     * Performance note: This method is called 45+ times per step.
+     * Debug logging has been removed from the hot path.
      */
     private function substituteVariables(string $template): string {
-        // Log available step outputs for debugging
-        $this->log('debug', 'substituteVariables called', [
-            'template_preview' => substr($template, 0, 200),
-            'available_step_outputs' => array_keys($this->stepOutputs),
-            'context_keys' => array_keys($this->context)
-        ]);
-
         // Replace context variables {context.xxx}
         $template = preg_replace_callback('/\{context\.([^}]+)\}/', function($matches) {
             $key = $matches[1];
-            $value = $this->getNestedValue($this->context, $key);
-            $this->log('debug', "Substituting context variable", [
-                'key' => $key,
-                'found' => $value !== null,
-                'value_preview' => $value !== null ? substr((string)$value, 0, 100) : 'NULL'
-            ]);
-            return $value ?? '';
+            return $this->getNestedValue($this->context, $key) ?? '';
         }, $template);
 
         // Replace step output variables {step_name.xxx}
@@ -3856,51 +3909,33 @@ PIPELINE;
 
             // Handle {prev.xxx} - reference the previous step's output
             if ($stepName === 'prev' && $this->previousStepOutput !== null) {
-                $value = $this->getNestedValue($this->previousStepOutput, $path);
-                $this->log('debug', "Substituting prev variable", [
-                    'path' => $path,
-                    'found' => $value !== null
-                ]);
-                return $value ?? '';
+                return $this->getNestedValue($this->previousStepOutput, $path) ?? '';
             }
 
             // First check stepOutputs, then fall back to context
             // This allows {_input.action} to work since _input is stored in context
             $sourceData = null;
-            $sourceType = 'stepOutput';
 
             if (isset($this->stepOutputs[$stepName])) {
                 $sourceData = $this->stepOutputs[$stepName];
             } elseif (isset($this->context[$stepName])) {
                 // Fall back to context (e.g., for _input which is stored in context)
                 $sourceData = $this->context[$stepName];
-                $sourceType = 'context';
             } else {
-                $this->log('warning', "Variable not found for substitution", [
-                    'step_name' => $stepName,
-                    'path' => $path,
-                    'available_steps' => array_keys($this->stepOutputs),
-                    'available_context' => array_keys($this->context)
-                ]);
+                // Variable not found - only log in debug mode to avoid performance hit
+                if ($this->debugMode) {
+                    $this->log('warning', "Variable not found: {$stepName}.{$path}");
+                }
                 return '';
             }
 
-            $value = $this->getNestedValue($sourceData, $path);
-            $this->log('debug', "Substituting variable from {$sourceType}", [
-                'step_name' => $stepName,
-                'path' => $path,
-                'source' => $sourceType,
-                'found' => $value !== null,
-                'value_preview' => $value !== null ? substr((string)$value, 0, 100) : 'NULL'
-            ]);
-            return $value ?? '';
+            return $this->getNestedValue($sourceData, $path) ?? '';
         }, $template);
 
         // Replace simple variables {xxx} - look up directly in context
         // This handles mapped variables like {shopify_store} without requiring context. prefix
         $template = preg_replace_callback('/\{([a-z_][a-z0-9_]*)\}/', function($matches) {
             $key = $matches[1];
-            // First check if it's a direct context key
             if (isset($this->context[$key])) {
                 $value = $this->context[$key];
                 return is_array($value) ? json_encode($value) : $value;
@@ -3930,14 +3965,36 @@ PIPELINE;
 
     /**
      * Update run progress
+     *
+     * Performance optimization: Only saves to DB if $flush is true or enough time has passed.
+     * Progress is always updated in memory, but DB writes are batched.
+     *
+     * @param int $completedCount Number of completed steps
+     * @param bool $flush Force immediate save to database
      */
-    private function updateProgress(int $completedCount): void {
+    private function updateProgress(int $completedCount, bool $flush = false): void {
+        static $lastSaveTime = 0;
+
+        // Always update in-memory state
         $this->run->steps_completed = $completedCount;
         $total = $this->run->steps_total ?: 1;
         $this->run->progress_percent = (int) (($completedCount / $total) * 100);
-        $this->run->context_json = json_encode($this->context);
-        $this->run->updated_at = date('Y-m-d H:i:s');
-        Bean::store($this->run);
+
+        // Only save to DB if:
+        // 1. Flush is explicitly requested
+        // 2. At least 2 seconds since last save (rate limit)
+        // 3. Pipeline is complete (100%)
+        $now = time();
+        $shouldSave = $flush
+            || ($now - $lastSaveTime >= 2)
+            || ($this->run->progress_percent >= 100);
+
+        if ($shouldSave) {
+            $this->run->context_json = json_encode($this->context);
+            $this->run->updated_at = date('Y-m-d H:i:s');
+            Bean::store($this->run);
+            $lastSaveTime = $now;
+        }
     }
 
     /**

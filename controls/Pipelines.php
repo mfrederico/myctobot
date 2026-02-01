@@ -2810,18 +2810,48 @@ class Pipelines extends BaseControls\Control {
         require_once __DIR__ . '/../services/PipelineExecutor.php';
 
         try {
-            $executor = new \app\services\PipelineExecutor($run->id);
+            $this->logger->info('formsubmit resuming pipeline', [
+                'run_id' => $run->id,
+                'inputData' => $inputData,
+                'token_length' => strlen($actualToken)
+            ]);
+
+            $executor = new \app\services\PipelineExecutor($run->id, $this->logger);
+            $executor->setTimingEnabled(true);  // Enable performance timing
             $result = $executor->resumeFromAwaitInput($inputData, $actualToken, 'form');
 
-            if ($isAjax) {
-                // Return JSON for AJAX requests
-                Flight::json([
-                    'success' => true,
-                    'run_id' => $runId,
-                    'run_uid' => $run->run_uid,
-                    'status' => $result['status'] ?? 'running',
-                    'message' => 'Input received'
+            // Log timing report for performance analysis
+            $timingReport = $executor->getTimingReport();
+            if (!empty($timingReport)) {
+                $this->logger->info('formsubmit timing', [
+                    'run_id' => $run->id,
+                    'timings' => $timingReport
                 ]);
+            }
+
+            $this->logger->info('formsubmit resume result', [
+                'run_id' => $run->id,
+                'success' => $result['success'] ?? false,
+                'status' => $result['status'] ?? 'unknown',
+                'error' => $result['error'] ?? null
+            ]);
+
+            if ($isAjax) {
+                // Return JSON for AJAX requests - check actual result
+                if (!empty($result['success'])) {
+                    Flight::json([
+                        'success' => true,
+                        'run_id' => $runId,
+                        'run_uid' => $run->run_uid,
+                        'status' => $result['status'] ?? 'running',
+                        'message' => 'Input received'
+                    ]);
+                } else {
+                    Flight::json([
+                        'success' => false,
+                        'error' => $result['error'] ?? 'Failed to process input'
+                    ], 400);
+                }
                 return;
             }
 

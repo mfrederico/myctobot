@@ -155,16 +155,15 @@ class McpClientService {
         $headers = $config['headers'] ?? [];
         $forceSse = $config['sse'] ?? null;
 
-        // Auto-detect SSE by trying /sse endpoint first
-        if ($forceSse === true || $forceSse === null) {
+        // SSE is deprecated - only use if explicitly requested
+        // Auto-detection is disabled to avoid 10-second timeout on non-SSE endpoints
+        if ($forceSse === true) {
             if ($this->connectSse($baseUrl, $headers)) {
                 return true;
             }
-            // If SSE was forced and failed, don't fall back
-            if ($forceSse === true) {
-                return false;
-            }
+            return false;  // SSE was forced but failed
         }
+        // Note: forceSse === null no longer triggers SSE auto-detection
 
         // Fall back to simple HTTP POST
         $this->transport = [
@@ -198,17 +197,26 @@ class McpClientService {
         }
         $this->log('info', "Attempting SSE connection to: {$sseUrl}");
 
-        // First, do a quick probe to see if /sse exists
+        // First, do a quick probe to see if /sse exists and is actually SSE
         $ch = curl_init($sseUrl);
         curl_setopt($ch, CURLOPT_NOBODY, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 3);  // Reduced from 5s
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         curl_close($ch);
 
+        // Check if endpoint exists and is actually SSE (not just a 200 from a catch-all route)
         if ($httpCode === 404 || $httpCode === 0) {
             $this->log('debug', "SSE endpoint not found (HTTP {$httpCode}), falling back to HTTP");
+            return false;
+        }
+
+        // If content-type is application/json, it's not an SSE endpoint - it's a regular HTTP API
+        // that happens to respond to all paths. Skip SSE and use HTTP transport.
+        if ($contentType && strpos($contentType, 'application/json') !== false) {
+            $this->log('debug', "Endpoint returns JSON (not SSE), falling back to HTTP");
             return false;
         }
 

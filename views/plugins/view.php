@@ -289,22 +289,7 @@
     </div>
 </div>
 
-<?php
-// Helper function for category badge colors
-function getCategoryBadgeClass($category) {
-    $classes = [
-        'general' => 'secondary',
-        'automation' => 'primary',
-        'integration' => 'info',
-        'analytics' => 'success',
-        'security' => 'danger',
-        'development' => 'dark',
-        'productivity' => 'warning',
-        'communication' => 'purple'
-    ];
-    return $classes[$category] ?? 'secondary';
-}
-?>
+<?php require_once __DIR__ . '/../../lib/ViewHelpers.php'; ?>
 
 <style>
 .plugin-description {

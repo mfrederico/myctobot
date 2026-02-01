@@ -840,29 +840,50 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <?php
+                $inputSchema = json_decode($pipeline['input_schema_json'] ?? '', true);
+                $requiredFields = $inputSchema['required'] ?? [];
+
+                if (!empty($inputSchema['properties'])):
+                    // Generate individual form fields for each property
+                    foreach ($inputSchema['properties'] as $key => $prop):
+                        $isRequired = in_array($key, $requiredFields);
+                        $type = $prop['type'] ?? 'string';
+                        $description = $prop['description'] ?? '';
+                ?>
                 <div class="mb-3">
-                    <label class="form-label">Context Variables (JSON)</label>
-                    <?php
-                    // Generate context template from input schema if available
-                    $contextTemplate = '';
-                    $inputSchema = json_decode($pipeline['input_schema_json'] ?? '', true);
-                    if (!empty($inputSchema['properties'])) {
-                        $template = [];
-                        foreach ($inputSchema['properties'] as $key => $prop) {
-                            $template[$key] = $prop['description'] ?? "Enter {$key}";
-                        }
-                        $contextTemplate = json_encode($template, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-                    }
-                    ?>
-                    <textarea class="form-control font-monospace" id="triggerContext" rows="6"><?= htmlspecialchars($contextTemplate) ?></textarea>
-                    <?php if (!empty($inputSchema['required'])): ?>
-                    <small class="text-muted">
-                        <strong>Required:</strong> <?= htmlspecialchars(implode(', ', $inputSchema['required'])) ?>
-                    </small>
+                    <label class="form-label" for="trigger_<?= htmlspecialchars($key) ?>">
+                        <?= htmlspecialchars(ucwords(str_replace('_', ' ', $key))) ?>
+                        <?php if ($isRequired): ?><span class="text-danger">*</span><?php endif; ?>
+                    </label>
+                    <?php if ($type === 'string' && strlen($description) > 100): ?>
+                    <textarea class="form-control trigger-field" id="trigger_<?= htmlspecialchars($key) ?>"
+                        data-field="<?= htmlspecialchars($key) ?>"
+                        placeholder="<?= htmlspecialchars($description) ?>"
+                        rows="3"
+                        <?= $isRequired ? 'required' : '' ?>></textarea>
                     <?php else: ?>
-                    <small class="text-muted">Pass initial context/variables to the pipeline</small>
+                    <input type="text" class="form-control trigger-field" id="trigger_<?= htmlspecialchars($key) ?>"
+                        data-field="<?= htmlspecialchars($key) ?>"
+                        placeholder="<?= htmlspecialchars($description) ?>"
+                        <?= $isRequired ? 'required' : '' ?>>
+                    <?php endif; ?>
+                    <?php if ($description): ?>
+                    <small class="text-muted"><?= htmlspecialchars($description) ?></small>
                     <?php endif; ?>
                 </div>
+                <?php
+                    endforeach;
+                else:
+                ?>
+                <div class="mb-3">
+                    <label class="form-label">Context Variables (JSON)</label>
+                    <textarea class="form-control font-monospace" id="triggerContext" rows="6">{}</textarea>
+                    <small class="text-muted">Pass initial context/variables to the pipeline as JSON</small>
+                </div>
+                <?php endif; ?>
+                <!-- Hidden field for backwards compatibility -->
+                <input type="hidden" id="triggerContext" value="{}">
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -1626,7 +1647,7 @@ const pipelineId = <?= $pipeline['id'] ?>;
 const isSystemPipeline = <?= !empty($pipeline['is_system']) ? 'true' : 'false' ?>;
 // Check sessionStorage for unlock state (persists across page reloads)
 let systemPipelineLocked = isSystemPipeline && sessionStorage.getItem('pipeline_' + pipelineId + '_unlocked') !== 'true';
-const initialContextTemplate = <?= json_encode($contextTemplate ?: '{}') ?>;
+const initialContextTemplate = <?= json_encode($contextTemplate ?? '{}') ?>;
 let stepModal = null;
 
 // Unlock/Lock system pipeline for editing
@@ -3679,8 +3700,30 @@ async function saveSettings() {
     }
 }
 
+function collectTriggerContext() {
+    // Collect values from individual form fields
+    const fields = document.querySelectorAll('.trigger-field');
+    if (fields.length > 0) {
+        const data = {};
+        fields.forEach(field => {
+            const key = field.dataset.field;
+            const value = field.value.trim();
+            if (key && value) {
+                data[key] = value;
+            }
+        });
+        return JSON.stringify(data);
+    }
+    // Fallback to raw textarea for pipelines without input schema
+    return document.getElementById('triggerContext').value || '{}';
+}
+
 function triggerPipeline() {
-    document.getElementById('triggerContext').value = initialContextTemplate;
+    // Clear form fields
+    document.querySelectorAll('.trigger-field').forEach(field => {
+        field.value = '';
+    });
+    document.getElementById('triggerContext').value = '{}';
     // Reset modal to normal state
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-play-fill"></i> Run Pipeline';
     document.getElementById('triggerModalSubmit').onclick = confirmTrigger;
@@ -3689,7 +3732,8 @@ function triggerPipeline() {
 }
 
 async function confirmTrigger() {
-    const context = document.getElementById('triggerContext').value || '{}';
+    // Collect values from trigger form fields
+    const context = collectTriggerContext();
 
     try {
         const response = await fetch('/pipelines/trigger/' + pipelineId, {
@@ -3714,8 +3758,12 @@ async function confirmTrigger() {
 }
 
 function triggerInteractive() {
+    // Clear form fields
+    document.querySelectorAll('.trigger-field').forEach(field => {
+        field.value = '';
+    });
+    document.getElementById('triggerContext').value = '{}';
     // Show same modal but with interactive label
-    document.getElementById('triggerContext').value = initialContextTemplate;
     document.getElementById('triggerModalLabel').innerHTML = '<i class="bi bi-bug"></i> Interactive/Debug Run';
     document.getElementById('triggerModalSubmit').onclick = confirmTriggerInteractive;
     document.getElementById('triggerModalSubmit').innerHTML = '<i class="bi bi-play-fill"></i> Start Interactive Run';
@@ -3731,7 +3779,8 @@ let pollInterval = null;
 let stepOutputs = {};  // Store output data by step_name
 
 async function confirmTriggerInteractive() {
-    const context = document.getElementById('triggerContext').value || '{}';
+    // Collect values from trigger form fields
+    const context = collectTriggerContext();
     const submitBtn = document.getElementById('triggerModalSubmit');
     const originalHtml = submitBtn.innerHTML;
 

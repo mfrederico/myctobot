@@ -219,83 +219,10 @@ class MailgunService {
     }
 
     /**
-     * Convert markdown to HTML
+     * Convert markdown to HTML (email-optimized with inline styles)
      */
     private function markdownToHtml(string $markdown): string {
-        $html = $markdown;
-
-        // Headers
-        $html = preg_replace('/^### (.+)$/m', '<h3>$1</h3>', $html);
-        $html = preg_replace('/^## (.+)$/m', '<h2>$1</h2>', $html);
-        $html = preg_replace('/^# (.+)$/m', '<h1>$1</h1>', $html);
-
-        // Bold
-        $html = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $html);
-
-        // Italic
-        $html = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $html);
-
-        // Links - [text](url) format
-        $html = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2" style="color: #3498db;">$1</a>', $html);
-
-        // Blockquotes
-        $html = preg_replace('/^> (.+)$/m', '<blockquote>$1</blockquote>', $html);
-
-        // Horizontal rules
-        $html = preg_replace('/^---$/m', '<hr>', $html);
-
-        // Tables
-        $html = $this->convertTables($html);
-
-        // Unordered lists
-        $html = preg_replace('/^- (.+)$/m', '<li>$1</li>', $html);
-        $html = preg_replace('/(<li>.*<\/li>\n?)+/', '<ul>$0</ul>', $html);
-
-        // Line breaks
-        $html = preg_replace('/\n\n/', '</p><p>', $html);
-        $html = '<p>' . $html . '</p>';
-
-        // Clean up empty paragraphs
-        $html = preg_replace('/<p>\s*<\/p>/', '', $html);
-        $html = preg_replace('/<p>\s*(<h[1-6]>)/', '$1', $html);
-        $html = preg_replace('/(<\/h[1-6]>)\s*<\/p>/', '$1', $html);
-        $html = preg_replace('/<p>\s*(<ul>)/', '$1', $html);
-        $html = preg_replace('/(<\/ul>)\s*<\/p>/', '$1', $html);
-        $html = preg_replace('/<p>\s*(<hr>)/', '$1', $html);
-        $html = preg_replace('/(<hr>)\s*<\/p>/', '$1', $html);
-        $html = preg_replace('/<p>\s*(<table)/', '$1', $html);
-        $html = preg_replace('/(<\/table>)\s*<\/p>/', '$1', $html);
-        $html = preg_replace('/<p>\s*(<blockquote>)/', '$1', $html);
-        $html = preg_replace('/(<\/blockquote>)\s*<\/p>/', '$1', $html);
-
-        return $html;
-    }
-
-    /**
-     * Convert markdown tables to HTML
-     */
-    private function convertTables(string $html): string {
-        $pattern = '/\|(.+)\|\n\|[-| ]+\|\n((?:\|.+\|\n?)+)/';
-
-        return preg_replace_callback($pattern, function ($matches) {
-            $headerRow = trim($matches[1]);
-            $bodyRows = trim($matches[2]);
-
-            // Parse header
-            $headers = array_map('trim', explode('|', $headerRow));
-            $headerHtml = '<tr>' . implode('', array_map(fn($h) => "<th>{$h}</th>", $headers)) . '</tr>';
-
-            // Parse body rows
-            $rows = explode("\n", $bodyRows);
-            $bodyHtml = '';
-            foreach ($rows as $row) {
-                $row = trim($row, '|');
-                $cells = array_map('trim', explode('|', $row));
-                $bodyHtml .= '<tr>' . implode('', array_map(fn($c) => "<td>{$c}</td>", $cells)) . '</tr>';
-            }
-
-            return "<table border=\"1\" cellpadding=\"8\" cellspacing=\"0\"><thead>{$headerHtml}</thead><tbody>{$bodyHtml}</tbody></table>";
-        }, $html);
+        return \app\MarkdownParser::parseBasic($markdown, false, true);
     }
 
     /**

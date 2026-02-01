@@ -1224,34 +1224,9 @@ if (is_dir($repoDir)) {
     copy("{$claudeSettingsDir}/settings.json", "{$repoClaudeDir}/settings.json");
 }
 
-// Pre-approve MCP servers in ~/.claude.json so Claude doesn't prompt
-// Use $repoDir since Claude runs from there (after cd repo in the prompt)
-$claudeConfigPath = getenv('HOME') . '/.claude.json';
-if (file_exists($claudeConfigPath)) {
-    $claudeConfig = json_decode(file_get_contents($claudeConfigPath), true);
-    if ($claudeConfig && isset($claudeConfig['projects'])) {
-        // Register both workDir and repoDir to cover both paths
-        $projectConfig = [
-            'allowedTools' => [],
-            'dontCrawlDirectory' => false,
-            'mcpContextUris' => [],
-            'mcpServers' => new \stdClass(),  // Empty object, servers defined in .mcp.json
-            'enabledMcpjsonServers' => array_unique($enabledMcpServers),
-            'disabledMcpjsonServers' => [],
-            'hasTrustDialogAccepted' => true,
-            'hasCompletedProjectOnboarding' => true,
-            'projectOnboardingSeenCount' => 1,
-            'hasClaudeMdExternalIncludesApproved' => false,
-            'hasClaudeMdExternalIncludesWarningShown' => false
-        ];
-        $claudeConfig['projects'][$workDir] = $projectConfig;
-        if (is_dir($repoDir)) {
-            $claudeConfig['projects'][$repoDir] = $projectConfig;
-        }
-        file_put_contents($claudeConfigPath, json_encode($claudeConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-        echo "Pre-approved MCP servers for this session\n";
-    }
-}
+// NOTE: We use --dangerously-skip-permissions flag when running Claude,
+// which bypasses all MCP approval prompts. No need to pre-approve in ~/.claude.json.
+// For remote execution, Claude uses the remote server's ~/.claude.json anyway.
 
 // ============================================
 // Create Wrapper Script with Environment

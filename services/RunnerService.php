@@ -281,4 +281,15 @@ class RunnerService {
         );
     }
 
+    /**
+     * Enrich runners array with stats and decoded capabilities
+     */
+    public static function enrichRunners(array $runners): array {
+        foreach ($runners as &$runner) {
+            $runner['stats'] = self::getRunnerStats($runner['id']);
+            $runner['capabilities'] = json_decode($runner['capabilities'] ?? '[]', true);
+        }
+        return $runners;
+    }
+
 }

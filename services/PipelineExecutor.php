@@ -839,6 +839,13 @@ class PipelineExecutor {
                     }
                 } elseif ($successAction === 'exit') {
                     // Exit the pipeline successfully
+                    // Count actual completed steps and set to 100% since we're done
+                    $completedCount = Bean::count('pipelinestepruns',
+                        'pipelineruns_id = ? AND status IN (?, ?)',
+                        [$this->runId, 'success', 'completed']
+                    );
+                    $this->run->steps_completed = $completedCount;
+                    $this->run->progress_percent = 100; // Pipeline finished, show as complete
                     $this->run->status = 'completed';
                     $this->run->completed_at = date('Y-m-d H:i:s');
                     Bean::store($this->run);
@@ -853,6 +860,13 @@ class PipelineExecutor {
         }
 
         // All steps completed
+        // Count actual completed steps and set to 100%
+        $completedCount = Bean::count('pipelinestepruns',
+            'pipelineruns_id = ? AND status IN (?, ?)',
+            [$this->runId, 'success', 'completed']
+        );
+        $this->run->steps_completed = $completedCount;
+        $this->run->progress_percent = 100;
         $this->run->status = 'completed';
         $this->run->completed_at = date('Y-m-d H:i:s');
         Bean::store($this->run);

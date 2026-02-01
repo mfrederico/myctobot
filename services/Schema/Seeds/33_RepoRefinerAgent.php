@@ -33,15 +33,15 @@ $pipeline->input_schema_json = json_encode([
     'properties' => [
         'repo_url' => [
             'type' => 'string',
-            'description' => 'GitHub repo URL to clone (e.g., https://github.com/user/repo.git)'
-        ],
-        'initial_instructions' => [
-            'type' => 'string',
-            'description' => 'Initial instructions for the agent (optional)'
+            'description' => 'Git repo URL (SSH or HTTPS). SSH format recommended for private repos (git@github.com:user/repo.git) - uses the agent\'s configured SSH key.'
         ],
         'email' => [
             'type' => 'string',
             'description' => 'Email address for status updates and instructions'
+        ],
+        'initial_instructions' => [
+            'type' => 'string',
+            'description' => 'Initial instructions for the agent (optional)'
         ]
     ],
     'required' => ['repo_url', 'email']

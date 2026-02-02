@@ -218,6 +218,80 @@ class PricingService {
     }
 
     /**
+     * Get platform tier pricing (unified pricing model)
+     *
+     * @return array Platform pricing with all tiers
+     */
+    public static function getPlatformPricing(): array {
+        $config = self::loadConfig();
+        $platform = $config['platform'] ?? [];
+        $symbol = self::getCurrencySymbol();
+        $discount = $platform['yearly_discount'] ?? 0.20;
+
+        $tiers = ['starter', 'pro', 'enterprise'];
+        $data = $platform;
+
+        foreach ($tiers as $tier) {
+            $monthlyKey = $tier . '_monthly';
+            if (isset($platform[$monthlyKey]) && is_numeric($platform[$monthlyKey])) {
+                $monthly = (float) $platform[$monthlyKey];
+                $data[$tier . '_monthly_formatted'] = $symbol . number_format($monthly, 0);
+
+                if ($monthly > 0) {
+                    $yearly = self::calculateYearly($monthly, (float) $discount);
+                    $data[$tier . '_yearly'] = $yearly;
+                    $data[$tier . '_yearly_formatted'] = $symbol . number_format($yearly, 0);
+                    $data[$tier . '_yearly_monthly'] = $yearly / 12;
+                    $data[$tier . '_yearly_monthly_formatted'] = $symbol . number_format($yearly / 12, 0);
+                }
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * Get services pricing (project-based, not subscription)
+     *
+     * @return array Services pricing data
+     */
+    public static function getServicesPricing(): array {
+        $config = self::loadConfig();
+        $symbol = self::getCurrencySymbol();
+
+        $services = [];
+
+        // PHP Modernization
+        if (isset($config['services.php-modernization'])) {
+            $php = $config['services.php-modernization'];
+            foreach (['small', 'medium', 'large', 'enterprise'] as $tier) {
+                $key = $tier . '_project';
+                if (isset($php[$key])) {
+                    $php[$key . '_formatted'] = $symbol . number_format((float) $php[$key], 0);
+                }
+            }
+            $services['php-modernization'] = $php;
+        }
+
+        // Shopify Themes
+        if (isset($config['services.shopify-themes'])) {
+            $shopify = $config['services.shopify-themes'];
+            foreach (['starter', 'pro', 'enterprise'] as $tier) {
+                $key = $tier . '_theme';
+                if (isset($shopify[$key])) {
+                    $shopify[$key . '_formatted'] = $symbol . number_format((float) $shopify[$key], 0);
+                }
+            }
+            if (isset($shopify['maintenance_monthly'])) {
+                $shopify['maintenance_monthly_formatted'] = $symbol . number_format((float) $shopify['maintenance_monthly'], 0);
+            }
+            $services['shopify-themes'] = $shopify;
+        }
+
+        return $services;
+    }
+
+    /**
      * Clear cached config (useful for testing)
      */
     public static function clearCache(): void {

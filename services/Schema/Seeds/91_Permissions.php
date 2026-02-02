@@ -111,6 +111,21 @@ $permissions = [
     ['orchestration', 'delete', 100, 'Delete orchestration project'],
     ['orchestration', 'history', 100, 'View project history'],
 
+    // Tenant Apps
+    ['apps', 'index', 100, 'List tenant apps'],
+    ['apps', 'form', 100, 'Create/edit app form'],
+    ['apps', 'store', 100, 'Create new app'],
+    ['apps', 'update', 100, 'Update app'],
+    ['apps', 'delete', 100, 'Delete app'],
+    ['apps', 'start', 100, 'Start app'],
+    ['apps', 'stop', 100, 'Stop app'],
+    ['apps', 'restart', 100, 'Restart app'],
+    ['apps', 'status', 100, 'Get app status'],
+    ['apps', 'logs', 100, 'Get app logs'],
+    ['apps', 'generatekey', 100, 'Generate API key'],
+    ['apps', 'api', 100, 'List apps API'],
+    ['apps', 'ports', 100, 'Get port statistics'],
+
     // Admin pages (level 50)
     ['admin', 'index', 50, 'Admin dashboard'],
     ['admin', 'members', 50, 'Manage members'],

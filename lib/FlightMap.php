@@ -361,6 +361,7 @@ Flight::map('loadMenu', function() {
             $menu[] = ['url' => '/shopify', 'label' => 'Stores', 'icon' => 'shop'];
         } elseif ($activeStudio === 'pipeline') {
             $menu[] = ['url' => '/pipelines', 'label' => 'Pipelines', 'icon' => 'diagram-3'];
+            $menu[] = ['url' => '/apps', 'label' => 'Apps', 'icon' => 'box-seam'];
             $menu[] = ['url' => '/mcpservers', 'label' => 'MCP Servers', 'icon' => 'plug'];
             $menu[] = ['url' => '/orchestration', 'label' => 'Orchestration', 'icon' => 'lightning-charge'];
         } else {

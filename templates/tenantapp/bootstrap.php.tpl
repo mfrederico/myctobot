@@ -22,7 +22,7 @@ date_default_timezone_set('America/New_York');
 
 // Constants
 define('APP_ROOT', __DIR__);
-define('MYCTOBOT_ROOT', '/home/mfrederico/development/myctobot');
+define('MYCTOBOT_ROOT', '{{MYCTOBOT_ROOT}}');
 
 // Ensure storage directories exist
 $storageDirs = [

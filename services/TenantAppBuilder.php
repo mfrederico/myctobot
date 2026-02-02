@@ -13,11 +13,27 @@ use app\Bean;
 class TenantAppBuilder
 {
     /**
-     * Base paths
+     * Base paths - dynamically detected
      */
-    private const MYCTOBOT_ROOT = '/home/mfrederico/development/myctobot';
-    private const TEMPLATE_DIR = '/home/mfrederico/development/myctobot/templates/tenantapp';
-    private const STORAGE_DIR = '/home/mfrederico/development/myctobot/storage/apps';
+    private static ?string $rootPath = null;
+
+    private static function getRootPath(): string
+    {
+        if (self::$rootPath === null) {
+            self::$rootPath = dirname(__DIR__);
+        }
+        return self::$rootPath;
+    }
+
+    private static function getTemplateDir(): string
+    {
+        return self::getRootPath() . '/templates/tenantapp';
+    }
+
+    private static function getStorageDir(): string
+    {
+        return self::getRootPath() . '/storage/apps';
+    }
 
     /**
      * Build complete app directory structure
@@ -35,7 +51,7 @@ class TenantAppBuilder
 
         $workspace = $app->workspace;
         $slug = $app->slug;
-        $appDir = self::STORAGE_DIR . "/{$workspace}/{$slug}";
+        $appDir = self::getStorageDir() . "/{$workspace}/{$slug}";
 
         // Create directory structure
         $this->ensureDirectories($appDir);
@@ -83,7 +99,7 @@ class TenantAppBuilder
      */
     public function generateServer($app): string
     {
-        $template = file_get_contents(self::TEMPLATE_DIR . '/server.php.tpl');
+        $template = file_get_contents(self::getTemplateDir() . '/server.php.tpl');
         if ($template === false) {
             throw new \RuntimeException('Server template not found');
         }
@@ -444,7 +460,7 @@ PHP;
      */
     public function generateConfig($app): string
     {
-        $template = file_get_contents(self::TEMPLATE_DIR . '/config.php.tpl');
+        $template = file_get_contents(self::getTemplateDir() . '/config.php.tpl');
         if ($template === false) {
             throw new \RuntimeException('Config template not found');
         }
@@ -474,7 +490,7 @@ PHP;
      */
     public function generateBootstrap($app): string
     {
-        $template = file_get_contents(self::TEMPLATE_DIR . '/bootstrap.php.tpl');
+        $template = file_get_contents(self::getTemplateDir() . '/bootstrap.php.tpl');
         if ($template === false) {
             throw new \RuntimeException('Bootstrap template not found');
         }
@@ -494,6 +510,7 @@ PHP;
             '{{WORKSPACE}}' => $app->workspace,
             '{{GENERATED_AT}}' => date('Y-m-d H:i:s'),
             '{{HEALTH_PATH}}' => $app->health_check_path ?: '/health',
+            '{{MYCTOBOT_ROOT}}' => self::getRootPath(),
         ];
     }
 
@@ -897,7 +914,7 @@ PHP;
      */
     public function getAppDir(string $workspace, string $slug): string
     {
-        return self::STORAGE_DIR . "/{$workspace}/{$slug}";
+        return self::getStorageDir() . "/{$workspace}/{$slug}";
     }
 
     /**

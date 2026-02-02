@@ -11,7 +11,7 @@ declare(strict_types=1);
  */
 
 // Use main MyCTOBot vendor (no duplication)
-require_once '/home/mfrederico/development/myctobot/vendor/autoload.php';
+require_once '{{MYCTOBOT_ROOT}}/vendor/autoload.php';
 require_once __DIR__ . '/bootstrap.php';
 
 use OpenSwoole\Http\Server;

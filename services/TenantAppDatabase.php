@@ -14,11 +14,20 @@ class TenantAppDatabase
 {
     private static bool $initialized = false;
     private static ?string $currentWorkspace = null;
+    private static ?string $basePath = null;
 
     /**
-     * Base path for MyCTOBot installation
+     * Get the base path for MyCTOBot installation
+     * Dynamically detected from this file's location
      */
-    private const BASE_PATH = '/home/mfrederico/development/myctobot';
+    private static function getBasePath(): string
+    {
+        if (self::$basePath === null) {
+            // This file is in /services/, so go up one directory
+            self::$basePath = dirname(__DIR__);
+        }
+        return self::$basePath;
+    }
 
     /**
      * Initialize RedBeanPHP for a workspace
@@ -34,9 +43,9 @@ class TenantAppDatabase
         }
 
         // Load workspace config, fall back to default
-        $configFile = self::BASE_PATH . "/conf/config.{$workspace}.ini";
+        $configFile = self::getBasePath() . "/conf/config.{$workspace}.ini";
         if (!file_exists($configFile)) {
-            $configFile = self::BASE_PATH . '/conf/config.ini';
+            $configFile = self::getBasePath() . '/conf/config.ini';
         }
 
         if (!file_exists($configFile)) {
@@ -60,7 +69,7 @@ class TenantAppDatabase
             $dbPath = $db['name'];
             // Handle relative paths
             if (!str_starts_with($dbPath, '/')) {
-                $dbPath = self::BASE_PATH . '/' . $dbPath;
+                $dbPath = self::getBasePath() . '/' . $dbPath;
             }
             R::setup("sqlite:{$dbPath}");
         } else {

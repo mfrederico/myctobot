@@ -157,7 +157,36 @@ This creates:
 - Initial permission settings
 - Contact form and response tables
 
-5. **Set permissions**
+5. **Run database seeds** (for full schema setup)
+
+The framework includes seed files that set up all database tables and default data:
+
+```bash
+# Run all seeds for your workspace
+php scripts/sync-schema.php --workspace=default
+
+# Or for a specific workspace (multi-tenant setup)
+php scripts/sync-schema.php --workspace=demo
+```
+
+**Seed commands:**
+```bash
+# List all available seeds
+php scripts/sync-schema.php --list
+
+# Preview changes without applying (dry run)
+php scripts/sync-schema.php --workspace=default --dry-run
+
+# Run specific seeds only (by number)
+php scripts/sync-schema.php --workspace=default --seeds=45,91
+
+# Verbose output for debugging
+php scripts/sync-schema.php --workspace=default --verbose
+```
+
+Seeds are located in `services/Schema/Seeds/` and are numbered for execution order.
+
+6. **Set permissions**
 ```bash
 chmod -R 755 .
 chmod -R 777 log/
@@ -165,7 +194,7 @@ mkdir -p uploads cache
 chmod -R 777 uploads/ cache/
 ```
 
-6. **Configure your web server**
+7. **Configure your web server**
 
 For Apache, use the included `.htaccess` file:
 ```apache
@@ -182,16 +211,52 @@ location / {
 }
 ```
 
-7. **Start development server** (for testing)
+8. **Start development server** (for testing)
 ```bash
 php -S localhost:8000 -t public/
 ```
 
-8. **Access the application**
+9. **Access the application**
 - Open http://localhost:8000
 - **Register a new account**: Click "Register" - no email verification needed
 - **Or login with admin**: username `admin`, password `admin123` (change immediately!)
 - After login/registration, you'll be redirected to the main dashboard at `/dashboard`
+
+### Multi-Tenant Workspace Setup
+
+The framework supports multiple isolated workspaces (tenants), each with their own database and configuration.
+
+**1. Create a workspace config file:**
+```bash
+# Copy the default config
+cp conf/config.ini conf/config.demo.ini
+
+# Edit with your workspace-specific settings
+nano conf/config.demo.ini
+```
+
+**2. Configure the workspace database** (in `conf/config.demo.ini`):
+```ini
+[database]
+type = "mysql"
+host = "localhost"
+name = "myctobot_demo"    ; Separate database for this workspace
+user = "your_user"
+pass = "your_password"
+```
+
+**3. Run seeds for the new workspace:**
+```bash
+# Initialize all tables and default data
+php scripts/sync-schema.php --workspace=demo
+
+# Add tenant app permissions (if using Tenant Apps feature)
+php scripts/add-apps-permissions.php --workspace=demo
+```
+
+**4. Access via subdomain:**
+- Configure your web server to route `demo.yourapp.com` to the application
+- The framework extracts the workspace from the subdomain automatically
 
 ## Project Structure
 

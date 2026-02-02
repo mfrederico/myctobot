@@ -13,11 +13,18 @@ class TenantAppLogger
     private string $logFile;
     private string $appSlug;
     private bool $toStdout;
+    private static ?string $basePath = null;
 
     /**
-     * Base path for log storage
+     * Get the base path for log storage (dynamically detected)
      */
-    private const LOG_BASE_PATH = '/home/mfrederico/development/myctobot/storage/apps';
+    private static function getLogBasePath(): string
+    {
+        if (self::$basePath === null) {
+            self::$basePath = dirname(__DIR__) . '/storage/apps';
+        }
+        return self::$basePath;
+    }
 
     /**
      * Log levels
@@ -42,7 +49,7 @@ class TenantAppLogger
         $this->toStdout = $toStdout;
 
         // Ensure log directory exists
-        $logDir = self::LOG_BASE_PATH . "/{$workspace}/{$appSlug}/storage/logs";
+        $logDir = self::getLogBasePath() . "/{$workspace}/{$appSlug}/storage/logs";
         if (!is_dir($logDir)) {
             mkdir($logDir, 0755, true);
         }

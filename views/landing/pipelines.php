@@ -1,10 +1,12 @@
 <?php
-// Extract pricing variables from controller
-$p = $pricing ?? [];
-$starterMonthly = $p['starter_monthly_formatted'] ?? '$79';
-$proMonthly = $p['pro_monthly_formatted'] ?? '$299';
-$enterpriseMonthly = $p['enterprise_monthly_formatted'] ?? '$999';
-$trialDays = $trialDays ?? 14;
+/**
+ * Pipelines Feature Page
+ * Part of MyCTOBot Platform - not sold separately
+ */
+use app\services\PricingService;
+
+$trialDays = $trialDays ?? PricingService::getTrialDays();
+$pricing = PricingService::getPlatformPricing();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -162,9 +164,9 @@ $trialDays = $trialDays ?? 14;
                 MyCTOBot
             </a>
             <ul class="navbar-nav">
-                <li><a href="#features">Features</a></li>
+                <li><a href="#features">Examples</a></li>
                 <li><a href="#step-types">Step Types</a></li>
-                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="/#pricing">Platform Pricing</a></li>
             </ul>
             <a href="/signup" class="btn btn-primary">Start Building</a>
         </div>
@@ -473,60 +475,67 @@ $trialDays = $trialDays ?? 14;
         </div>
     </section>
 
-    <!-- Pricing -->
+    <!-- Included in Platform -->
     <section class="section" id="pricing">
         <div class="container">
             <div class="section-header">
-                <span class="overline">Pricing</span>
-                <h2>Start Free, Scale as You Grow</h2>
+                <span class="overline">Part of MyCTOBot</span>
+                <h2>Included in Every Plan</h2>
+                <p>Pipelines is a core feature of the MyCTOBot platform — not a separate product.</p>
             </div>
 
-            <div class="pricing-grid">
-                <div class="pricing-card">
-                    <div class="pricing-header">
-                        <h3>Free</h3>
-                        <div class="price">$0<span>/month</span></div>
-                        <p class="mb-0">100 runs/month</p>
-                    </div>
+            <div class="two-col" style="align-items: center;">
+                <div>
+                    <h3 style="margin-bottom: 1rem;">Automate your entire workflow.</h3>
+                    <p style="color: var(--gray-600); margin-bottom: 1.5rem;">
+                        Pipelines work alongside AI Developer, Code Review, and all other MyCTOBot features.
+                        Build complex automation workflows with AI agents, shell commands, and webhooks.
+                    </p>
                     <ul class="pricing-features">
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>3 pipelines</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>All step types</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Webhook triggers</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>7-day log retention</li>
+                        <li>
+                            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                            Pipeline automation
+                        </li>
+                        <li>
+                            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                            AI implementation agents
+                        </li>
+                        <li>
+                            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                            Automated code review
+                        </li>
+                        <li>
+                            <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                            MCP tool exposure
+                        </li>
                     </ul>
-                    <a href="/signup" class="btn btn-outline">Start Free</a>
                 </div>
-
-                <div class="pricing-card featured">
-                    <div class="pricing-header">
-                        <h3>Pro</h3>
-                        <div class="price"><?= $starterMonthly ?><span>/month</span></div>
-                        <p class="mb-0">2,000 runs/month</p>
+                <div>
+                    <div class="pricing-card featured" style="max-width: 400px; margin: 0 auto;">
+                        <div class="pricing-header">
+                            <h3>MyCTOBot Pro</h3>
+                            <div class="price"><?= $pricing['pro_monthly_formatted'] ?? '$1,999' ?><span>/month</span></div>
+                            <p class="mb-0">Full AI engineering platform</p>
+                        </div>
+                        <ul class="pricing-features">
+                            <li>
+                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                Unlimited pipelines
+                            </li>
+                            <li>
+                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                Unlimited projects
+                            </li>
+                            <li>
+                                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+                                All platform features
+                            </li>
+                        </ul>
+                        <a href="/signup" class="btn btn-primary">Start <?= $trialDays ?>-Day Trial</a>
+                        <p style="font-size: 0.75rem; color: var(--gray-500); margin-top: 0.75rem; margin-bottom: 0;">
+                            <a href="/#pricing" style="color: var(--primary);">View all plans →</a>
+                        </p>
                     </div>
-                    <ul class="pricing-features">
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Unlimited pipelines</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>AI agent steps</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Cron scheduling</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>MCP tool exposure</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>30-day log retention</li>
-                    </ul>
-                    <a href="/signup" class="btn btn-primary">Start Free Trial</a>
-                </div>
-
-                <div class="pricing-card">
-                    <div class="pricing-header">
-                        <h3>Business</h3>
-                        <div class="price"><?= $proMonthly ?><span>/month</span></div>
-                        <p class="mb-0">10,000 runs/month</p>
-                    </div>
-                    <ul class="pricing-features">
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Everything in Pro</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Dedicated workstations</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Parallel execution</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>90-day log retention</li>
-                        <li><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>Priority support</li>
-                    </ul>
-                    <a href="/contact" class="btn btn-outline">Contact Sales</a>
                 </div>
             </div>
         </div>
@@ -535,11 +544,11 @@ $trialDays = $trialDays ?? 14;
     <!-- CTA -->
     <section class="cta">
         <div class="container">
-            <h2>Build Your First Pipeline in Minutes</h2>
-            <p>Start with our templates or build from scratch. No credit card required.</p>
+            <h2>Stop Hiring. Start Shipping.</h2>
+            <p>Get an AI engineering team with powerful automation. Start your free <?= $trialDays ?>-day trial.</p>
             <div class="cta-actions">
-                <a href="/signup" class="btn btn-white btn-lg">Start Building Free</a>
-                <a href="/docs/pipelines" class="btn btn-outline btn-lg" style="border-color: #fff; color: #fff;">Read the Docs</a>
+                <a href="/signup" class="btn btn-white btn-lg">Start Free Trial</a>
+                <a href="/" class="btn btn-outline btn-lg" style="border-color: #fff; color: #fff;">Learn About MyCTOBot</a>
             </div>
         </div>
     </section>
@@ -561,12 +570,18 @@ $trialDays = $trialDays ?? 14;
                     </ul>
                 </div>
                 <div class="footer-column">
-                    <h5>Solutions</h5>
+                    <h5>Features</h5>
                     <ul class="footer-links">
-                        <li><a href="/landing/php-modernization">PHP Modernization</a></li>
-                        <li><a href="/landing/ai-developer">AI Developer</a></li>
-                        <li><a href="/landing/shopify-themes">Shopify Themes</a></li>
+                        <li><a href="/landing/aideveloper">AI Developer</a></li>
+                        <li><a href="/landing/codereview">Code Review</a></li>
                         <li><a href="/landing/pipelines">Pipelines</a></li>
+                    </ul>
+                </div>
+                <div class="footer-column">
+                    <h5>Services</h5>
+                    <ul class="footer-links">
+                        <li><a href="/landing/phpmodernization">PHP Modernization</a></li>
+                        <li><a href="/landing/shopifythemes">Shopify Themes</a></li>
                     </ul>
                 </div>
                 <div class="footer-column">

@@ -14,7 +14,7 @@ test.describe('Homepage', () => {
     // Check for main heading
     const heading = page.locator('h1');
     await expect(heading).toBeVisible();
-    await expect(heading).toContainText(/AI-Powered|Development|Team/i);
+    await expect(heading).toContainText(/ideas|deployed|software/i);
   });
 
   test('should have prominent signup call-to-action', async ({ page }) => {

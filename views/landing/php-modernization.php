@@ -471,25 +471,28 @@ $trialDays = $trialDays ?? 14;
                 <div class="footer-column">
                     <h5>Product</h5>
                     <ul class="footer-links">
-                        <li><a href="/features">Features</a></li>
-                        <li><a href="/pricing">Pricing</a></li>
+                        <li><a href="/#pricing">Platform Pricing</a></li>
                         <li><a href="/docs">Documentation</a></li>
-                        <li><a href="/changelog">Changelog</a></li>
                     </ul>
                 </div>
                 <div class="footer-column">
-                    <h5>Solutions</h5>
+                    <h5>Features</h5>
+                    <ul class="footer-links">
+                        <li><a href="/landing/aideveloper">AI Developer</a></li>
+                        <li><a href="/landing/codereview">Code Review</a></li>
+                        <li><a href="/landing/pipelines">Pipelines</a></li>
+                    </ul>
+                </div>
+                <div class="footer-column">
+                    <h5>Services</h5>
                     <ul class="footer-links">
                         <li><a href="/landing/phpmodernization">PHP Modernization</a></li>
-                        <li><a href="/landing/aideveloper">AI Developer</a></li>
                         <li><a href="/landing/shopifythemes">Shopify Themes</a></li>
-                        <li><a href="/landing/pipelines">Pipelines</a></li>
                     </ul>
                 </div>
                 <div class="footer-column">
                     <h5>Company</h5>
                     <ul class="footer-links">
-                        <li><a href="/about">About</a></li>
                         <li><a href="/contact">Contact</a></li>
                         <li><a href="/legal/privacy">Privacy</a></li>
                         <li><a href="/legal/terms">Terms</a></li>

@@ -1,10 +1,12 @@
 <?php
-// Extract pricing variables from controller
-$p = $pricing ?? [];
-$starterMonthly = $p['starter_monthly_formatted'] ?? '$49';
-$proMonthly = $p['pro_monthly_formatted'] ?? '$149';
-$enterpriseMonthly = $p['enterprise_monthly_formatted'] ?? '$499';
-$trialDays = $trialDays ?? 14;
+/**
+ * AI Code Review Feature Page
+ * Part of MyCTOBot Platform - not sold separately
+ */
+use app\services\PricingService;
+
+$trialDays = $trialDays ?? PricingService::getTrialDays();
+$pricing = PricingService::getPlatformPricing();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -276,7 +278,7 @@ $trialDays = $trialDays ?? 14;
                 <ul class="navbar-nav ms-auto">
                     <li class="nav-item"><a class="nav-link" href="#features">Features</a></li>
                     <li class="nav-item"><a class="nav-link" href="#how-it-works">How It Works</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#pricing">Pricing</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/#pricing">Platform Pricing</a></li>
                     <li class="nav-item"><a class="nav-link" href="#faq">FAQ</a></li>
                 </ul>
                 <a href="/signup" class="btn btn-primary ms-3">Start Free Trial</a>
@@ -591,64 +593,48 @@ const user = await db.query(query, [email]);</code>
         </div>
     </section>
 
-    <!-- Pricing Section -->
+    <!-- Included in Platform -->
     <section class="pricing-section" id="pricing">
         <div class="container">
             <div class="text-center mb-5">
-                <h2 class="display-6 fw-bold">Simple, Transparent Pricing</h2>
-                <p class="lead text-muted">Pay based on your PR volume. No hidden fees.</p>
+                <span class="badge bg-primary mb-3">Part of MyCTOBot</span>
+                <h2 class="display-6 fw-bold">Included in Every Plan</h2>
+                <p class="lead text-muted">AI Code Review is a core feature of the MyCTOBot platform.</p>
             </div>
 
             <div class="row g-4 justify-content-center">
-                <div class="col-lg-4">
-                    <div class="pricing-card">
-                        <h4>Starter</h4>
-                        <div class="price"><?= htmlspecialchars($starterMonthly) ?><span class="price-period">/month</span></div>
-                        <p class="text-muted mb-4">Perfect for small teams</p>
-                        <ul class="pricing-features">
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Up to 100 PRs/month</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>All review categories</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>GitHub integration</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Inline PR comments</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Email support</li>
-                        </ul>
-                        <a href="/signup" class="btn btn-outline-primary w-100">Start Free Trial</a>
+                <div class="col-lg-5">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body p-4">
+                            <h4 class="mb-4">One platform. Complete AI engineering.</h4>
+                            <p class="text-muted mb-4">
+                                Code Review works alongside AI Developer, Pipelines, and all other MyCTOBot features.
+                                Every PR gets reviewed automatically — security, performance, style, and more.
+                            </p>
+                            <ul class="list-unstyled">
+                                <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>Automated code review on every PR</li>
+                                <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>AI implementation agents</li>
+                                <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>Pipeline automation</li>
+                                <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-2"></i>All integrations included</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
-
                 <div class="col-lg-4">
                     <div class="pricing-card featured">
-                        <div class="featured-badge">Most Popular</div>
-                        <h4>Team</h4>
-                        <div class="price"><?= htmlspecialchars($proMonthly) ?><span class="price-period">/month</span></div>
-                        <p class="text-muted mb-4">For growing engineering teams</p>
+                        <div class="featured-badge">Recommended</div>
+                        <h4>MyCTOBot Pro</h4>
+                        <div class="price"><?= htmlspecialchars($pricing['pro_monthly_formatted'] ?? '$1,999') ?><span class="price-period">/month</span></div>
+                        <p class="text-muted mb-4">Full AI engineering platform</p>
                         <ul class="pricing-features">
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Up to 500 PRs/month</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>All review categories</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>GitHub + GitLab</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Custom rulesets</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Slack notifications</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Priority support</li>
+                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Unlimited code reviews</li>
+                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Unlimited projects</li>
+                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>All platform features</li>
                         </ul>
-                        <a href="/signup" class="btn btn-primary w-100">Start Free Trial</a>
-                    </div>
-                </div>
-
-                <div class="col-lg-4">
-                    <div class="pricing-card">
-                        <h4>Enterprise</h4>
-                        <div class="price"><?= htmlspecialchars($enterpriseMonthly) ?><span class="price-period">/month</span></div>
-                        <p class="text-muted mb-4">For large organizations</p>
-                        <ul class="pricing-features">
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Unlimited PRs</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>All integrations</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>CLAUDE.md support</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Self-hosted option</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>SAML SSO</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>Dedicated support</li>
-                            <li><i class="bi bi-check-circle-fill text-success me-2"></i>SLA guarantee</li>
-                        </ul>
-                        <a href="/contact" class="btn btn-outline-primary w-100">Contact Sales</a>
+                        <a href="/signup" class="btn btn-primary w-100">Start <?= $trialDays ?>-Day Trial</a>
+                        <p class="text-center mt-3 mb-0">
+                            <a href="/#pricing" class="text-primary">View all plans →</a>
+                        </p>
                     </div>
                 </div>
             </div>
@@ -731,17 +717,17 @@ const user = await db.query(query, [email]);</code>
     <!-- CTA Section -->
     <section class="cta-section">
         <div class="container text-center">
-            <h2 class="display-6 fw-bold mb-4">Stop Shipping Bugs to Production</h2>
-            <p class="lead mb-4">Join 500+ engineering teams using AI to catch issues before they reach users.</p>
+            <h2 class="display-6 fw-bold mb-4">Stop Hiring. Start Shipping.</h2>
+            <p class="lead mb-4">Get an AI engineering team that reviews every PR automatically. Start your free <?= $trialDays ?>-day trial.</p>
             <div class="d-flex gap-3 justify-content-center flex-wrap">
                 <a href="/signup" class="btn btn-light btn-lg">
-                    <i class="bi bi-github me-2"></i>Start Free <?= htmlspecialchars($trialDays) ?>-Day Trial
+                    Start Free Trial
                 </a>
-                <a href="/contact" class="btn btn-outline-light btn-lg">
-                    <i class="bi bi-calendar me-2"></i>Schedule Demo
+                <a href="/" class="btn btn-outline-light btn-lg">
+                    Learn About MyCTOBot
                 </a>
             </div>
-            <p class="mt-3 text-white-50">No credit card required. Setup in under 60 seconds.</p>
+            <p class="mt-3 text-white-50">Code Review is included in all MyCTOBot plans.</p>
         </div>
     </section>
 
@@ -749,35 +735,38 @@ const user = await db.query(query, [email]);</code>
     <footer class="footer">
         <div class="container">
             <div class="row g-4">
-                <div class="col-lg-4">
+                <div class="col-lg-3">
                     <h5><i class="bi bi-robot me-2"></i>MyCTOBot</h5>
-                    <p class="text-muted">AI-powered code review that makes every PR better.</p>
+                    <p class="text-muted">AI engineering platform. From idea to production with AI that follows your rules.</p>
                 </div>
                 <div class="col-lg-2">
                     <h6>Product</h6>
                     <ul class="footer-links">
-                        <li><a href="#features">Features</a></li>
-                        <li><a href="#pricing">Pricing</a></li>
-                        <li><a href="/integrations">Integrations</a></li>
-                        <li><a href="/changelog">Changelog</a></li>
+                        <li><a href="/#pricing">Pricing</a></li>
+                        <li><a href="/docs">Documentation</a></li>
                     </ul>
                 </div>
                 <div class="col-lg-2">
-                    <h6>Resources</h6>
+                    <h6>Features</h6>
                     <ul class="footer-links">
-                        <li><a href="/docs">Documentation</a></li>
-                        <li><a href="/blog">Blog</a></li>
-                        <li><a href="/status">Status</a></li>
-                        <li><a href="/security">Security</a></li>
+                        <li><a href="/landing/aideveloper">AI Developer</a></li>
+                        <li><a href="/landing/codereview">Code Review</a></li>
+                        <li><a href="/landing/pipelines">Pipelines</a></li>
+                    </ul>
+                </div>
+                <div class="col-lg-2">
+                    <h6>Services</h6>
+                    <ul class="footer-links">
+                        <li><a href="/landing/phpmodernization">PHP Modernization</a></li>
+                        <li><a href="/landing/shopifythemes">Shopify Themes</a></li>
                     </ul>
                 </div>
                 <div class="col-lg-2">
                     <h6>Company</h6>
                     <ul class="footer-links">
-                        <li><a href="/about">About</a></li>
                         <li><a href="/contact">Contact</a></li>
-                        <li><a href="/careers">Careers</a></li>
-                        <li><a href="/legal">Legal</a></li>
+                        <li><a href="/legal/privacy">Privacy</a></li>
+                        <li><a href="/legal/terms">Terms</a></li>
                     </ul>
                 </div>
                 <div class="col-lg-2">

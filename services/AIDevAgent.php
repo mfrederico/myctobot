@@ -1,0 +1,1597 @@
+<?php
+/**
+ * AI Developer Agent Service
+ * Core orchestrator for the Enterprise tier AI Developer feature
+ *
+ * Workflow:
+ * 1. Fetch ticket from Jira
+ * 2. Analyze requirements (clarity check)
+ * 3. If unclear → post questions to Jira, wait for answer
+ * 4. Clone repository
+ * 5. Analyze codebase with Claude
+ * 6. Generate implementation plan
+ * 7. Write code changes
+ * 8. Create PR with description
+ */
+
+namespace app\services;
+
+use \Flight as Flight;
+use GuzzleHttp\Client;
+
+require_once __DIR__ . '/ShopifyClient.php';
+require_once __DIR__ . '/AttachmentService.php';
+require_once __DIR__ . '/GitOperations.php';
+
+class AIDevAgent {
+    private int $memberId;
+    private string $cloudId;
+    private int $repoConnectionId;
+    private string $customerApiKey;
+    private string $jobId;
+
+    private ?JiraClient $jira = null;
+    private ?GitHubClient $github = null;
+    private ?GitOperations $git = null;
+    private ?ShopifyClient $shopify = null;
+    private ?AttachmentService $attachmentService = null;
+
+    private array $repoConfig = [];
+    private string $model = 'claude-sonnet-4-20250514';
+    private bool $isShopifyTheme = false;
+
+    /** @var string Workspace slug for RAG integration */
+    private string $workspaceSlug = 'default';
+
+    /**
+     * Create a new AI Developer Agent
+     *
+     * @param int $memberId Member ID
+     * @param string $cloudId Atlassian Cloud ID
+     * @param int $repoConnectionId Repository connection ID
+     * @param string $customerApiKey Customer's Anthropic API key
+     * @param string $jobId Job ID for status tracking
+     */
+    public function __construct(
+        int $memberId,
+        string $cloudId,
+        int $repoConnectionId,
+        string $customerApiKey,
+        string $jobId
+    ) {
+        $this->memberId = $memberId;
+        $this->cloudId = $cloudId;
+        $this->repoConnectionId = $repoConnectionId;
+        $this->customerApiKey = $customerApiKey;
+        $this->jobId = $jobId;
+
+        // Initialize Jira client
+        $this->jira = new JiraClient($memberId, $cloudId);
+
+        // Initialize Attachment service for detecting and acknowledging file attachments
+        $this->attachmentService = new AttachmentService($this->jira);
+
+        // Load repository configuration
+        $this->loadRepoConfig();
+
+        // Initialize Shopify client if connected
+        $this->initShopify();
+
+        // Set workspace slug from session if available
+        $this->workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+    }
+
+    /**
+     * Initialize Shopify client if connected
+     */
+    private function initShopify(): void {
+        try {
+            $this->shopify = new ShopifyClient($this->memberId);
+            if (!$this->shopify->isConnected()) {
+                $this->shopify = null;
+            }
+        } catch (\Exception $e) {
+            $this->shopify = null;
+        }
+    }
+
+    /**
+     * Load repository configuration from user's database
+     */
+    private function loadRepoConfig(): void {
+        $repo = \app\Bean::load('repoconnections', $this->repoConnectionId);
+
+        if (!$repo || !$repo->id) {
+            throw new \Exception("Repository connection not found: {$this->repoConnectionId}");
+        }
+
+        // Export bean to array for compatibility with existing code
+        $this->repoConfig = $repo->export();
+
+        // Initialize Git client based on provider
+        if ($repo->provider === 'github') {
+            // Decrypt access token
+            $accessToken = EncryptionService::decrypt($repo->access_token);
+            $this->github = new GitHubClient($accessToken);
+        }
+
+        $this->git = new GitOperations();
+    }
+
+    // ========================================
+    // Main Workflow
+    // ========================================
+
+    /**
+     * Process a Jira ticket - main entry point
+     *
+     * @param string $issueKey Jira issue key (e.g., "PROJ-123")
+     * @return array Result with status and details
+     */
+    public function processTicket(string $issueKey): array {
+        $this->log('info', "Starting to process ticket: {$issueKey}");
+
+        try {
+            // Step 1: Fetch issue from Jira
+            $this->updateStatus(AIDevStatusService::STEP_FETCHING_ISSUE, 5);
+            $issue = $this->jira->getIssue($issueKey);
+
+            if (!$issue) {
+                throw new \Exception("Issue not found: {$issueKey}");
+            }
+
+            $this->log('info', 'Fetched issue', [
+                'summary' => $issue['fields']['summary'] ?? 'No summary'
+            ]);
+
+            // Step 2: Analyze requirements
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_REQUIREMENTS, 10);
+            $requirements = $this->analyzeRequirements($issue);
+
+            // Step 3: Check if clarification needed
+            $this->updateStatus(AIDevStatusService::STEP_CHECKING_CLARITY, 15);
+            if ($this->needsClarification($requirements)) {
+                $this->updateStatus(AIDevStatusService::STEP_POSTING_QUESTIONS, 20);
+                return $this->postClarificationQuestions($issueKey, $requirements['questions']);
+            }
+
+            // Step 4: Clone repository
+            $this->updateStatus(AIDevStatusService::STEP_CLONING_REPO, 25);
+            $this->cloneRepository();
+
+            // Step 5: Analyze codebase
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_CODEBASE, 35);
+            $codebaseContext = $this->analyzeCodebase($requirements);
+
+            // Step 6: Plan implementation
+            $this->updateStatus(AIDevStatusService::STEP_PLANNING_IMPLEMENTATION, 45);
+            $plan = $this->planImplementation($requirements, $codebaseContext);
+
+            // Step 7: Implement changes
+            $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
+            $changes = $this->implementChanges($plan);
+
+            // Step 7b: Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
+            // Step 8: Create PR
+            $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
+            $pr = $this->createPullRequest($issueKey, $issue, $changes, $plan);
+
+            // Complete
+            AIDevStatusService::prCreated(
+                $this->memberId,
+                $this->jobId,
+                $pr['url'],
+                $pr['number'],
+                $pr['branch']
+            );
+
+            $this->log('info', 'Job completed successfully', ['pr_url' => $pr['url']]);
+
+            $result = [
+                'status' => 'success',
+                'pr_url' => $pr['url'],
+                'pr_number' => $pr['number'],
+                'branch' => $pr['branch'],
+                'files_changed' => count($changes['files'] ?? [])
+            ];
+
+            // Add Shopify info if available
+            if ($shopifyResult) {
+                $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
+            }
+
+            return $result;
+
+        } catch (\Exception $e) {
+            $this->log('error', 'Job failed', ['error' => $e->getMessage()]);
+            AIDevStatusService::fail($this->memberId, $this->jobId, $e->getMessage());
+
+            return [
+                'status' => 'error',
+                'error' => $e->getMessage()
+            ];
+        } finally {
+            // Cleanup git working directory
+            if ($this->git) {
+                $this->git->cleanup();
+            }
+        }
+    }
+
+    /**
+     * Resume after clarification has been answered
+     *
+     * @param string $issueKey Issue key
+     * @param string $answerCommentId ID of the comment with the answer
+     * @return array Result
+     */
+    public function resumeAfterClarification(string $issueKey, string $answerCommentId): array {
+        $this->log('info', "Resuming after clarification for: {$issueKey}");
+
+        try {
+            // Add working label to indicate job is in progress
+            try {
+                $this->jira->addLabel($issueKey, 'myctobot-working');
+                $this->log('info', 'Added working label');
+            } catch (\Exception $e) {
+                $this->log('warning', 'Failed to add working label: ' . $e->getMessage());
+            }
+
+            // Fetch the issue again with the new comment
+            $this->updateStatus(AIDevStatusService::STEP_FETCHING_ISSUE, 5);
+            $issue = $this->jira->getIssue($issueKey);
+
+            // Get the comments to find the answer
+            $comments = $this->jira->getComments($issueKey);
+            $answer = null;
+
+            // Find the answer comment and any subsequent comments
+            $foundAnswer = false;
+            $additionalContext = [];
+            foreach ($comments as $comment) {
+                if ($comment['id'] === $answerCommentId || $foundAnswer) {
+                    $foundAnswer = true;
+                    $additionalContext[] = JiraClient::extractTextFromAdf($comment['body']);
+                }
+            }
+
+            // Re-analyze with the clarification
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_REQUIREMENTS, 10);
+            $requirements = $this->analyzeRequirements($issue, implode("\n\n", $additionalContext));
+
+            // Continue with implementation (skip clarification check since we just got the answer)
+            // Clone repository
+            $this->updateStatus(AIDevStatusService::STEP_CLONING_REPO, 25);
+            $this->cloneRepository();
+
+            // Analyze codebase
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_CODEBASE, 35);
+            $codebaseContext = $this->analyzeCodebase($requirements);
+
+            // Plan implementation
+            $this->updateStatus(AIDevStatusService::STEP_PLANNING_IMPLEMENTATION, 45);
+            $plan = $this->planImplementation($requirements, $codebaseContext);
+
+            // Implement changes
+            $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
+            $changes = $this->implementChanges($plan);
+
+            // Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
+            // Create PR
+            $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
+            $pr = $this->createPullRequest($issueKey, $issue, $changes, $plan);
+
+            AIDevStatusService::prCreated(
+                $this->memberId,
+                $this->jobId,
+                $pr['url'],
+                $pr['number'],
+                $pr['branch']
+            );
+
+            $result = [
+                'status' => 'success',
+                'pr_url' => $pr['url'],
+                'pr_number' => $pr['number'],
+                'branch' => $pr['branch']
+            ];
+
+            if ($shopifyResult) {
+                $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
+            }
+
+            return $result;
+
+        } catch (\Exception $e) {
+            $this->log('error', 'Resume failed', ['error' => $e->getMessage()]);
+            AIDevStatusService::fail($this->memberId, $this->jobId, $e->getMessage());
+
+            return [
+                'status' => 'error',
+                'error' => $e->getMessage()
+            ];
+        } finally {
+            if ($this->git) {
+                $this->git->cleanup();
+            }
+        }
+    }
+
+    /**
+     * Retry implementation on an existing branch/PR
+     *
+     * @param string $issueKey Issue key
+     * @param string $branchName Existing branch to work on
+     * @param int|null $prNumber Existing PR number (optional)
+     * @return array Result
+     */
+    public function retryOnBranch(string $issueKey, string $branchName, ?int $prNumber = null): array {
+        $this->log('info', "Retrying on existing branch: {$branchName} for {$issueKey}");
+
+        try {
+            // Add working label to indicate job is in progress
+            try {
+                $this->jira->addLabel($issueKey, 'myctobot-working');
+                $this->log('info', 'Added working label');
+            } catch (\Exception $e) {
+                $this->log('warning', 'Failed to add working label: ' . $e->getMessage());
+            }
+
+            // Step 1: Fetch issue from Jira
+            $this->updateStatus(AIDevStatusService::STEP_FETCHING_ISSUE, 5);
+            $issue = $this->jira->getIssue($issueKey);
+
+            if (!$issue) {
+                throw new \Exception("Issue not found: {$issueKey}");
+            }
+
+            // Get all comments for additional context
+            $comments = $this->jira->getComments($issueKey);
+            $commentText = '';
+            foreach ($comments as $comment) {
+                $commentText .= JiraClient::extractTextFromAdf($comment['body']) . "\n\n";
+            }
+
+            // Step 2: Analyze requirements with full context
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_REQUIREMENTS, 10);
+            $requirements = $this->analyzeRequirements($issue, $commentText);
+
+            // Step 3: Clone repository and checkout existing branch
+            $this->updateStatus(AIDevStatusService::STEP_CLONING_REPO, 25);
+            $this->cloneRepository();
+
+            // Checkout the existing branch
+            $this->updateStatus('Checking out existing branch', 28);
+            $this->git->checkout($branchName);
+            $this->log('info', 'Checked out existing branch', ['branch' => $branchName]);
+
+            // Step 4: Analyze codebase
+            $this->updateStatus(AIDevStatusService::STEP_ANALYZING_CODEBASE, 35);
+            $codebaseContext = $this->analyzeCodebase($requirements);
+
+            // Step 5: Plan implementation
+            $this->updateStatus(AIDevStatusService::STEP_PLANNING_IMPLEMENTATION, 45);
+            $plan = $this->planImplementation($requirements, $codebaseContext);
+
+            // Override branch name to use existing one
+            $plan['branch_name'] = $branchName;
+
+            // Step 6: Implement changes (on existing branch)
+            $this->updateStatus(AIDevStatusService::STEP_IMPLEMENTING_CHANGES, 55);
+            $changes = $this->implementChangesOnExistingBranch($plan, $branchName);
+
+            // Shopify theme sync (if applicable)
+            $shopifyResult = null;
+            if ($this->shopify && $this->isShopifyThemeRepo()) {
+                $shopifyResult = $this->syncToShopify($issueKey, $issue, $changes);
+            }
+
+            // Step 7: If no PR exists, create one; otherwise just push updates
+            if ($prNumber) {
+                // Just update the PR with a comment
+                $this->updateStatus('Updating pull request', 90);
+                $this->updatePullRequestComment($prNumber, $changes, $plan);
+
+                $prUrl = "https://github.com/{$this->repoConfig['repo_owner']}/{$this->repoConfig['repo_name']}/pull/{$prNumber}";
+
+                AIDevStatusService::prCreated(
+                    $this->memberId,
+                    $this->jobId,
+                    $prUrl,
+                    $prNumber,
+                    $branchName
+                );
+
+                $result = [
+                    'status' => 'success',
+                    'pr_url' => $prUrl,
+                    'pr_number' => $prNumber,
+                    'branch' => $branchName,
+                    'files_changed' => count($changes['files'] ?? [])
+                ];
+
+                if ($shopifyResult) {
+                    $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                    $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
+                }
+
+                return $result;
+            } else {
+                // Create new PR
+                $this->updateStatus(AIDevStatusService::STEP_CREATING_PR, 85);
+                $pr = $this->createPullRequest($issueKey, $issue, $changes, $plan);
+
+                AIDevStatusService::prCreated(
+                    $this->memberId,
+                    $this->jobId,
+                    $pr['url'],
+                    $pr['number'],
+                    $branchName
+                );
+
+                $result = [
+                    'status' => 'success',
+                    'pr_url' => $pr['url'],
+                    'pr_number' => $pr['number'],
+                    'branch' => $branchName,
+                    'files_changed' => count($changes['files'] ?? [])
+                ];
+
+                if ($shopifyResult) {
+                    $result['shopify_preview_url'] = $shopifyResult['preview_url'] ?? null;
+                    $result['shopify_themeid'] = $shopifyResult['theme_id'] ?? null;
+                }
+
+                return $result;
+            }
+
+        } catch (\Exception $e) {
+            $this->log('error', 'Retry failed', ['error' => $e->getMessage()]);
+            AIDevStatusService::fail($this->memberId, $this->jobId, $e->getMessage());
+
+            return [
+                'status' => 'error',
+                'error' => $e->getMessage()
+            ];
+        } finally {
+            if ($this->git) {
+                $this->git->cleanup();
+            }
+        }
+    }
+
+    /**
+     * Implement changes on an existing branch (no branch creation)
+     */
+    private function implementChangesOnExistingBranch(array $plan, string $branchName): array {
+        $changes = [
+            'files' => [],
+            'commits' => [],
+            'branch' => $branchName
+        ];
+
+        // Process files to modify
+        $progress = 60;
+        $totalFiles = count($plan['files_to_modify'] ?? []) + count($plan['files_to_create'] ?? []);
+        $progressPerFile = $totalFiles > 0 ? (20 / $totalFiles) : 0;
+
+        foreach ($plan['files_to_modify'] ?? [] as $fileSpec) {
+            $path = $fileSpec['path'];
+            $action = $fileSpec['action'] ?? 'modify';
+
+            if ($action === 'delete') {
+                $this->git->deleteFile($path);
+                $changes['files'][] = ['path' => $path, 'action' => 'deleted'];
+            } else {
+                $currentContent = '';
+                try {
+                    $currentContent = $this->git->readFile($path);
+                } catch (\Exception $e) {
+                    // File doesn't exist
+                }
+
+                $newContent = $this->generateFileContent($path, $currentContent, $fileSpec, $plan);
+                $this->git->writeFile($path, $newContent);
+                $changes['files'][] = ['path' => $path, 'action' => 'modified'];
+            }
+
+            $progress += $progressPerFile;
+            $this->updateStatus("Implementing: {$path}", (int)$progress);
+        }
+
+        // Create new files
+        foreach ($plan['files_to_create'] ?? [] as $fileSpec) {
+            $path = $fileSpec['path'];
+            $newContent = $this->generateNewFileContent($path, $fileSpec, $plan);
+            $this->git->writeFile($path, $newContent);
+            $changes['files'][] = ['path' => $path, 'action' => 'created'];
+
+            $progress += $progressPerFile;
+            $this->updateStatus("Creating: {$path}", (int)$progress);
+        }
+
+        // Commit changes
+        $this->updateStatus(AIDevStatusService::STEP_COMMITTING_CHANGES, 80);
+        $this->git->add('.');
+        $commitMessage = "Retry: " . $this->generateCommitMessage($plan);
+        $commitSha = $this->git->commit($commitMessage);
+        $changes['commit_sha'] = $commitSha;
+
+        // Push to remote (force push to update existing branch)
+        $this->updateStatus(AIDevStatusService::STEP_PUSHING_CHANGES, 83);
+        $this->git->push('origin', $branchName);
+
+        $this->log('info', 'Retry changes committed and pushed', [
+            'files_changed' => count($changes['files']),
+            'commit' => $commitSha
+        ]);
+
+        return $changes;
+    }
+
+    /**
+     * Add a comment to an existing PR about the retry
+     */
+    private function updatePullRequestComment(int $prNumber, array $changes, array $plan): void {
+        $comment = "## Retry Update\n\n";
+        $comment .= "This PR has been updated with a new implementation attempt.\n\n";
+        $comment .= "### Changes\n\n";
+
+        foreach ($changes['files'] ?? [] as $file) {
+            $action = ucfirst($file['action']);
+            $comment .= "- **{$action}**: `{$file['path']}`\n";
+        }
+
+        $comment .= "\n### Approach\n\n";
+        $comment .= $plan['approach'] ?? 'Updated implementation';
+        $comment .= "\n\n---\n*Updated by MyCTOBot AI Developer*\n";
+
+        $this->github->addPRComment(
+            $this->repoConfig['repo_owner'],
+            $this->repoConfig['repo_name'],
+            $prNumber,
+            $comment
+        );
+    }
+
+    // ========================================
+    // Analysis Methods
+    // ========================================
+
+    /**
+     * Analyze issue requirements using Claude
+     * Enhanced to detect and acknowledge all file attachments (not just images)
+     */
+    private function analyzeRequirements(array $issue, ?string $additionalContext = null): array {
+        $summary = $issue['fields']['summary'] ?? '';
+        $description = JiraClient::extractTextFromAdf($issue['fields']['description'] ?? null);
+        $issueType = $issue['fields']['issuetype']['name'] ?? 'Task';
+        $priority = $issue['fields']['priority']['name'] ?? 'Medium';
+        $labelsArray = $issue['fields']['labels'] ?? [];
+        $labels = !empty($labelsArray) ? implode(', ', $labelsArray) : 'None';
+        $issueKey = $issue['key'] ?? '';
+
+        // Get comments for additional context
+        $comments = $issue['fields']['comment']['comments'] ?? [];
+        $commentText = '';
+        foreach (array_slice($comments, -5) as $comment) { // Last 5 comments
+            $commentText .= JiraClient::extractTextFromAdf($comment['body']) . "\n\n";
+        }
+
+        // Detect ALL attachments (not just images) using AttachmentService
+        $allAttachments = $this->attachmentService->detectAttachments($issue);
+        $attachmentStats = $this->attachmentService->getStatistics($allAttachments);
+
+        // Log attachment detection
+        $this->log('info', 'Detected attachments in directive', [
+            'issue_key' => $issueKey,
+            'total_attachments' => $attachmentStats['total_count'],
+            'by_type' => $attachmentStats['by_type'],
+            'oversized_count' => $attachmentStats['oversized_count']
+        ]);
+
+        // Post attachment acknowledgment to Jira if attachments exist
+        if (!empty($allAttachments)) {
+            $this->postAttachmentAcknowledgment($issueKey, $allAttachments);
+
+            // Index documents to RAG system (async)
+            $this->indexAttachmentsToRag($allAttachments);
+        }
+
+        // Get image attachments for vision analysis
+        $images = $this->jira->getIssueImages($issue, 5, 2048); // Max 5 images, 2MB each
+
+        // Build comprehensive attachment note for the prompt
+        $attachmentNote = $this->buildAttachmentNote($allAttachments, $images);
+
+        $prompt = <<<PROMPT
+Analyze this Jira ticket and extract the implementation requirements.
+
+TICKET INFORMATION:
+- Type: {$issueType}
+- Priority: {$priority}
+- Labels: {$labels}
+
+SUMMARY:
+{$summary}
+
+DESCRIPTION:
+{$description}
+
+COMMENTS:
+{$commentText}{$attachmentNote}
+PROMPT;
+
+        if ($additionalContext) {
+            $prompt .= "\n\nADDITIONAL CLARIFICATION:\n{$additionalContext}";
+        }
+
+        $prompt .= <<<PROMPT
+
+
+Provide your analysis in JSON format with these fields:
+{
+    "summary": "Brief summary of what needs to be implemented",
+    "requirements": ["List of specific requirements"],
+    "acceptance_criteria": ["List of acceptance criteria"],
+    "technical_approach": "High-level technical approach",
+    "affected_areas": ["List of likely affected code areas"],
+    "is_clear": true/false,
+    "unclear_aspects": ["List of aspects that need clarification, if any"],
+    "questions": ["Specific questions to ask the reporter, if any"],
+    "estimated_complexity": "low/medium/high",
+    "image_insights": ["Any insights or requirements derived from the attached images"],
+    "attachment_insights": ["Any insights from non-image attachments like documents"]
+}
+PROMPT;
+
+        // Use vision-enabled call if we have images
+        if (!empty($images)) {
+            $this->log('info', 'Analyzing ticket with ' . count($images) . ' image(s)');
+            $response = $this->callClaudeWithImages($prompt, $images, 'You are a senior software engineer analyzing requirements for implementation. Pay close attention to any attached screenshots as they show the current issue or expected behavior.');
+        } else {
+            $response = $this->callClaude($prompt, 'You are a senior software engineer analyzing requirements for implementation.');
+        }
+
+        // Parse JSON from response
+        $json = $this->extractJson($response);
+        if (!$json) {
+            $this->log('warning', 'Could not parse requirements analysis, using defaults');
+            return [
+                'summary' => $summary,
+                'requirements' => [$description],
+                'is_clear' => true,
+                'questions' => [],
+                'attachments' => $allAttachments,
+                'attachment_stats' => $attachmentStats
+            ];
+        }
+
+        // Add attachment metadata to the requirements for downstream processing
+        $json['attachments'] = $allAttachments;
+        $json['attachment_stats'] = $attachmentStats;
+
+        return $json;
+    }
+
+    /**
+     * Build a comprehensive attachment note for the AI prompt
+     *
+     * @param array $allAttachments All detected attachments
+     * @param array $images Image attachments loaded for vision
+     * @return string Attachment note text
+     */
+    private function buildAttachmentNote(array $allAttachments, array $images): string {
+        if (empty($allAttachments)) {
+            return "\n\nATTACHMENTS:\nNo file attachments found in this directive.";
+        }
+
+        $note = "\n\nATTACHMENTS (" . count($allAttachments) . " file(s)):\n";
+
+        // Group by type
+        $byType = [];
+        foreach ($allAttachments as $att) {
+            $type = $att['type'] ?? 'other';
+            $byType[$type][] = $att;
+        }
+
+        // Images section with vision note
+        if (!empty($byType['image'])) {
+            $note .= "\nImages (" . count($byType['image']) . "):\n";
+            foreach ($byType['image'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})";
+                if ($att['is_oversized'] ?? false) {
+                    $note .= " [OVERSIZED - may not be fully processed]";
+                }
+                $note .= "\n";
+            }
+            if (!empty($images)) {
+                $note .= "Note: " . count($images) . " image(s) are being analyzed visually.\n";
+            }
+        }
+
+        // Documents section
+        if (!empty($byType['document'])) {
+            $note .= "\nDocuments (" . count($byType['document']) . "):\n";
+            foreach ($byType['document'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})";
+                if ($att['is_oversized'] ?? false) {
+                    $note .= " [OVERSIZED]";
+                }
+                $note .= "\n";
+            }
+            $note .= "Note: Document attachments have been indexed for reference.\n";
+        }
+
+        // Code files section
+        if (!empty($byType['code'])) {
+            $note .= "\nCode Files (" . count($byType['code']) . "):\n";
+            foreach ($byType['code'] as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})\n";
+            }
+        }
+
+        // Other files
+        if (!empty($byType['archive']) || !empty($byType['other'])) {
+            $otherFiles = array_merge($byType['archive'] ?? [], $byType['other'] ?? []);
+            $note .= "\nOther Files (" . count($otherFiles) . "):\n";
+            foreach ($otherFiles as $att) {
+                $note .= "- {$att['filename']} ({$att['size_formatted']})\n";
+            }
+        }
+
+        return $note;
+    }
+
+    /**
+     * Post attachment acknowledgment comment to Jira
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $attachments Detected attachments
+     */
+    private function postAttachmentAcknowledgment(string $issueKey, array $attachments): void {
+        if (empty($issueKey)) {
+            return;
+        }
+
+        try {
+            $acknowledgment = "**MyCTOBot AI Developer - Attachments Acknowledged**\n\n";
+            $acknowledgment .= $this->attachmentService->formatAcknowledgment($attachments, true);
+
+            $this->jira->addComment($issueKey, $acknowledgment);
+            $this->log('info', 'Posted attachment acknowledgment to Jira', [
+                'issue_key' => $issueKey,
+                'attachment_count' => count($attachments)
+            ]);
+        } catch (\Exception $e) {
+            $this->log('warning', 'Failed to post attachment acknowledgment', [
+                'issue_key' => $issueKey,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Index document attachments to the workspace's RAG system
+     *
+     * @param array $attachments Detected attachments
+     */
+    private function indexAttachmentsToRag(array $attachments): void {
+        // Filter to only indexable attachments (documents and images)
+        $indexable = array_filter($attachments, function($att) {
+            return ($att['is_indexable'] ?? false) && !($att['is_oversized'] ?? false);
+        });
+
+        if (empty($indexable)) {
+            $this->log('info', 'No attachments eligible for RAG indexing');
+            return;
+        }
+
+        try {
+            $result = $this->attachmentService->indexMultipleToRag(
+                $this->workspaceSlug,
+                $indexable,
+                'ceo-directives' // Default knowledge base for CEO directives
+            );
+
+            $this->log('info', 'RAG indexing completed', [
+                'indexed' => $result['indexed'],
+                'skipped' => $result['skipped'],
+                'failed' => $result['failed']
+            ]);
+        } catch (\Exception $e) {
+            $this->log('warning', 'RAG indexing failed', [
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Check if clarification is needed
+     */
+    private function needsClarification(array $requirements): bool {
+        return !($requirements['is_clear'] ?? true) && !empty($requirements['questions']);
+    }
+
+    /**
+     * Post clarification questions to Jira
+     */
+    private function postClarificationQuestions(string $issueKey, array $questions): array {
+        $questionText = "**MyCTOBot AI Developer - Clarification Needed**\n\n";
+        $questionText .= "Before I can implement this ticket, I need some clarification:\n\n";
+
+        foreach ($questions as $i => $question) {
+            $questionText .= ($i + 1) . ". {$question}\n";
+        }
+
+        $questionText .= "\nPlease reply to this comment with your answers, and I'll resume implementation automatically.";
+
+        $comment = $this->jira->addComment($issueKey, $questionText);
+
+        AIDevStatusService::waitingClarification(
+            $this->memberId,
+            $this->jobId,
+            $comment['id'],
+            $questions
+        );
+
+        $this->log('info', 'Posted clarification questions', [
+            'comment_id' => $comment['id'],
+            'question_count' => count($questions)
+        ]);
+
+        return [
+            'status' => 'waiting_clarification',
+            'comment_id' => $comment['id'],
+            'questions' => $questions
+        ];
+    }
+
+    // ========================================
+    // Repository Methods
+    // ========================================
+
+    /**
+     * Clone the repository
+     */
+    private function cloneRepository(): void {
+        $cloneUrl = $this->repoConfig['clone_url'];
+        $accessToken = EncryptionService::decrypt($this->repoConfig['access_token']);
+
+        $this->git->cloneRepositoryFull($cloneUrl, $accessToken);
+        $this->log('info', 'Repository cloned', ['repo' => $this->repoConfig['repo_name']]);
+    }
+
+    /**
+     * Analyze the codebase for context
+     */
+    private function analyzeCodebase(array $requirements): array {
+        // Get list of files
+        $files = $this->git->listFiles('', true);
+
+        // Filter to relevant files based on requirements
+        $relevantExtensions = ['.php', '.js', '.ts', '.py', '.java', '.go', '.rb', '.cs'];
+        $relevantFiles = array_filter($files, function($file) use ($relevantExtensions) {
+            $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+            return in_array('.' . $ext, $relevantExtensions);
+        });
+
+        // Build codebase summary
+        $codebaseInfo = "# Codebase Structure\n\n";
+        $codebaseInfo .= "## Files (" . count($relevantFiles) . " code files)\n\n";
+
+        // Group by directory
+        $byDir = [];
+        foreach (array_slice($relevantFiles, 0, 100) as $file) { // Limit to 100 files
+            $dir = dirname($file);
+            $byDir[$dir][] = basename($file);
+        }
+
+        foreach ($byDir as $dir => $dirFiles) {
+            $codebaseInfo .= "- {$dir}/\n";
+            foreach (array_slice($dirFiles, 0, 5) as $f) { // Max 5 files per dir
+                $codebaseInfo .= "  - {$f}\n";
+            }
+            if (count($dirFiles) > 5) {
+                $remaining = count($dirFiles) - 5;
+                $codebaseInfo .= "  - ... and {$remaining} more\n";
+            }
+        }
+
+        // Try to find and read key files for context
+        $keyFiles = $this->findKeyFiles($relevantFiles, $requirements);
+        $fileContents = [];
+
+        foreach ($keyFiles as $file) {
+            try {
+                $content = $this->git->readFile($file);
+                // Truncate large files
+                if (strlen($content) > 5000) {
+                    $content = substr($content, 0, 5000) . "\n... (truncated)";
+                }
+                $fileContents[$file] = $content;
+            } catch (\Exception $e) {
+                $this->log('warning', "Could not read file: {$file}");
+            }
+        }
+
+        return [
+            'structure' => $codebaseInfo,
+            'relevant_files' => $keyFiles,
+            'file_contents' => $fileContents,
+            'total_files' => count($relevantFiles)
+        ];
+    }
+
+    /**
+     * Find key files relevant to the requirements
+     */
+    private function findKeyFiles(array $files, array $requirements): array {
+        $keyFiles = [];
+        $affectedAreas = $requirements['affected_areas'] ?? [];
+
+        // Look for files matching affected areas
+        foreach ($files as $file) {
+            $fileLower = strtolower($file);
+            foreach ($affectedAreas as $area) {
+                $areaLower = strtolower($area);
+                if (strpos($fileLower, $areaLower) !== false) {
+                    $keyFiles[] = $file;
+                    break;
+                }
+            }
+        }
+
+        // Look for common entry points
+        $entryPoints = ['index.php', 'app.php', 'main.php', 'routes.php', 'bootstrap.php'];
+        foreach ($files as $file) {
+            $basename = basename($file);
+            if (in_array($basename, $entryPoints) && !in_array($file, $keyFiles)) {
+                $keyFiles[] = $file;
+            }
+        }
+
+        return array_slice($keyFiles, 0, 10); // Max 10 key files
+    }
+
+    // ========================================
+    // Implementation Methods
+    // ========================================
+
+    /**
+     * Plan the implementation with Claude
+     */
+    private function planImplementation(array $requirements, array $codebaseContext): array {
+        $prompt = "# Implementation Planning\n\n";
+        $prompt .= "## Requirements\n";
+        $prompt .= json_encode($requirements, JSON_PRETTY_PRINT) . "\n\n";
+        $prompt .= "## Codebase Context\n";
+        $prompt .= $codebaseContext['structure'] . "\n\n";
+
+        if (!empty($codebaseContext['file_contents'])) {
+            $prompt .= "## Key File Contents\n\n";
+            foreach ($codebaseContext['file_contents'] as $file => $content) {
+                $prompt .= "### {$file}\n```\n{$content}\n```\n\n";
+            }
+        }
+
+        $prompt .= <<<PROMPT
+
+Based on the requirements and codebase analysis, create an implementation plan.
+
+Provide your response in JSON format:
+{
+    "approach": "Description of the implementation approach",
+    "files_to_modify": [
+        {
+            "path": "path/to/file.php",
+            "action": "modify|create|delete",
+            "changes": "Description of changes to make"
+        }
+    ],
+    "files_to_create": [
+        {
+            "path": "path/to/newfile.php",
+            "purpose": "Description of what this file does"
+        }
+    ],
+    "implementation_steps": [
+        "Step 1: ...",
+        "Step 2: ..."
+    ],
+    "testing_notes": "How to test the changes",
+    "branch_name": "suggested-branch-name"
+}
+PROMPT;
+
+        $response = $this->callClaude($prompt, 'You are a senior software engineer planning an implementation. Be precise and thorough.');
+
+        $plan = $this->extractJson($response);
+        if (!$plan) {
+            throw new \Exception('Could not generate implementation plan');
+        }
+
+        $this->log('info', 'Implementation plan created', [
+            'files_to_modify' => count($plan['files_to_modify'] ?? []),
+            'files_to_create' => count($plan['files_to_create'] ?? [])
+        ]);
+
+        return $plan;
+    }
+
+    /**
+     * Implement the code changes with Claude
+     */
+    private function implementChanges(array $plan): array {
+        $changes = [
+            'files' => [],
+            'commits' => []
+        ];
+
+        // Create feature branch
+        $branchName = $plan['branch_name'] ?? 'feature/ai-dev-' . date('Ymd-His');
+        $baseBranch = $this->repoConfig['default_branch'] ?? 'main';
+
+        $this->updateStatus(AIDevStatusService::STEP_CREATING_BRANCH, 60);
+        $this->git->createBranch($branchName, $baseBranch);
+        $changes['branch'] = $branchName;
+
+        $this->log('info', 'Created branch', ['branch' => $branchName]);
+
+        // Process files to modify
+        $progress = 60;
+        $totalFiles = count($plan['files_to_modify'] ?? []) + count($plan['files_to_create'] ?? []);
+        $progressPerFile = $totalFiles > 0 ? (20 / $totalFiles) : 0;
+
+        foreach ($plan['files_to_modify'] ?? [] as $fileSpec) {
+            $path = $fileSpec['path'];
+            $action = $fileSpec['action'] ?? 'modify';
+
+            if ($action === 'delete') {
+                $this->git->deleteFile($path);
+                $changes['files'][] = ['path' => $path, 'action' => 'deleted'];
+            } else {
+                // Get current content
+                $currentContent = '';
+                try {
+                    $currentContent = $this->git->readFile($path);
+                } catch (\Exception $e) {
+                    // File doesn't exist, will be created
+                }
+
+                // Generate new content with Claude
+                $newContent = $this->generateFileContent($path, $currentContent, $fileSpec, $plan);
+                $this->git->writeFile($path, $newContent);
+                $changes['files'][] = ['path' => $path, 'action' => 'modified'];
+            }
+
+            $progress += $progressPerFile;
+            $this->updateStatus("Implementing: {$path}", (int)$progress);
+        }
+
+        // Create new files
+        foreach ($plan['files_to_create'] ?? [] as $fileSpec) {
+            $path = $fileSpec['path'];
+            $newContent = $this->generateNewFileContent($path, $fileSpec, $plan);
+            $this->git->writeFile($path, $newContent);
+            $changes['files'][] = ['path' => $path, 'action' => 'created'];
+
+            $progress += $progressPerFile;
+            $this->updateStatus("Creating: {$path}", (int)$progress);
+        }
+
+        // Commit changes
+        $this->updateStatus(AIDevStatusService::STEP_COMMITTING_CHANGES, 80);
+        $this->git->add('.');
+        $commitMessage = $this->generateCommitMessage($plan);
+        $commitSha = $this->git->commit($commitMessage);
+        $changes['commit_sha'] = $commitSha;
+
+        // Push to remote
+        $this->updateStatus(AIDevStatusService::STEP_PUSHING_CHANGES, 83);
+        $this->git->push('origin', $branchName);
+
+        $this->log('info', 'Changes committed and pushed', [
+            'files_changed' => count($changes['files']),
+            'commit' => $commitSha
+        ]);
+
+        return $changes;
+    }
+
+    /**
+     * Generate modified file content using Claude
+     */
+    private function generateFileContent(string $path, string $currentContent, array $fileSpec, array $plan): string {
+        $prompt = "# Code Modification Task\n\n";
+        $prompt .= "## File: {$path}\n\n";
+        $prompt .= "## Current Content:\n```\n{$currentContent}\n```\n\n";
+        $prompt .= "## Required Changes:\n{$fileSpec['changes']}\n\n";
+        $prompt .= "## Overall Plan Context:\n{$plan['approach']}\n\n";
+        $prompt .= "Provide ONLY the complete modified file content, with no explanation. Start directly with the code.";
+
+        $response = $this->callClaude($prompt, 'You are a senior software engineer. Output only code, no explanations.');
+
+        // Extract code from response (remove markdown code blocks if present)
+        $code = $this->extractCode($response);
+        return $code;
+    }
+
+    /**
+     * Generate new file content using Claude
+     */
+    private function generateNewFileContent(string $path, array $fileSpec, array $plan): string {
+        $prompt = "# New File Creation Task\n\n";
+        $prompt .= "## File Path: {$path}\n\n";
+        $prompt .= "## Purpose: {$fileSpec['purpose']}\n\n";
+        $prompt .= "## Overall Plan Context:\n{$plan['approach']}\n\n";
+        $prompt .= "## Implementation Steps:\n" . implode("\n", $plan['implementation_steps'] ?? []) . "\n\n";
+        $prompt .= "Provide ONLY the complete file content, with no explanation. Start directly with the code.";
+
+        $response = $this->callClaude($prompt, 'You are a senior software engineer. Output only code, no explanations.');
+
+        return $this->extractCode($response);
+    }
+
+    /**
+     * Generate commit message
+     */
+    private function generateCommitMessage(array $plan): string {
+        $approach = $plan['approach'] ?? 'Implementation';
+        $filesCount = count($plan['files_to_modify'] ?? []) + count($plan['files_to_create'] ?? []);
+
+        $message = substr($approach, 0, 50);
+        if (strlen($approach) > 50) {
+            $message .= '...';
+        }
+
+        $message .= "\n\nImplemented via MyCTOBot AI Developer\n";
+        $message .= "Files changed: {$filesCount}\n";
+
+        return $message;
+    }
+
+    // ========================================
+    // Pull Request Methods
+    // ========================================
+
+    /**
+     * Create a pull request
+     */
+    private function createPullRequest(string $issueKey, array $issue, array $changes, array $plan): array {
+        $summary = $issue['fields']['summary'] ?? 'Implementation';
+        $branchName = $changes['branch'];
+        $baseBranch = $this->repoConfig['default_branch'] ?? 'main';
+
+        // Generate PR title
+        $title = "[{$issueKey}] {$summary}";
+        if (strlen($title) > 100) {
+            $title = substr($title, 0, 97) . '...';
+        }
+
+        // Generate PR body
+        $body = $this->generatePRBody($issueKey, $issue, $changes, $plan);
+
+        // Create PR via GitHub API
+        $pr = $this->github->createPullRequest(
+            $this->repoConfig['repo_owner'],
+            $this->repoConfig['repo_name'],
+            $title,
+            $body,
+            $branchName,
+            $baseBranch
+        );
+
+        $this->log('info', 'Pull request created', [
+            'pr_number' => $pr['number'],
+            'url' => $pr['html_url']
+        ]);
+
+        return [
+            'number' => $pr['number'],
+            'url' => $pr['html_url'],
+            'branch' => $branchName
+        ];
+    }
+
+    /**
+     * Generate pull request body
+     */
+    private function generatePRBody(string $issueKey, array $issue, array $changes, array $plan): string {
+        $summary = $issue['fields']['summary'] ?? '';
+
+        $body = "## Summary\n\n";
+        $body .= $plan['approach'] ?? $summary;
+        $body .= "\n\n";
+
+        $body .= "## Jira Ticket\n\n";
+        $body .= "**{$issueKey}**: {$summary}\n\n";
+
+        $body .= "## Changes\n\n";
+        foreach ($changes['files'] ?? [] as $file) {
+            $action = ucfirst($file['action']);
+            $body .= "- **{$action}**: `{$file['path']}`\n";
+        }
+        $body .= "\n";
+
+        if (!empty($plan['testing_notes'])) {
+            $body .= "## Testing\n\n";
+            $body .= $plan['testing_notes'] . "\n\n";
+        }
+
+        $body .= "---\n";
+        $body .= "*This PR was created automatically by [" . SiteConfig::getName() . " AI Developer](" . SiteConfig::getBaseUrl() . ")*\n";
+
+        return $body;
+    }
+
+    // ========================================
+    // Shopify Integration Methods
+    // ========================================
+
+    /**
+     * Check if the repository is a Shopify theme
+     */
+    private function isShopifyThemeRepo(): bool {
+        if ($this->isShopifyTheme) {
+            return true;
+        }
+
+        // Check for Shopify theme indicators
+        $themeIndicators = [
+            'config/settings_schema.json',
+            'layout/theme.liquid',
+            'templates/index.liquid',
+            'templates/index.json'
+        ];
+
+        foreach ($themeIndicators as $indicator) {
+            try {
+                $this->git->readFile($indicator);
+                $this->isShopifyTheme = true;
+                $this->log('info', 'Detected Shopify theme repository');
+                return true;
+            } catch (\Exception $e) {
+                // File doesn't exist, continue checking
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Sync changed files to Shopify development theme
+     *
+     * @param string $issueKey Jira issue key
+     * @param array $issue Jira issue data
+     * @param array $changes Changes made by implementation
+     * @return array|null Result with theme_id and preview_url, or null on failure
+     */
+    private function syncToShopify(string $issueKey, array $issue, array $changes): ?array {
+        if (!$this->shopify) {
+            return null;
+        }
+
+        try {
+            $this->updateStatus(AIDevStatusService::STEP_SYNCING_SHOPIFY, 75);
+            $this->log('info', 'Starting Shopify theme sync');
+
+            // Get or create development theme for this ticket
+            $summary = $issue['fields']['summary'] ?? '';
+            $theme = $this->shopify->getOrCreateDevTheme($issueKey, $summary);
+
+            if (empty($theme['id'])) {
+                $this->log('warning', 'Could not create Shopify development theme');
+                return null;
+            }
+
+            $themeId = (int)$theme['id'];
+            $this->log('info', 'Using Shopify theme', ['theme_id' => $themeId, 'theme_name' => $theme['name'] ?? '']);
+
+            // Prepare files to upload
+            $filesToUpload = [];
+            foreach ($changes['files'] ?? [] as $file) {
+                $path = $file['path'];
+                $action = $file['action'];
+
+                // Skip deleted files (Shopify handles via separate delete call)
+                if ($action === 'deleted') {
+                    continue;
+                }
+
+                // Only sync theme files (assets, config, layout, locales, sections, snippets, templates)
+                if (!$this->isShopifyThemeFile($path)) {
+                    continue;
+                }
+
+                try {
+                    $content = $this->git->readFile($path);
+                    $assetKey = $this->toShopifyAssetKey($path);
+
+                    // Check if it's a binary file
+                    if ($this->isBinaryFile($path)) {
+                        $filesToUpload[] = [
+                            'key' => $assetKey,
+                            'attachment' => base64_encode($content)
+                        ];
+                    } else {
+                        $filesToUpload[] = [
+                            'key' => $assetKey,
+                            'value' => $content
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    $this->log('warning', "Could not read file for Shopify sync: {$path}");
+                }
+            }
+
+            if (empty($filesToUpload)) {
+                $this->log('info', 'No theme files to sync to Shopify');
+                return [
+                    'theme_id' => $themeId,
+                    'preview_url' => $theme['preview_url']
+                ];
+            }
+
+            // Upload files to Shopify theme
+            $this->updateStatus(AIDevStatusService::STEP_CREATING_PREVIEW, 78);
+            $uploadResult = $this->shopify->uploadThemeFiles($themeId, $filesToUpload);
+
+            $this->log('info', 'Shopify theme sync complete', [
+                'uploaded' => count($uploadResult['success']),
+                'failed' => count($uploadResult['failed'])
+            ]);
+
+            // Get preview URL
+            $previewUrl = $this->shopify->getPreviewUrl($themeId);
+
+            // Update job status with Shopify info
+            AIDevStatusService::updateShopifyTheme(
+                $this->memberId,
+                $this->jobId,
+                $themeId,
+                $previewUrl
+            );
+
+            // Post preview URL to Jira
+            $this->postShopifyPreviewToJira($issueKey, $previewUrl);
+
+            return [
+                'theme_id' => $themeId,
+                'preview_url' => $previewUrl,
+                'files_synced' => count($uploadResult['success']),
+                'files_failed' => count($uploadResult['failed'])
+            ];
+
+        } catch (\Exception $e) {
+            $this->log('error', 'Shopify sync failed', ['error' => $e->getMessage()]);
+            return null;
+        }
+    }
+
+    /**
+     * Check if a file path is a Shopify theme file
+     */
+    private function isShopifyThemeFile(string $path): bool {
+        $themeDirectories = [
+            'assets/',
+            'config/',
+            'layout/',
+            'locales/',
+            'sections/',
+            'snippets/',
+            'templates/',
+            'blocks/'
+        ];
+
+        foreach ($themeDirectories as $dir) {
+            if (str_starts_with($path, $dir)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Convert file path to Shopify asset key
+     */
+    private function toShopifyAssetKey(string $path): string {
+        // Shopify asset keys are just the path from theme root
+        return $path;
+    }
+
+    /**
+     * Check if a file is binary based on extension
+     */
+    private function isBinaryFile(string $path): bool {
+        $binaryExtensions = [
+            'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico',
+            'woff', 'woff2', 'ttf', 'eot', 'otf',
+            'mp4', 'webm', 'mp3', 'ogg',
+            'pdf', 'zip'
+        ];
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        return in_array($ext, $binaryExtensions);
+    }
+
+    /**
+     * Post Shopify preview URL to Jira as a comment
+     */
+    private function postShopifyPreviewToJira(string $issueKey, string $previewUrl): void {
+        try {
+            $comment = "**MyCTOBot - Shopify Preview Ready**\n\n";
+            $comment .= "Your changes have been synced to a Shopify development theme.\n\n";
+            $comment .= "**Preview Link:** [{$previewUrl}]({$previewUrl})\n\n";
+            $comment .= "_Note: This is an unpublished preview. Changes will not affect your live store._";
+
+            $this->jira->addComment($issueKey, $comment);
+            $this->log('info', 'Posted Shopify preview to Jira', ['issue_key' => $issueKey]);
+
+        } catch (\Exception $e) {
+            $this->log('warning', 'Failed to post Shopify preview to Jira', ['error' => $e->getMessage()]);
+        }
+    }
+
+    // ========================================
+    // Claude API Methods
+    // ========================================
+
+    /**
+     * Call Claude API with customer's API key
+     */
+    private function callClaude(string $prompt, string $systemPrompt = ''): string {
+        $client = new Client([
+            'base_uri' => 'https://api.anthropic.com',
+            'headers' => [
+                'x-api-key' => $this->customerApiKey,
+                'anthropic-version' => '2023-06-01',
+                'Content-Type' => 'application/json',
+            ],
+        ]);
+
+        $payload = [
+            'model' => $this->model,
+            'max_tokens' => 4096,
+            'messages' => [
+                ['role' => 'user', 'content' => $prompt]
+            ]
+        ];
+
+        if ($systemPrompt) {
+            $payload['system'] = $systemPrompt;
+        }
+
+        $response = $client->post('/v1/messages', [
+            'json' => $payload
+        ]);
+
+        $data = json_decode($response->getBody()->getContents(), true);
+
+        return $data['content'][0]['text'] ?? '';
+    }
+
+    /**
+     * Call Claude API with images (vision)
+     *
+     * @param string $prompt Text prompt
+     * @param array $images Array of images with ['filename', 'mimeType', 'base64']
+     * @param string $systemPrompt Optional system prompt
+     * @return string Claude's response
+     */
+    private function callClaudeWithImages(string $prompt, array $images, string $systemPrompt = ''): string {
+        $client = new Client([
+            'base_uri' => 'https://api.anthropic.com',
+            'headers' => [
+                'x-api-key' => $this->customerApiKey,
+                'anthropic-version' => '2023-06-01',
+                'Content-Type' => 'application/json',
+            ],
+        ]);
+
+        // Build content array with images first, then text
+        $content = [];
+
+        // Add images as content blocks
+        foreach ($images as $image) {
+            $content[] = [
+                'type' => 'image',
+                'source' => [
+                    'type' => 'base64',
+                    'media_type' => $image['mimeType'],
+                    'data' => $image['base64']
+                ]
+            ];
+        }
+
+        // Add the text prompt
+        $content[] = [
+            'type' => 'text',
+            'text' => $prompt
+        ];
+
+        $payload = [
+            'model' => $this->model,
+            'max_tokens' => 4096,
+            'messages' => [
+                ['role' => 'user', 'content' => $content]
+            ]
+        ];
+
+        if ($systemPrompt) {
+            $payload['system'] = $systemPrompt;
+        }
+
+        $response = $client->post('/v1/messages', [
+            'json' => $payload
+        ]);
+
+        $data = json_decode($response->getBody()->getContents(), true);
+
+        return $data['content'][0]['text'] ?? '';
+    }
+
+    /**
+     * Extract JSON from Claude response
+     */
+    private function extractJson(string $response): ?array {
+        // Try to find JSON in the response
+        if (preg_match('/\{[\s\S]*\}/m', $response, $matches)) {
+            $json = json_decode($matches[0], true);
+            if ($json !== null) {
+                return $json;
+            }
+        }
+
+        // Try parsing the whole response
+        $json = json_decode($response, true);
+        return $json ?: null;
+    }
+
+    /**
+     * Extract code from Claude response (remove markdown blocks)
+     */
+    private function extractCode(string $response): string {
+        // Remove markdown code blocks
+        $code = preg_replace('/^```[\w]*\n/m', '', $response);
+        $code = preg_replace('/\n```$/m', '', $code);
+        return trim($code);
+    }
+
+    // ========================================
+    // Utility Methods
+    // ========================================
+
+    /**
+     * Update job status
+     */
+    private function updateStatus(string $step, int $progress): void {
+        AIDevStatusService::updateStatus(
+            $this->memberId,
+            $this->jobId,
+            $step,
+            $progress,
+            AIDevStatusService::STATUS_RUNNING
+        );
+    }
+
+    /**
+     * Log a message
+     */
+    private function log(string $level, string $message, array $context = []): void {
+        AIDevStatusService::log($this->jobId, $this->memberId, $level, $message, $context);
+    }
+}

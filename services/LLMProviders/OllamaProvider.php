@@ -1,0 +1,543 @@
+<?php
+/**
+ * Ollama LLM Provider
+ *
+ * Connects to a local or remote Ollama instance for inference.
+ * https://ollama.ai/
+ */
+
+namespace app\services\LLMProviders;
+
+class OllamaProvider implements LLMProviderInterface
+{
+    private string $host;
+    private string $model;
+    private array $config;
+
+    public function __construct(array $config)
+    {
+        $this->config = array_merge($this->getDefaultConfig(), $config);
+        $this->host = rtrim($this->config['host'], '/');
+        $this->model = $this->config['model'];
+    }
+
+    public function getType(): string
+    {
+        return 'ollama';
+    }
+
+    public function getName(): string
+    {
+        return 'Ollama (Local)';
+    }
+
+    public function testConnection(): array
+    {
+        try {
+            $response = $this->httpGet('/api/tags');
+
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                $modelCount = count($data['models'] ?? []);
+                return [
+                    'success' => true,
+                    'message' => "Connected - {$modelCount} models available",
+                    'details' => [
+                        'host' => $this->host,
+                        'models' => array_map(fn($m) => $m['name'], $data['models'] ?? [])
+                    ]
+                ];
+            }
+
+            return [
+                'success' => false,
+                'message' => 'Failed to connect: ' . ($response['error'] ?? 'Unknown error'),
+                'details' => []
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Connection error: ' . $e->getMessage(),
+                'details' => []
+            ];
+        }
+    }
+
+    public function getAvailableModels(): array
+    {
+        try {
+            $response = $this->httpGet('/api/tags');
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                return array_map(fn($m) => $m['name'], $data['models'] ?? []);
+            }
+        } catch (\Exception $e) {
+            // Ignore
+        }
+        return [];
+    }
+
+    /**
+     * Get detailed model list with metadata
+     *
+     * @return array List of models with details
+     */
+    public function getModelsWithDetails(): array
+    {
+        try {
+            $response = $this->httpGet('/api/tags');
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                $models = [];
+                foreach ($data['models'] ?? [] as $m) {
+                    $models[] = [
+                        'name' => $m['name'],
+                        'size' => $m['size'] ?? 0,
+                        'size_formatted' => $this->formatBytes($m['size'] ?? 0),
+                        'modified_at' => $m['modified_at'] ?? null,
+                        'digest' => substr($m['digest'] ?? '', 0, 12),
+                        'details' => [
+                            'family' => $m['details']['family'] ?? 'unknown',
+                            'parameter_size' => $m['details']['parameter_size'] ?? 'unknown',
+                            'quantization' => $m['details']['quantization_level'] ?? 'unknown'
+                        ]
+                    ];
+                }
+                return $models;
+            }
+        } catch (\Exception $e) {
+            // Ignore
+        }
+        return [];
+    }
+
+    /**
+     * Get detailed information about a specific model
+     *
+     * @param string $modelName Model name (e.g., "llama3.2")
+     * @return array Model info or error
+     */
+    public function getModelInfo(string $modelName): array
+    {
+        try {
+            $response = $this->httpPost('/api/show', ['name' => $modelName]);
+            if ($response['success']) {
+                $data = json_decode($response['body'], true);
+                return [
+                    'success' => true,
+                    'model' => $modelName,
+                    'license' => $data['license'] ?? null,
+                    'modelfile' => $data['modelfile'] ?? null,
+                    'parameters' => $data['parameters'] ?? null,
+                    'template' => $data['template'] ?? null,
+                    'system' => $data['system'] ?? null,
+                    'details' => $data['details'] ?? [],
+                    'model_info' => $data['model_info'] ?? []
+                ];
+            }
+            return [
+                'success' => false,
+                'error' => 'Failed to get model info: HTTP ' . ($response['http_code'] ?? 'unknown')
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'error' => 'Error: ' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * Get model capabilities by analyzing model info
+     * Cached per model to avoid repeated API calls
+     *
+     * @param string $modelName Model name
+     * @return array Capabilities array
+     */
+    public function getModelCapabilities(string $modelName): array
+    {
+        static $cache = [];
+
+        if (isset($cache[$modelName])) {
+            return $cache[$modelName];
+        }
+
+        $capabilities = [
+            'tool_calling' => false,
+            'vision' => false,
+            'streaming' => true,
+            'embedding' => false
+        ];
+
+        $info = $this->getModelInfo($modelName);
+        if (!$info['success']) {
+            $cache[$modelName] = $capabilities;
+            return $capabilities;
+        }
+
+        $modelInfo = $info['model_info'] ?? [];
+        $details = $info['details'] ?? [];
+        $template = $info['template'] ?? '';
+        $family = strtolower($details['family'] ?? '');
+        $modelNameLower = strtolower($modelName);
+
+        // Vision detection - look for vision/multimodal indicators
+        if (str_contains($modelNameLower, 'llava') ||
+            str_contains($modelNameLower, 'vision') ||
+            str_contains($modelNameLower, 'moondream') ||
+            str_contains($family, 'llava') ||
+            !empty($modelInfo['vision'])) {
+            $capabilities['vision'] = true;
+        }
+
+        // Tool calling detection - check template and known models
+        $toolIndicators = ['tools', 'function', '<tool_call>', '<<functioncall>>'];
+        foreach ($toolIndicators as $indicator) {
+            if (str_contains($template, $indicator)) {
+                $capabilities['tool_calling'] = true;
+                break;
+            }
+        }
+
+        // Known tool-capable model families
+        $toolCapableFamilies = ['llama', 'qwen', 'mistral', 'mixtral', 'command-r'];
+        foreach ($toolCapableFamilies as $tcFamily) {
+            if (str_contains($family, $tcFamily) || str_contains($modelNameLower, $tcFamily)) {
+                // Llama 3+ and Qwen 2.5+ support tools
+                if (str_contains($modelNameLower, 'llama3') ||
+                    str_contains($modelNameLower, 'qwen2') ||
+                    str_contains($modelNameLower, 'qwen3') ||
+                    str_contains($modelNameLower, 'mistral') ||
+                    str_contains($modelNameLower, 'mixtral')) {
+                    $capabilities['tool_calling'] = true;
+                }
+                break;
+            }
+        }
+
+        // Embedding models
+        if (str_contains($modelNameLower, 'embed') ||
+            str_contains($modelNameLower, 'nomic') ||
+            str_contains($modelNameLower, 'mxbai')) {
+            $capabilities['embedding'] = true;
+        }
+
+        $cache[$modelName] = $capabilities;
+        return $capabilities;
+    }
+
+    /**
+     * Format bytes to human readable
+     */
+    private function formatBytes(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $i = 0;
+        while ($bytes >= 1024 && $i < count($units) - 1) {
+            $bytes /= 1024;
+            $i++;
+        }
+        return round($bytes, 1) . ' ' . $units[$i];
+    }
+
+    public function complete(string $prompt, array $options = []): array
+    {
+        $payload = [
+            'model' => $options['model'] ?? $this->model,
+            'prompt' => $prompt,
+            'stream' => false,
+            'options' => [
+                'temperature' => $options['temperature'] ?? $this->config['temperature'] ?? 0.7,
+                'num_ctx' => $options['context_length'] ?? $this->config['context_length'] ?? 8192,
+            ]
+        ];
+
+        if (isset($options['system'])) {
+            $payload['system'] = $options['system'];
+        }
+
+        $response = $this->httpPost('/api/generate', $payload);
+
+        if (!$response['success']) {
+            return [
+                'success' => false,
+                'response' => '',
+                'error' => $response['error'] ?? 'Request failed',
+                'usage' => []
+            ];
+        }
+
+        $data = json_decode($response['body'], true);
+
+        return [
+            'success' => true,
+            'response' => $data['response'] ?? '',
+            'usage' => [
+                'prompt_tokens' => $data['prompt_eval_count'] ?? 0,
+                'completion_tokens' => $data['eval_count'] ?? 0,
+                'total_tokens' => ($data['prompt_eval_count'] ?? 0) + ($data['eval_count'] ?? 0),
+                'eval_duration_ms' => ($data['eval_duration'] ?? 0) / 1000000
+            ]
+        ];
+    }
+
+    public function chat(array $messages, array $options = []): array
+    {
+        $ollamaOptions = [
+            'temperature' => $options['temperature'] ?? $this->config['temperature'] ?? 0.7,
+            'num_ctx' => $options['context_length'] ?? $this->config['context_length'] ?? 8192,
+        ];
+
+        // Cap output tokens if specified
+        $numPredict = $options['num_predict'] ?? $options['max_tokens'] ?? null;
+        if ($numPredict !== null) {
+            $ollamaOptions['num_predict'] = (int) $numPredict;
+        }
+
+        $payload = [
+            'model' => $options['model'] ?? $this->model,
+            'messages' => $messages,
+            'stream' => false,
+            'options' => $ollamaOptions
+        ];
+
+        // Ollama native JSON mode — guarantees valid JSON output
+        if (!empty($options['format'])) {
+            $payload['format'] = $options['format'];
+        }
+
+        $response = $this->httpPost('/api/chat', $payload);
+
+        if (!$response['success']) {
+            return [
+                'success' => false,
+                'response' => '',
+                'error' => $response['error'] ?? 'Request failed',
+                'usage' => []
+            ];
+        }
+
+        $data = json_decode($response['body'], true);
+
+        return [
+            'success' => true,
+            'response' => $data['message']['content'] ?? '',
+            'usage' => [
+                'prompt_tokens' => $data['prompt_eval_count'] ?? 0,
+                'completion_tokens' => $data['eval_count'] ?? 0,
+                'total_tokens' => ($data['prompt_eval_count'] ?? 0) + ($data['eval_count'] ?? 0)
+            ]
+        ];
+    }
+
+    public function supportsStreaming(): bool
+    {
+        return true;
+    }
+
+    public function canExposeAsMcp(): bool
+    {
+        return true;
+    }
+
+    public function getConfigSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'host' => [
+                    'type' => 'string',
+                    'title' => 'Ollama Host',
+                    'description' => 'URL of the Ollama server',
+                    'default' => 'http://localhost:11434'
+                ],
+                'model' => [
+                    'type' => 'string',
+                    'title' => 'Model',
+                    'description' => 'The Ollama model to use',
+                    'default' => 'llama3'
+                ],
+                'context_length' => [
+                    'type' => 'integer',
+                    'title' => 'Context Length',
+                    'description' => 'Maximum context window size',
+                    'default' => 8192,
+                    'minimum' => 1024,
+                    'maximum' => 131072
+                ],
+                'temperature' => [
+                    'type' => 'number',
+                    'title' => 'Temperature',
+                    'description' => 'Sampling temperature (0.0 - 2.0)',
+                    'default' => 0.7,
+                    'minimum' => 0,
+                    'maximum' => 2
+                ]
+            ],
+            'required' => ['host', 'model']
+        ];
+    }
+
+    public function validateConfig(array $config): array
+    {
+        $errors = [];
+
+        if (empty($config['host'])) {
+            $errors[] = 'Host is required';
+        } elseif (!filter_var($config['host'], FILTER_VALIDATE_URL)) {
+            $errors[] = 'Host must be a valid URL';
+        }
+
+        if (empty($config['model'])) {
+            $errors[] = 'Model is required';
+        }
+
+        if (isset($config['temperature']) && ($config['temperature'] < 0 || $config['temperature'] > 2)) {
+            $errors[] = 'Temperature must be between 0 and 2';
+        }
+
+        return [
+            'valid' => empty($errors),
+            'errors' => $errors
+        ];
+    }
+
+    public function getDefaultConfig(): array
+    {
+        return [
+            'host' => 'http://localhost:11434',
+            'model' => 'llama3',
+            'context_length' => 8192,
+            'temperature' => 0.7
+        ];
+    }
+
+    // ========================================
+    // Static Convenience Methods
+    // ========================================
+
+    /**
+     * Simple static method to call Ollama chat API
+     * Throws exceptions on error for simple use cases
+     *
+     * @param string $host Ollama host URL
+     * @param string $model Model name
+     * @param string $prompt User prompt
+     * @param string|null $imagePath Optional path to image file for vision models
+     * @return string The response content
+     * @throws \Exception On connection or API errors
+     */
+    public static function quickChat(string $host, string $model, string $prompt, ?string $imagePath = null): string {
+        $url = rtrim($host, '/') . '/api/chat';
+
+        $messages = [
+            ['role' => 'user', 'content' => $prompt]
+        ];
+
+        // Add image if provided
+        if ($imagePath && file_exists($imagePath)) {
+            $imageData = file_get_contents($imagePath);
+            if ($imageData !== false) {
+                $messages[0]['images'] = [base64_encode($imageData)];
+            }
+        }
+
+        $payload = [
+            'model' => $model,
+            'messages' => $messages,
+            'stream' => false
+        ];
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_TIMEOUT => 120
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            throw new \Exception('Ollama request failed: ' . $error);
+        }
+
+        if ($httpCode !== 200) {
+            throw new \Exception('Ollama returned HTTP ' . $httpCode . ': ' . $response);
+        }
+
+        $data = json_decode($response, true);
+        if (isset($data['message']['content'])) {
+            return $data['message']['content'];
+        }
+
+        return $response;
+    }
+
+    // ========================================
+    // HTTP Helpers
+    // ========================================
+
+    private function httpGet(string $path): array
+    {
+        $url = $this->host . $path;
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_HTTPHEADER => ['Accept: application/json']
+        ]);
+
+        $body = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            return ['success' => false, 'error' => $error, 'body' => ''];
+        }
+
+        return [
+            'success' => $httpCode >= 200 && $httpCode < 300,
+            'body' => $body,
+            'http_code' => $httpCode
+        ];
+    }
+
+    private function httpPost(string $path, array $payload): array
+    {
+        $url = $this->host . $path;
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT => 300, // 5 minutes for inference
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Accept: application/json'
+            ]
+        ]);
+
+        $body = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            return ['success' => false, 'error' => $error, 'body' => ''];
+        }
+
+        return [
+            'success' => $httpCode >= 200 && $httpCode < 300,
+            'body' => $body,
+            'http_code' => $httpCode
+        ];
+    }
+}

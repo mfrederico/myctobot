@@ -1,0 +1,302 @@
+<div class="container py-4">
+    <!-- Navigation Tabs -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link" href="/mcpservers">
+                <i class="bi bi-plug"></i> MCP Servers
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link active" href="/agents">
+                <i class="bi bi-robot"></i> Agents
+            </a>
+        </li>
+    </ul>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2 mb-0">
+            <i class="bi bi-robot"></i> AI Agent Profiles
+        </h1>
+        <div>
+            <a href="/workstations" class="btn btn-outline-secondary me-2">
+                <i class="bi bi-arrow-left"></i> Workstations 
+            </a>
+            <button type="button" class="btn btn-success me-2" onclick="openAgentSetupWizard()">
+                <i class="bi bi-magic"></i> Setup Wizard
+            </button>
+            <a href="/agents/create" class="btn btn-primary">
+                <i class="bi bi-plus-lg"></i> Create Agent
+            </a>
+        </div>
+    </div>
+
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i>
+        <strong>Agent Profiles</strong> define <em>how</em> AI Developer jobs run: which runner to use, MCP servers, and hooks.
+        <strong><a href="/workstations">Workstation Runners</a></strong> define <em>where</em> jobs run (remote servers with Claude installed).
+        Assign agents to repositories on the <a href="/github/repos">Repos page</a>.
+    </div>
+
+    <?php if (empty($agents)): ?>
+    <div class="card">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-robot display-4 text-muted"></i>
+            <h4 class="mt-3">No agent profiles configured yet</h4>
+            <p class="text-muted mb-4">
+                AI Agents are intelligent assistants that can write code, review pull requests, and test your applications.
+            </p>
+            <div class="d-flex justify-content-center gap-3">
+                <button type="button" class="btn btn-success btn-lg" onclick="openAgentSetupWizard()">
+                    <i class="bi bi-magic"></i> Setup Wizard
+                    <small class="d-block fw-normal">Guided setup for beginners</small>
+                </button>
+                <a href="/agents/create" class="btn btn-outline-primary btn-lg">
+                    <i class="bi bi-plus-lg"></i> Manual Setup
+                    <small class="d-block fw-normal">Configure every option</small>
+                </a>
+            </div>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="row">
+        <?php foreach ($agents as $agent): ?>
+        <div class="col-md-6 col-lg-4 mb-4" id="agent-<?= $agent['id'] ?>">
+            <div class="card h-100 agent-card <?= !$agent['is_active'] ? 'border-secondary opacity-75' : '' ?>">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span>
+                        <i class="bi bi-robot"></i>
+                        <strong><?= h($agent['name']) ?></strong>
+                    </span>
+                    <div>
+                        <?php if ($agent['is_default']): ?>
+                        <span class="badge bg-warning text-dark">Default</span>
+                        <?php endif; ?>
+                        <span class="badge <?= $agent['is_active'] ? 'bg-success' : 'bg-secondary' ?>">
+                            <?= $agent['is_active'] ? 'Active' : 'Inactive' ?>
+                        </span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3"><?= h($agent['description'] ?: 'No description') ?></p>
+
+                    <table class="table table-sm table-borderless mb-3">
+                        <tr>
+                            <td class="text-muted" style="width: 40%">Provider:</td>
+                            <td>
+                                <?php
+                                $providerIcon = match($agent['provider']) {
+                                    'claude_cli' => 'terminal',
+                                    'claude_api' => 'cloud',
+                                    'ollama' => 'cpu',
+                                    'openai' => 'stars',
+                                    'custom_http' => 'globe',
+                                    default => 'gear'
+                                };
+                                $providerClass = match($agent['provider']) {
+                                    'claude_cli' => 'bg-primary',
+                                    'claude_api' => 'bg-info',
+                                    'ollama' => 'bg-success',
+                                    'openai' => 'bg-dark',
+                                    'custom_http' => 'bg-secondary',
+                                    default => 'bg-secondary'
+                                };
+                                ?>
+                                <?php if ($agent['provider'] === 'claude_cli'): ?>
+                                    <?php if (!empty($agent['provider_config']['use_ollama'])): ?>
+                                    <span class="badge bg-primary" title="Runner: Claude Code CLI">
+                                        <i class="bi bi-terminal"></i> Claude CLI
+                                    </span>
+                                    <span class="badge bg-info text-dark" title="LLM Engine: Ollama">
+                                        <i class="bi bi-cpu"></i> Ollama
+                                    </span>
+                                    <?php else: ?>
+                                    <span class="badge bg-primary" title="Runner: Claude Code CLI">
+                                        <i class="bi bi-terminal"></i> Claude CLI
+                                    </span>
+                                    <span class="badge bg-success" title="LLM Engine: Anthropic API">
+                                        <i class="bi bi-cloud"></i> Anthropic
+                                    </span>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                <span class="badge <?= $providerClass ?>">
+                                    <i class="bi bi-<?= $providerIcon ?>"></i>
+                                    <?= h($agent['provider_label']) ?>
+                                </span>
+                                <?php endif; ?>
+                                <?php if ($agent['expose_as_mcp']): ?>
+                                <span class="badge bg-warning text-dark" title="Exposed as MCP tool: <?= h($agent['mcp_tool_name'] ?? '') ?>">
+                                    <i class="bi bi-plug"></i> MCP
+                                </span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php if ($agent['provider'] === 'claude_cli'): ?>
+                        <tr>
+                            <td class="text-muted">Model:</td>
+                            <td>
+                                <?php if (!empty($agent['provider_config']['use_ollama'])): ?>
+                                <code><?= h($agent['provider_config']['ollama_model'] ?? 'not set') ?></code>
+                                <?php else: ?>
+                                <code><?= h($agent['provider_config']['model'] ?? 'sonnet') ?></code>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
+                        <?php if (!empty($agent['llm_capabilities'])): ?>
+                        <tr>
+                            <td class="text-muted">LLM Features:</td>
+                            <td>
+                                <?php $caps = $agent['llm_capabilities']; ?>
+                                <span class="badge <?= ($caps['tool_calling'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['tool_calling'] ?? false) ? 'Tool Calling Supported' : 'No Tool Calling' ?>">
+                                    <i class="bi bi-wrench"></i>
+                                </span>
+                                <span class="badge <?= ($caps['vision'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['vision'] ?? false) ? 'Vision Supported' : 'No Vision' ?>">
+                                    <i class="bi bi-eye"></i>
+                                </span>
+                                <span class="badge <?= ($caps['web_search'] ?? false) ? 'bg-success' : 'bg-secondary' ?>" title="<?= ($caps['web_search'] ?? false) ? 'Web Search Supported' : 'No Web Search' ?>">
+                                    <i class="bi bi-search"></i>
+                                </span>
+                                <?php if ($caps['can_orchestrate'] ?? false): ?>
+                                <span class="badge bg-primary" title="Can Orchestrate Sub-Agents">
+                                    <i class="bi bi-diagram-3"></i>
+                                </span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
+                        <tr>
+                            <td class="text-muted">MCP Servers:</td>
+                            <td>
+                                <?php if ($agent['mcp_count'] > 0): ?>
+                                <span class="badge bg-secondary"><?= $agent['mcp_count'] ?> configured</span>
+                                <?php if (($agent['mcp_token_overhead'] ?? 0) > 0): ?>
+                                <span class="badge bg-success" title="Cumulative token overhead for MCP tool definitions">
+                                    <i class="bi bi-speedometer2"></i> ~<?= number_format($agent['mcp_token_overhead']) ?>
+                                </span>
+                                <?php endif; ?>
+                                <?php else: ?>
+                                <span class="text-muted small">None</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Hooks:</td>
+                            <td>
+                                <?php if ($agent['hooks_count'] > 0): ?>
+                                <span class="badge bg-secondary"><?= $agent['hooks_count'] ?> hooks</span>
+                                <?php else: ?>
+                                <span class="text-muted small">None</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php if (($agent['capabilities_count'] ?? 0) > 0): ?>
+                        <tr>
+                            <td class="text-muted">Capabilities:</td>
+                            <td>
+                                <span class="badge bg-info"><?= $agent['capabilities_count'] ?> skills</span>
+                            </td>
+                        </tr>
+                        <?php endif; ?>
+                        <tr>
+                            <td class="text-muted">Used By:</td>
+                            <td>
+                                <?php if ($agent['repo_count'] > 0): ?>
+                                <span class="badge bg-info"><?= $agent['repo_count'] ?> repos</span>
+                                <?php else: ?>
+                                <span class="text-muted small">No repos</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="card-footer bg-transparent">
+                    <div class="d-flex justify-content-between">
+                        <a href="/agents/edit/<?= $agent['id'] ?>" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-pencil"></i> Edit
+                        </a>
+                        <button type="button" class="btn btn-sm btn-outline-danger"
+                                onclick="deleteAgent(<?= $agent['id'] ?>, '<?= h($agent['name'], ENT_QUOTES) ?>')"
+                                <?= $agent['repo_count'] > 0 ? 'disabled title="Unassign from repos first"' : '' ?>>
+                            <i class="bi bi-trash"></i> Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+</div>
+
+<script>
+function deleteAgent(id, name) {
+    if (!confirm('Are you sure you want to delete agent "' + name + '"?')) {
+        return;
+    }
+
+    fetch('/agents/delete/' + id, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete agent'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+// Highlight agent from URL hash
+function highlightAgentFromHash() {
+    const hash = window.location.hash;
+    if (hash && hash.startsWith('#agent-')) {
+        const element = document.querySelector(hash);
+        if (element) {
+            // Scroll to element
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Add highlight (stays until page navigation)
+            const card = element.querySelector('.agent-card');
+            if (card) {
+                // Remove highlight from any previously highlighted cards
+                document.querySelectorAll('.agent-highlighted').forEach(c => c.classList.remove('agent-highlighted'));
+                card.classList.add('agent-highlighted');
+            }
+        }
+    }
+}
+
+// Run on page load and hash change
+document.addEventListener('DOMContentLoaded', highlightAgentFromHash);
+window.addEventListener('hashchange', highlightAgentFromHash);
+</script>
+
+<style>
+.agent-card.agent-highlighted {
+    border: 2px solid #198754 !important;
+    box-shadow: 0 0 15px rgba(25, 135, 84, 0.4);
+    animation: pulse-highlight 0.5s ease-in-out;
+}
+
+@keyframes pulse-highlight {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); }
+}
+</style>
+
+<?php
+// Pass runner availability to wizard
+$wizardHasRunners = $has_runners ?? false;
+$wizardUseLocalRunner = $use_local_runner ?? false;
+include __DIR__ . '/../partials/agentsetupwizard.php';
+?>

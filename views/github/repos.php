@@ -1,0 +1,693 @@
+<div class="container py-4" data-assist-page="github/repos" data-assist-purpose="Manage repository connections for AI Developer jobs">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/activity?type=aidev">AI Developer</a></li>
+            <li class="breadcrumb-item active">Repositories</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2 mb-0">Repository Connections</h1>
+        <?php if (!$githubConnected): ?>
+        <a href="/connections/connect/github" class="btn btn-dark">
+            <i class="bi bi-github"></i> Connect GitHub
+        </a>
+        <?php endif; ?>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Connected Repositories -->
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Connected Repositories</h5>
+                </div>
+                <?php if (empty($repos)): ?>
+                <div class="card-body">
+                    <div class="text-center py-4">
+                        <i class="bi bi-folder2-open display-4 text-muted"></i>
+                        <p class="text-muted mt-2">No repositories connected yet.</p>
+                        <?php if ($githubConnected): ?>
+                        <p>Add a repository below to get started.</p>
+                        <?php else: ?>
+                        <a href="/connections/connect/github" class="btn btn-dark">
+                            <i class="bi bi-github"></i> Connect GitHub First
+                        </a>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div class="list-group list-group-flush">
+                    <?php foreach ($repos as $repo): ?>
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div>
+                                <i class="bi bi-<?= $repo['provider'] === 'github' ? 'github' : 'git' ?>"></i>
+                                <strong><?= h($repo['repo_owner'] . '/' . $repo['repo_name']) ?></strong>
+                                <br>
+                                <small class="text-muted">
+                                    Branch: <?= h($repo['default_branch']) ?>
+                                    <?php if ($repo['enabled']): ?>
+                                    <span class="badge bg-success">Active</span>
+                                    <?php else: ?>
+                                    <span class="badge bg-secondary">Disabled</span>
+                                    <?php endif; ?>
+                                    <?php if (!empty($repo['webhook_uid'])): ?>
+                                    <span class="badge bg-info" title="Webhook auto-configured">
+                                        <i class="bi bi-link-45deg"></i> Webhook
+                                    </span>
+                                    <?php else: ?>
+                                    <span class="badge bg-warning text-dark" title="Webhook needs manual setup - see instructions below">
+                                        <i class="bi bi-exclamation-triangle"></i> No Webhook
+                                    </span>
+                                    <?php endif; ?>
+                                </small>
+                                <div class="mt-2 p-2 bg-light rounded">
+                                    <small>
+                                        <?php if ($repo['issues_enabled']): ?>
+                                        <i class="bi bi-github"></i> <strong>To trigger AI Dev:</strong> Add this label to a GitHub Issue:
+                                        <code class="bg-primary text-white px-1 rounded">ai-dev</code>
+                                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+                                                onclick="copyLabel('ai-dev', this)" title="Copy label">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                        <?php else: ?>
+                                        <i class="bi bi-tags"></i> <strong>To trigger AI Dev:</strong> Add these Jira labels:
+                                        <code id="repoLabel<?= $repo['id'] ?>" class="bg-secondary text-white px-1 rounded ms-1">repo-<?= h($repo['slug'] ?? $repo['id']) ?></code>
+                                        <button type="button" class="btn btn-link btn-sm p-0" onclick="editSlug(<?= $repo['id'] ?>, '<?= h($repo['slug'] ?? '', ENT_QUOTES) ?>')" title="Edit slug">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        +
+                                        <code class="bg-primary text-white px-1 rounded">ai-dev</code>
+                                        <button class="btn btn-sm btn-outline-secondary ms-2" type="button"
+                                                onclick="copyLabel('repo-<?= h($repo['slug'] ?? $repo['id']) ?> ai-dev', this)" title="Copy both labels">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                        <?php endif; ?>
+                                    </small>
+                                </div>
+                            </div>
+                            <div>
+                                <a href="/github/disconnectrepo/<?= $repo['id'] ?>" class="btn btn-sm btn-outline-danger"
+                                   onclick="return confirm('Are you sure you want to disconnect this repository?')">
+                                    <i class="bi bi-x-lg"></i> Disconnect
+                                </a>
+                            </div>
+                        </div>
+                        <!-- Agent Assignment -->
+                        <div class="d-flex align-items-center gap-2 pt-2 border-top">
+                            <label class="text-muted small mb-0" style="min-width: 60px;">
+                                <i class="bi bi-robot"></i> Agent:
+                            </label>
+                            <select class="form-select form-select-sm" style="max-width: 250px;"
+                                    onchange="assignAgent(<?= $repo['id'] ?>, this.value, this)">
+                                <option value="">-- Use Default --</option>
+                                <?php foreach ($agents ?? [] as $agent): ?>
+                                <option value="<?= $agent['id'] ?>"
+                                        <?= ($repo['aiagents_id'] ?? null) == $agent['id'] ? 'selected' : '' ?>>
+                                    <?= h($agent['name']) ?>
+                                    (<?= h($agent['provider_label'] ?? $agent['provider']) ?>)
+                                    <?= $agent['is_default'] ? '[Default]' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (!empty($repo['agent_name'])): ?>
+                            <small class="text-muted">
+                                <i class="bi bi-check-circle text-success"></i>
+                            </small>
+                            <?php endif; ?>
+                            <a href="/agents" class="btn btn-sm btn-link text-muted p-0 ms-auto">
+                                <i class="bi bi-gear"></i> Manage Agents
+                            </a>
+                        </div>
+                        <?php if ($repo['provider'] === 'github'): ?>
+                        <!-- Issue Tracking Source -->
+                        <div class="d-flex align-items-center gap-2 pt-2 border-top">
+                            <label class="text-muted small mb-0" style="min-width: 80px;">
+                                <i class="bi bi-card-checklist"></i> Issues:
+                            </label>
+                            <select class="form-select form-select-sm" style="max-width: 200px;"
+                                    id="issuesSource<?= $repo['id'] ?>"
+                                    onchange="setIssueSource(<?= $repo['id'] ?>, this.value, this)">
+                                <option value="jira" <?= !$repo['issues_enabled'] ? 'selected' : '' ?>>
+                                    Jira (default)
+                                </option>
+                                <option value="github" <?= $repo['issues_enabled'] ? 'selected' : '' ?>>
+                                    GitHub Issues
+                                </option>
+                            </select>
+                            <span id="issuesStatus<?= $repo['id'] ?>" class="ms-auto"></span>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Add Repository -->
+            <?php if ($githubConnected && !empty($availableRepos)): ?>
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Add Repository</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="addRepoSelect" class="form-label">Select Repository</label>
+                        <select class="form-select" id="addRepoSelect">
+                            <option value="">Choose a repository...</option>
+                            <?php
+                            $connectedRepoNames = array_map(fn($r) => $r['repo_owner'] . '/' . $r['repo_name'], $repos);
+                            foreach ($availableRepos as $availRepo):
+                                $fullName = $availRepo['full_name'];
+                                if (in_array($fullName, $connectedRepoNames)) continue;
+                            ?>
+                            <option value="<?= h($fullName) ?>" data-branch="<?= h($availRepo['default_branch'] ?? 'main') ?>">
+                                <?= h($fullName) ?>
+                                <?= $availRepo['private'] ? ' (private)' : '' ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+
+                    <?php if (count($githubConnections ?? []) > 1): ?>
+                    <div class="mb-3">
+                        <label for="connectionSelect" class="form-label">GitHub Account</label>
+                        <select class="form-select" id="connectionSelect">
+                            <?php foreach ($githubConnections as $gc):
+                                $gcMeta = json_decode($gc->metadata_json ?: '{}', true);
+                            ?>
+                            <option value="<?= (int)$gc->id ?>">
+                                @<?= h($gcMeta['user_login'] ?? $gc->external_eid ?? 'Unknown') ?>
+                                <?= $gc->external_name ? ' (' . h($gc->external_name) . ')' : '' ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <?php endif; ?>
+
+                    <button type="button" class="btn btn-primary" id="addRepoBtn" onclick="connectRepository()">
+                        <i class="bi bi-plus-lg"></i> Connect Repository
+                    </button>
+                    <span id="addRepoStatus" class="ms-2"></span>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Board Repository Mappings (Board-Centric) -->
+            <?php if (!empty($boards)): ?>
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">Board Repository Mappings</h5>
+                    <a href="/settings/boards" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-kanban"></i> Manage Boards
+                    </a>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-4">
+                        <strong>For Jira:</strong> Map repositories to boards. Add both labels to a Jira ticket: <code>repo-{slug}</code> specifies the repository, then <code>ai-dev</code> triggers the job.
+                        <br><small class="text-info"><i class="bi bi-github"></i> <strong>For GitHub Issues:</strong> Just add the <code>ai-dev</code> label directly to an issue — no board mapping needed.</small>
+                    </p>
+
+                    <?php foreach ($boards as $board):
+                        $boardMappings = $mappings[$board['id']] ?? [];
+                    ?>
+                    <div class="card mb-3 bg-light">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-3">
+                                <div>
+                                    <h6 class="mb-1">
+                                        <i class="bi bi-kanban"></i>
+                                        <?= h($board['board_name']) ?>
+                                    </h6>
+                                    <small class="text-muted"><?= h($board['project_key']) ?></small>
+                                </div>
+                            </div>
+
+                            <?php if (empty($boardMappings)): ?>
+                            <p class="text-muted mb-3"><em>No repositories mapped</em></p>
+                            <?php else: ?>
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm table-bordered bg-white mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Repository</th>
+                                            <th style="width: 240px;">Trigger Labels</th>
+                                            <th style="width: 80px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($boardMappings as $mapping):
+                                            $repo = null;
+                                            foreach ($repos as $r) {
+                                                if ($r['id'] == $mapping['repoconnections_id']) {
+                                                    $repo = $r;
+                                                    break;
+                                                }
+                                            }
+                                            if (!$repo) continue;
+                                            $repoSlug = $repo['slug'] ?? $repo['id'];
+                                            $repoLabel = 'repo-' . $repoSlug;
+                                            $fullLabels = $repoLabel . ' ai-dev';
+                                            $usesGitHubIssues = !empty($repo['issues_enabled']);
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <i class="bi bi-github"></i>
+                                                <?= h($repo['repo_owner'] . '/' . $repo['repo_name']) ?>
+                                                <br>
+                                                <small class="text-muted">Branch: <?= h($repo['default_branch']) ?></small>
+                                                <?php if ($usesGitHubIssues): ?>
+                                                <br><small class="text-info"><i class="bi bi-github"></i> GitHub Issues</small>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <?php if ($usesGitHubIssues): ?>
+                                                <div class="d-flex gap-1 align-items-center">
+                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
+                                                    <small class="text-muted">(on GitHub Issue)</small>
+                                                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                                                            onclick="copyLabel('ai-dev', this)" title="Copy label">
+                                                        <i class="bi bi-clipboard"></i>
+                                                    </button>
+                                                </div>
+                                                <?php else: ?>
+                                                <div class="d-flex gap-1 align-items-center">
+                                                    <code class="bg-secondary text-white px-2 py-1 rounded"><?= $repoLabel ?></code>
+                                                    <code class="bg-primary text-white px-2 py-1 rounded">ai-dev</code>
+                                                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                                                            onclick="copyLabel('<?= $fullLabels ?>', this)" title="Copy both labels">
+                                                        <i class="bi bi-clipboard"></i>
+                                                    </button>
+                                                </div>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td>
+                                                <a href="/github/unmapboard?board_id=<?= $board['id'] ?>&repo_id=<?= $repo['id'] ?>"
+                                                   class="btn btn-sm btn-outline-danger"
+                                                   onclick="return confirm('Remove this mapping?')">
+                                                    <i class="bi bi-x-lg"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <?php endif; ?>
+
+                            <!-- Add repo to this board -->
+                            <?php if (!empty($repos)): ?>
+                            <?php
+                            // Find repos not yet mapped to this board
+                            $mappedRepoIds = array_map(fn($m) => $m['repoconnections_id'], $boardMappings);
+                            $unmappedRepos = array_filter($repos, fn($r) => !in_array($r['id'], $mappedRepoIds));
+                            ?>
+                            <?php if (!empty($unmappedRepos)): ?>
+                            <form method="POST" action="/github/mapboard" class="d-flex gap-2">
+                                <?php if (!empty($csrf) && is_array($csrf)): ?>
+                                    <?php foreach ($csrf as $name => $value): ?>
+                                        <input type="hidden" name="<?= h($name) ?>" value="<?= h($value) ?>">
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                                <input type="hidden" name="board_id" value="<?= $board['id'] ?>">
+                                <select class="form-select form-select-sm" name="repo_id" required style="max-width: 300px;">
+                                    <option value="">Add repository...</option>
+                                    <?php foreach ($unmappedRepos as $repo): ?>
+                                    <option value="<?= $repo['id'] ?>">
+                                        <?= h($repo['repo_owner'] . '/' . $repo['repo_name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    <i class="bi bi-plus-lg"></i> Add
+                                </button>
+                            </form>
+                            <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+
+                    <?php
+                    // Get an example slug from connected repos for the help text
+                    $exampleSlug = 'myapp';
+                    if (!empty($repos)) {
+                        $firstRepo = reset($repos);
+                        $exampleSlug = $firstRepo['slug'] ?? $firstRepo['repo_name'] ?? 'myapp';
+                    }
+                    ?>
+                    <div class="alert alert-info mt-3 mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>How it works:</strong>
+                        <div class="row mt-2">
+                            <div class="col-md-6">
+                                <strong><i class="bi bi-kanban"></i> Jira Workflow:</strong>
+                                <ol class="mb-0 mt-1 small">
+                                    <li>Add <code>repo-<?= h($exampleSlug) ?></code> to specify which repository</li>
+                                    <li>Add <code>ai-dev</code> to trigger the job</li>
+                                </ol>
+                            </div>
+                            <div class="col-md-6">
+                                <strong><i class="bi bi-github"></i> GitHub Issues Workflow:</strong>
+                                <ol class="mb-0 mt-1 small">
+                                    <li>Add <code>ai-dev</code> label to a GitHub Issue</li>
+                                    <li>That's it! The repo is already known from the issue.</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">About Repository Connections</h5>
+                    <p class="text-muted">
+                        Connect your GitHub repositories to enable the AI Developer to create branches, commit code, and open pull requests.
+                    </p>
+                    <ul class="small">
+                        <li>OAuth tokens are securely encrypted</li>
+                        <li>Only repositories you have push access to are shown</li>
+                        <li>Each repo gets a unique label for AI Developer</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h5 class="card-title">Using Labels</h5>
+                    <p class="text-muted small">
+                        Each repository has a unique label like <code>repo-myapp</code>.
+                        Add this label first, then add <code>ai-dev</code> to trigger the job.
+                    </p>
+                    <p class="text-muted small">
+                        <strong>Example:</strong> If your frontend repo has slug <code>frontend</code> (label: <code>repo-frontend</code>) and backend
+                        has slug <code>backend</code> (label: <code>repo-backend</code>), add the appropriate repo label first, then <code>ai-dev</code> to trigger.
+                    </p>
+                    <p class="text-muted small mb-0">
+                        <i class="bi bi-pencil"></i> Click the pencil icon next to any repo's label to customize its slug.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card mt-3 border-info">
+                <div class="card-header bg-info text-white">
+                    <i class="bi bi-github"></i> GitHub Webhook Setup
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-2">
+                        <i class="bi bi-check-circle text-success"></i> <strong>Webhooks are auto-created</strong> when you connect a repository. If a repo shows "No Webhook", you may need to set it up manually:
+                    </p>
+                    <ol class="small mb-3">
+                        <li>Go to your repo on GitHub</li>
+                        <li>Click <strong>Settings</strong> &rarr; <strong>Webhooks</strong></li>
+                        <li>Click <strong>Add webhook</strong></li>
+                        <li>Configure:
+                            <?php
+                            $workspace = $_SERVER['WORKSPACE'] ?? null;
+                            $webhookDomain = $workspace ? "{$workspace}.myctobot.ai" : 'myctobot.ai';
+                            ?>
+                            <ul class="mb-1">
+                                <li><strong>Payload URL:</strong><br>
+                                    <code class="user-select-all">https://<?= h($webhookDomain) ?>/webhook/github</code>
+                                </li>
+                                <li><strong>Content type:</strong> <code>application/json</code></li>
+                                <li><strong>Events:</strong> Select "Let me select individual events" then check <strong>Issues</strong> and <strong>Issue comments</strong></li>
+                            </ul>
+                        </li>
+                        <li>Click <strong>Add webhook</strong></li>
+                    </ol>
+                    <p class="text-muted small mb-0">
+                        <i class="bi bi-info-circle"></i> Manual setup is usually needed if you don't have admin access to the repo. After adding, check "Recent Deliveries" for a green checkmark to confirm it's working.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h5 class="card-title">Quick Links</h5>
+                    <div class="list-group">
+                        <a href="/activity?type=aidev" class="list-group-item list-group-item-action">
+                            <i class="bi bi-house"></i> AI Developer Dashboard
+                        </a>
+                        <a href="/settings/connections" class="list-group-item list-group-item-action">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                        <a href="/activity?type=aidev" class="list-group-item list-group-item-action">
+                            <i class="bi bi-list-ul"></i> View Jobs
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Slug Edit Modal -->
+<div class="modal fade" id="slugModal" tabindex="-1" aria-labelledby="slugModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="slugModalLabel">Edit Repository Slug</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small">
+                    The slug is used in Jira labels (e.g., <code>repo-<span id="slugPreview">myapp</span></code>).
+                    Use lowercase letters, numbers, and hyphens only.
+                </p>
+                <div class="mb-3">
+                    <label for="slugInput" class="form-label">Slug</label>
+                    <input type="text" class="form-control" id="slugInput" placeholder="my-repo-name"
+                           pattern="[a-z0-9][a-z0-9-]*[a-z0-9]|[a-z0-9]" maxlength="50"
+                           oninput="updateSlugPreview(this.value)">
+                    <div class="form-text">Lowercase letters, numbers, and hyphens. Cannot start or end with hyphen.</div>
+                </div>
+                <input type="hidden" id="slugRepoId">
+                <div id="slugError" class="alert alert-danger d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveSlug()">
+                    <i class="bi bi-check"></i> Save
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyLabel(label, btn) {
+    navigator.clipboard.writeText(label).then(() => {
+        const icon = btn.querySelector('i');
+        icon.className = 'bi bi-check';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+            icon.className = 'bi bi-clipboard';
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-secondary');
+        }, 1500);
+    });
+}
+
+function assignAgent(repoId, agentId, selectEl) {
+    fetch('/github/assignagent', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            repo_id: repoId,
+            agent_id: agentId || null
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show brief success indicator
+            selectEl.style.borderColor = '#198754';
+            setTimeout(() => {
+                selectEl.style.borderColor = '';
+            }, 1500);
+        } else {
+            alert('Error: ' + (data.message || 'Failed to assign agent'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+function setIssueSource(repoId, source, selectEl) {
+    const statusEl = document.getElementById('issuesStatus' + repoId);
+    const enabled = (source === 'github');
+    const previousValue = enabled ? 'jira' : 'github';
+
+    fetch('/github/toggleissues', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            id: repoId,
+            enabled: enabled
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show brief success indicator
+            statusEl.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+            selectEl.style.borderColor = '#198754';
+            setTimeout(() => {
+                statusEl.innerHTML = '';
+                selectEl.style.borderColor = '';
+            }, 1500);
+        } else {
+            // Revert dropdown on error
+            selectEl.value = previousValue;
+            alert('Error: ' + (data.message || 'Failed to update issue source'));
+        }
+    })
+    .catch(error => {
+        selectEl.value = previousValue;
+        alert('Error: ' + error.message);
+    });
+}
+
+function connectRepository() {
+    const select = document.getElementById('addRepoSelect');
+    const btn = document.getElementById('addRepoBtn');
+    const status = document.getElementById('addRepoStatus');
+    const fullName = select.value;
+    const defaultBranch = select.options[select.selectedIndex]?.dataset?.branch || 'main';
+
+    // Get connection ID from selector if it exists
+    const connectionSelect = document.getElementById('connectionSelect');
+    const connectionId = connectionSelect ? connectionSelect.value : null;
+
+    if (!fullName) {
+        alert('Please select a repository');
+        return;
+    }
+
+    btn.disabled = true;
+    status.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Connecting...';
+
+    fetch('/github/addrepo', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            full_name: fullName,
+            default_branch: defaultBranch,
+            connection_id: connectionId
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        btn.disabled = false;
+        if (data.success) {
+            status.innerHTML = '<i class="bi bi-check-circle text-success"></i> Connected!';
+            // Reload page to show new repo
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        } else {
+            status.innerHTML = '<i class="bi bi-x-circle text-danger"></i> ' + (data.message || 'Failed');
+        }
+    })
+    .catch(error => {
+        btn.disabled = false;
+        status.innerHTML = '<i class="bi bi-x-circle text-danger"></i> Error: ' + error.message;
+    });
+}
+
+function editSlug(repoId, currentSlug) {
+    document.getElementById('slugRepoId').value = repoId;
+    document.getElementById('slugInput').value = currentSlug || '';
+    document.getElementById('slugPreview').textContent = currentSlug || 'slug';
+    document.getElementById('slugError').classList.add('d-none');
+
+    const modal = new bootstrap.Modal(document.getElementById('slugModal'));
+    modal.show();
+}
+
+function updateSlugPreview(value) {
+    const preview = document.getElementById('slugPreview');
+    preview.textContent = value || 'slug';
+}
+
+function saveSlug() {
+    const repoId = document.getElementById('slugRepoId').value;
+    const slug = document.getElementById('slugInput').value.trim().toLowerCase();
+    const errorEl = document.getElementById('slugError');
+
+    // Basic validation
+    if (!slug) {
+        errorEl.textContent = 'Slug cannot be empty';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug)) {
+        errorEl.textContent = 'Invalid format. Use lowercase letters, numbers, and hyphens. Cannot start or end with hyphen.';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    if (slug.length > 50) {
+        errorEl.textContent = 'Slug must be 50 characters or less';
+        errorEl.classList.remove('d-none');
+        return;
+    }
+
+    errorEl.classList.add('d-none');
+
+    fetch('/github/updateslug', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        },
+        body: JSON.stringify({
+            repo_id: parseInt(repoId),
+            slug: slug
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Update the label display
+            const labelEl = document.getElementById('repoLabel' + repoId);
+            if (labelEl) {
+                labelEl.textContent = data.data.tag;
+            }
+
+            // Close modal
+            const modal = bootstrap.Modal.getInstance(document.getElementById('slugModal'));
+            modal.hide();
+
+            // Show success message briefly (could use toast)
+            // Reload to ensure all labels are updated
+            window.location.reload();
+        } else {
+            errorEl.textContent = data.message || 'Failed to update slug';
+            errorEl.classList.remove('d-none');
+        }
+    })
+    .catch(error => {
+        errorEl.textContent = 'Error: ' + error.message;
+        errorEl.classList.remove('d-none');
+    });
+}
+</script>

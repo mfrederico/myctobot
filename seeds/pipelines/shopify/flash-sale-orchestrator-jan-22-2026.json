@@ -1,0 +1,241 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Flash Sale Orchestrator - Jan 22, 2026",
+        "slug": "flash-sale-orchestrator-jan-22-2026",
+        "description": "",
+        "columns_json": [
+            "Setup",
+            "Data",
+            "Stage 3"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "product_handle": {
+                    "type": "string",
+                    "description": "The product handle value (update this description for MCP)"
+                }
+            },
+            "required": [
+                "product_handle"
+            ]
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "query_products",
+            "label": "Query Products",
+            "row": 0,
+            "col": 0,
+            "step_type": "shopify_graphql",
+            "config_json": {
+                "connection_id": "1",
+                "query": "query getProductByHandle($handle: String!) {\n  productByHandle(handle: $handle) {\n    id\n    title\n    description\n    handle\n    status\n    totalInventory\n    variants(first: 10) {\n      edges {\n        node {\n          id\n          title\n          sku\n          price\n          inventoryQuantity\n        }\n      }\n    }\n    metafields(first: 10) {\n      edges {\n        node {\n          namespace\n          key\n          value\n          type\n        }\n      }\n    }\n  }\n}",
+                "variables": {
+                    "handle": "{context.product_handle}"
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": {
+                "shop": {
+                    "path": "shop",
+                    "fullPath": "query_products.output.shop"
+                },
+                "title": {
+                    "path": "data.productByHandle.title",
+                    "fullPath": "query_products.output.data.productByHandle.title"
+                },
+                "description": {
+                    "path": "data.productByHandle.description",
+                    "fullPath": "query_products.output.data.productByHandle.description"
+                },
+                "handle": {
+                    "path": "data.productByHandle.handle",
+                    "fullPath": "query_products.output.data.productByHandle.handle"
+                },
+                "totalInventory": {
+                    "path": "data.productByHandle.totalInventory",
+                    "fullPath": "query_products.output.data.productByHandle.totalInventory"
+                },
+                "variants": {
+                    "path": "data.productByHandle.variants",
+                    "fullPath": "query_products.output.data.productByHandle.variants"
+                }
+            },
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "store_original_state",
+            "label": "Store Original State",
+            "row": 0,
+            "col": 1,
+            "step_type": "parser",
+            "config_json": {
+                "parser_type": "jq",
+                "expression": ".data.productByHandle | {\"title\":.title, \"id\":.id, \"variant\" : {\"sku\":.variants.edges[0].node.sku,\"price\":.variants.edges[0].node.price,\"inventory\" :.variants.edges[0].node.inventoryQuantity }}"
+            },
+            "input_source": "stdin",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": {
+                "sku": {
+                    "path": "variant.sku",
+                    "fullPath": "store_original_state.output.variant.sku"
+                },
+                "price": {
+                    "path": "variant.price",
+                    "fullPath": "store_original_state.output.variant.price"
+                },
+                "inventory": {
+                    "path": "variant.inventory",
+                    "fullPath": "store_original_state.output.variant.inventory"
+                },
+                "title": {
+                    "path": "title",
+                    "fullPath": "store_original_state.output.title"
+                },
+                "id": {
+                    "path": "id",
+                    "fullPath": "store_original_state.output.id"
+                }
+            },
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "write_promptfile",
+            "label": "Writing prompt file",
+            "row": 0,
+            "col": 2,
+            "step_type": "file_write",
+            "config_json": {
+                "filename": "prompt.txt",
+                "source": "template",
+                "content": "Generate sale messaging and announcement banner HTML based on: \n- Up to 3 Specific item callouts \n- Urgent flash sale tone talking about: {query_products.output.data.productByHandle.description}\n- emphasize limited time and great savings\n- Only {store_original_state.output.variant.inventory} items remain!\n----------------------------------------------------------------",
+                "source_step": "",
+                "source_field": "",
+                "base64_var": "",
+                "content_type": "text/plain",
+                "append": true
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "generate_sale_copy",
+            "label": "Generate Sale Copy",
+            "row": 1,
+            "col": 0,
+            "step_type": "ai_agent",
+            "config_json": {
+                "agent_id": "5",
+                "runner_id": "",
+                "prompt": "Generate sale messaging and announcement banner HTML based on: \n- Up to 3 Specific item callouts \n- Urgent flash sale tone talking about: {query_products.output.data.productByHandle.description}\n- emphasize limited time and great savings\n- Only {store_original_state.output.variant.inventory} items remain!"
+            },
+            "input_source": "stdin",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "ignore",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "test_variables",
+            "label": "test_variables",
+            "row": 1,
+            "col": 1,
+            "step_type": "file_write",
+            "config_json": {
+                "filename": "",
+                "source": "template",
+                "content": "Product: {query_products.output.data.productByHandle.title}",
+                "source_step": "",
+                "source_field": "",
+                "base64_var": "",
+                "content_type": "",
+                "append": false
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "create_discounts",
+            "label": "Create Discounts",
+            "row": 2,
+            "col": 0,
+            "step_type": "file_write",
+            "config_json": {
+                "filename": "discount.txt",
+                "source": "stdin",
+                "content": "",
+                "source_step": "",
+                "source_field": "",
+                "base64_var": "",
+                "content_type": "text/plain",
+                "append": true
+            },
+            "input_source": "stdin",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

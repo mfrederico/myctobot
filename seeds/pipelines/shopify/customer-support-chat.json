@@ -1,0 +1,122 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Customer Support Chat",
+        "slug": "customer-support-chat",
+        "description": "Multi-turn customer support chat pipeline. Receives customer messages, generates AI responses using order context, and loops for continued conversation.",
+        "columns_json": [
+            "Receive",
+            "Respond",
+            "Loop"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": [],
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "receive_message",
+            "label": "Await Message",
+            "row": 0,
+            "col": 0,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "Waiting for customer message...",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Customer message"
+                        }
+                    },
+                    "required": [
+                        "message"
+                    ]
+                },
+                "timeout_seconds": 1800,
+                "allowed_sources": [
+                    "mcp",
+                    "webhook",
+                    "form"
+                ]
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "generate_response",
+            "label": "AI Response",
+            "row": 0,
+            "col": 1,
+            "step_type": "ai_agent",
+            "config_json": {
+                "agent_id": "10",
+                "runner_id": "",
+                "execution_mode": "api",
+                "working_dir": "",
+                "prompt": "Previous conversation:\n{context._input.conversation_history}\n\nCustomer's latest message: {context._input.message}\n\nProduct context (if relevant):\n{context._input.product_context}\n\nRespond helpfully based on the order details and conversation history.\n\nIMPORTANT: Reply with plain text only. Do NOT wrap your response in JSON, code blocks, or any structured format.",
+                "system_prompt": "You are a helpful customer support agent for Shopify stores. You have access to order information provided in the conversation context.\n\nRules:\n- Explain things simply, as if talking to a 5 year old. Use short sentences and simple words.\n- Do NOT greet the customer by name on every response. Only greet them on your very first message.\n- Do NOT use emojis.\n- Only discuss the verified customers orders.\n- For refunds, cancellations, or complex issues, explain you will escalate to the support team.\n- Keep responses short and direct. Do not over-explain.\n- Be professional but warm.\n- NEVER output JSON. Always reply in plain conversational text.",
+                "wait_for_completion": true,
+                "json_output": false
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "loop_back",
+            "label": "Continue Chat",
+            "row": 0,
+            "col": 2,
+            "step_type": "condition",
+            "config_json": {
+                "left": "{generate_response.output}",
+                "operator": "is_not_empty",
+                "then_goto": "receive_message",
+                "else_goto": ""
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "dynamic",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

@@ -1,0 +1,243 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Multi-Turn Input Test",
+        "slug": "multi-turn-input-test",
+        "description": "Test pipeline with 3 await_input steps to demonstrate multi-turn workflows",
+        "columns_json": [
+            "Main"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "user_name": {
+                    "type": "string",
+                    "description": "Name of the user"
+                }
+            },
+            "required": [
+                "user_name"
+            ]
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "greeting",
+            "label": "Greeting",
+            "row": 0,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo \"Hello {context.user_name}! Welcome to the multi-turn test.\""
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "ask_color",
+            "label": "Ask Favorite Color",
+            "row": 1,
+            "col": 0,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "What is your favorite color?",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "color": {
+                            "type": "string",
+                            "description": "Your favorite color"
+                        }
+                    },
+                    "required": [
+                        "color"
+                    ]
+                },
+                "timeout_seconds": 3600,
+                "allowed_sources": [
+                    "mcp",
+                    "webhook",
+                    "form"
+                ]
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "process_color",
+            "label": "Process Color",
+            "row": 2,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo \"Great choice! Your color has been recorded.\""
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "ask_food",
+            "label": "Ask Favorite Food",
+            "row": 3,
+            "col": 0,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "What is your favorite food?",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "food": {
+                            "type": "string",
+                            "description": "Your favorite food"
+                        }
+                    },
+                    "required": [
+                        "food"
+                    ]
+                },
+                "timeout_seconds": 3600,
+                "allowed_sources": [
+                    "mcp",
+                    "webhook",
+                    "form"
+                ]
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "process_food",
+            "label": "Process Food",
+            "row": 4,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo \"Yum! Your food preference has been recorded.\""
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "ask_confirm",
+            "label": "Confirm Choices",
+            "row": 5,
+            "col": 0,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "Please confirm your choices. Is everything correct?",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "confirmed": {
+                            "type": "boolean",
+                            "description": "Confirm your choices (true/false)"
+                        }
+                    },
+                    "required": [
+                        "confirmed"
+                    ]
+                },
+                "timeout_seconds": 3600,
+                "allowed_sources": [
+                    "mcp",
+                    "webhook",
+                    "form"
+                ]
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "summary",
+            "label": "Final Summary",
+            "row": 6,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo \"Thank you {context.user_name}! Your profile is complete.\""
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

@@ -1,0 +1,370 @@
+<?php
+/**
+ * Atlassian Controller
+ * Handles Atlassian OAuth 2.0 connection and management
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \RedBeanPHP\R as R;
+use \Exception as Exception;
+use \app\Bean;
+use \app\plugins\AtlassianAuth;
+use \app\WorkspaceResolver;
+
+// Load Atlassian Auth plugin
+require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
+
+class Atlassian extends BaseControls\Control {
+
+    /**
+     * Show Atlassian connection status and options
+     */
+    public function index() {
+        if (!$this->requireLogin()) return;
+
+        $sites = AtlassianAuth::getConnectedSites($this->member->id);
+
+        // Fetch registered webhooks for each site
+        $webhooksPerSite = [];
+        foreach ($sites as $site) {
+            $cloudId = $site->external_eid;
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $cloudId);
+            if ($accessToken) {
+                $webhooksPerSite[$cloudId] = AtlassianAuth::getRegisteredWebhooks($cloudId, $accessToken);
+            }
+        }
+
+        $this->render('atlassian/index', [
+            'title' => 'Atlassian Connection',
+            'sites' => $sites,
+            'atlassianConfigured' => AtlassianAuth::isConfigured(),
+            'webhooksPerSite' => $webhooksPerSite
+        ]);
+    }
+
+    /**
+     * Start Atlassian OAuth flow - delegates to generic Connections controller
+     */
+    public function connect() {
+        Flight::redirect('/connections/connect/atlassian');
+    }
+
+    /**
+     * Handle Atlassian OAuth callback - forwards to generic Connections controller
+     */
+    public function callback() {
+        $queryString = $_SERVER['QUERY_STRING'] ?? '';
+        Flight::redirect('/connections/callback/atlassian' . ($queryString ? '?' . $queryString : ''));
+    }
+
+    /**
+     * Disconnect a specific Atlassian site
+     */
+    public function disconnect($params = []) {
+        if (!$this->requireLogin()) return;
+
+        try {
+            // Cloud ID comes from URL: /atlassian/disconnect/{cloud_uid}
+            $cloudId = $this->opId() ?? $this->getParam('cloud_uid');
+
+            if (empty($cloudId)) {
+                if (Flight::request()->ajax) {
+                    $this->jsonError('No site specified');
+                } else {
+                    $this->flash('error', 'No site specified');
+                    Flight::redirect('/atlassian');
+                }
+                return;
+            }
+
+            $success = AtlassianAuth::disconnect($this->member->id, $cloudId);
+
+            if (Flight::request()->ajax) {
+                if ($success) {
+                    $this->jsonSuccess([], 'Atlassian site disconnected');
+                } else {
+                    $this->jsonError('Could not disconnect site');
+                }
+            } else {
+                if ($success) {
+                    $this->flash('success', 'Atlassian site disconnected');
+                } else {
+                    $this->flash('error', 'Could not disconnect site');
+                }
+                Flight::redirect('/atlassian');
+            }
+
+        } catch (Exception $e) {
+            $this->handleException($e, 'Disconnect failed');
+            Flight::redirect('/settings');
+        }
+    }
+
+    /**
+     * Disconnect all Atlassian sites
+     */
+    public function disconnectall() {
+        if (!$this->requireLogin()) return;
+
+        try {
+            $count = AtlassianAuth::disconnectAll($this->member->id);
+
+            if ($count > 0) {
+                $this->flash('success', "Disconnected {$count} Atlassian site(s)");
+            } else {
+                $this->flash('info', 'No Atlassian sites were connected');
+            }
+
+            Flight::redirect('/settings');
+
+        } catch (Exception $e) {
+            $this->handleException($e, 'Disconnect failed');
+            Flight::redirect('/settings');
+        }
+    }
+
+    /**
+     * Refresh tokens (AJAX endpoint)
+     */
+    public function refresh($params = []) {
+        if (!$this->requireLogin()) return;
+
+        try {
+            // Cloud ID comes from URL: /atlassian/refresh/{cloud_uid}
+            $cloudId = $this->opId() ?? $this->getParam('cloud_uid');
+
+            if (empty($cloudId)) {
+                $this->jsonError('No cloud ID specified', 400);
+                return;
+            }
+
+            $success = AtlassianAuth::refreshToken($this->member->id, $cloudId);
+
+            if ($success) {
+                $this->jsonSuccess(['refreshed' => true], 'Token refreshed successfully');
+            } else {
+                $this->jsonError('Could not refresh token. Please reconnect.', 401);
+            }
+
+        } catch (Exception $e) {
+            $this->logger->error('Token refresh failed: ' . $e->getMessage());
+            $this->jsonError('Token refresh failed', 500);
+        }
+    }
+
+    /**
+     * List connected resources (AJAX endpoint)
+     */
+    public function resources() {
+        if (!$this->requireLogin()) return;
+
+        try {
+            $sites = AtlassianAuth::getConnectedSites($this->member->id);
+
+            $resources = [];
+            foreach ($sites as $site) {
+                $resources[] = [
+                    'cloud_uid' => $site->external_eid,
+                    'site_url' => $site->external_url,
+                    'site_name' => $site->external_name,
+                    'connected_at' => $site->created_at,
+                    'expires_at' => $site->expires_at
+                ];
+            }
+
+            $this->jsonSuccess(['resources' => $resources]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Resources fetch failed: ' . $e->getMessage());
+            $this->jsonError('Could not fetch resources', 500);
+        }
+    }
+
+    /**
+     * Check connection status (AJAX endpoint)
+     */
+    public function status() {
+        if (!$this->requireLogin()) return;
+
+        try {
+            $sites = AtlassianAuth::getConnectedSites($this->member->id);
+            $connected = count($sites) > 0;
+
+            $status = [
+                'connected' => $connected,
+                'site_count' => count($sites),
+                'configured' => AtlassianAuth::isConfigured()
+            ];
+
+            if ($connected) {
+                $status['sites'] = array_map(function($site) {
+                    $expired = strtotime($site->expires_at) < time();
+                    return [
+                        'cloud_uid' => $site->external_eid,
+                        'site_name' => $site->external_name,
+                        'site_url' => $site->external_url,
+                        'expired' => $expired
+                    ];
+                }, array_values($sites));
+            }
+
+            $this->jsonSuccess($status);
+
+        } catch (Exception $e) {
+            $this->logger->error('Status check failed: ' . $e->getMessage());
+            $this->jsonError('Could not check status', 500);
+        }
+    }
+
+    /**
+     * Refresh webhook for a site (delete old + register new)
+     */
+    public function refreshwebhook($params = []) {
+        if (!$this->requireLogin()) return;
+
+        try {
+            $cloudId = $params['cloud_uid'] ?? $this->getParam('cloud_uid');
+            if (!$cloudId) {
+                $this->flash('error', 'No site specified');
+                Flight::redirect('/atlassian');
+                return;
+            }
+
+            $accessToken = AtlassianAuth::getValidToken($this->member->id, $cloudId);
+            if (!$accessToken) {
+                $this->flash('error', 'Could not get access token');
+                Flight::redirect('/atlassian');
+                return;
+            }
+
+            // Delete existing webhooks for this site
+            $existingWebhooks = AtlassianAuth::getRegisteredWebhooks($cloudId, $accessToken);
+            $deleted = 0;
+            foreach ($existingWebhooks as $webhook) {
+                if (isset($webhook['id'])) {
+                    if (AtlassianAuth::deleteWebhook($cloudId, $accessToken, (int)$webhook['id'])) {
+                        $deleted++;
+                    }
+                }
+            }
+
+            // Register new webhook
+            $registered = AtlassianAuth::registerAIDevWebhook($this->member->id, $cloudId, $accessToken);
+
+            if ($registered) {
+                $this->flash('success', "Webhook refreshed (deleted {$deleted}, registered new)");
+            } else {
+                $this->flash('warning', "Deleted {$deleted} webhooks but failed to register new one");
+            }
+
+            Flight::redirect('/atlassian');
+
+        } catch (Exception $e) {
+            $this->handleException($e, 'Webhook refresh failed');
+            Flight::redirect('/atlassian');
+        }
+    }
+
+    /**
+     * Re-register Jira webhook with correct workspace URL (AJAX)
+     * POST /atlassian/reregisterwebhook
+     */
+    public function reregisterwebhook() {
+        if (!$this->requireLogin()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
+
+        $cloudId = $this->getParam('cloud_uid');
+        if (empty($cloudId)) {
+            // Try to get from member's first Atlassian connection (or shared)
+            $conn = Bean::findOne('connections', 'connector_type = ? AND (member_id = ? OR shared = 1)', ['atlassian', $this->member->id]);
+            if ($conn) {
+                $cloudId = $conn->external_eid;
+            }
+        }
+
+        if (empty($cloudId)) {
+            $this->json(['success' => false, 'error' => 'No Atlassian connection found']);
+            return;
+        }
+
+        try {
+            $result = AtlassianAuth::reregisterAIDevWebhook($this->member->id, $cloudId);
+
+            if ($result) {
+                $workspaceSlug = $_SESSION['workspace_slug'] ?? 'default';
+                $this->json([
+                    'success' => true,
+                    'message' => "Webhook re-registered with workspace: {$workspaceSlug}"
+                ]);
+            } else {
+                $this->json(['success' => false, 'error' => 'Failed to re-register webhook']);
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Webhook re-registration failed', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Upgrade Atlassian scopes to include write access
+     */
+    public function upgradescopes() {
+        if (!$this->requireLogin()) return;
+
+        $loginUrl = AtlassianAuth::getLoginUrlWithWriteScopes();
+        Flight::redirect($loginUrl);
+    }
+
+    /**
+     * Switch to a workspace/workspace database context
+     * Used when callback URL contains ?workspace=xxx parameter
+     *
+     * @param string $workspace Workspace/workspace slug
+     */
+    private function switchToWorkspace(string $workspace): void {
+        if (!WorkspaceResolver::switchDatabase($workspace)) {
+            $this->logger->warning("Failed to switch to workspace: {$workspace}");
+        }
+    }
+
+    // ========================================
+    // Static Label Management Methods
+    // ========================================
+
+    /**
+     * Remove a label from a Jira issue
+     */
+    public static function removeLabel(string $issueKey, int $memberId, string $cloudId, string $label): void {
+        $logger = Flight::get('log');
+        try {
+            $jiraClient = new \app\services\JiraClient($memberId, $cloudId);
+            $jiraClient->removeLabel($issueKey, $label);
+            $logger->info("Removed {$label} label from Jira ticket", [
+                'issue_key' => $issueKey,
+                'member_id' => $memberId
+            ]);
+        } catch (\Exception $e) {
+            // 404 means label wasn't on the issue - that's OK
+            if (strpos($e->getMessage(), '404') === false) {
+                $logger->warning("Failed to remove {$label} label from Jira", [
+                    'issue_key' => $issueKey,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Remove ai-dev and myctobot-working labels from Jira issue (called on /exit)
+     */
+    public static function removeLabelsOnExit(string $issueKey, int $memberId, string $cloudId): void {
+        self::removeLabel($issueKey, $memberId, $cloudId, 'ai-dev');
+        self::removeLabel($issueKey, $memberId, $cloudId, 'myctobot-working');
+    }
+}

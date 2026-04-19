@@ -1,0 +1,371 @@
+<?php
+/**
+ * Settings Controller
+ * User settings and preferences
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \RedBeanPHP\R as R;
+use \app\Bean;
+use \Exception as Exception;
+use \app\plugins\AtlassianAuth;
+use \app\services\UserDatabaseService;
+use \app\services\SubscriptionService;
+use \app\services\TierFeatures;
+
+require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
+require_once __DIR__ . '/../services/UserDatabaseService.php';
+require_once __DIR__ . '/../services/ConnectionsService.php';
+
+use \app\services\ConnectionsService;
+
+class Settings extends BaseControls\Control {
+
+    /**
+     * Settings dashboard - overview of all configuration sections
+     */
+    public function index() {
+        if (!$this->requireLogin()) return;
+
+        // Build settings sections with counts/status
+        $sections = [];
+
+        // Connections
+        $connectionCount = Bean::count('connections', ' member_id = ? OR shared = 1 ', [$this->member->id]);
+        $sections[] = [
+            'title' => 'Connections',
+            'description' => 'Manage integrations with external services',
+            'icon' => 'bi-plug',
+            'color' => 'primary',
+            'url' => '/settings/connections',
+            'badge' => $connectionCount . ' connected',
+            'badge_class' => $connectionCount > 0 ? 'bg-success' : 'bg-secondary',
+        ];
+
+        // Repositories
+        $repoCount = Bean::count('repoconnections', '1');
+        $sections[] = [
+            'title' => 'Repositories',
+            'description' => 'GitHub repositories linked for AI dev jobs',
+            'icon' => 'bi-github',
+            'color' => 'dark',
+            'url' => '/settings/repos',
+            'badge' => $repoCount . ' repos',
+            'badge_class' => $repoCount > 0 ? 'bg-success' : 'bg-secondary',
+        ];
+
+        // Jira Boards
+        $boardCount = Bean::count('jiraboards', '1');
+        $sections[] = [
+            'title' => 'Jira Boards',
+            'description' => 'Board configuration for issue tracking',
+            'icon' => 'bi-kanban',
+            'color' => 'info',
+            'url' => '/settings/boards',
+            'badge' => $boardCount . ' boards',
+            'badge_class' => $boardCount > 0 ? 'bg-success' : 'bg-secondary',
+        ];
+
+        // API Keys
+        $apiKeyCount = Bean::count('apikeys', ' member_id = ? ', [$this->member->id]);
+        $sections[] = [
+            'title' => 'API Keys',
+            'description' => 'Manage programmatic access tokens',
+            'icon' => 'bi-key',
+            'color' => 'warning',
+            'url' => '/apikeys',
+            'badge' => $apiKeyCount . ' keys',
+            'badge_class' => $apiKeyCount > 0 ? 'bg-success' : 'bg-secondary',
+        ];
+
+        // Profile
+        $sections[] = [
+            'title' => 'Profile',
+            'description' => 'Name, email, and password settings',
+            'icon' => 'bi-person-circle',
+            'color' => 'secondary',
+            'url' => '/member/profile',
+            'badge' => null,
+            'badge_class' => '',
+        ];
+
+        // Subscription
+        $tier = SubscriptionService::getTier($this->member->id);
+        $sections[] = [
+            'title' => 'Subscription',
+            'description' => 'Plan and billing management',
+            'icon' => 'bi-credit-card',
+            'color' => 'success',
+            'url' => '/settings/subscription',
+            'badge' => ucfirst($tier) . ' plan',
+            'badge_class' => $tier === 'pro' ? 'bg-primary' : 'bg-secondary',
+        ];
+
+        $this->viewData['title'] = 'Settings';
+        $this->viewData['sections'] = $sections;
+
+        $this->render('settings/index', $this->viewData);
+    }
+
+    /**
+     * Update profile
+     */
+    public function profile() {
+        if (!$this->requireLogin()) return;
+
+        $request = Flight::request();
+        if ($request->method === 'GET') {
+            Flight::redirect('/member/profile');
+            return;
+        }
+
+        // Update profile on POST
+        try {
+            $member = Bean::load('member', $this->member->id);
+
+            $displayName = $this->sanitize($this->getParam('display_name'));
+            if (!empty($displayName)) {
+                $member->display_name = $displayName;
+            }
+
+            Bean::store($member);
+
+            $this->flash('success', 'Profile updated successfully');
+            Flight::redirect('/settings');
+
+        } catch (Exception $e) {
+            $this->logger->error('Profile update failed: ' . $e->getMessage());
+            $this->flash('error', 'Failed to update profile');
+            Flight::redirect('/settings');
+        }
+    }
+
+    /**
+     * Update notification preferences (AJAX)
+     */
+    public function notifications() {
+        if (!$this->requireLogin()) return;
+
+        $digestEnabled = $this->getParam('digest_enabled') === 'true' || $this->getParam('digest_enabled') === '1';
+
+        UserDatabaseService::setSetting('digest_enabled', $digestEnabled ? '1' : '0');
+
+        $this->jsonSuccess([], 'Notification preferences updated');
+    }
+
+    /**
+     * Subscription management page
+     */
+    public function subscription() {
+        if (!$this->requireLogin()) return;
+
+        $request = Flight::request();
+
+        // Handle POST actions (upgrade/downgrade)
+        if ($request->method === 'POST') {
+            $action = $this->getParam('action');
+
+            if ($action === 'upgrade') {
+                SubscriptionService::stubUpgrade($this->member->id);
+                $this->flash('success', 'Upgraded to Pro! Enjoy your new features.');
+            } elseif ($action === 'downgrade') {
+                SubscriptionService::stubDowngrade($this->member->id);
+                $this->flash('info', 'Downgraded to Free tier.');
+            }
+
+            Flight::redirect('/settings/subscription');
+            return;
+        }
+
+        // Get current subscription info
+        $currentTier = SubscriptionService::getTier($this->member->id);
+        $subscription = SubscriptionService::getSubscription($this->member->id);
+        $tierInfo = SubscriptionService::getTierInfo($currentTier);
+
+        // Get board count for context
+        $boards = UserDatabaseService::getBoards();
+        $boardCount = count($boards);
+
+        // Get feature access
+        $features = TierFeatures::getFeatures($currentTier);
+        $limits = TierFeatures::getLimits($currentTier);
+
+        $this->render('settings/subscription', [
+            'title' => 'Subscription',
+            'currentTier' => $currentTier,
+            'subscription' => $subscription,
+            'tierInfo' => $tierInfo,
+            'boardCount' => $boardCount,
+            'features' => $features,
+            'limits' => $limits
+        ]);
+    }
+
+    /**
+     * Repository connections page - delegates to Github controller
+     * URL: /settings/repos
+     */
+    public function repos() {
+        $controller = new Github();
+        $controller->repolist();
+    }
+
+    /**
+     * Jira boards page - delegates to Boards controller
+     * URL: /settings/boards
+     */
+    public function boards() {
+        $controller = new Boards();
+        $controller->index();
+    }
+
+    /**
+     * Unified connections management page
+     * Shows all connected services (Atlassian, GitHub, Anthropic, Shopify, etc.)
+     * Also includes profile, stats, and account actions (consolidated settings page)
+     */
+    public function connections() {
+        if (!$this->requireLogin()) return;
+
+        $connectionsService = new ConnectionsService($this->member->id);
+        $connections = $connectionsService->getAllConnections();
+        $summary = $connectionsService->getConnectionSummary();
+
+        // Check AI Developer requirements
+        $aiDevReady = $connectionsService->checkRequirements('ai_developer');
+
+        // Fetch individual connection beans for the view
+        $connBeans = Bean::find('connections',
+            ' (member_id = ? OR shared = 1) ORDER BY connector_type, created_at DESC ',
+            [$this->member->id]
+        );
+
+        // Get connector registry metadata
+        require_once __DIR__ . '/../services/ConnectorRegistry.php';
+        $connectorMeta = \app\services\ConnectorRegistry::getAllMeta();
+
+        // Get connected Atlassian sites for stats
+        $sites = AtlassianAuth::getConnectedSites($this->member->id);
+
+        // Get user stats
+        $stats = UserDatabaseService::getStats();
+
+        // Get subscription info - use SubscriptionService directly for reliability
+        $tier = SubscriptionService::getTier($this->member->id);
+        $tierInfo = SubscriptionService::getTierInfo($tier);
+
+        // Get agent and runner counts (workspace-level - shared by all members)
+        $agentCount = Bean::count('aiagents', '1');
+        $runnerCount = 0;
+
+        // Runners are admin-level (not per-member)
+        if ($this->member->level <= 50) {
+            require_once __DIR__ . '/../services/RunnerService.php';
+            $allRunners = \app\services\RunnerService::getAllRunners(false);
+            $runnerCount = count($allRunners);
+        }
+
+        // Check if we should show onboarding wizard (all tiers)
+        $gitConnected = $connections['github']['connected'] ?? false;
+        $jiraConnected = $connections['atlassian']['connected'] ?? false;
+        $repoCount = $connections['github']['details']['repo_count'] ?? 0;
+        $boardCount = $stats['total_boards'] ?? 0;
+
+        // Show onboarding if any step is incomplete AND user hasn't dismissed it
+        $setupComplete = $gitConnected && $repoCount > 0 && $jiraConnected && $boardCount > 0;
+        $wizardDismissedKey = 'onboarding_wizard_dismissed_' . $this->member->id;
+        $wizardDismissed = UserDatabaseService::getSetting($wizardDismissedKey) === '1';
+        $showOnboarding = !$setupComplete && !$wizardDismissed;
+
+        $this->render('settings/connections', [
+            'title' => 'Settings',
+            'connections' => $connections,
+            'summary' => $summary,
+            'aiDevReady' => $aiDevReady,
+            'tier' => $tier,
+            'member' => $this->member,
+            'sites' => $sites,
+            'stats' => $stats,
+            'tierInfo' => $tierInfo,
+            'agentCount' => $agentCount,
+            'runnerCount' => $runnerCount,
+            'showOnboarding' => $showOnboarding,
+            'gitConnected' => $gitConnected,
+            'jiraConnected' => $jiraConnected,
+            'repoCount' => $repoCount,
+            'boardCount' => $boardCount,
+            'connBeans' => $connBeans,
+            'connectorMeta' => $connectorMeta
+        ]);
+    }
+
+    /**
+     * Dismiss onboarding wizard (AJAX)
+     * Stores user preference to not auto-show the wizard
+     */
+    public function dismisswizard() {
+        if (!$this->requireLogin()) return;
+
+        // Store in enterprisesettings table (workspace database)
+        // Use member-specific key so each user can have their own preference
+        $key = 'onboarding_wizard_dismissed_' . $this->member->id;
+        UserDatabaseService::setSetting($key, '1');
+
+        $this->jsonSuccess([], 'Wizard dismissed');
+    }
+
+    /**
+     * Reset onboarding wizard (AJAX)
+     * Allows user to see the wizard again
+     */
+    public function resetwizard() {
+        if (!$this->requireLogin()) return;
+
+        $key = 'onboarding_wizard_dismissed_' . $this->member->id;
+        UserDatabaseService::setSetting($key, '0');
+
+        $this->jsonSuccess([], 'Wizard reset');
+    }
+
+    /**
+     * Export user data (GDPR compliance)
+     */
+    public function export() {
+        if (!$this->requireLogin()) return;
+
+        $data = [
+            'member' => [
+                'id' => $this->member->id,
+                'email' => $this->member->email,
+                'display_name' => $this->member->display_name,
+                'created_at' => $this->member->created_at,
+                'last_login' => $this->member->last_login
+            ],
+            'atlassian_sites' => [],
+            'boards' => [],
+            'analyses' => []
+        ];
+
+        // Get Atlassian sites
+        $sites = AtlassianAuth::getConnectedSites($this->member->id);
+        foreach ($sites as $site) {
+            $data['atlassian_sites'][] = [
+                'site_name' => $site->site_name,
+                'site_url' => $site->site_url,
+                'cloud_uid' => $site->cloud_uid
+            ];
+        }
+
+        // Get boards and analyses
+        $data['boards'] = UserDatabaseService::getBoards();
+        $data['analyses'] = UserDatabaseService::getAllRecentAnalyses(100);
+
+        // Output as JSON download
+        header('Content-Type: application/json');
+        header('Content-Disposition: attachment; filename="myctobot_export_' . date('Y-m-d') . '.json"');
+        echo json_encode($data, JSON_PRETTY_PRINT);
+        exit;
+    }
+}

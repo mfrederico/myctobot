@@ -1,0 +1,2373 @@
+<?php
+$isNew = empty($agent);
+$agentId = $agent['id'] ?? 0;
+$agentName = $agent['name'] ?? '';
+$provider = $agent['provider'] ?? 'claude_cli';
+$providerConfig = $agent['provider_config'] ?? [];
+$linkedMcpServers = $agent['linked_mcp_servers'] ?? []; // Many-to-many linked servers
+$totalMcpCount = count($linkedMcpServers);
+$availableMcpServers = $availableMcpServers ?? []; // All available servers
+$hooksConfig = $agent['hooks_config'] ?? [];
+$agentCapabilities = $agent['capabilities'] ?? [];
+$exposeAsMcp = $agent['expose_as_mcp'] ?? false;
+$mcpToolName = $agent['mcp_tool_name'] ?? '';
+$mcpToolDescription = $agent['mcp_tool_description'] ?? '';
+?>
+
+<div class="container py-4"
+     data-assist-page="<?= $isNew ? 'agents/create' : 'agents/edit' ?>"
+     data-assist-purpose="<?= $isNew ? 'Create a new AI agent that can execute tasks using Claude or other LLMs' : 'Edit agent configuration including provider, MCP servers, and hooks' ?>"
+     data-assist-context='{"entity":"agent","isNew":<?= $isNew ? 'true' : 'false' ?>}'>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h2 mb-0">
+            <i class="bi bi-robot"></i>
+            <?= $isNew ? 'Create Agent Profile' : 'Edit Agent: ' . h($agentName) ?>
+        </h1>
+        <a href="/agents" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Agents
+        </a>
+    </div>
+
+    <?php if (!$isNew): ?>
+    <!-- Tabs -->
+    <ul class="nav nav-tabs mb-4" role="tablist">
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'general' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=general">
+                <i class="bi bi-gear"></i> General
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'provider' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=provider">
+                <i class="bi bi-cpu"></i> Provider
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'mcp' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=mcp">
+                <i class="bi bi-plug"></i> MCP Servers
+                <?php if ($totalMcpCount > 0): ?>
+                <span class="badge bg-secondary"><?= $totalMcpCount ?></span>
+                <?php endif; ?>
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <?php
+            $hookCount = 0;
+            foreach (['PreToolUse', 'PostToolUse', 'Stop'] as $event) {
+                if (!empty($hooksConfig[$event])) {
+                    foreach ($hooksConfig[$event] as $rule) {
+                        $hookCount += count($rule['hooks'] ?? []);
+                    }
+                }
+            }
+            ?>
+            <a class="nav-link <?= $activeTab === 'hooks' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=hooks">
+                <i class="bi bi-lightning"></i> Hooks
+                <?php if ($hookCount > 0): ?>
+                <span class="badge bg-secondary"><?= $hookCount ?></span>
+                <?php endif; ?>
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'capabilities' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=capabilities">
+                <i class="bi bi-stars"></i> Capabilities
+                <?php if (count($agentCapabilities) > 0): ?>
+                <span class="badge bg-secondary"><?= count($agentCapabilities) ?></span>
+                <?php endif; ?>
+            </a>
+        </li>
+        <li class="nav-item" role="presentation">
+            <a class="nav-link <?= $activeTab === 'tools' ? 'active' : '' ?>"
+               href="/agents/edit/<?= $agentId ?>?tab=tools">
+                <i class="bi bi-tools"></i> MCP Tools
+                <span class="badge bg-secondary" id="tools-count-badge">0</span>
+            </a>
+        </li>
+    </ul>
+    <?php endif; ?>
+
+    <!-- Tab Content -->
+    <?php if ($isNew || $activeTab === 'general'): ?>
+    <!-- General Tab -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-gear"></i> General Settings
+        </div>
+        <div class="card-body">
+            <form method="POST" action="<?= $isNew ? '/agents/store' : '/agents/update/' . $agentId ?>"
+                  data-assist-form="agent-general"
+                  data-assist-purpose="Configure the agent's basic settings, LLM provider, and workstation assignment">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
+                <input type="hidden" name="tab" value="general">
+
+                <div class="mb-3">
+                    <label for="name" class="form-label">Agent Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="name" name="name"
+                           value="<?= h($agentName) ?>" required
+                           placeholder="e.g., Shopify Bot, API Worker"
+                           data-assist-field="name"
+                           data-assist-required="true"
+                           data-assist-hint="Required. A unique, descriptive name for this agent. Use something meaningful like 'Shopify Theme Dev' or 'Code Reviewer'."
+                           aria-describedby="nameHelp">
+                    <div id="nameHelp" class="form-text visually-hidden">Enter a descriptive name for the agent</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="description" class="form-label">Description</label>
+                    <textarea class="form-control" id="description" name="description" rows="2"
+                              placeholder="Optional description of this agent's purpose"
+                              data-assist-field="description"
+                              data-assist-hint="Describe what this agent does. This helps you remember its purpose and can be used in documentation."
+                              aria-describedby="descHelp"><?= h($agent['description'] ?? '') ?></textarea>
+                    <div id="descHelp" class="form-text visually-hidden">Optional description of the agent's purpose</div>
+                </div>
+
+                <?php
+                // Include the shared provider config partial
+                $prefix = $isNew ? 'create' : 'edit';
+                include __DIR__ . '/_provider_config.php';
+                ?>
+
+                <!-- Provider Capabilities -->
+                <div class="mb-3">
+                    <label class="form-label">LLM Capabilities</label>
+                    <div id="provider-capabilities" class="d-flex flex-wrap gap-2">
+                        <span class="text-muted small">Loading...</span>
+                    </div>
+                    <div class="form-text">Capabilities derived from the selected model</div>
+                </div>
+
+                <hr>
+
+                <!-- Assigned Workstation -->
+                <div class="mb-3">
+                    <label class="form-label" for="runners_id">Assigned Workstation</label>
+                    <select class="form-select" name="runners_id" id="runners_id"
+                            data-assist-field="runners_id"
+                            data-assist-hint="Choose where this agent runs. Local runner uses this machine. Remote workstations run jobs via SSH on dedicated servers."
+                            aria-describedby="runnersHelp">
+                        <option value="">-- Local Runner (this machine) --</option>
+                        <!-- Populated via JavaScript -->
+                    </select>
+                    <div id="runnersHelp" class="form-text">
+                        Assign this agent to run on a specific workstation via SSH.
+                        Leave empty to use the local runner on this machine.
+                    </div>
+                </div>
+
+                <!-- Default Working Directory -->
+                <div class="mb-3">
+                    <label class="form-label" for="default_work_dir">Default Working Directory</label>
+                    <input type="text" class="form-control font-monospace" name="default_work_dir" id="default_work_dir"
+                           value="<?= h($agent['default_work_dir'] ?? '') ?>"
+                           placeholder="~/jobs/{job_uid}"
+                           data-assist-field="default_work_dir"
+                           data-assist-hint="The directory where the agent clones repos and works. Use {job_uid} as a placeholder for unique job folders. Leave empty for default ~/jobs/{job_uid}"
+                           aria-describedby="workDirHelp">
+                    <div class="form-text">
+                        Default directory on the workstation where this agent runs.
+                        Examples: <code>/var/www/html/mysite</code>, <code>~/projects/myapp</code><br>
+                        Leave empty to use <code>~/jobs/{job_uid}</code>. Pipelines can override this per-step.
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" id="is_active" name="is_active" value="1"
+                                   <?= ($agent['is_active'] ?? true) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="is_active">Active</label>
+                            <div class="form-text">Inactive agents cannot be assigned to repos</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" id="is_default" name="is_default" value="1"
+                                   <?= ($agent['is_default'] ?? false) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="is_default">Default Agent</label>
+                            <div class="form-text">Used when no agent is assigned to a repo</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i>
+                        <?= $isNew ? 'Create Agent' : 'Save Changes' ?>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <?php if (!$isNew): ?>
+    <!-- Test Agent on Workstation -->
+    <div class="card mt-4">
+        <div class="card-header">
+            <i class="bi bi-play-circle"></i> Test Agent on Workstation
+        </div>
+        <div class="card-body">
+            <p class="text-muted mb-3">
+                Test this agent's configuration by running a "Hello World" test on a workstation.
+                This verifies the full pipeline: SSH connection + agent config (model, Ollama) + Claude CLI.
+            </p>
+
+            <div class="row align-items-end">
+                <div class="col-md-8 mb-3">
+                    <label for="test_workstation" class="form-label">Select Workstation</label>
+                    <select class="form-select" id="test_workstation">
+                        <option value="">Loading workstations...</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <button type="button" class="btn btn-success w-100" onclick="runAgentTest()" id="runTestBtn">
+                        <i class="bi bi-robot"></i> Run Test
+                    </button>
+                </div>
+            </div>
+
+            <!-- Test Results -->
+            <div id="agentTestResults" style="display: none;">
+                <!-- Results populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Load available workstations for testing and assignment
+    document.addEventListener('DOMContentLoaded', function() {
+        const currentWorkstationId = '<?= $agent['runners_id'] ?? '' ?>';
+
+        fetch('/agents/workstations')
+            .then(r => r.json())
+            .then(data => {
+                // Populate test workstation dropdown
+                const testSelect = document.getElementById('test_workstation');
+                // Populate assignment workstation dropdown
+                const assignSelect = document.getElementById('runners_id');
+
+                if (data.success && data.data.workstations && data.data.workstations.length > 0) {
+                    testSelect.innerHTML = '<option value="">-- Select a workstation --</option>';
+
+                    data.data.workstations.forEach(ws => {
+                        // Test dropdown - pre-select assigned workstation
+                        const testOpt = document.createElement('option');
+                        testOpt.value = ws.id;
+                        testOpt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        if (ws.id == currentWorkstationId) {
+                            testOpt.selected = true;
+                        }
+                        testSelect.appendChild(testOpt);
+
+                        // Assignment dropdown
+                        const assignOpt = document.createElement('option');
+                        assignOpt.value = ws.id;
+                        assignOpt.textContent = ws.name + ' (' + ws.ssh_user + '@' + ws.host + ')';
+                        if (ws.id == currentWorkstationId) {
+                            assignOpt.selected = true;
+                        }
+                        assignSelect.appendChild(assignOpt);
+                    });
+                } else {
+                    testSelect.innerHTML = '<option value="">No active workstations found</option>';
+                }
+            })
+            .catch(e => {
+                document.getElementById('test_workstation').innerHTML =
+                    '<option value="">Error loading workstations</option>';
+            });
+    });
+
+    let currentTestId = null;
+    let pollInterval = null;
+
+    async function runAgentTest() {
+        const workstationId = document.getElementById('test_workstation').value;
+        if (!workstationId) {
+            alert('Please select a workstation');
+            return;
+        }
+
+        const btn = document.getElementById('runTestBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+
+        const resultsDiv = document.getElementById('agentTestResults');
+        resultsDiv.style.display = 'block';
+        resultsDiv.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-success"></div><p class="mt-2">Starting agent test...</p></div>';
+
+        try {
+            // Start the test (async)
+            const formData = new FormData();
+            formData.append('workstation_id', workstationId);
+            formData.append('csrf_token', '<?= Flight::csrf()->getToken() ?>');
+
+            const response = await fetch('/agents/testagent/<?= $agentId ?>', {
+                method: 'POST',
+                headers: { 'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>' },
+                body: formData
+            });
+            const data = await response.json();
+
+            if (!data.success) {
+                throw new Error(data.error || data.message || 'Failed to start test');
+            }
+
+            currentTestId = data.data?.test_id || data.test_id;
+
+            // Show initial status with agent/workstation info
+            const agentInfo = data.data?.agent || data.agent;
+            const wsInfo = data.data?.workstation || data.workstation;
+
+            resultsDiv.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-success"></div>
+                    <p class="mt-2">Running agent test...</p>
+                    <p class="text-muted small">Test ID: ${currentTestId}</p>
+                </div>
+                ${agentInfo && wsInfo ? `
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-robot"></i> Agent:</strong> ${escapeHtml(agentInfo.name)}<br>
+                                <small class="text-muted">
+                                    ${agentInfo.use_ollama
+                                        ? 'Ollama: ' + escapeHtml(agentInfo.ollama_model || '')
+                                        : 'Anthropic: ' + escapeHtml(agentInfo.anthropic_model || '')}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-hdd-network"></i> Workstation:</strong> ${escapeHtml(wsInfo.name)}<br>
+                                <small class="text-muted">${escapeHtml(wsInfo.ssh_user)}@${escapeHtml(wsInfo.host)}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+            `;
+
+            // Start polling for status
+            pollInterval = setInterval(() => pollTestStatus(original), 2000);
+
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = original;
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-x-circle"></i> <strong>Error starting test</strong>
+                    <p class="mb-0 mt-2">${err.message}</p>
+                </div>
+            `;
+        }
+    }
+
+    async function pollTestStatus(originalBtnHtml) {
+        if (!currentTestId) return;
+
+        try {
+            const response = await fetch('/agents/teststatus/' + currentTestId);
+            const data = await response.json();
+
+            if (!data.success && !data.status) {
+                return; // Keep polling
+            }
+
+            const status = data.data?.status || data.status;
+
+            if (status === 'running' || status === 'pending' || status === 'validated') {
+                // Still running, update message
+                const phase = data.data?.phase || '';
+                const msg = data.data?.message || data.message || (phase ? `Phase: ${phase}` : 'Running...');
+                const spinnerDiv = document.querySelector('#agentTestResults .spinner-border');
+                if (spinnerDiv) {
+                    spinnerDiv.parentElement.querySelector('p').textContent = msg;
+                }
+                return;
+            }
+
+            // Test completed (success or failed)
+            clearInterval(pollInterval);
+            pollInterval = null;
+
+            const btn = document.getElementById('runTestBtn');
+            btn.disabled = false;
+            btn.innerHTML = originalBtnHtml || '<i class="bi bi-robot"></i> Run Test';
+
+            displayTestResults(data.data || data);
+
+        } catch (err) {
+            // Network error, keep polling
+            console.error('Poll error:', err);
+        }
+    }
+
+    function displayTestResults(resultData) {
+        const resultsDiv = document.getElementById('agentTestResults');
+        let html = '';
+
+        const result = resultData.result || resultData;
+        const isSuccess = resultData.status === 'completed' || result.success;
+
+        if (isSuccess) {
+            html += `
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Agent Test Passed!</strong>
+                        <div class="small">Completed in ${result.duration_ms || 'N/A'}ms</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="alert alert-danger d-flex align-items-center">
+                    <i class="bi bi-x-circle-fill me-2 fs-4"></i>
+                    <div>
+                        <strong>Agent Test Failed</strong>
+                        <div class="small">${result.error || resultData.error || resultData.message || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (result.warning) {
+            html += `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> ${result.warning}</div>`;
+        }
+
+        // Show agent and workstation info
+        const agentInfo = resultData.agent || result.agent;
+        const wsInfo = resultData.workstation || result.workstation;
+
+        if (agentInfo && wsInfo) {
+            html += `
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-robot"></i> Agent:</strong> ${escapeHtml(agentInfo.name)}<br>
+                                <small class="text-muted">
+                                    ${agentInfo.use_ollama
+                                        ? 'Ollama: ' + escapeHtml(agentInfo.ollama_model || '')
+                                        : 'Anthropic: ' + escapeHtml(agentInfo.anthropic_model || '')}
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body py-2">
+                                <strong><i class="bi bi-hdd-network"></i> Workstation:</strong> ${escapeHtml(wsInfo.name)}<br>
+                                <small class="text-muted">${escapeHtml(wsInfo.ssh_user)}@${escapeHtml(wsInfo.host)}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (result.output) {
+            html += `
+                <div class="card">
+                    <div class="card-header"><strong><i class="bi bi-chat-left-text"></i> Claude Response</strong></div>
+                    <div class="card-body">
+                        <pre class="mb-0 bg-dark text-light p-3 rounded" style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(result.output)}</pre>
+                    </div>
+                </div>
+            `;
+        }
+
+        resultsDiv.innerHTML = html;
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    </script>
+    <?php endif; ?>
+
+    <!-- Shared JavaScript for Provider Config (works with any prefix) -->
+    <script>
+    const currentPrefix = '<?= $isNew ? 'create' : 'edit' ?>';
+
+    // Generic function to update provider config visibility and field states
+    function updateProviderConfig(prefix) {
+        const provider = document.getElementById('provider_' + prefix)?.value;
+        if (!provider) return;
+
+        // Hide all provider configs and disable their fields
+        document.querySelectorAll('.provider-config-' + prefix).forEach(el => {
+            el.style.display = 'none';
+            // Disable all fields in hidden sections so they don't submit
+            el.querySelectorAll('input, select, textarea').forEach(field => {
+                field.disabled = true;
+            });
+        });
+
+        // Show selected provider config and enable its fields
+        const configEl = document.getElementById(prefix + '-config-' + provider);
+        if (configEl) {
+            configEl.style.display = 'block';
+            // Enable fields in the visible section
+            configEl.querySelectorAll('input, select, textarea').forEach(field => {
+                field.disabled = false;
+            });
+        }
+    }
+
+    // Generic function to toggle Claude backend between Anthropic and Ollama
+    function toggleClaudeBackend(prefix) {
+        const useOllama = document.getElementById(prefix + '-use-ollama')?.checked;
+        const anthropicEl = document.getElementById(prefix + '-claude-anthropic');
+        const ollamaEl = document.getElementById(prefix + '-claude-ollama');
+        if (anthropicEl) anthropicEl.style.display = useOllama ? 'none' : 'block';
+        if (ollamaEl) ollamaEl.style.display = useOllama ? 'block' : 'none';
+
+        // Auto-load models when toggling on
+        if (useOllama) {
+            loadOllamaModels(prefix);
+        }
+    }
+
+    // Generic function to load Ollama models
+    function loadOllamaModels(prefix, isDirect = false) {
+        const hostId = isDirect ? prefix + '-ollama-direct-host' : prefix + '-ollama-host';
+        const modelId = isDirect ? prefix + '-ollama-direct-model' : prefix + '-ollama-model';
+
+        const host = document.getElementById(hostId)?.value;
+        const modelSelect = document.getElementById(modelId);
+
+        if (!modelSelect) return;
+
+        modelSelect.innerHTML = '<option value="">Loading models...</option>';
+
+        fetch('/agents/getmodels', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
+            },
+            body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.data.models && data.data.models.length > 0) {
+                modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
+                data.data.models.forEach(model => {
+                    const opt = document.createElement('option');
+                    opt.value = model.name;
+                    const details = model.details || {};
+                    const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+                    const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+                    opt.textContent = model.name + paramInfo + sizeInfo;
+                    modelSelect.appendChild(opt);
+                });
+                hideOllamaManualInput(prefix, isDirect);
+            } else {
+                modelSelect.innerHTML = '<option value="">No models found - enter manually</option>';
+                showOllamaManualInput(prefix, isDirect);
+            }
+        })
+        .catch(e => {
+            console.log('Failed to load models:', e.message);
+            modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            showOllamaManualInput(prefix, isDirect);
+        });
+    }
+
+    function showOllamaManualInput(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualId = prefix + '-ollama' + suffix + '-manual';
+        const modelId = prefix + '-ollama' + suffix + '-model';
+
+        let manualDiv = document.getElementById(manualId);
+        if (!manualDiv) {
+            const modelDiv = document.getElementById(modelId)?.parentElement;
+            if (!modelDiv) return;
+
+            manualDiv = document.createElement('div');
+            manualDiv.id = manualId;
+            manualDiv.className = 'mt-2';
+            manualDiv.innerHTML = `
+                <label class="form-label small text-muted">Or enter model name:</label>
+                <input type="text" class="form-control form-control-sm" id="${manualId}-input"
+                       placeholder="qwen3-coder, codellama, llama3" onchange="syncManualModel('${prefix}', ${isDirect})">
+                <div class="form-text">Localhost not reachable from web - model will be validated when agent runs</div>
+            `;
+            modelDiv.appendChild(manualDiv);
+        }
+        manualDiv.style.display = 'block';
+    }
+
+    function hideOllamaManualInput(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualDiv = document.getElementById(prefix + '-ollama' + suffix + '-manual');
+        if (manualDiv) manualDiv.style.display = 'none';
+    }
+
+    function syncManualModel(prefix, isDirect = false) {
+        const suffix = isDirect ? '-direct' : '';
+        const manualId = prefix + '-ollama' + suffix + '-manual-input';
+        const modelId = prefix + '-ollama' + suffix + '-model';
+
+        const manual = document.getElementById(manualId);
+        const select = document.getElementById(modelId);
+        if (manual && manual.value && select) {
+            const opt = document.createElement('option');
+            opt.value = manual.value;
+            opt.textContent = manual.value;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        updateProviderConfig(currentPrefix);
+    });
+    </script>
+
+    <?php elseif ($activeTab === 'mcp'): ?>
+    <!-- MCP Servers Tab -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-plug"></i> MCP Servers Configuration</span>
+            <div>
+                <a href="/mcpservers" class="btn btn-sm btn-outline-primary me-2" target="_blank">
+                    <i class="bi bi-collection"></i> Manage Library
+                </a>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleAdvancedMcp()">
+                    <i class="bi bi-code"></i> <span id="advancedToggleText">Advanced</span>
+                </button>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Configure MCP servers for this agent. Add servers from your library or <a href="/mcpservers" target="_blank">create new ones</a>.
+            </div>
+
+            <!-- Link from Library Section -->
+            <?php if (!empty($availableMcpServers)): ?>
+            <div class="d-flex gap-2 mb-4 align-items-end" id="librarySection">
+                <div class="flex-grow-1">
+                    <label class="form-label"><i class="bi bi-collection"></i> Add from Server Library</label>
+                    <select class="form-select" id="libraryServerSelect">
+                        <option value="">-- Select a server to add --</option>
+                        <?php foreach ($availableMcpServers as $libServer): ?>
+                        <option value="<?= $libServer['id'] ?>"
+                                data-server='<?= h(json_encode($libServer), ENT_QUOTES) ?>'>
+                            <?= h($libServer['name']) ?>
+                            (<?= strtoupper($libServer['server_type']) ?>)
+                            <?= $libServer['is_shared'] ? ' [Shared]' : '' ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-primary" onclick="addServerFromLibrary()">
+                    <i class="bi bi-plus-lg"></i> Add
+                </button>
+            </div>
+            <?php endif; ?>
+
+            <!-- Visual Server List (Linked + Inline) -->
+            <div id="mcpServerList" class="mb-4">
+                <!-- Servers rendered by JS -->
+            </div>
+
+            <div id="emptyMcpState" class="text-center py-5 text-muted" style="display: none;">
+                <i class="bi bi-plug display-4"></i>
+                <p class="mt-3">No additional MCP servers configured.</p>
+                <?php if (!empty($availableMcpServers)): ?>
+                <p class="small">Use the dropdown above to add servers from your library.</p>
+                <?php else: ?>
+                <a href="/mcpservers" class="btn btn-outline-primary">
+                    <i class="bi bi-plus-lg"></i> Create Server in Library
+                </a>
+                <?php endif; ?>
+            </div>
+
+            <!-- Advanced JSON Editor (hidden by default) -->
+            <div id="advancedMcpEditor" class="mb-3" style="display: none;">
+                <label class="form-label">Generated MCP Config</label>
+                <textarea class="form-control font-monospace bg-light" id="generated_mcp_config" rows="16" readonly></textarea>
+                <div class="form-text">
+                    <i class="bi bi-info-circle"></i> Read-only preview of the MCP config that will be generated for this agent.
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+// MCP Server data
+let linkedMcpServers = <?= json_encode($linkedMcpServers) ?>;
+let advancedMode = false;
+const availableServers = <?= json_encode($availableMcpServers) ?>;
+
+// Add server from library dropdown
+function addServerFromLibrary() {
+    const select = document.getElementById('libraryServerSelect');
+    const selectedId = select.value;
+
+    if (!selectedId) {
+        alert('Please select a server to add');
+        return;
+    }
+
+    // Check if already linked
+    if (linkedMcpServers.some(s => String(s.id) === selectedId)) {
+        alert('This server is already linked');
+        select.value = '';
+        return;
+    }
+
+    // Find server data
+    const server = availableServers.find(s => String(s.id) === selectedId);
+    if (!server) {
+        select.value = '';
+        return;
+    }
+
+    // Disable button while saving
+    const addBtn = document.querySelector('#librarySection button');
+    addBtn.disabled = true;
+    addBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    // Save via AJAX
+    fetch('/agents/linkmcp/<?= $agentId ?>', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+            action: 'add',
+            server_id: selectedId
+        })
+    })
+    .then(r => r.json())
+    .then(result => {
+        addBtn.disabled = false;
+        addBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
+
+        if (result.success) {
+            linkedMcpServers.push(server);
+            renderMcpServerList();
+        } else {
+            alert(result.message || 'Error linking server');
+        }
+    })
+    .catch(err => {
+        addBtn.disabled = false;
+        addBtn.innerHTML = '<i class="bi bi-plus-lg"></i> Add';
+        alert('Error: ' + err.message);
+    });
+
+    select.value = '';
+}
+
+// Remove a linked server
+function removeLinkedServer(serverId) {
+    // Save via AJAX
+    fetch('/agents/linkmcp/<?= $agentId ?>', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({
+            action: 'remove',
+            server_id: serverId
+        })
+    })
+    .then(r => r.json())
+    .then(result => {
+        if (result.success) {
+            linkedMcpServers = linkedMcpServers.filter(s => String(s.id) !== String(serverId));
+            renderMcpServerList();
+        } else {
+            alert(result.message || 'Error unlinking server');
+        }
+    })
+    .catch(err => {
+        alert('Error: ' + err.message);
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    renderMcpServerList();
+});
+
+// Render the server list
+function renderMcpServerList() {
+    const listEl = document.getElementById('mcpServerList');
+    const emptyEl = document.getElementById('emptyMcpState');
+
+    if (!linkedMcpServers || linkedMcpServers.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+    }
+
+    emptyEl.style.display = 'none';
+
+    let html = '<div class="row g-3">';
+    linkedMcpServers.forEach((server) => {
+        const typeIcon = server.server_type === 'stdio' ? 'bi-terminal' : (server.server_type === 'sse' ? 'bi-broadcast' : 'bi-globe');
+        const typeBadge = server.server_type === 'stdio' ? 'bg-info' : (server.server_type === 'sse' ? 'bg-success' : 'bg-warning');
+        const tokenInfo = server.tools_token_estimate
+            ? `<span class="badge bg-secondary" title="Estimated token overhead"><i class="bi bi-speedometer2"></i> ~${server.tools_token_estimate.toLocaleString()}</span>`
+            : (server.tools_count !== null ? `<span class="badge bg-light text-muted" title="Test server to calculate tokens">${server.tools_count} tools</span>` : '');
+
+        html += `
+        <div class="col-md-6">
+            <div class="card h-100 border-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <h6 class="card-title mb-0">
+                            <i class="bi ${typeIcon}"></i> ${escapeHtml(server.name)}
+                        </h6>
+                        <div class="d-flex gap-2 align-items-center">
+                            ${tokenInfo}
+                            <span class="badge ${typeBadge}">${(server.server_type || 'stdio').toUpperCase()}</span>
+                            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeLinkedServer(${server.id})" title="Remove">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    ${server.description ? `<div class="small text-muted mb-1">${escapeHtml(server.description)}</div>` : ''}
+                    ${server.command ? `<code class="small">${escapeHtml(server.command)} ${(server.args || []).join(' ')}</code>` : ''}
+                    ${server.url ? `<code class="small d-block text-truncate">${escapeHtml(server.url)}</code>` : ''}
+                </div>
+            </div>
+        </div>
+        `;
+    });
+    html += '</div>';
+
+    listEl.innerHTML = html;
+}
+
+// Toggle advanced mode - shows generated MCP config
+function toggleAdvancedMcp() {
+    advancedMode = !advancedMode;
+    const editorEl = document.getElementById('advancedMcpEditor');
+    const listEl = document.getElementById('mcpServerList');
+    const emptyEl = document.getElementById('emptyMcpState');
+    const toggleText = document.getElementById('advancedToggleText');
+
+    if (advancedMode) {
+        // Generate config from linked servers
+        const config = { mcpServers: {} };
+        linkedMcpServers.forEach(server => {
+            const serverConfig = {};
+            if (server.server_type === 'stdio') {
+                serverConfig.type = 'stdio';
+                serverConfig.command = server.command || '';
+                if (server.args && server.args.length > 0) {
+                    serverConfig.args = server.args;
+                }
+            } else {
+                serverConfig.type = server.server_type || 'http';
+                serverConfig.url = server.url || '';
+                if (server.headers && Object.keys(server.headers).length > 0) {
+                    serverConfig.headers = server.headers;
+                }
+            }
+            if (server.env && Object.keys(server.env).length > 0) {
+                serverConfig.env = server.env;
+            }
+            config.mcpServers[server.name] = serverConfig;
+        });
+        document.getElementById('generated_mcp_config').value = JSON.stringify(config, null, 2);
+
+        editorEl.style.display = 'block';
+        listEl.style.display = 'none';
+        emptyEl.style.display = 'none';
+        toggleText.textContent = 'Visual';
+    } else {
+        editorEl.style.display = 'none';
+        toggleText.textContent = 'Advanced';
+        renderMcpServerList();
+    }
+}
+
+// Escape HTML
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+</script>
+
+    <?php elseif ($activeTab === 'hooks'): ?>
+    <!-- Hooks Tab -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-lightning"></i> Hooks Configuration</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadAllHooks()">
+                <i class="bi bi-arrow-repeat"></i> Load All Hooks
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Configure hooks that run before/after tool execution. This generates the <code>.claude/settings.json</code> hooks section.
+            </div>
+
+            <!-- Language Validator Quick Setup -->
+            <div class="card bg-light mb-4">
+                <div class="card-header">
+                    <i class="bi bi-shield-check"></i> Security Validators (Quick Setup)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Select language validators to automatically check for OWASP security issues, coding standards, and best practices.
+                        These run as PreToolUse hooks on Write/Edit operations.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_php" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_php">
+                                    <i class="bi bi-filetype-php text-primary"></i> <strong>PHP</strong>
+                                    <small class="d-block text-muted">RedBeanPHP, FlightPHP, OWASP</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_js" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_js">
+                                    <i class="bi bi-filetype-js text-warning"></i> <strong>JavaScript/TypeScript</strong>
+                                    <small class="d-block text-muted">XSS, eval, Node.js security</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_python" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_python">
+                                    <i class="bi bi-filetype-py text-success"></i> <strong>Python</strong>
+                                    <small class="d-block text-muted">SQL injection, pickle, subprocess</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_go" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_go">
+                                    <i class="bi bi-box"></i> Go <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_ruby" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_ruby">
+                                    <i class="bi bi-gem"></i> Ruby <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_liquid" onchange="updateHooksFromCheckboxes()" disabled>
+                                <label class="form-check-label text-muted" for="hook_liquid">
+                                    <i class="bi bi-droplet"></i> Liquid <span class="badge bg-secondary">Coming Soon</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Hooks Quick Setup -->
+            <div class="card bg-light mb-4">
+                <div class="card-header">
+                    <i class="bi bi-gear"></i> Additional Hooks
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Additional automation hooks for commit cleanup, activity logging, and response capture.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_commit_cruft" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_commit_cruft">
+                                    <i class="bi bi-git text-danger"></i> <strong>Strip Commit Cruft</strong>
+                                    <small class="d-block text-muted">Remove emojis and Claude signatures from commits</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_log_activity" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_log_activity">
+                                    <i class="bi bi-journal-text text-info"></i> <strong>Log Activity</strong>
+                                    <small class="d-block text-muted">Log file changes to AI Dev job</small>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="hook_capture_response" onchange="updateHooksFromCheckboxes()">
+                                <label class="form-check-label" for="hook_capture_response">
+                                    <i class="bi bi-chat-dots text-success"></i> <strong>Capture Responses</strong>
+                                    <small class="d-block text-muted">Save Claude responses to job log</small>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
+                <input type="hidden" name="tab" value="hooks">
+
+                <div class="mb-3">
+                    <label class="form-label">Hooks Configuration (JSON)</label>
+                    <textarea class="form-control font-monospace" id="hooks_config" name="hooks_config" rows="20"
+                              placeholder='{
+  "PreToolUse": [
+    {
+      "matcher": "Bash|Write|Edit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "php /path/to/security-check.php",
+          "timeout": 5
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [],
+  "Stop": []
+}'><?= h(json_encode($hooksConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '{}') ?></textarea>
+                    <div class="form-text">
+                        Hook events: <code>PreToolUse</code> (can block with exit 2), <code>PostToolUse</code>, <code>Stop</code><br>
+                        Each hook needs: <code>matcher</code> (regex for tool names), <code>hooks</code> array with <code>type</code>, <code>command</code>, <code>timeout</code>
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Save Hooks Config
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+<script>
+// Available hooks configuration
+// Note: ${MYCTOBOT_APP_ROOT} is set by job-dispatcher.php at runtime
+const availableHooks = {
+    // Language validators (PreToolUse on Write|Edit)
+    php: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-php.php",
+        timeout: 30,
+        matcher: "Write|Edit"
+    },
+    js: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-js.php",
+        timeout: 30,
+        matcher: "Write|Edit"
+    },
+    python: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/validate-python.php",
+        timeout: 30,
+        matcher: "Write|Edit"
+    },
+    // Commit cruft stripper (PreToolUse on Bash - git commit)
+    commit_cruft: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/strip-commit-cruft.php",
+        timeout: 5,
+        matcher: "Bash"
+    },
+    // Activity logger (PostToolUse on Write|Edit)
+    log_activity: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/log-activity.php",
+        timeout: 10,
+        matcher: "Write|Edit",
+        event: "PostToolUse"
+    },
+    // Response capture (Stop hook)
+    capture_response: {
+        command: "php ${MYCTOBOT_APP_ROOT}/scripts/hooks/capture-response.php",
+        timeout: 5,
+        matcher: "",
+        event: "Stop"
+    }
+};
+
+function updateHooksFromCheckboxes() {
+    const preToolUseValidators = [];
+    const preToolUseBash = [];
+    const postToolUse = [];
+    const stop = [];
+
+    // Language validators (PreToolUse on Write|Edit)
+    if (document.getElementById('hook_php').checked) {
+        preToolUseValidators.push({
+            type: "command",
+            command: availableHooks.php.command,
+            timeout: availableHooks.php.timeout
+        });
+    }
+    if (document.getElementById('hook_js').checked) {
+        preToolUseValidators.push({
+            type: "command",
+            command: availableHooks.js.command,
+            timeout: availableHooks.js.timeout
+        });
+    }
+    if (document.getElementById('hook_python').checked) {
+        preToolUseValidators.push({
+            type: "command",
+            command: availableHooks.python.command,
+            timeout: availableHooks.python.timeout
+        });
+    }
+
+    // Commit cruft stripper (PreToolUse on Bash)
+    if (document.getElementById('hook_commit_cruft').checked) {
+        preToolUseBash.push({
+            type: "command",
+            command: availableHooks.commit_cruft.command,
+            timeout: availableHooks.commit_cruft.timeout
+        });
+    }
+
+    // Activity logger (PostToolUse)
+    if (document.getElementById('hook_log_activity').checked) {
+        postToolUse.push({
+            type: "command",
+            command: availableHooks.log_activity.command,
+            timeout: availableHooks.log_activity.timeout
+        });
+    }
+
+    // Response capture (Stop)
+    if (document.getElementById('hook_capture_response').checked) {
+        stop.push({
+            type: "command",
+            command: availableHooks.capture_response.command,
+            timeout: availableHooks.capture_response.timeout
+        });
+    }
+
+    // Build config with proper structure
+    const preToolUseRules = [];
+    if (preToolUseValidators.length > 0) {
+        preToolUseRules.push({
+            matcher: "Write|Edit",
+            hooks: preToolUseValidators
+        });
+    }
+    if (preToolUseBash.length > 0) {
+        preToolUseRules.push({
+            matcher: "Bash",
+            hooks: preToolUseBash
+        });
+    }
+
+    const config = {
+        PreToolUse: preToolUseRules,
+        PostToolUse: postToolUse.length > 0 ? [{
+            matcher: "Write|Edit",
+            hooks: postToolUse
+        }] : [],
+        Stop: stop.length > 0 ? [{
+            matcher: "",
+            hooks: stop
+        }] : []
+    };
+
+    document.getElementById('hooks_config').value = JSON.stringify(config, null, 2);
+}
+
+// Load all available hooks
+function loadAllHooks() {
+    document.getElementById('hook_php').checked = true;
+    document.getElementById('hook_commit_cruft').checked = true;
+    document.getElementById('hook_log_activity').checked = true;
+    document.getElementById('hook_capture_response').checked = true;
+    updateHooksFromCheckboxes();
+}
+
+
+// Initialize checkboxes from existing config on page load
+document.addEventListener('DOMContentLoaded', function() {
+    try {
+        const configText = document.getElementById('hooks_config').value;
+        if (!configText || configText === '{}' || configText === '[]') return;
+
+        const config = JSON.parse(configText);
+
+        // Check PreToolUse hooks
+        (config.PreToolUse || []).forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('validate-php')) {
+                    document.getElementById('hook_php').checked = true;
+                }
+                if (cmd.includes('validate-js')) {
+                    document.getElementById('hook_js').checked = true;
+                }
+                if (cmd.includes('validate-python')) {
+                    document.getElementById('hook_python').checked = true;
+                }
+                if (cmd.includes('strip-commit-cruft')) {
+                    document.getElementById('hook_commit_cruft').checked = true;
+                }
+            });
+        });
+
+        // Check PostToolUse hooks
+        (config.PostToolUse || []).forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('log-activity')) {
+                    document.getElementById('hook_log_activity').checked = true;
+                }
+            });
+        });
+
+        // Check Stop hooks
+        (config.Stop || []).forEach(rule => {
+            (rule.hooks || []).forEach(hook => {
+                const cmd = hook.command || '';
+                if (cmd.includes('capture-response')) {
+                    document.getElementById('hook_capture_response').checked = true;
+                }
+            });
+        });
+    } catch (e) {
+        // Ignore parse errors
+    }
+});
+</script>
+
+    <?php elseif ($activeTab === 'provider'): ?>
+    <!-- Provider Tab -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-cpu"></i> LLM Provider Configuration
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Choose which LLM provider this agent uses. Different providers have different capabilities and costs.
+            </div>
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>" onsubmit="prepareProviderConfig()">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
+                <input type="hidden" name="tab" value="provider">
+
+                <div class="mb-4">
+                    <label for="provider_select" class="form-label">Provider Type <span class="text-danger">*</span></label>
+                    <select class="form-select" id="provider_select" name="provider" onchange="updateProviderForm()">
+                        <?php foreach ($providers as $p): ?>
+                        <option value="<?= $p['type'] ?>"
+                                <?= $provider === $p['type'] ? 'selected' : '' ?>
+                                data-can-orchestrate="<?= $p['can_orchestrate'] ? '1' : '0' ?>"
+                                data-requires-api-key="<?= $p['requires_api_key'] ? '1' : '0' ?>">
+                            <?= h($p['name']) ?> - <?= h($p['description']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <!-- Dynamic provider config form -->
+                <div id="provider-config-form" class="mb-4">
+                    <!-- Claude CLI -->
+                    <div class="provider-config" id="config-claude_cli" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-terminal"></i> Claude CLI Settings</h6>
+                                <p class="text-muted small">Uses Claude Code CLI. Can use Anthropic API or local Ollama as backend.</p>
+
+                                <!-- Backend Toggle -->
+                                <div class="mb-3">
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input provider-field" type="checkbox" role="switch"
+                                               id="claude-use-ollama" name="config_use_ollama"
+                                               <?= !empty($providerConfig['use_ollama']) ? 'checked' : '' ?>
+                                               onchange="toggleClaudeBackend()">
+                                        <label class="form-check-label" for="claude-use-ollama">
+                                            <i class="bi bi-cpu"></i> Use Ollama as backend
+                                        </label>
+                                    </div>
+                                    <div class="form-text">Run Claude Code with local Ollama models instead of Anthropic API</div>
+                                </div>
+
+                                <!-- Anthropic Backend (default) -->
+                                <div id="claude-anthropic-config">
+                                    <div class="mb-2">
+                                        <label class="form-label">Model</label>
+                                        <select class="form-select provider-field" name="config_model" id="claude-model-select">
+                                            <option value="sonnet" <?= ($providerConfig['model'] ?? 'sonnet') === 'sonnet' ? 'selected' : '' ?>>Sonnet (Recommended)</option>
+                                            <option value="opus" <?= ($providerConfig['model'] ?? '') === 'opus' ? 'selected' : '' ?>>Opus</option>
+                                            <option value="haiku" <?= ($providerConfig['model'] ?? '') === 'haiku' ? 'selected' : '' ?>>Haiku (Fast)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <!-- Ollama Backend -->
+                                <div id="claude-ollama-config" style="display: none;">
+                                    <div class="alert alert-info small py-2 mb-3">
+                                        <i class="bi bi-info-circle"></i>
+                                        Claude Code will run with Ollama. Requires Ollama running locally or accessible via network.
+                                        <a href="https://docs.ollama.com/integrations/claude-code" target="_blank">Learn more</a>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">Ollama Host</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control provider-field" name="config_ollama_host"
+                                                   id="claude-ollama-host"
+                                                   value="<?= h($providerConfig['ollama_host'] ?? 'http://localhost:11434') ?>"
+                                                   placeholder="http://localhost:11434">
+                                            <button type="button" class="btn btn-outline-primary" onclick="loadClaudeOllamaModels()">
+                                                <i class="bi bi-arrow-clockwise"></i> Load Models
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">Ollama Model</label>
+                                        <select class="form-select provider-field" name="config_ollama_model" id="claude-ollama-model"
+                                                onchange="loadClaudeOllamaModelInfo(this.value)">
+                                            <option value="">-- Click "Load Models" to fetch --</option>
+                                            <?php if (!empty($providerConfig['ollama_model'])): ?>
+                                            <option value="<?= h($providerConfig['ollama_model']) ?>" selected>
+                                                <?= h($providerConfig['ollama_model']) ?>
+                                            </option>
+                                            <?php endif; ?>
+                                        </select>
+                                        <div class="form-text">
+                                            Recommended: <code>qwen3-coder</code>, <code>gpt-oss:20b</code>, <code>codellama</code>
+                                        </div>
+                                    </div>
+
+                                    <!-- Model Info Card for Claude+Ollama -->
+                                    <div id="claude-ollama-model-info" class="mb-3" style="display:none;">
+                                        <div class="card border-info">
+                                            <div class="card-header bg-info bg-opacity-10 py-2">
+                                                <strong id="claude-model-info-name">Model Info</strong>
+                                            </div>
+                                            <div class="card-body py-2 small">
+                                                <div class="row">
+                                                    <div class="col-6"><strong>Family:</strong> <span id="claude-model-info-family">-</span></div>
+                                                    <div class="col-6"><strong>Size:</strong> <span id="claude-model-info-size">-</span></div>
+                                                    <div class="col-6"><strong>Parameters:</strong> <span id="claude-model-info-params">-</span></div>
+                                                    <div class="col-6"><strong>Quantization:</strong> <span id="claude-model-info-quant">-</span></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="testClaudeOllamaConnection()">
+                                        <i class="bi bi-plug"></i> Test Ollama Connection
+                                    </button>
+                                    <span id="claude-ollama-test-result" class="ms-2"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OpenAI -->
+                    <div class="provider-config" id="config-openai" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-stars"></i> OpenAI Settings</h6>
+                                <p class="text-muted small">Connect to OpenAI API.</p>
+                                <div class="mb-2">
+                                    <label class="form-label">API Key Setting Name</label>
+                                    <input type="text" class="form-control provider-field" name="config_api_key_setting"
+                                           value="<?= h($providerConfig['api_key_setting'] ?? 'openai_api_key') ?>"
+                                           placeholder="openai_api_key">
+                                    <div class="form-text">Name of the encrypted setting in your enterprise settings</div>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select provider-field" name="config_model">
+                                        <option value="gpt-4-turbo" <?= ($providerConfig['model'] ?? 'gpt-4-turbo') === 'gpt-4-turbo' ? 'selected' : '' ?>>GPT-4 Turbo</option>
+                                        <option value="gpt-4o" <?= ($providerConfig['model'] ?? '') === 'gpt-4o' ? 'selected' : '' ?>>GPT-4o</option>
+                                        <option value="gpt-4o-mini" <?= ($providerConfig['model'] ?? '') === 'gpt-4o-mini' ? 'selected' : '' ?>>GPT-4o Mini</option>
+                                        <option value="gpt-4" <?= ($providerConfig['model'] ?? '') === 'gpt-4' ? 'selected' : '' ?>>GPT-4</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Claude API -->
+                    <div class="provider-config" id="config-claude_api" style="display: none;">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6><i class="bi bi-cloud"></i> Claude API Settings</h6>
+                                <p class="text-muted small">Uses Anthropic API directly (no CLI). Assign a specific API key to this agent.</p>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Anthropic API Key <span class="text-danger">*</span></label>
+                                    <select class="form-select provider-field" name="connections_id" id="connections_id">
+                                        <option value="">-- Select API Key --</option>
+                                        <?php if (!empty($anthropicKeys)): ?>
+                                            <?php foreach ($anthropicKeys as $key): ?>
+                                            <option value="<?= $key->id ?>"
+                                                    <?= ($agent['connections_id'] ?? null) == $key->id ? 'selected' : '' ?>
+                                                    data-model="<?= h($key->model ?? '') ?>">
+                                                <?= h($key->name) ?>
+                                                <?php if ($key->shared): ?>(Shared)<?php endif; ?>
+                                                - <?= h($key->model ?? 'default') ?>
+                                            </option>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </select>
+                                    <div class="form-text">
+                                        Select the API key this agent will use.
+                                        <a href="/anthropic/keys">Manage API Keys</a>
+                                    </div>
+                                </div>
+
+                                <div class="mb-2">
+                                    <label class="form-label">Model</label>
+                                    <select class="form-select provider-field" name="config_model" id="claude-api-model">
+                                        <option value="claude-sonnet-4-20250514" <?= ($providerConfig['model'] ?? 'claude-sonnet-4-20250514') === 'claude-sonnet-4-20250514' ? 'selected' : '' ?>>Claude Sonnet 4 (Recommended)</option>
+                                        <option value="claude-opus-4-20250514" <?= ($providerConfig['model'] ?? '') === 'claude-opus-4-20250514' ? 'selected' : '' ?>>Claude Opus 4</option>
+                                        <option value="claude-3-5-haiku-20241022" <?= ($providerConfig['model'] ?? '') === 'claude-3-5-haiku-20241022' ? 'selected' : '' ?>>Claude 3.5 Haiku (Fast)</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hidden field to store provider config as JSON -->
+                <input type="hidden" name="provider_config" id="provider_config_json" value="<?= h(json_encode($providerConfig)) ?>">
+
+                <hr>
+
+                <!-- MCP Exposure -->
+                <h6><i class="bi bi-plug"></i> Expose as MCP Tool</h6>
+                <p class="text-muted small">Allow other agents to call this agent as an MCP tool for inter-LLM orchestration.</p>
+
+                <div class="mb-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="expose_as_mcp" name="expose_as_mcp" value="1"
+                               <?= $exposeAsMcp ? 'checked' : '' ?> onchange="toggleMcpExposure()">
+                        <label class="form-check-label" for="expose_as_mcp">
+                            Expose this agent as an MCP tool
+                        </label>
+                    </div>
+                </div>
+
+                <div id="mcp-exposure-config" style="display: <?= $exposeAsMcp ? 'block' : 'none' ?>;">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">MCP Tool Name</label>
+                            <input type="text" class="form-control" name="mcp_tool_name" id="mcp_tool_name"
+                                   value="<?= h($mcpToolName) ?>"
+                                   placeholder="e.g., ollama_review"
+                                   onchange="updateMcpConfig()">
+                            <div class="form-text">How Claude will call this agent</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tool Description</label>
+                            <input type="text" class="form-control" name="mcp_tool_description"
+                                   value="<?= h($mcpToolDescription) ?>"
+                                   placeholder="Get code review from local Ollama">
+                        </div>
+                    </div>
+
+                    <?php if (!$isNew): ?>
+                    <div class="card bg-dark border-secondary mt-3">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-code-square"></i> MCP Configuration</span>
+                            <button type="button" class="btn btn-sm btn-outline-light" onclick="copyMcpConfig()">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle"></i>
+                                    workspace: <code><?= h($workspaceSlug ?? 'default') ?></code> |
+                                    API URL: <code><?= h($mcpApiUrl ?? '') ?></code>
+                                </small>
+                            </div>
+                            <pre class="bg-body-secondary p-3 rounded mb-0" id="mcp-config-preview"><code><?php
+$serverName = $mcpToolName ?: strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $agentName));
+$mcpConfigJson = [
+    'mcpServers' => [
+        $serverName => [
+            'type' => 'http',
+            'url' => 'https://' . ($workspaceSlug ?? 'default') . '.myctobot.ai/mcp',
+            'headers' => [
+                'Authorization' => 'Bearer ${MYCTOBOT_API_KEY}'
+            ]
+        ]
+    ]
+];
+echo h(json_encode($mcpConfigJson, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+?></code></pre>
+                            <div class="form-text mt-2">
+                                <i class="bi bi-lightbulb"></i>
+                                Save this as <code>.mcp.json</code> in your project root.
+                                Set <code>MYCTOBOT_API_KEY</code> env var or replace with your API key.
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Save Provider Config
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+<script>
+function updateProviderForm() {
+    const provider = document.getElementById('provider_select').value;
+    document.querySelectorAll('.provider-config').forEach(el => el.style.display = 'none');
+    const configEl = document.getElementById('config-' + provider);
+    if (configEl) {
+        configEl.style.display = 'block';
+    }
+}
+
+function toggleMcpExposure() {
+    const show = document.getElementById('expose_as_mcp').checked;
+    document.getElementById('mcp-exposure-config').style.display = show ? 'block' : 'none';
+}
+
+function prepareProviderConfig() {
+    const provider = document.getElementById('provider_select').value;
+    const configEl = document.getElementById('config-' + provider);
+    const config = {};
+
+    if (configEl) {
+        configEl.querySelectorAll('.provider-field').forEach(field => {
+            const name = field.name.replace('config_', '');
+            // Handle checkboxes properly
+            if (field.type === 'checkbox') {
+                config[name] = field.checked;
+            } else {
+                config[name] = field.value;
+            }
+        });
+    }
+
+    document.getElementById('provider_config_json').value = JSON.stringify(config);
+}
+
+// Claude + Ollama backend functions
+function toggleClaudeBackend() {
+    const useOllama = document.getElementById('claude-use-ollama').checked;
+    document.getElementById('claude-anthropic-config').style.display = useOllama ? 'none' : 'block';
+    document.getElementById('claude-ollama-config').style.display = useOllama ? 'block' : 'none';
+
+    // Auto-load models when toggling on
+    if (useOllama) {
+        loadClaudeOllamaModels();
+    }
+}
+
+function loadClaudeOllamaModels() {
+    const host = document.getElementById('claude-ollama-host').value;
+    const modelSelect = document.getElementById('claude-ollama-model');
+    const currentModel = modelSelect.value;
+
+    modelSelect.innerHTML = '<option value="">Loading models...</option>';
+
+    // Fetch via server (Ollama runs on same server)
+    fetch('/agents/getmodels', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
+        },
+        body: 'provider=ollama&detailed=1&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data.models && data.data.models.length > 0) {
+            modelSelect.innerHTML = '<option value="">-- Select a model --</option>';
+            data.data.models.forEach(model => {
+                const opt = document.createElement('option');
+                opt.value = model.name;
+                const details = model.details || {};
+                const sizeInfo = model.size_formatted ? ` (${model.size_formatted})` : '';
+                const paramInfo = details.parameter_size ? ` - ${details.parameter_size}` : '';
+                opt.textContent = model.name + paramInfo + sizeInfo;
+                opt.dataset.family = details.family || '';
+                opt.dataset.params = details.parameter_size || '';
+                opt.dataset.quant = details.quantization || '';
+                opt.dataset.size = model.size_formatted || '';
+                if (model.name === currentModel) opt.selected = true;
+                modelSelect.appendChild(opt);
+            });
+            hideClaudeOllamaManualInput();
+            if (modelSelect.value) loadClaudeOllamaModelInfo(modelSelect.value);
+        } else {
+            modelSelect.innerHTML = '<option value="">No models found - enter manually</option>';
+            showClaudeOllamaManualInput();
+        }
+    })
+    .catch(e => {
+        console.log('Failed to load models:', e.message);
+        modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        showClaudeOllamaManualInput();
+    });
+}
+
+function showClaudeOllamaManualInput() {
+    let manualDiv = document.getElementById('claude-ollama-manual');
+    if (!manualDiv) {
+        const modelDiv = document.getElementById('claude-ollama-model').parentElement;
+        manualDiv = document.createElement('div');
+        manualDiv.id = 'claude-ollama-manual';
+        manualDiv.className = 'mt-2';
+        manualDiv.innerHTML = `
+            <label class="form-label small text-muted">Or enter model name:</label>
+            <input type="text" class="form-control form-control-sm" id="claude-ollama-model-manual"
+                   placeholder="qwen3-coder, codellama, llama3" onchange="syncClaudeManualModel()">
+            <div class="form-text">Localhost not reachable from web - model validated when agent runs</div>
+        `;
+        modelDiv.appendChild(manualDiv);
+    }
+    manualDiv.style.display = 'block';
+}
+
+function hideClaudeOllamaManualInput() {
+    const manualDiv = document.getElementById('claude-ollama-manual');
+    if (manualDiv) manualDiv.style.display = 'none';
+}
+
+function syncClaudeManualModel() {
+    const manual = document.getElementById('claude-ollama-model-manual');
+    const select = document.getElementById('claude-ollama-model');
+    if (manual && manual.value) {
+        const opt = document.createElement('option');
+        opt.value = manual.value;
+        opt.textContent = manual.value;
+        opt.selected = true;
+        select.appendChild(opt);
+    }
+}
+
+function loadClaudeOllamaModelInfo(modelName) {
+    const infoCard = document.getElementById('claude-ollama-model-info');
+    if (!modelName) {
+        infoCard.style.display = 'none';
+        return;
+    }
+
+    const modelSelect = document.getElementById('claude-ollama-model');
+    const selectedOpt = modelSelect.options[modelSelect.selectedIndex];
+
+    document.getElementById('claude-model-info-name').textContent = modelName;
+    document.getElementById('claude-model-info-family').textContent = selectedOpt?.dataset.family || '-';
+    document.getElementById('claude-model-info-size').textContent = selectedOpt?.dataset.size || '-';
+    document.getElementById('claude-model-info-params').textContent = selectedOpt?.dataset.params || '-';
+    document.getElementById('claude-model-info-quant').textContent = selectedOpt?.dataset.quant || '-';
+    infoCard.style.display = 'block';
+}
+
+function testClaudeOllamaConnection() {
+    const host = document.getElementById('claude-ollama-host').value;
+    const resultEl = document.getElementById('claude-ollama-test-result');
+
+    resultEl.innerHTML = '<span class="text-muted">Testing connection...</span>';
+
+    // Test via server (Ollama runs on same server)
+    fetch('/agents/testconnection', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
+        },
+        body: 'provider=ollama&config=' + encodeURIComponent(JSON.stringify({host: host}))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success && data.data.success) {
+            resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> ' + data.data.message + '</span>';
+            loadClaudeOllamaModels();
+        } else {
+            resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> ' + (data.data?.message || data.message || 'Cannot reach Ollama') + '</span>';
+            showClaudeOllamaManualInput();
+        }
+    })
+    .catch(e => {
+        resultEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle"></i> Error: ' + e.message + '</span>';
+        showClaudeOllamaManualInput();
+    });
+}
+
+// MCP Config functions
+function copyMcpConfig() {
+    const configEl = document.getElementById('mcp-config-preview');
+    const text = configEl?.textContent || '';
+    navigator.clipboard.writeText(text).then(() => {
+        // Show feedback
+        const btn = document.querySelector('[onclick="copyMcpConfig()"]');
+        const origHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check"></i> Copied!';
+        btn.classList.remove('btn-outline-light');
+        btn.classList.add('btn-success');
+        setTimeout(() => {
+            btn.innerHTML = origHtml;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-light');
+        }, 2000);
+    }).catch(e => {
+        alert('Failed to copy: ' + e.message);
+    });
+}
+
+function updateMcpConfig() {
+    const toolName = document.getElementById('mcp_tool_name')?.value || '';
+    const agentName = '<?= addslashes($agentName) ?>';
+    const workspaceSlug = '<?= addslashes($workspaceSlug ?? 'default') ?>';
+
+    // Derive server name from tool name or agent name
+    const serverName = toolName || agentName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
+    // Use subdomain-based URL pattern
+    const mcpUrl = `https://${workspaceSlug}.myctobot.ai/mcp`;
+
+    const config = {
+        mcpServers: {}
+    };
+    config.mcpServers[serverName] = {
+        type: 'http',
+        url: mcpUrl,
+        headers: {
+            'Authorization': 'Bearer ${MYCTOBOT_API_KEY}'
+        }
+    };
+
+    const configEl = document.getElementById('mcp-config-preview');
+    if (configEl) {
+        configEl.querySelector('code').textContent = JSON.stringify(config, null, 2);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // For edit form (Provider tab)
+    if (document.getElementById('provider_select')) {
+        updateProviderForm();
+        toggleClaudeBackend();
+    }
+    // For create form
+    if (document.getElementById('provider_create')) {
+        updateCreateProviderConfig();
+    }
+});
+</script>
+
+    <?php elseif ($activeTab === 'capabilities'): ?>
+    <!-- Capabilities Tab -->
+    <div class="card">
+        <div class="card-header">
+            <i class="bi bi-stars"></i> Agent Capabilities
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Define what tasks this agent can handle. The orchestrator uses capabilities to route tasks to appropriate agents.
+            </div>
+
+            <form method="POST" action="/agents/update/<?= $agentId ?>">
+                <input type="hidden" name="csrf_token" value="<?= Flight::csrf()->getToken() ?>">
+                <input type="hidden" name="tab" value="capabilities">
+
+                <div class="row">
+                    <?php foreach ($capabilities as $key => $label): ?>
+                    <div class="col-md-6 mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="capabilities[]"
+                                   value="<?= $key ?>" id="cap_<?= $key ?>"
+                                   <?= in_array($key, $agentCapabilities) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="cap_<?= $key ?>">
+                                <strong><?= h($label) ?></strong>
+                            </label>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <hr>
+
+                <div class="d-flex justify-content-end">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Save Capabilities
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <?php elseif ($activeTab === 'tools'): ?>
+    <!-- MCP Tools Tab -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-tools"></i> Custom MCP Tools</span>
+            <button type="button" class="btn btn-sm btn-primary" onclick="showToolModal()">
+                <i class="bi bi-plus-lg"></i> Add Tool
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <i class="bi bi-info-circle"></i>
+                Define custom MCP tools for this agent. When called, tools format a prompt with parameters and send to the agent's LLM.
+                <strong>Requires "Expose as MCP Tool"</strong> to be enabled on the Provider tab.
+            </div>
+
+            <!-- Tools List -->
+            <div id="tools-list">
+                <div class="text-center text-muted py-4" id="tools-loading">
+                    <i class="bi bi-hourglass-split"></i> Loading tools...
+                </div>
+                <div id="tools-empty" class="text-center py-5" style="display:none;">
+                    <i class="bi bi-tools display-4 text-muted"></i>
+                    <p class="text-muted mt-3">No tools defined yet.</p>
+                    <button type="button" class="btn btn-primary" onclick="showToolModal()">
+                        <i class="bi bi-plus-lg"></i> Create Your First Tool
+                    </button>
+                </div>
+                <div id="tools-container" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tool Modal -->
+    <div class="modal fade" id="toolModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="toolModalTitle">
+                        <i class="bi bi-tools"></i> Add MCP Tool
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="tool_id" value="0">
+
+                    <div class="mb-3">
+                        <label class="form-label">Tool Name <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="tool_name"
+                               pattern="[a-z][a-z0-9_]*" required
+                               placeholder="e.g., analyze_image, extract_text">
+                        <div class="form-text">Lowercase letters, numbers, underscores. Must start with letter.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-control" id="tool_description"
+                               placeholder="What this tool does (shown in MCP tools/list)">
+                    </div>
+
+                    <hr>
+
+                    <h6><i class="bi bi-sliders"></i> Parameters</h6>
+                    <p class="text-muted small">Define the input parameters for this tool.</p>
+
+                    <div id="parameters-list" class="mb-3"></div>
+
+                    <button type="button" class="btn btn-sm btn-outline-primary mb-3" onclick="addParameter()">
+                        <i class="bi bi-plus-lg"></i> Add Parameter
+                    </button>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <label class="form-label">Prompt Template</label>
+                        <textarea class="form-control font-monospace" id="prompt_template" rows="6"
+                                  placeholder="Use {parameter_name} placeholders.
+
+Example:
+Analyze the image at {image_path}.
+
+User request: {prompt}
+
+Respond concisely."></textarea>
+                        <div class="form-text">
+                            Available placeholders: <span id="available-placeholders" class="text-primary">none defined</span>
+                        </div>
+                    </div>
+
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="tool_is_active" checked>
+                        <label class="form-check-label" for="tool_is_active">Active</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" onclick="testTool()" id="btn-test-tool" style="display:none;">
+                        <i class="bi bi-play"></i> Test
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveTool()">
+                        <i class="bi bi-check-lg"></i> Save Tool
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test Modal -->
+    <div class="modal fade" id="testModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-play"></i> Test Tool</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="test-params-form"></div>
+                    <hr>
+                    <div id="test-result" style="display:none;">
+                        <h6>Result:</h6>
+                        <pre class="bg-light p-3 rounded" id="test-result-content"></pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary" onclick="executeTest()">
+                        <i class="bi bi-play"></i> Run Test
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const agentId = <?= $agentId ?>;
+const csrfToken = '<?= Flight::csrf()->getToken() ?>';
+let toolsData = [];
+let parameterIndex = 0;
+
+// Load tools on page load
+document.addEventListener('DOMContentLoaded', loadTools);
+
+function loadTools() {
+    fetch('/agents/tools/' + agentId, {
+        headers: { 'X-CSRF-Token': csrfToken }
+    })
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('tools-loading').style.display = 'none';
+        if (data.success && data.data.tools.length > 0) {
+            toolsData = data.data.tools;
+            renderTools();
+            document.getElementById('tools-container').style.display = 'block';
+            document.getElementById('tools-count-badge').textContent = toolsData.length;
+        } else {
+            document.getElementById('tools-empty').style.display = 'block';
+            document.getElementById('tools-count-badge').textContent = '0';
+        }
+    })
+    .catch(e => {
+        document.getElementById('tools-loading').innerHTML =
+            '<span class="text-danger"><i class="bi bi-exclamation-triangle"></i> Error loading tools</span>';
+    });
+}
+
+function renderTools() {
+    const container = document.getElementById('tools-container');
+    let html = '<div class="list-group">';
+
+    toolsData.forEach(tool => {
+        const params = tool.parameters_schema || [];
+        const paramStr = params.map(p => `${p.name} (${p.type})`).join(', ') || 'none';
+        const statusBadge = tool.is_active
+            ? '<span class="badge bg-success">Active</span>'
+            : '<span class="badge bg-secondary">Inactive</span>';
+
+        html += `
+        <div class="list-group-item">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h6 class="mb-1">
+                        <code>${escapeHtml(tool.tool_name)}</code>
+                        ${statusBadge}
+                    </h6>
+                    <p class="text-muted small mb-1">${escapeHtml(tool.tool_description || 'No description')}</p>
+                    <small class="text-muted">Parameters: ${escapeHtml(paramStr)}</small>
+                </div>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="editTool(${tool.id})">
+                        <i class="bi bi-pencil"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-info" onclick="showTestModal(${tool.id})">
+                        <i class="bi bi-play"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTool(${tool.id})">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function showToolModal(toolId = 0) {
+    document.getElementById('tool_id').value = toolId;
+    document.getElementById('tool_name').value = '';
+    document.getElementById('tool_description').value = '';
+    document.getElementById('prompt_template').value = '';
+    document.getElementById('tool_is_active').checked = true;
+    document.getElementById('parameters-list').innerHTML = '';
+    document.getElementById('available-placeholders').textContent = 'none defined';
+    parameterIndex = 0;
+
+    document.getElementById('toolModalTitle').innerHTML = '<i class="bi bi-tools"></i> Add MCP Tool';
+    document.getElementById('btn-test-tool').style.display = 'none';
+
+    new bootstrap.Modal(document.getElementById('toolModal')).show();
+}
+
+function editTool(toolId) {
+    const tool = toolsData.find(t => t.id === toolId);
+    if (!tool) return;
+
+    document.getElementById('tool_id').value = tool.id;
+    document.getElementById('tool_name').value = tool.tool_name;
+    document.getElementById('tool_description').value = tool.tool_description || '';
+    document.getElementById('prompt_template').value = tool.prompt_template || '';
+    document.getElementById('tool_is_active').checked = tool.is_active;
+
+    // Load parameters
+    document.getElementById('parameters-list').innerHTML = '';
+    parameterIndex = 0;
+    (tool.parameters_schema || []).forEach(param => {
+        addParameter(param);
+    });
+    updatePlaceholders();
+
+    document.getElementById('toolModalTitle').innerHTML = '<i class="bi bi-tools"></i> Edit Tool: ' + escapeHtml(tool.tool_name);
+    document.getElementById('btn-test-tool').style.display = 'inline-block';
+
+    new bootstrap.Modal(document.getElementById('toolModal')).show();
+}
+
+function addParameter(data = null) {
+    const idx = parameterIndex++;
+    const name = data?.name || '';
+    const type = data?.type || 'string';
+    const description = data?.description || '';
+    const required = data?.required ?? true;
+    const defaultVal = data?.default || '';
+
+    const html = `
+    <div class="card mb-2 param-card" id="param-${idx}">
+        <div class="card-body py-2">
+            <div class="row g-2">
+                <div class="col-md-3">
+                    <input type="text" class="form-control form-control-sm param-name"
+                           placeholder="Name" value="${escapeHtml(name)}" onchange="updatePlaceholders()">
+                </div>
+                <div class="col-md-2">
+                    <select class="form-select form-select-sm param-type">
+                        <option value="string" ${type === 'string' ? 'selected' : ''}>string</option>
+                        <option value="number" ${type === 'number' ? 'selected' : ''}>number</option>
+                        <option value="boolean" ${type === 'boolean' ? 'selected' : ''}>boolean</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <input type="text" class="form-control form-control-sm param-desc"
+                           placeholder="Description" value="${escapeHtml(description)}">
+                </div>
+                <div class="col-md-2">
+                    <input type="text" class="form-control form-control-sm param-default"
+                           placeholder="Default" value="${escapeHtml(defaultVal)}">
+                </div>
+                <div class="col-md-1">
+                    <div class="form-check mt-1">
+                        <input type="checkbox" class="form-check-input param-required" ${required ? 'checked' : ''}>
+                        <label class="form-check-label small">Req</label>
+                    </div>
+                </div>
+                <div class="col-md-1">
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeParameter(${idx})">
+                        <i class="bi bi-x"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+
+    document.getElementById('parameters-list').insertAdjacentHTML('beforeend', html);
+    updatePlaceholders();
+}
+
+function removeParameter(idx) {
+    document.getElementById('param-' + idx)?.remove();
+    updatePlaceholders();
+}
+
+function updatePlaceholders() {
+    const names = [];
+    document.querySelectorAll('.param-name').forEach(el => {
+        if (el.value.trim()) names.push('{' + el.value.trim() + '}');
+    });
+    document.getElementById('available-placeholders').textContent = names.length ? names.join(', ') : 'none defined';
+}
+
+function getParametersSchema() {
+    const params = [];
+    document.querySelectorAll('.param-card').forEach(card => {
+        const name = card.querySelector('.param-name').value.trim();
+        if (!name) return;
+
+        const param = {
+            name: name,
+            type: card.querySelector('.param-type').value,
+            description: card.querySelector('.param-desc').value.trim(),
+            required: card.querySelector('.param-required').checked
+        };
+
+        const defaultVal = card.querySelector('.param-default').value.trim();
+        if (defaultVal) param.default = defaultVal;
+
+        params.push(param);
+    });
+    return params;
+}
+
+function saveTool() {
+    const toolId = parseInt(document.getElementById('tool_id').value) || 0;
+    const toolName = document.getElementById('tool_name').value.trim();
+    const toolDescription = document.getElementById('tool_description').value.trim();
+    const promptTemplate = document.getElementById('prompt_template').value;
+    const isActive = document.getElementById('tool_is_active').checked;
+    const parametersSchema = getParametersSchema();
+
+    if (!toolName) {
+        alert('Tool name is required');
+        return;
+    }
+
+    if (!/^[a-z][a-z0-9_]*$/.test(toolName)) {
+        alert('Tool name must start with lowercase letter and contain only lowercase letters, numbers, and underscores');
+        return;
+    }
+
+    const body = new URLSearchParams({
+        tool_id: toolId,
+        tool_name: toolName,
+        tool_description: toolDescription,
+        parameters_schema: JSON.stringify(parametersSchema),
+        prompt_template: promptTemplate,
+        is_active: isActive ? '1' : '0',
+        csrf_token: csrfToken
+    });
+
+    fetch('/agents/savetool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: body.toString()
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('toolModal')).hide();
+            loadTools();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to save tool'));
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e.message);
+    });
+}
+
+function deleteTool(toolId) {
+    if (!confirm('Are you sure you want to delete this tool?')) return;
+
+    fetch('/agents/deletetool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: 'tool_id=' + toolId + '&csrf_token=' + csrfToken
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            loadTools();
+        } else {
+            alert('Error: ' + (data.message || 'Failed to delete tool'));
+        }
+    })
+    .catch(e => {
+        alert('Error: ' + e.message);
+    });
+}
+
+function showTestModal(toolId) {
+    const tool = toolsData.find(t => t.id === toolId);
+    if (!tool) return;
+
+    document.getElementById('test-result').style.display = 'none';
+
+    let html = '<input type="hidden" id="test-tool-id" value="' + toolId + '">';
+    (tool.parameters_schema || []).forEach(param => {
+        html += `
+        <div class="mb-2">
+            <label class="form-label small">${escapeHtml(param.name)} (${param.type})${param.required ? ' *' : ''}</label>
+            <input type="text" class="form-control form-control-sm test-param"
+                   data-param="${escapeHtml(param.name)}"
+                   value="${escapeHtml(param.default || '')}"
+                   placeholder="${escapeHtml(param.description || param.name)}">
+        </div>`;
+    });
+
+    if (!tool.parameters_schema?.length) {
+        html += '<p class="text-muted">No parameters to configure.</p>';
+    }
+
+    document.getElementById('test-params-form').innerHTML = html;
+    new bootstrap.Modal(document.getElementById('testModal')).show();
+}
+
+function executeTest() {
+    const toolId = document.getElementById('test-tool-id').value;
+    const params = {};
+
+    document.querySelectorAll('.test-param').forEach(el => {
+        params[el.dataset.param] = el.value;
+    });
+
+    document.getElementById('test-result-content').textContent = 'Executing...';
+    document.getElementById('test-result').style.display = 'block';
+
+    fetch('/agents/testtool/' + agentId, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': csrfToken
+        },
+        body: 'tool_id=' + toolId + '&test_params=' + encodeURIComponent(JSON.stringify(params)) + '&csrf_token=' + csrfToken
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('test-result-content').textContent =
+                typeof data.data.response === 'string'
+                    ? data.data.response
+                    : JSON.stringify(data.data, null, 2);
+        } else {
+            document.getElementById('test-result-content').textContent = 'Error: ' + (data.message || 'Test failed');
+        }
+    })
+    .catch(e => {
+        document.getElementById('test-result-content').textContent = 'Error: ' + e.message;
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text || '';
+    return div.innerHTML;
+}
+</script>
+
+    <?php endif; ?>
+</div>
+
+<?php if (!$isNew): ?>
+<script>
+// Load and display provider capabilities on page load
+function loadProviderCapabilities() {
+    const container = document.getElementById('provider-capabilities');
+    if (!container) return;
+
+    const provider = '<?= $provider ?>';
+    const providerConfig = <?= json_encode($providerConfig) ?>;
+
+    fetch('/agents/getcapabilities', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRF-Token': '<?= Flight::csrf()->getToken() ?>'
+        },
+        body: 'provider=' + encodeURIComponent(provider) + '&provider_config=' + encodeURIComponent(JSON.stringify(providerConfig))
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const caps = data.data.capabilities;
+            const labels = data.data.labels;
+            let html = '';
+
+            for (const [key, enabled] of Object.entries(caps)) {
+                if (key === 'can_orchestrate') continue; // Show separately
+                const label = labels[key] || key;
+                const icon = getCapabilityIcon(key);
+                const badgeClass = enabled ? 'bg-success' : 'bg-secondary';
+                const titleText = enabled ? 'Supported' : 'Not supported';
+                html += `<span class="badge ${badgeClass}" title="${titleText}">
+                    <i class="bi bi-${icon}"></i> ${label}
+                </span>`;
+            }
+
+            // Add orchestration badge
+            if (caps.can_orchestrate) {
+                html += `<span class="badge bg-primary" title="Can spawn sub-agents">
+                    <i class="bi bi-diagram-3"></i> ${labels.can_orchestrate || 'Orchestration'}
+                </span>`;
+            }
+
+            container.innerHTML = html || '<span class="text-muted small">No capabilities info</span>';
+        } else {
+            container.innerHTML = '<span class="text-muted small">Could not load capabilities</span>';
+        }
+    })
+    .catch(e => {
+        container.innerHTML = '<span class="text-muted small">Error loading capabilities</span>';
+    });
+}
+
+function getCapabilityIcon(key) {
+    const icons = {
+        'tool_calling': 'wrench',
+        'vision': 'eye',
+        'streaming': 'lightning',
+        'file_operations': 'folder',
+        'web_search': 'search',
+        'embedding': 'hash'
+    };
+    return icons[key] || 'gear';
+}
+
+// Load capabilities on page load for existing agents
+document.addEventListener('DOMContentLoaded', loadProviderCapabilities);
+</script>
+<?php endif; ?>

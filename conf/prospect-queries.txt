@@ -1,0 +1,38 @@
+# Tier 1 - Shopify stores with self-shipping signals
+"powered by shopify" "ships from our warehouse"
+"powered by shopify" "we ship all orders"
+"powered by shopify" "shipping policy" "business days" -shipbob -deliverr -"fulfilled by amazon"
+site:myshopify.com "shipping policy" "warehouse"
+"shopify" "we fulfill" -amazon -"fulfilled by"
+
+# Tier 2 - Miva Merchant stores
+"miva merchant" "shipping policy"
+"powered by miva" ecommerce shipping
+inurl:mm5 "shipping policy"
+"miva" "ships from" warehouse
+
+# Tier 3 - Category-specific (high self-ship likelihood)
+"powered by shopify" "handmade" "ships from"
+"powered by shopify" "small batch" shipping
+"shopify" "family owned" "we ship"
+"powered by shopify" "made to order" shipping
+
+# Tier 4 - Broader self-shipping signals
+"powered by shopify" "ships from" "warehouse" -amazon
+"powered by shopify" "we pack and ship" OR "we package and ship"
+"powered by shopify" "made in usa" "shipping policy"
+
+# Tier 5 - Vertical-specific (high-value niches)
+"powered by shopify" "ships from our" supplements OR vitamins
+"powered by shopify" "ships from our" candles OR soap OR skincare
+"powered by shopify" "processing time" "ships from" apparel OR clothing
+"powered by shopify" "ships from" coffee OR tea OR food
+"powered by shopify" "ships from" jewelry OR accessories
+"powered by shopify" "our warehouse" pet OR dog OR cat
+
+# Tier 6 - Miva broader
+"powered by miva" "ships from" OR "shipping policy" OR "we ship"
+
+# Tier 7 - Negative filter (exclude known 3PL users)
+"powered by shopify" "shipping policy" -shipbob -deliverr -"fulfilled by amazon" -FBA -shipmonk
+"shopify" "from our facility" -3pl -"third party"

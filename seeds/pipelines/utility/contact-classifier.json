@@ -1,0 +1,363 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Contact Classifier",
+        "slug": "contact-classifier",
+        "description": "AI-powered contact form classifier. Stores submissions, classifies intent, and routes appropriately.",
+        "columns_json": [
+            "Receive",
+            "Classify",
+            "Route",
+            "Notify"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": {
+            "app_slug": "contact-classifier"
+        },
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Your name"
+                },
+                "email": {
+                    "type": "string",
+                    "description": "Your email address"
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Message category (general, support, billing, feature, bug, other)"
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Subject line"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Your message"
+                }
+            },
+            "required": [
+                "name",
+                "email",
+                "message"
+            ]
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "store_submission",
+            "label": "Store Submission",
+            "row": 0,
+            "col": 0,
+            "step_type": "datastore_query",
+            "config_json": {
+                "app_slug": "{context.app_slug}",
+                "operation": "insert",
+                "table": "submissions",
+                "data": {
+                    "name": "{context.name}",
+                    "email": "{context.email}",
+                    "category": "{context.category}",
+                    "subject": "{context.subject}",
+                    "message": "{context.message}",
+                    "ip_address": "{context.source_ip}",
+                    "referrer": "{context.referrer}",
+                    "user_agent": "{context.user_agent}",
+                    "status": "new",
+                    "created_at": "NOW()"
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "classify_ai",
+            "label": "Classify with AI",
+            "row": 0,
+            "col": 1,
+            "step_type": "llm_call",
+            "config_json": {
+                "provider": "ollama",
+                "model": "qwen3-coder:30b",
+                "max_tokens": 500,
+                "json_output": true,
+                "system_prompt": "You are a contact form classifier. Analyze submissions and classify them. Always respond with valid JSON only, no markdown, no explanation.",
+                "prompt": "Classify this contact form submission:\n\nName: {context.name}\nEmail: {context.email}\nCategory: {context.category}\nSubject: {context.subject}\nMessage: {context.message}\n\nClassification Rules:\n- spam: Obvious spam, promotional content, suspicious links, gibberish, crypto/scam patterns\n- prospect: Interest in products/services, pricing inquiries, demo requests, partnerships\n- support: Technical issues, bugs, account problems, how-to questions\n- service: General inquiries, feedback, suggestions\n\nFor prospects: estimate lead_score (1-100)\nFor support: set priority (low/medium/high/critical)\n\nRespond with ONLY this JSON structure:\n{\"classification\": \"spam|prospect|support|service\", \"confidence\": 0.95, \"reasoning\": \"brief explanation\", \"lead_score\": null, \"priority\": null}"
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 60,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "route_switch",
+            "label": "Route",
+            "row": 0,
+            "col": 2,
+            "step_type": "switch",
+            "config_json": {
+                "value": "{classify_ai.output.classification}",
+                "cases": {
+                    "spam": "update_spam",
+                    "prospect": "update_prospect",
+                    "support": "update_support",
+                    "service": "update_service"
+                },
+                "default": "update_service"
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "dynamic",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "update_spam",
+            "label": "Mark Spam",
+            "row": 1,
+            "col": 2,
+            "step_type": "datastore_query",
+            "config_json": {
+                "app_slug": "{context.app_slug}",
+                "operation": "update",
+                "table": "submissions",
+                "data": {
+                    "classification": "spam",
+                    "confidence": "{classify_ai.output.confidence}",
+                    "reasoning": "{classify_ai.output.reasoning}",
+                    "status": "archived",
+                    "classified_at": "NOW()"
+                },
+                "where": {
+                    "id": "{store_submission.output.last_insert_id}"
+                }
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "update_prospect",
+            "label": "Mark Prospect",
+            "row": 2,
+            "col": 2,
+            "step_type": "datastore_query",
+            "config_json": {
+                "app_slug": "{context.app_slug}",
+                "operation": "update",
+                "table": "submissions",
+                "data": {
+                    "classification": "prospect",
+                    "confidence": "{classify_ai.output.confidence}",
+                    "reasoning": "{classify_ai.output.reasoning}",
+                    "lead_score": "{classify_ai.output.lead_score}",
+                    "status": "processed",
+                    "classified_at": "NOW()"
+                },
+                "where": {
+                    "id": "{store_submission.output.last_insert_id}"
+                }
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:notify_prospect",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "notify_prospect",
+            "label": "Notify Sales",
+            "row": 2,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "admin@example.com",
+                "cc": "",
+                "subject": "[Lead Score: {classify_ai.output.lead_score}] New Prospect: {context.subject}",
+                "content_type": "markdown",
+                "body": "# New Prospect Contact\n\n**Lead Score:** {classify_ai.output.lead_score}/100\n**Confidence:** {classify_ai.output.confidence}\n\n## Contact Details\n- **Name:** {context.name}\n- **Email:** {context.email}\n- **Category:** {context.category}\n\n## Subject\n{context.subject}\n\n## Message\n{context.message}\n\n---\n**AI Analysis:**\n{classify_ai.output.reasoning}\n\n---\n*Submission ID: {store_submission.output.last_insert_id}*",
+                "attachments": ""
+            },
+            "input_source": "",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 60,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "update_support",
+            "label": "Mark Support",
+            "row": 3,
+            "col": 2,
+            "step_type": "datastore_query",
+            "config_json": {
+                "app_slug": "{context.app_slug}",
+                "operation": "update",
+                "table": "submissions",
+                "data": {
+                    "classification": "support",
+                    "confidence": "{classify_ai.output.confidence}",
+                    "reasoning": "{classify_ai.output.reasoning}",
+                    "priority": "{classify_ai.output.priority}",
+                    "status": "processed",
+                    "classified_at": "NOW()"
+                },
+                "where": {
+                    "id": "{store_submission.output.last_insert_id}"
+                }
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:notify_support",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "notify_support",
+            "label": "Notify Support",
+            "row": 3,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "admin@example.com",
+                "cc": "",
+                "subject": "[{classify_ai.output.priority}] Support Request: {context.subject}",
+                "content_type": "markdown",
+                "body": "# Support Request\n\n**Priority:** {classify_ai.output.priority}\n**Confidence:** {classify_ai.output.confidence}\n\n## Contact Details\n- **Name:** {context.name}\n- **Email:** {context.email}\n- **Category:** {context.category}\n\n## Subject\n{context.subject}\n\n## Message\n{context.message}\n\n---\n**AI Analysis:**\n{classify_ai.output.reasoning}\n\n---\n*Submission ID: {store_submission.output.last_insert_id}*",
+                "attachments": ""
+            },
+            "input_source": "",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 60,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "update_service",
+            "label": "Mark Service",
+            "row": 4,
+            "col": 2,
+            "step_type": "datastore_query",
+            "config_json": {
+                "app_slug": "{context.app_slug}",
+                "operation": "update",
+                "table": "submissions",
+                "data": {
+                    "classification": "service",
+                    "confidence": "{classify_ai.output.confidence}",
+                    "reasoning": "{classify_ai.output.reasoning}",
+                    "status": "processed",
+                    "classified_at": "NOW()"
+                },
+                "where": {
+                    "id": "{store_submission.output.last_insert_id}"
+                }
+            },
+            "input_source": "prev",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:notify_general",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "notify_general",
+            "label": "Notify General",
+            "row": 4,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "admin@example.com",
+                "cc": "",
+                "subject": "[General] Contact: {context.subject}",
+                "content_type": "markdown",
+                "body": "# General Contact\n\n**Classification:** Service/General\n**Confidence:** {classify_ai.output.confidence}\n\n## Contact Details\n- **Name:** {context.name}\n- **Email:** {context.email}\n- **Category:** {context.category}\n\n## Subject\n{context.subject}\n\n## Message\n{context.message}\n\n---\n**AI Analysis:**\n{classify_ai.output.reasoning}\n\n---\n*Submission ID: {store_submission.output.last_insert_id}*",
+                "attachments": ""
+            },
+            "input_source": "",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 60,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

@@ -1,0 +1,465 @@
+<?php
+/**
+ * Runner Diagnostic Service
+ *
+ * Runs diagnostic checks on runners to validate SSH connectivity
+ * and required dependencies for running Claude Code sessions.
+ */
+
+namespace app\services;
+
+require_once __DIR__ . '/SSHKeyService.php';
+
+class RunnerDiagnosticService {
+
+    private array $runner;
+    private array $results = [];
+    private float $startTime;
+    private ?string $tempKeyFile = null;
+
+    /**
+     * Create diagnostic service for a runner
+     */
+    public function __construct(array $runner) {
+        $this->runner = $runner;
+    }
+
+    /**
+     * Cleanup temp key file on destruction
+     */
+    public function __destruct() {
+        if ($this->tempKeyFile) {
+            SSHKeyService::cleanupTempKeyFile($this->tempKeyFile);
+            $this->tempKeyFile = null;
+        }
+    }
+
+    /**
+     * Prepare SSH key from database for use
+     *
+     * @return string|null Path to temp key file, or null if no key configured
+     */
+    private function prepareSSHKey(): ?string {
+        $sshKeyId = $this->runner['sshkey_id'] ?? null;
+
+        if (!$sshKeyId) {
+            return null;
+        }
+
+        $this->tempKeyFile = SSHKeyService::prepareTempKeyFile((int)$sshKeyId);
+        return $this->tempKeyFile;
+    }
+
+    /**
+     * Run all diagnostic checks
+     *
+     * @return array Diagnostic results
+     */
+    public function runDiagnostic(): array {
+        $this->startTime = microtime(true);
+        $this->results = [
+            'runner_id' => $this->runner['id'],
+            'runner_name' => $this->runner['name'],
+            'execution_mode' => $this->runner['execution_mode'] ?? 'ssh_tmux',
+            'started_at' => date('Y-m-d H:i:s'),
+            'checks' => [],
+            'summary' => '',
+            'ready' => false
+        ];
+
+        // Run checks in order (some depend on previous passing)
+        $this->checkSSHConnection();
+
+        // Only continue if SSH works
+        if ($this->results['checks']['ssh_connect']['passed'] ?? false) {
+            $this->checkClaudeCLI();
+            $this->checkTmux();
+            $this->checkGit();
+            $this->checkNode();
+            $this->checkWorkDirectory();
+            $this->checkTmuxSession();
+            $this->checkMCPServer();
+        }
+
+        // Calculate summary
+        $passed = 0;
+        $total = count($this->results['checks']);
+        foreach ($this->results['checks'] as $check) {
+            if ($check['passed']) $passed++;
+        }
+
+        $this->results['summary'] = "{$passed}/{$total} checks passed";
+        $this->results['ready'] = ($passed === $total);
+        $this->results['duration_ms'] = round((microtime(true) - $this->startTime) * 1000);
+        $this->results['completed_at'] = date('Y-m-d H:i:s');
+
+        return $this->results;
+    }
+
+    /**
+     * Build SSH command prefix
+     */
+    private function sshPrefix(): string {
+        $user = $this->runner['ssh_user'] ?? 'claudeuser';
+        $host = $this->runner['host'];
+        $port = $this->runner['ssh_port'] ?? 22;
+
+        $cmd = "ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes";
+
+        if ($port !== 22) {
+            $cmd .= " -p {$port}";
+        }
+
+        // Try to get key from database first
+        $keyPath = $this->prepareSSHKey();
+
+        // If no database key, fall back to default SSH key location
+        if ($keyPath && file_exists($keyPath)) {
+            $cmd .= " -i " . escapeshellarg($keyPath);
+        }
+
+        $cmd .= " " . escapeshellarg("{$user}@{$host}");
+
+        return $cmd;
+    }
+
+    /**
+     * Execute SSH command and return result
+     */
+    private function sshExec(string $remoteCmd, int $timeout = 10): array {
+        $start = microtime(true);
+        $sshCmd = $this->sshPrefix() . " " . escapeshellarg($remoteCmd) . " 2>&1";
+
+        exec($sshCmd, $output, $exitCode);
+
+        return [
+            'exit_code' => $exitCode,
+            'output' => implode("\n", $output),
+            'time_ms' => round((microtime(true) - $start) * 1000)
+        ];
+    }
+
+    /**
+     * Check SSH connectivity
+     */
+    private function checkSSHConnection(): void {
+        $result = $this->sshExec('echo "SSH_OK"');
+
+        $this->results['checks']['ssh_connect'] = [
+            'name' => 'SSH Connection',
+            'passed' => ($result['exit_code'] === 0 && strpos($result['output'], 'SSH_OK') !== false),
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $result['exit_code'] === 0
+                ? 'Connected to ' . ($this->runner['ssh_user'] ?? 'claudeuser') . '@' . $this->runner['host']
+                : 'Failed to connect: ' . $result['output']
+        ];
+    }
+
+    /**
+     * Check Claude CLI is installed
+     */
+    private function checkClaudeCLI(): void {
+        // Source profile to get npm global bin in PATH, or check common locations
+        $result = $this->sshExec('source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null; claude --version 2>/dev/null || ~/.npm-global/bin/claude --version 2>/dev/null || /usr/local/bin/claude --version 2>/dev/null || echo "NOT_FOUND"');
+
+        $passed = $result['exit_code'] === 0 && strpos($result['output'], 'NOT_FOUND') === false;
+
+        $this->results['checks']['claude_cli'] = [
+            'name' => 'Claude CLI',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $passed
+                ? 'Claude CLI: ' . trim($result['output'])
+                : 'Claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code'
+        ];
+    }
+
+    /**
+     * Check tmux is installed
+     */
+    private function checkTmux(): void {
+        $result = $this->sshExec('tmux -V 2>/dev/null || echo "NOT_FOUND"');
+
+        $passed = $result['exit_code'] === 0 && strpos($result['output'], 'NOT_FOUND') === false;
+
+        $this->results['checks']['tmux'] = [
+            'name' => 'Tmux',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $passed
+                ? 'Tmux: ' . trim($result['output'])
+                : 'Tmux not found. Install with: apt install tmux'
+        ];
+    }
+
+    /**
+     * Check Git is installed
+     */
+    private function checkGit(): void {
+        $result = $this->sshExec('git --version 2>/dev/null || echo "NOT_FOUND"');
+
+        $passed = $result['exit_code'] === 0 && strpos($result['output'], 'NOT_FOUND') === false;
+
+        $this->results['checks']['git'] = [
+            'name' => 'Git',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $passed
+                ? 'Git: ' . trim($result['output'])
+                : 'Git not found. Install with: apt install git'
+        ];
+    }
+
+    /**
+     * Check Node.js is installed
+     */
+    private function checkNode(): void {
+        // Source profile for nvm or other node version managers
+        $result = $this->sshExec('source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null; node --version 2>/dev/null || echo "NOT_FOUND"');
+
+        $passed = $result['exit_code'] === 0 && strpos($result['output'], 'NOT_FOUND') === false;
+
+        $this->results['checks']['node'] = [
+            'name' => 'Node.js',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $passed
+                ? 'Node.js: ' . trim($result['output'])
+                : 'Node.js not found. Required for Claude CLI.'
+        ];
+    }
+
+    /**
+     * Check work directory is writable
+     */
+    private function checkWorkDirectory(): void {
+        $testDir = '/tmp/aidev-diagnostic-test-' . uniqid();
+        $result = $this->sshExec("mkdir -p {$testDir} && touch {$testDir}/test && rm -rf {$testDir} && echo 'WRITABLE'");
+
+        $passed = strpos($result['output'], 'WRITABLE') !== false;
+
+        $this->results['checks']['work_dir'] = [
+            'name' => 'Work Directory',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $passed
+                ? '/tmp is writable'
+                : 'Cannot write to /tmp directory'
+        ];
+    }
+
+    /**
+     * Check tmux session creation/deletion works
+     */
+    private function checkTmuxSession(): void {
+        $testSession = 'diag-test-' . uniqid();
+
+        // Create session
+        $create = $this->sshExec("tmux new-session -d -s {$testSession} 'sleep 2'");
+        if ($create['exit_code'] !== 0) {
+            $this->results['checks']['tmux_session'] = [
+                'name' => 'Tmux Sessions',
+                'passed' => false,
+                'output' => $create['output'],
+                'time_ms' => $create['time_ms'],
+                'details' => 'Failed to create tmux session: ' . $create['output']
+            ];
+            return;
+        }
+
+        // Verify exists
+        $check = $this->sshExec("tmux has-session -t {$testSession}");
+
+        // Kill session
+        $kill = $this->sshExec("tmux kill-session -t {$testSession}");
+
+        $passed = $create['exit_code'] === 0 && $check['exit_code'] === 0;
+
+        $this->results['checks']['tmux_session'] = [
+            'name' => 'Tmux Sessions',
+            'passed' => $passed,
+            'output' => 'create: ' . $create['exit_code'] . ', check: ' . $check['exit_code'] . ', kill: ' . $kill['exit_code'],
+            'time_ms' => $create['time_ms'] + $check['time_ms'] + $kill['time_ms'],
+            'details' => $passed
+                ? 'Can create and manage tmux sessions'
+                : 'Failed to manage tmux sessions'
+        ];
+    }
+
+    /**
+     * Check MCP Jira server is reachable via HTTP
+     * Tests connectivity from the runner to the centralized MCP endpoint
+     * If member has Jira credentials, performs authenticated test
+     */
+    private function checkMCPServer(): void {
+        // Get workspace from runner config or session
+        $workspace = $this->runner['workspace'] ?? $_SESSION['workspace_slug'] ?? null;
+
+        if (!$workspace) {
+            $this->results['checks']['mcp_server'] = [
+                'name' => 'MCP Jira Server',
+                'passed' => false,
+                'output' => 'No workspace configured',
+                'time_ms' => 0,
+                'details' => 'Runner has no workspace configured. Set workspace in runner settings.'
+            ];
+            return;
+        }
+
+        // Construct MCP endpoint URL
+        $mcpUrl = "https://{$workspace}.myctobot.ai/mcp/jira";
+
+        // Try to get member credentials for authenticated test
+        $memberId = $_SESSION['member_id'] ?? null;
+        $cloudId = null;
+        $authHeader = '';
+
+        if ($memberId) {
+            // Look up member's Jira cloud ID from connections table
+            $token = \app\Bean::findOne('connections', 'connector_type = ? AND member_id = ?', ['atlassian', $memberId]);
+            if ($token && !empty($token->external_eid)) {
+                $cloudId = $token->external_eid;
+                // Build Basic auth header: base64(memberId:cloudId)
+                $authCredentials = base64_encode("{$memberId}:{$cloudId}");
+                $authHeader = "-H 'Authorization: Basic {$authCredentials}'";
+            }
+        }
+
+        // Test HTTP connectivity from the runner using curl
+        // If we have auth credentials, do an authenticated request
+        $curlCmd = sprintf(
+            'curl -s -o /dev/null -w "%%{http_code}" --connect-timeout 10 -X POST %s -H "Content-Type: application/json" -d \'{"jsonrpc":"2.0","method":"tools/list","id":1}\' %s 2>/dev/null || echo "CURL_FAILED"',
+            $authHeader,
+            escapeshellarg($mcpUrl)
+        );
+
+        $result = $this->sshExec($curlCmd);
+
+        $httpCode = trim($result['output']);
+        $isAuthenticated = !empty($authHeader);
+
+        // Determine pass/fail based on whether we sent auth
+        if ($isAuthenticated) {
+            // With auth, we expect 200 for success
+            $passed = $httpCode === '200';
+            $details = $passed
+                ? "MCP server authenticated successfully at {$mcpUrl}"
+                : ($httpCode === '401'
+                    ? "MCP server reachable but auth failed (HTTP 401). Check Jira connection."
+                    : "MCP server returned HTTP {$httpCode}");
+        } else {
+            // Without auth, any HTTP response means server is reachable
+            // 401 = server exists but needs auth (expected)
+            $passed = is_numeric($httpCode) && (int)$httpCode >= 200 && (int)$httpCode < 600;
+            $details = $passed
+                ? "MCP server reachable at {$mcpUrl} (HTTP {$httpCode}, no Jira credentials to test auth)"
+                : "Cannot reach MCP server at {$mcpUrl}. Response: {$httpCode}";
+        }
+
+        $this->results['checks']['mcp_server'] = [
+            'name' => 'MCP Jira Server',
+            'passed' => $passed,
+            'output' => $result['output'],
+            'time_ms' => $result['time_ms'],
+            'details' => $details
+        ];
+    }
+
+    /**
+     * Quick connectivity check (just SSH)
+     */
+    public function quickCheck(): array {
+        $result = $this->sshExec('echo "OK"', 5);
+
+        return [
+            'connected' => ($result['exit_code'] === 0 && trim($result['output']) === 'OK'),
+            'time_ms' => $result['time_ms'],
+            'error' => $result['exit_code'] !== 0 ? $result['output'] : null
+        ];
+    }
+
+    /**
+     * Run a "Hello World" test using Claude CLI
+     * This verifies the full pipeline works: SSH -> tmux -> Claude CLI
+     *
+     * @return array Test results with output
+     */
+    public function runHelloWorld(): array {
+        $startTime = microtime(true);
+        $testId = 'hello-' . uniqid();
+        $workDir = "/tmp/aidev-hello-{$testId}";
+
+        // Create work directory
+        $mkdirResult = $this->sshExec("mkdir -p {$workDir}", 10);
+        if ($mkdirResult['exit_code'] !== 0) {
+            return [
+                'success' => false,
+                'error' => 'Failed to create work directory: ' . $mkdirResult['output'],
+                'duration_ms' => round((microtime(true) - $startTime) * 1000)
+            ];
+        }
+
+        // Run Claude with a simple prompt (non-interactive, print mode)
+        // Using --print to get output directly without interactive session
+        $claudeCmd = 'source ~/.bashrc 2>/dev/null; source ~/.profile 2>/dev/null; source ~/.nvm/nvm.sh 2>/dev/null; '
+            . 'cd ' . escapeshellarg($workDir) . ' && '
+            . 'timeout 60 claude --print "Say exactly: Hello from Claude on this workstation! Then tell me what directory you are in."';
+
+        $claudeResult = $this->sshExec($claudeCmd, 65);
+
+        // Cleanup work directory
+        $this->sshExec("rm -rf {$workDir}", 5);
+
+        $success = $claudeResult['exit_code'] === 0 && !empty(trim($claudeResult['output']));
+
+        // Check if output looks like a valid Claude response
+        $output = trim($claudeResult['output']);
+        $hasHello = stripos($output, 'hello') !== false;
+
+        return [
+            'success' => $success && $hasHello,
+            'output' => $output,
+            'exit_code' => $claudeResult['exit_code'],
+            'duration_ms' => round((microtime(true) - $startTime) * 1000),
+            'error' => !$success ? 'Claude command failed: ' . $claudeResult['output'] : null,
+            'warning' => ($success && !$hasHello) ? 'Response received but may not contain expected greeting' : null
+        ];
+    }
+
+    /**
+     * Get installation commands for missing dependencies
+     */
+    public function getInstallCommands(): array {
+        $commands = [];
+
+        foreach ($this->results['checks'] as $key => $check) {
+            if ($check['passed']) continue;
+
+            switch ($key) {
+                case 'claude_cli':
+                    $commands[] = 'npm install -g @anthropic-ai/claude-code';
+                    break;
+                case 'tmux':
+                    $commands[] = 'apt install -y tmux';
+                    break;
+                case 'git':
+                    $commands[] = 'apt install -y git';
+                    break;
+                case 'node':
+                    $commands[] = 'curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt install -y nodejs';
+                    break;
+                case 'mcp_server':
+                    $commands[] = '# Verify network connectivity to MCP endpoint and check runner workspace config';
+                    break;
+            }
+        }
+
+        return $commands;
+    }
+}

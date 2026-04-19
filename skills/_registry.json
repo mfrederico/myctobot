@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "skills": {
+    "pipeline-create": {
+      "name": "Pipeline Creation",
+      "description": "Guide for creating new pipelines with proper step configuration",
+      "file": "pipeline-create.md",
+      "tags": ["pipeline", "create", "automation"]
+    },
+    "pipeline-debug": {
+      "name": "Pipeline Debugging",
+      "description": "Troubleshoot failed or stuck pipeline runs",
+      "file": "pipeline-debug.md",
+      "tags": ["pipeline", "debug", "troubleshoot"]
+    },
+    "shopify-automation": {
+      "name": "Shopify Automation",
+      "description": "Build Shopify store automations using GraphQL and pipelines",
+      "file": "shopify-automation.md",
+      "tags": ["shopify", "ecommerce", "automation"]
+    }
+  }
+}

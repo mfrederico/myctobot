@@ -1,0 +1,1038 @@
+/**
+ * MyCTOBot Dark Mode Theme
+ * Comprehensive dark mode styling for Bootstrap 5.3+
+ */
+
+/* ============================================
+   CSS Variables - Dark Mode Color Palette
+   ============================================ */
+:root {
+    /* Primary brand colors */
+    --primary-color: #6ea8fe;
+    --primary-hover: #8bb9fe;
+    --primary-bg: #0d6efd;
+
+    /* Semantic colors - slightly muted for dark mode */
+    --success-color: #75b798;
+    --danger-color: #ea868f;
+    --warning-color: #ffda6a;
+    --info-color: #6edff6;
+
+    /* Dark mode backgrounds - layered for depth */
+    --bg-body: #121212;
+    --bg-surface: #1e1e1e;
+    --bg-surface-raised: #2d2d2d;
+    --bg-surface-overlay: #383838;
+
+    /* Text colors with proper contrast */
+    --text-primary: #e9ecef;
+    --text-secondary: #adb5bd;
+    --text-muted: #8b949e;
+    --text-disabled: #6c757d;
+
+    /* Border colors */
+    --border-color: #373b3e;
+    --border-color-light: #495057;
+
+    /* Component-specific */
+    --card-bg: #1e1e1e;
+    --card-border: #373b3e;
+    --card-header-bg: #252525;
+    --table-stripe-bg: rgba(255, 255, 255, 0.02);
+    --table-hover-bg: rgba(255, 255, 255, 0.05);
+    --input-bg: #2b2b2b;
+    --input-border: #495057;
+    --dropdown-bg: #2d2d2d;
+    --modal-bg: #1e1e1e;
+    --code-bg: #2d2d2d;
+
+    /* Shadows for depth */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================
+   Base Styles
+   ============================================ */
+html, body {
+    height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background-color: var(--bg-body);
+    color: var(--text-primary);
+}
+
+main {
+    flex: 1 0 auto;
+    min-height: 0;
+}
+
+footer {
+    flex-shrink: 0;
+}
+
+/* ============================================
+   Typography
+   ============================================ */
+h1, h2, h3, h4, h5, h6 {
+    color: var(--text-primary);
+}
+
+.text-muted {
+    color: var(--text-muted) !important;
+}
+
+a {
+    color: var(--primary-color);
+}
+
+a:hover {
+    color: var(--primary-hover);
+}
+
+/* Code blocks */
+code {
+    background-color: var(--code-bg);
+    color: #e685b5;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+}
+
+pre {
+    background-color: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    padding: 1rem;
+}
+
+pre code {
+    background: none;
+    padding: 0;
+}
+
+/* ============================================
+   Cards - Main content containers
+   ============================================ */
+.card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.card-header {
+    background-color: var(--card-header-bg);
+    border-bottom-color: var(--border-color);
+}
+
+/* Card headers with colored backgrounds need text contrast */
+.card-header.bg-primary,
+.card-header.bg-success,
+.card-header.bg-danger,
+.card-header.bg-info {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+}
+
+.card-body {
+    color: var(--text-primary);
+}
+
+.card-footer {
+    background-color: var(--card-header-bg);
+    border-top-color: var(--border-color);
+}
+
+/* ============================================
+   Tables
+   ============================================ */
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--text-primary);
+    --bs-table-border-color: var(--border-color);
+    --bs-table-striped-bg: var(--table-stripe-bg);
+    --bs-table-hover-bg: var(--table-hover-bg);
+}
+
+.table th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    border-bottom-width: 2px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.table-hover tbody tr:hover {
+    background-color: var(--table-hover-bg);
+}
+
+/* Striped tables */
+.table-striped > tbody > tr:nth-of-type(odd) {
+    background-color: var(--table-stripe-bg);
+}
+
+/* ============================================
+   Forms
+   ============================================ */
+.form-control,
+.form-select {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+.form-control:focus,
+.form-select:focus {
+    background-color: var(--input-bg);
+    border-color: var(--primary-color);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 0.2rem rgba(110, 168, 254, 0.25);
+}
+
+.form-control::placeholder {
+    color: var(--text-muted);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+    background-color: var(--bg-surface);
+    color: var(--text-disabled);
+}
+
+/* Form labels */
+.form-label,
+label {
+    color: var(--text-primary);
+}
+
+.form-text {
+    color: var(--text-muted);
+}
+
+/* Input groups */
+.input-group-text {
+    background-color: var(--bg-surface-raised);
+    border-color: var(--input-border);
+    color: var(--text-secondary);
+}
+
+/* Checkboxes and radios */
+.form-check-input {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-bg);
+    border-color: var(--primary-bg);
+}
+
+.form-check-label {
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Buttons
+   ============================================ */
+.btn {
+    transition: all 0.2s;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Outline buttons - better contrast in dark mode */
+.btn-outline-primary {
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--primary-color);
+    color: #000;
+}
+
+.btn-outline-secondary {
+    color: var(--text-secondary);
+    border-color: var(--border-color-light);
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--bg-surface-raised);
+    border-color: var(--border-color-light);
+    color: var(--text-primary);
+}
+
+.btn-outline-light {
+    color: var(--text-primary);
+    border-color: var(--border-color-light);
+}
+
+.btn-outline-light:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+/* Close buttons */
+.btn-close {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* ============================================
+   Alerts
+   ============================================ */
+.alert {
+    border-width: 1px;
+}
+
+.alert-primary {
+    background-color: rgba(13, 110, 253, 0.15);
+    border-color: rgba(13, 110, 253, 0.3);
+    color: var(--primary-color);
+}
+
+.alert-secondary {
+    background-color: rgba(108, 117, 125, 0.15);
+    border-color: rgba(108, 117, 125, 0.3);
+    color: var(--text-secondary);
+}
+
+.alert-success {
+    background-color: rgba(25, 135, 84, 0.15);
+    border-color: rgba(25, 135, 84, 0.3);
+    color: var(--success-color);
+}
+
+.alert-danger {
+    background-color: rgba(220, 53, 69, 0.15);
+    border-color: rgba(220, 53, 69, 0.3);
+    color: var(--danger-color);
+}
+
+.alert-warning {
+    background-color: rgba(255, 193, 7, 0.15);
+    border-color: rgba(255, 193, 7, 0.3);
+    color: var(--warning-color);
+}
+
+.alert-info {
+    background-color: rgba(13, 202, 240, 0.15);
+    border-color: rgba(13, 202, 240, 0.3);
+    color: var(--info-color);
+}
+
+.alert-heading {
+    color: inherit;
+}
+
+.alert hr {
+    border-color: currentColor;
+    opacity: 0.25;
+}
+
+/* ============================================
+   Badges
+   ============================================ */
+.badge {
+    font-weight: 500;
+}
+
+.badge.bg-secondary {
+    background-color: var(--bg-surface-raised) !important;
+    color: var(--text-secondary);
+}
+
+.badge.bg-light {
+    background-color: var(--bg-surface-raised) !important;
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Dropdowns
+   ============================================ */
+.dropdown-menu {
+    background-color: var(--dropdown-bg);
+    border-color: var(--border-color);
+    box-shadow: var(--shadow-lg);
+}
+
+.dropdown-item {
+    color: var(--text-primary);
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus {
+    background-color: var(--bg-surface-overlay);
+    color: var(--text-primary);
+}
+
+.dropdown-item.active,
+.dropdown-item:active {
+    background-color: var(--primary-bg);
+    color: #fff;
+}
+
+.dropdown-divider {
+    border-color: var(--border-color);
+}
+
+/* ============================================
+   Modals
+   ============================================ */
+.modal-content {
+    background-color: var(--modal-bg);
+    border-color: var(--border-color);
+}
+
+.modal-header {
+    border-bottom-color: var(--border-color);
+}
+
+.modal-footer {
+    border-top-color: var(--border-color);
+}
+
+.modal-title {
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Navigation & Navbar
+   ============================================ */
+.navbar {
+    background-color: var(--bg-surface) !important;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.navbar-brand {
+    color: var(--text-primary) !important;
+}
+
+.navbar-nav .nav-link {
+    color: var(--text-secondary) !important;
+}
+
+.navbar-nav .nav-link:hover,
+.navbar-nav .nav-link:focus {
+    color: var(--text-primary) !important;
+}
+
+.navbar-nav .nav-link.active {
+    color: var(--primary-color) !important;
+}
+
+/* ============================================
+   Breadcrumbs
+   ============================================ */
+.breadcrumb {
+    background-color: transparent;
+}
+
+.breadcrumb-item a {
+    color: var(--primary-color);
+}
+
+.breadcrumb-item.active {
+    color: var(--text-muted);
+}
+
+.breadcrumb-item + .breadcrumb-item::before {
+    color: var(--text-muted);
+}
+
+/* ============================================
+   Pagination
+   ============================================ */
+.page-link {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--primary-color);
+}
+
+.page-link:hover {
+    background-color: var(--bg-surface-raised);
+    border-color: var(--border-color);
+    color: var(--primary-hover);
+}
+
+.page-item.active .page-link {
+    background-color: var(--primary-bg);
+    border-color: var(--primary-bg);
+}
+
+.page-item.disabled .page-link {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--text-disabled);
+}
+
+/* ============================================
+   List Groups
+   ============================================ */
+.list-group-item {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.list-group-item:hover {
+    background-color: var(--bg-surface-raised);
+}
+
+.list-group-item.active {
+    background-color: var(--primary-bg);
+    border-color: var(--primary-bg);
+}
+
+.list-group-item-action:hover,
+.list-group-item-action:focus {
+    background-color: var(--bg-surface-raised);
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Progress Bars
+   ============================================ */
+.progress {
+    background-color: var(--bg-surface-raised);
+}
+
+/* ============================================
+   Toasts
+   ============================================ */
+.toast {
+    background-color: var(--bg-surface-raised);
+    border-color: var(--border-color);
+}
+
+.toast-header {
+    background-color: var(--bg-surface-overlay);
+    border-bottom-color: var(--border-color);
+    color: var(--text-primary);
+}
+
+.toast-body {
+    color: var(--text-primary);
+}
+
+/* ============================================
+   Accordion
+   ============================================ */
+.accordion-item {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color);
+}
+
+.accordion-button {
+    background-color: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.accordion-button:not(.collapsed) {
+    background-color: var(--bg-surface-raised);
+    color: var(--primary-color);
+}
+
+.accordion-button:focus {
+    box-shadow: 0 0 0 0.2rem rgba(110, 168, 254, 0.25);
+}
+
+.accordion-body {
+    background-color: var(--bg-surface);
+}
+
+/* ============================================
+   Tabs & Nav Pills
+   ============================================ */
+.nav-tabs {
+    border-bottom-color: var(--border-color);
+}
+
+.nav-tabs .nav-link {
+    color: var(--text-secondary);
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: var(--border-color) var(--border-color) transparent;
+    color: var(--text-primary);
+}
+
+.nav-tabs .nav-link.active {
+    background-color: var(--bg-surface);
+    border-color: var(--border-color) var(--border-color) var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.nav-pills .nav-link {
+    color: var(--text-secondary);
+}
+
+.nav-pills .nav-link:hover {
+    background-color: var(--bg-surface-raised);
+    color: var(--text-primary);
+}
+
+.nav-pills .nav-link.active {
+    background-color: var(--primary-bg);
+    color: #fff;
+}
+
+/* ============================================
+   Custom Scrollbar
+   ============================================ */
+::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color-light);
+    border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ============================================
+   Loading Spinner
+   ============================================ */
+.spinner {
+    border: 3px solid var(--bg-surface-raised);
+    border-top: 3px solid var(--primary-color);
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 20px auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ============================================
+   Fade Animation
+   ============================================ */
+.fade-in {
+    animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ============================================
+   Hover Effects
+   ============================================ */
+.hover-lift {
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+    transform: translateY(-8px);
+    box-shadow: var(--shadow-lg);
+}
+
+/* Prevent double animation on product cards */
+#products .card.hover-lift:hover {
+    transform: translateY(-8px);
+}
+
+/* ============================================
+   Gradient Backgrounds
+   ============================================ */
+.gradient-primary {
+    background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+}
+
+.gradient-success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.gradient-info {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+}
+
+.gradient-shopify {
+    background: linear-gradient(135deg, #95bf47 0%, #5e8e3e 100%);
+}
+
+/* ============================================
+   Footer
+   ============================================ */
+footer.footer {
+    background-color: var(--bg-surface) !important;
+    border-top: 1px solid var(--border-color);
+}
+
+footer h5 {
+    color: var(--text-primary);
+}
+
+footer .text-muted {
+    color: var(--text-muted) !important;
+}
+
+footer a.text-muted:hover {
+    color: var(--primary-color) !important;
+}
+
+footer hr {
+    border-color: var(--border-color);
+}
+
+/* ============================================
+   Utility Overrides
+   ============================================ */
+.bg-light {
+    background-color: var(--bg-surface) !important;
+}
+
+.bg-white {
+    background-color: var(--bg-surface) !important;
+}
+
+.bg-secondary {
+    background-color: var(--bg-surface) !important;
+}
+
+.text-dark {
+    color: var(--text-primary) !important;
+}
+
+.border {
+    border-color: var(--border-color) !important;
+}
+
+.border-secondary {
+    border-color: var(--border-color) !important;
+}
+
+/* ============================================
+   Print Styles
+   ============================================ */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+
+    body {
+        background-color: #fff !important;
+        color: #000 !important;
+    }
+}
+
+/* ============================================
+   Responsive Tables
+   ============================================ */
+@media (max-width: 768px) {
+    .table-responsive {
+        font-size: 0.9rem;
+    }
+}
+
+/* ============================================
+   Selection Color
+   ============================================ */
+::selection {
+    background-color: var(--primary-bg);
+    color: #fff;
+}
+
+/* ============================================
+   Focus Visible (Accessibility)
+   ============================================ */
+:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* Remove outline for mouse users */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* ============================================
+   Specific Component Fixes
+   ============================================ */
+
+/* JSON/Code display areas */
+.json-display,
+.code-block,
+pre.bg-light,
+pre.bg-dark {
+    background-color: var(--code-bg) !important;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+/* Status indicators */
+.status-online,
+.status-active {
+    color: var(--success-color);
+}
+
+.status-offline,
+.status-inactive {
+    color: var(--danger-color);
+}
+
+.status-pending {
+    color: var(--warning-color);
+}
+
+/* Pipeline/workflow visualizations */
+.pipeline-step {
+    background-color: var(--bg-surface-raised);
+    border-color: var(--border-color);
+}
+
+/* Agent cards */
+.agent-card {
+    background-color: var(--card-bg);
+    border-color: var(--card-border);
+}
+
+/* Job status badges */
+.job-status-running {
+    background-color: rgba(25, 135, 84, 0.2) !important;
+    color: var(--success-color) !important;
+}
+
+.job-status-failed {
+    background-color: rgba(220, 53, 69, 0.2) !important;
+    color: var(--danger-color) !important;
+}
+
+.job-status-pending {
+    background-color: rgba(255, 193, 7, 0.2) !important;
+    color: var(--warning-color) !important;
+}
+
+/* ============================================
+   Dark Mode Button Fixes
+   ============================================ */
+
+/* btn-outline-dark is invisible on dark backgrounds - invert for dark mode */
+.btn-outline-dark {
+    --bs-btn-color: #adb5bd;
+    --bs-btn-border-color: #6c757d;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #6c757d;
+    --bs-btn-hover-border-color: #6c757d;
+    --bs-btn-focus-shadow-rgb: 108, 117, 125;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #6c757d;
+    --bs-btn-active-border-color: #6c757d;
+}
+
+/* Alternative: use btn-outline-light styling for dark mode */
+.btn-outline-secondary {
+    --bs-btn-color: #adb5bd;
+    --bs-btn-border-color: #6c757d;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #5c636a;
+    --bs-btn-hover-border-color: #565e64;
+}
+
+/* ============================================
+   Warning Background Text Contrast Fix
+   ============================================ */
+
+/* bg-warning should have dark text for readability - override Bootstrap dark mode inversions */
+.bg-warning,
+.bg-warning.text-white,
+.bg-warning.text-dark,
+.card-header.bg-warning,
+.card-header.bg-warning.text-white,
+.card-header.bg-warning.text-dark,
+.badge.bg-warning,
+.badge.bg-warning.text-dark,
+.alert-warning {
+    color: #000 !important;
+}
+
+/* Ensure text-dark stays dark on warning backgrounds (Bootstrap dark mode inverts text-dark) */
+.bg-warning .text-dark,
+.card-header.bg-warning .text-dark {
+    color: #000 !important;
+}
+
+/* Ensure links in warning backgrounds are also dark */
+.bg-warning a,
+.card-header.bg-warning a,
+.alert-warning a {
+    color: #0d6efd !important;
+}
+
+/* Better warning card header styling */
+.card-header.bg-warning {
+    background-color: #ffc107 !important;
+    color: #212529 !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure ALL child elements in warning backgrounds have dark text */
+.bg-warning *,
+.card-header.bg-warning *,
+.bg-warning h1, .bg-warning h2, .bg-warning h3,
+.bg-warning h4, .bg-warning h5, .bg-warning h6,
+.card-header.bg-warning h1, .card-header.bg-warning h2, .card-header.bg-warning h3,
+.card-header.bg-warning h4, .card-header.bg-warning h5, .card-header.bg-warning h6 {
+    color: #000 !important;
+}
+
+.card-header.bg-warning .btn {
+    color: #212529;
+}
+
+/* Muted warning - softer yellow for dark mode that's less glaring */
+.card-header.bg-warning-subtle,
+.bg-warning-subtle {
+    background-color: rgba(255, 193, 7, 0.15) !important;
+    color: #ffda6a !important;
+}
+
+/* ============================================
+   Other Background Color Text Fixes
+   ============================================ */
+
+/* Info backgrounds - ensure readable text */
+.bg-info,
+.bg-info.text-white {
+    color: #000 !important;
+}
+
+/* Light backgrounds in dark mode need adjustment */
+.bg-light {
+    background-color: var(--bg-surface-raised) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Ensure text-white doesn't override when it shouldn't */
+.bg-warning .text-white,
+.bg-info .text-white {
+    color: #000 !important;
+}
+
+/* ============================================
+   Sidebar Navigation Layout
+   ============================================ */
+
+/* Sidebar wrapper - fixed on desktop */
+.sidebar-nav {
+    width: 260px;
+    background-color: var(--bg-surface);
+    border-right: 1px solid var(--border-color);
+}
+
+/* Desktop: sidebar always visible */
+@media (min-width: 992px) {
+    .sidebar-nav {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        z-index: 1030;
+    }
+}
+
+/* Sidebar nav links */
+.sidebar-nav .nav-link {
+    color: var(--text-secondary);
+    padding: 0.6rem 1rem;
+    border-radius: 0.375rem;
+    margin: 0.125rem 0.5rem;
+    transition: all 0.15s ease;
+}
+
+.sidebar-nav .nav-link:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-surface-raised);
+}
+
+.sidebar-nav .nav-link.active {
+    color: var(--primary-color);
+    background-color: rgba(13, 110, 253, 0.15);
+}
+
+.sidebar-nav .nav-link i {
+    width: 1.25rem;
+    text-align: center;
+}
+
+/* Sidebar sections */
+.sidebar-nav .offcanvas-body {
+    padding: 0.5rem 0;
+}
+
+/* Top bar - minimal height */
+.topbar {
+    background-color: var(--bg-surface);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0.5rem 0;
+    min-height: 56px;
+}
+
+.topbar .navbar-brand {
+    font-weight: 600;
+}
+
+.topbar .nav-link {
+    color: var(--text-secondary);
+}
+
+.topbar .nav-link:hover {
+    color: var(--text-primary);
+}
+
+/* Body with sidebar - wrapper class */
+body.has-sidebar {
+    overflow-x: hidden;
+}
+
+/* Main content area adjustment */
+@media (min-width: 992px) {
+    body.has-sidebar main,
+    body.has-sidebar footer {
+        margin-left: 260px;
+    }
+
+    body.has-sidebar .topbar {
+        position: fixed;
+        top: 0;
+        right: 0;
+        left: 260px;
+        z-index: 1020;
+    }
+
+    body.has-sidebar main {
+        padding-top: 56px;
+    }
+}
+
+/* Mobile offcanvas tweaks */
+@media (max-width: 991.98px) {
+    .sidebar-nav .offcanvas-header {
+        background-color: var(--bg-surface);
+    }
+}

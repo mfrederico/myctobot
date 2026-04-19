@@ -1,0 +1,78 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Customer Support - Send Transcript",
+        "slug": "customer-support-send-transcript",
+        "description": "Formats and emails a support chat transcript to the customer. Triggered by the transcript button in the chat widget.",
+        "columns_json": [
+            "Format",
+            "Send"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": [],
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "format_transcript",
+            "label": "Format Transcript",
+            "row": 0,
+            "col": 0,
+            "step_type": "ai_agent",
+            "config_json": {
+                "agent_id": 10,
+                "execution_mode": "api",
+                "prompt": "Format this support chat transcript as a clean, readable email. Include the store name, order number, and all messages with timestamps. Output just the formatted markdown.\n\nStore: {context.shop_name}\nOrder: {context.order_name}\nCustomer: {context.customer_email}\n\nMessages:\n{context.messages_text}",
+                "system_prompt": "You format chat transcripts into clean, professional email-ready markdown. Be concise. Do not add any content that wasn't in the original conversation.",
+                "max_tokens": 2000
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_email",
+            "label": "Send Email",
+            "row": 0,
+            "col": 1,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.customer_email}",
+                "subject": "Your Support Chat Transcript - Order {context.order_name}",
+                "body": "{format_transcript.output.response}",
+                "content_type": "markdown"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

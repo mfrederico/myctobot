@@ -1,0 +1,620 @@
+<?php
+/**
+ * Jobs Controller
+ * Handles AI Developer job management
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \RedBeanPHP\R as R;
+use \Exception as Exception;
+use \app\Bean;
+use \app\services\EncryptionService;
+use \app\services\AIDevJobManager;
+use \app\services\RunnerService;
+use \app\services\RunnerRouter;
+use \app\services\AnthropicKeyService;
+use \app\services\ApiAuthService;
+use \app\WorkspaceResolver;
+
+require_once __DIR__ . '/../services/EncryptionService.php';
+require_once __DIR__ . '/../services/AIDevJobManager.php';
+require_once __DIR__ . '/../services/RunnerService.php';
+require_once __DIR__ . '/../services/RunnerRouter.php';
+require_once __DIR__ . '/../services/AIDevJobService.php';
+
+class Jobs extends BaseControls\Control {
+
+    /**
+     * View a single AI Developer job detail
+     */
+    public function view($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $identifier = $this->opId() ?? '';
+        if (empty($identifier)) {
+            $this->flash('error', 'Issue key required');
+            Flight::redirect('/activity?type=aidev');
+            return;
+        }
+
+        $jobManager = new AIDevJobManager($this->member->id);
+
+        // Support both numeric ID and issue key lookups
+        if (ctype_digit($identifier)) {
+            $job = Bean::findOne('aidevjobs', 'id = ? AND member_id = ?', [(int) $identifier, $this->member->id]);
+        } else {
+            $job = $jobManager->get($identifier);
+        }
+
+        if (!$job) {
+            $this->flash('error', 'Job not found');
+            Flight::redirect('/activity?type=aidev');
+            return;
+        }
+
+        // Format job data for the view
+        $jobData = $jobManager->formatJob($job);
+
+        // Get job logs
+        $logs = $jobManager->getLogs($job->issue_key);
+
+        $this->render('jobs/view', [
+            'title' => 'Job: ' . $job->issue_key,
+            'job' => $jobData,
+            'logs' => $logs
+        ]);
+    }
+
+    /**
+     * Start a new AI Developer job
+     */
+    public function start($params = []) {
+        return $this->startrunner($params);
+    }
+
+    /**
+     * Start a new AI Developer job on a runner (Claude Code CLI)
+     */
+    public function startrunner($params = []) {
+        if (!$this->requireLogin()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            $this->json(['success' => false, 'error' => 'POST required']);
+            return;
+        }
+
+        $issueKey = Flight::request()->data->issue_key ?? '';
+        $boardId = (int)(Flight::request()->data->board_id ?? 0);
+        $repoId = (int)(Flight::request()->data->repo_id ?? 0);
+        $cloudId = Flight::request()->data->cloud_uid ?? '';
+        $useOrchestrator = !empty(Flight::request()->data->use_orchestrator);
+
+        if (empty($issueKey) || empty($boardId) || empty($repoId) || empty($cloudId)) {
+            $this->json(['success' => false, 'error' => 'Missing required parameters']);
+            return;
+        }
+
+        try {
+            // Get Anthropic API key from connections table (connector_type='anthropic')
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
+
+            if (!$apiKey) {
+                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
+                return;
+            }
+
+            // Find an available runner
+            $runner = RunnerRouter::findAvailableRunner($this->member->id, ['git', 'filesystem']);
+
+            if (!$runner) {
+                $this->json(['success' => false, 'error' => 'No available runners. Please try again later.']);
+                return;
+            }
+
+            // Get repository details
+            $repoBean = Bean::load('repoconnections', (int)$repoId);
+
+            if (!$repoBean->id) {
+                $this->json(['success' => false, 'error' => 'Repository not found']);
+                return;
+            }
+
+            $repoToken = EncryptionService::decrypt($repoBean->access_token);
+
+            // Store repo details for payload
+            $repoResult = [
+                'repo_owner' => $repoBean->repo_owner,
+                'repo_name' => $repoBean->repo_name,
+                'default_branch' => $repoBean->default_branch ?? 'main',
+                'clone_url' => $repoBean->clone_url
+            ];
+
+            // Get issue details from Jira
+            $jiraClient = new \app\services\JiraClient($this->member->id, $cloudId);
+            $issue = $jiraClient->getIssue($issueKey);
+
+            $summary = $issue['fields']['summary'] ?? '';
+            $description = \app\services\JiraClient::extractTextFromAdf($issue['fields']['description'] ?? null);
+            $issueType = $issue['fields']['issuetype']['name'] ?? 'Task';
+            $priority = $issue['fields']['priority']['name'] ?? 'Medium';
+
+            // Get comments
+            $comments = $issue['fields']['comment']['comments'] ?? [];
+            $commentText = '';
+            foreach (array_slice($comments, -10) as $comment) {
+                $commentText .= \app\services\JiraClient::extractTextFromAdf($comment['body']) . "\n\n";
+            }
+
+            // Get attachment info
+            $attachments = $issue['fields']['attachment'] ?? [];
+            $attachmentInfo = '';
+            if (!empty($attachments)) {
+                $attachmentInfo = "## Attachments\n";
+                foreach ($attachments as $att) {
+                    $attachmentInfo .= "- {$att['filename']} ({$att['mimeType']}, {$att['size']} bytes)\n";
+                    $attachmentInfo .= "  Download: {$att['content']}\n";
+                }
+            }
+
+            // Extract URLs from description and comments
+            $urlsToCheck = $this->extractUrls($description . ' ' . $commentText);
+
+            // Get Jira credentials
+            $jiraCreds = RunnerRouter::getMemberMcpCredentials($this->member->id);
+            $jiraHost = $jiraCreds['jira_host'] ?? '';
+            $jiraEmail = $jiraCreds['jira_email'] ?? '';
+            $jiraToken = $jiraCreds['jira_api_token'] ?? '';
+            $jiraSiteUrl = $jiraCreds['jira_site_url'] ?? '';
+
+            // Create or get job using AIDevJobManager
+            $jobManager = new AIDevJobManager($this->member->id);
+            $job = $jobManager->getOrCreate($issueKey, $boardId, $repoId, $cloudId);
+
+            // Generate runner job ID
+            $runnerJobId = md5(uniqid($issueKey . '_' . microtime(true), true));
+
+            // Build payload for runner
+            $payload = [
+                'anthropic_api_key' => $apiKey,
+                'job_uid' => $runnerJobId,
+                'issue_key' => $issueKey,
+                'issue_data' => [
+                    'summary' => $summary,
+                    'description' => $description,
+                    'type' => $issueType,
+                    'priority' => $priority,
+                    'comments' => $commentText,
+                    'attachment_info' => $attachmentInfo,
+                    'urls_to_check' => $urlsToCheck
+                ],
+                'repo_config' => [
+                    'repo_owner' => $repoResult['repo_owner'],
+                    'repo_name' => $repoResult['repo_name'],
+                    'default_branch' => $repoResult['default_branch'] ?? 'main',
+                    'clone_url' => $repoResult['clone_url']
+                ],
+                'jira_host' => $jiraHost,
+                'jira_email' => $jiraEmail,
+                'jira_api_token' => $jiraToken,
+                'jira_site_url' => $jiraSiteUrl,
+                'github_token' => $repoToken,
+                'callback_url' => Flight::get('baseurl') . '/webhook/aidev',
+                'callback_api_key' => Flight::get('cron.api_key'),
+                'action' => 'implement',
+                'use_orchestrator' => $useOrchestrator
+            ];
+
+            // Call runner endpoint
+            $runnerPort = $runner['port'];
+            $runnerProtocol = ($runnerPort == 443 || !empty($runner['ssl'])) ? 'https' : 'http';
+            $runnerUrl = "{$runnerProtocol}://{$runner['host']}:{$runnerPort}/analysis/runneraidev";
+
+            $client = new \GuzzleHttp\Client([
+                'timeout' => 30,
+                'verify' => false
+            ]);
+
+            $response = $client->post($runnerUrl, [
+                'json' => $payload
+            ]);
+
+            $result = json_decode($response->getBody()->getContents(), true);
+
+            if ($response->getStatusCode() !== 202) {
+                throw new \Exception('Runner returned non-202 status: ' . $response->getStatusCode());
+            }
+
+            // Mark job as running with the runner job ID
+            $jobManager->startRun($issueKey, $runnerJobId);
+
+            $this->logger->info('AI Developer runner job started', [
+                'member_id' => $this->member->id,
+                'issue_key' => $issueKey,
+                'runner_job_uid' => $runnerJobId,
+                'runner_id' => $runner['id'],
+                'use_orchestrator' => $useOrchestrator
+            ]);
+
+            $this->json([
+                'success' => true,
+                'issue_key' => $issueKey,
+                'runner_job_uid' => $runnerJobId,
+                'runner' => $runner['name'] ?? $runner['host'],
+                'message' => $useOrchestrator ? 'Job started with agent orchestrator' : 'Job started on runner',
+                'use_orchestrator' => $useOrchestrator
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to start runner job', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Get job status (AJAX)
+     */
+    public function status($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $issueKey = $this->opId() ?? '';
+        if (empty($issueKey)) {
+            $this->json(['success' => false, 'error' => 'Issue key required']);
+            return;
+        }
+
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;
+
+        if (!$job) {
+            $this->json(['success' => false, 'error' => 'Job not found']);
+            return;
+        }
+
+        $this->json([
+            'success' => true,
+            'status' => $job
+        ]);
+    }
+
+    /**
+     * Get job logs (AJAX)
+     */
+    public function logs($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $issueKey = $this->opId() ?? '';
+        if (empty($issueKey)) {
+            $this->json(['success' => false, 'error' => 'Issue key required']);
+            return;
+        }
+
+        require_once __DIR__ . '/../services/AIDevStatusService.php';
+        $jobs = \app\services\AIDevStatusService::findAllJobsByIssueKey($this->member->id, $issueKey);
+        $job = $jobs[0] ?? null;
+
+        if (!$job) {
+            $this->json(['success' => false, 'error' => 'Job not found']);
+            return;
+        }
+
+        // Convert steps_completed to log format
+        $logs = [];
+        foreach ($job['steps_completed'] ?? [] as $step) {
+            $logs[] = [
+                'level' => 'info',
+                'message' => $step['step'],
+                'context' => ['progress' => $step['progress'] ?? 0],
+                'created_at' => $step['timestamp'] ?? null
+            ];
+        }
+
+        // Add error if present
+        if (!empty($job['error'])) {
+            $logs[] = [
+                'level' => 'error',
+                'message' => $job['error'],
+                'context' => null,
+                'created_at' => $job['updated_at'] ?? null
+            ];
+        }
+
+        $this->json([
+            'success' => true,
+            'logs' => $logs,
+            'job' => $job
+        ]);
+    }
+
+    /**
+     * Resume a job after clarification
+     */
+    public function resume($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $issueKey = $this->opId() ?? '';
+        if (empty($issueKey)) {
+            $this->json(['success' => false, 'error' => 'Issue key required']);
+            return;
+        }
+
+        $jobManager = new AIDevJobManager($this->member->id);
+        $job = $jobManager->get($issueKey);
+        if (!$job) {
+            $this->json(['success' => false, 'error' => 'Job not found']);
+            return;
+        }
+
+        if ($job->status !== AIDevJobManager::STATUS_WAITING_CLARIFICATION) {
+            $this->json(['success' => false, 'error' => 'Job is not waiting for clarification']);
+            return;
+        }
+
+        try {
+            $cronSecret = Flight::get('cron.api_key');
+            $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
+
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
+                : '';
+
+            $cmd = sprintf(
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=resume%s > /dev/null 2>&1 &',
+                escapeshellarg($scriptPath),
+                escapeshellarg($cronSecret),
+                $this->member->id,
+                escapeshellarg($job->id),
+                escapeshellarg($issueKey),
+                $workspaceParam
+            );
+
+            exec($cmd);
+
+            $this->json([
+                'success' => true,
+                'message' => 'Job resumed'
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to resume job', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Retry a completed/failed job on its existing branch
+     */
+    public function retry($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $issueKey = $this->opId() ?? '';
+        if (empty($issueKey)) {
+            $this->json(['success' => false, 'error' => 'Issue key required']);
+            return;
+        }
+
+        $jobManager = new AIDevJobManager($this->member->id);
+        $job = $jobManager->get($issueKey);
+        if (!$job) {
+            $this->json(['success' => false, 'error' => 'Job not found']);
+            return;
+        }
+
+        if (empty($job->branchName)) {
+            $this->json(['success' => false, 'error' => 'No branch found for this job. Cannot retry.']);
+            return;
+        }
+
+        if (!in_array($job->status, [
+            AIDevJobManager::STATUS_COMPLETE,
+            AIDevJobManager::STATUS_PR_CREATED,
+            AIDevJobManager::STATUS_FAILED
+        ])) {
+            $this->json(['success' => false, 'error' => 'Can only retry completed, pr_created, or failed jobs']);
+            return;
+        }
+
+        try {
+            // Get API key from connections table (connector_type='anthropic')
+            $apiKey = AnthropicKeyService::getApiKey($this->member->id);
+
+            if (!$apiKey) {
+                $this->json(['success' => false, 'error' => 'Anthropic API key not configured. Add one at /anthropic/keys']);
+                return;
+            }
+
+            // Get cloud_uid from the job or look up from board
+            $cloudId = $job->cloudId;
+            if (empty($cloudId)) {
+                $board = Bean::load('boards', (int)$job->boards_id);
+                $cloudId = $board->cloud_uid ?? null;
+            }
+
+            if (empty($cloudId)) {
+                $this->json(['success' => false, 'error' => 'Could not determine Atlassian Cloud ID for this job']);
+                return;
+            }
+
+            $runnerJobId = md5(uniqid($issueKey . '_retry_' . microtime(true), true));
+
+            $cronSecret = Flight::get('cron.api_key');
+            $scriptPath = __DIR__ . '/../scripts/ai-dev-agent.php';
+
+            $workspaceSlug = $_SESSION['workspace_slug'] ?? null;
+            $workspaceParam = $workspaceSlug && $workspaceSlug !== 'default'
+                ? sprintf(' --workspace=%s', escapeshellarg($workspaceSlug))
+                : '';
+
+            $cmd = sprintf(
+                'php %s --script --secret=%s --member=%d --job=%s --issue=%s --action=retry --branch=%s --pr=%d%s > /dev/null 2>&1 &',
+                escapeshellarg($scriptPath),
+                escapeshellarg($cronSecret),
+                $this->member->id,
+                escapeshellarg($runnerJobId),
+                escapeshellarg($issueKey),
+                escapeshellarg($job->branchName),
+                $job->prNumber ?? 0,
+                $workspaceParam
+            );
+
+            exec($cmd);
+
+            $this->logger->info('AI Developer retry job started', [
+                'member_id' => $this->member->id,
+                'issue_key' => $issueKey,
+                'branch' => $job->branchName
+            ]);
+
+            $this->json([
+                'success' => true,
+                'issue_key' => $issueKey,
+                'message' => 'Retry job started on branch: ' . $job->branchName
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to retry job', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Mark a job as complete
+     */
+    public function complete($params = []) {
+        if (!$this->requireLogin()) return;
+
+        $issueKey = $this->opId() ?? '';
+        if (empty($issueKey)) {
+            $this->json(['success' => false, 'error' => 'Issue key required']);
+            return;
+        }
+
+        $jobManager = new AIDevJobManager($this->member->id);
+        $job = $jobManager->get($issueKey);
+        if (!$job) {
+            $this->json(['success' => false, 'error' => 'Job not found']);
+            return;
+        }
+
+        if ($job->status !== AIDevJobManager::STATUS_PR_CREATED) {
+            $this->json(['success' => false, 'error' => 'Can only mark pr_created jobs as complete']);
+            return;
+        }
+
+        try {
+            $jobManager->markComplete($issueKey);
+
+            $this->logger->info('AI Developer job marked complete', [
+                'member_id' => $this->member->id,
+                'issue_key' => $issueKey
+            ]);
+
+            $this->json([
+                'success' => true,
+                'message' => 'Job marked as complete'
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to complete job', ['error' => $e->getMessage()]);
+            $this->json(['success' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * API endpoint to cleanup job labels after AOE session completes
+     *
+     * POST /jobs/cleanup
+     * Authentication: X-Cron-Secret header or ?secret= query param
+     * Parameters:
+     *   - workspace (required): workspace slug
+     *   - job_uid OR issue_key (one required): identifies the job
+     *
+     * This endpoint handles both Jira and GitHub issues based on the job's project_type.
+     */
+    public function cleanup() {
+        // Support both workspace and workspace parameter names
+        $workspace = $this->getParam('workspace', '') ?: $this->getParam('workspace', '');
+        $jobId = $this->getParam('job_uid', '');
+        $issueKey = $this->getParam('issue_key', '');
+
+        if (empty($workspace)) {
+            Flight::jsonError('workspace parameter required', 400);
+            return;
+        }
+
+        // Switch to workspace database first (required for API key lookup)
+        if (!$this->switchToWorkspaceDatabase($workspace)) {
+            Flight::jsonError("Failed to switch to workspace: {$workspace}", 500);
+            return;
+        }
+
+        // Authenticate via ApiAuthService
+        $authResult = ApiAuthService::authenticate('jobs', 'cleanup');
+        if (!$authResult['success']) {
+            $this->logger->warning('Jobs cleanup: authentication failed', [
+                'workspace' => $workspace,
+                'error' => $authResult['error']
+            ]);
+            Flight::jsonError($authResult['error'], $authResult['code']);
+            return;
+        }
+
+        if (empty($jobId) && empty($issueKey)) {
+            Flight::jsonError('job_uid or issue_key parameter required', 400);
+            return;
+        }
+
+        $this->logger->info('Jobs cleanup called', [
+            'workspace' => $workspace,
+            'job_uid' => $jobId,
+            'issue_key' => $issueKey,
+            'member_id' => $authResult['member']->id
+        ]);
+
+        try {
+            $service = new \app\services\AIDevJobService();
+            $result = $service->cleanupJobLabels(
+                $jobId ? (int) $jobId : null,
+                $issueKey ?: null
+            );
+
+            $this->logger->info('Jobs cleanup completed', [
+                'workspace' => $workspace,
+                'result' => $result
+            ]);
+
+            Flight::jsonSuccess($result);
+
+        } catch (Exception $e) {
+            $this->logger->error('Jobs cleanup failed', [
+                'error' => $e->getMessage(),
+                'workspace' => $workspace
+            ]);
+            Flight::jsonError('Cleanup failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Switch to workspace database for internal API calls
+     */
+    private function switchToWorkspaceDatabase(string $workspace): bool {
+        return WorkspaceResolver::switchDatabase($workspace);
+    }
+
+    /**
+     * Extract URLs from text
+     */
+    private function extractUrls(string $text): array {
+        $urls = [];
+        if (preg_match_all('#https?://[^\s<>"\')\]]+#i', $text, $matches)) {
+            $urls = array_unique($matches[0]);
+            $urls = array_filter($urls, function($url) {
+                return !preg_match('#atlassian\.net|atlassian\.com#i', $url);
+            });
+        }
+        return array_values($urls);
+    }
+}

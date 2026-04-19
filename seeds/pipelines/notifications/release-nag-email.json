@@ -1,0 +1,52 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Release Nag Email",
+        "slug": "release-nag-email",
+        "description": "Sends a reminder/nag email for a pending release. Called by scheduled tasks from the main release control pipeline.",
+        "columns_json": [
+            "Send"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": [],
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "send_nag",
+            "label": "Send Nag Email",
+            "row": 0,
+            "col": 0,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.email}",
+                "subject": "{context.subject}",
+                "content_type": "markdown",
+                "body": "## \u23f0 Reminder: Release Still Pending\n\nThis is an automated reminder that a pipeline is still waiting for your release.\n\n**[\u27a1\ufe0f Click here to RELEASE]({base_url}/pipelines/run/{context.run_uid})**\n\n---\n\n\u231b Time elapsed: **{context.minutes_elapsed} minutes**\n\nThe pipeline will automatically terminate after 1 hour if no action is taken."
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

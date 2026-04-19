@@ -1,0 +1,54 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Webhook Email Notifier",
+        "slug": "webhook-email-notifier",
+        "description": "Receives webhook data and sends email notification with the payload",
+        "columns_json": [
+            "Start",
+            "Execute",
+            "Complete"
+        ],
+        "trigger_type": "webhook",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": [],
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "send_notification",
+            "label": "Send Email Notification",
+            "row": 0,
+            "col": 0,
+            "step_type": "mailgun",
+            "config_json": {
+                "body": "## Webhook Received\n\n**Received at:** {context.timestamp}\n\n**Event Type:** {context.event_type}\n\n**Payload:**\n```json\n{prev.output}\n```\n\n---\n*Sent by MyCTOBot Pipeline*",
+                "content_type": "markdown",
+                "subject": "Webhook Received: {context.event_type}",
+                "to": "your-email@example.com"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

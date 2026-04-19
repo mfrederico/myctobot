@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/validate-php.php",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/validate-git-commit.php",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR\"/scripts/hooks/enforce-troubleshooting.php",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

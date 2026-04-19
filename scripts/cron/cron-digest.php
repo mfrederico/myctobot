@@ -1,0 +1,370 @@
+#!/usr/bin/env php
+<?php
+/**
+ * MyCTOBot Daily Digest Scheduler
+ *
+ * Run this script via cron every 15 minutes to process scheduled digests.
+ * It checks each member's boards and runs analysis + sends email for boards
+ * that are due based on their configured digest_time and timezone.
+ *
+ * CRONTAB:
+ * --------
+ * 0,15,30,45 * * * * cd /path/to/myctobot/scripts && php cron-digest.php --script --verbose >> ../log/cron.log 2>&1
+ *
+ * OPTIONS:
+ * --------
+ *   --script     REQUIRED for CLI execution
+ *   --workspace     Process specific workspace (e.g., gwt, greenworks). If omitted, processes all workspaces.
+ *   --verbose    Show detailed output
+ *   --dry-run    Check what would be sent without actually sending
+ *   --force      Send digests now, ignoring time window (for missed digests)
+ *   --help       Show this help message
+ */
+
+// Determine paths
+$scriptDir = dirname(__FILE__);
+$baseDir = dirname($scriptDir, 2);
+
+// Change to base directory
+chdir($baseDir);
+
+// Parse command line options
+$options = getopt('', ['verbose', 'dry-run', 'force', 'script', 'workspace:', 'help']);
+
+if (isset($options['help'])) {
+    echo "MyCTOBot Daily Digest Scheduler\n\n";
+    echo "Usage: php cron-digest.php --script [options]\n\n";
+    echo "Options:\n";
+    echo "  --script     REQUIRED for standalone script mode\n";
+    echo "  --workspace     Process specific workspace (omit to process all workspaces)\n";
+    echo "  --verbose    Show detailed output\n";
+    echo "  --dry-run    Check what would be sent without sending\n";
+    echo "  --force      Send digests now, ignoring time window\n";
+    echo "  --help       Show this help message\n";
+    exit(0);
+}
+
+$verbose = isset($options['verbose']);
+$dryRun = isset($options['dry-run']);
+$force = isset($options['force']);
+$specificWorkspace = $options['workspace'] ?? null;
+
+if ($verbose) {
+    echo "MyCTOBot Digest Scheduler\n";
+    echo "=========================\n";
+    echo "Time: " . date('Y-m-d H:i:s') . "\n";
+    echo "Base: {$baseDir}\n";
+    if ($specificWorkspace) echo "Workspace: {$specificWorkspace}\n";
+    if ($force) echo "Mode: FORCE (ignoring time windows)\n";
+    if ($dryRun) echo "Mode: DRY RUN\n";
+    echo "\n";
+}
+
+// Load vendor autoload first
+require_once $baseDir . '/vendor/autoload.php';
+
+// Load bootstrap class and instantiate it
+require_once $baseDir . '/bootstrap.php';
+
+use \Flight as Flight;
+use \app\Bean;
+use \app\services\AnalysisService;
+
+// Load the service
+require_once $baseDir . '/services/AnalysisService.php';
+
+try {
+    // Discover workspaces to process
+    $workspacesToProcess = [];
+    if ($specificWorkspace) {
+        // Single workspace specified
+        $workspaceConfig = $baseDir . "/conf/config.{$specificWorkspace}.ini";
+        if (!file_exists($workspaceConfig)) {
+            echo "Error: Workspace config not found: {$workspaceConfig}\n";
+            exit(1);
+        }
+        $workspacesToProcess[$specificWorkspace] = $workspaceConfig;
+    } else {
+        // Discover all workspace configs
+        $configFiles = glob($baseDir . '/conf/config.*.ini');
+        foreach ($configFiles as $configFile) {
+            $basename = basename($configFile);
+            // Extract workspace name from config.{workspace}.ini
+            if (preg_match('/^config\.([a-z0-9]+)\.ini$/', $basename, $matches)) {
+                $workspaceSlug = $matches[1];
+                // Skip 'example' config
+                if ($workspaceSlug !== 'example') {
+                    $workspacesToProcess[$workspaceSlug] = $configFile;
+                }
+            }
+        }
+    }
+
+    if (empty($workspacesToProcess)) {
+        if ($verbose) {
+            echo "No workspace configs found. Nothing to process.\n";
+        }
+        exit(0);
+    }
+
+    if ($verbose) {
+        echo "Workspaces to process: " . implode(', ', array_keys($workspacesToProcess)) . "\n\n";
+    }
+
+    $totalProcessed = 0;
+    $totalErrors = 0;
+
+    // Process each workspace
+    foreach ($workspacesToProcess as $workspaceSlug => $configFile) {
+        if ($verbose) {
+            echo "=== Processing workspace: {$workspaceSlug} ===\n";
+        }
+
+        try {
+            // Initialize fresh bootstrap for this workspace
+            $bootstrap = new \app\Bootstrap($configFile);
+
+            // Set timezone from config
+            $configTimezone = Flight::get('app.timezone') ?? 'America/New_York';
+            date_default_timezone_set($configTimezone);
+
+            if ($verbose) {
+                echo "Workspace initialized, timezone: {$configTimezone}\n";
+            }
+
+            // Process all boards with digests enabled for this workspace
+            $boards = Bean::findAll('boards', 'is_active = 1 AND digest_enabled = 1');
+            $processedCount = 0;
+            $errorCount = 0;
+
+            if (empty($boards)) {
+                if ($verbose) {
+                    echo "No boards with digests enabled for workspace {$workspaceSlug}\n";
+                }
+                continue;
+            }
+
+            // Group boards by member for logging
+            $memberBoards = [];
+            foreach ($boards as $board) {
+                $memberId = $board->member_id;
+                if (!isset($memberBoards[$memberId])) {
+                    $memberBoards[$memberId] = [];
+                }
+                $memberBoards[$memberId][] = $board;
+            }
+
+            foreach ($memberBoards as $memberId => $memberBoardList) {
+                $member = Bean::load('member', $memberId);
+                if (!$member->id || $member->status !== 'active') {
+                    continue; // Skip inactive members
+                }
+
+                try {
+                    $result = processMemberDigests($member, $memberBoardList, $verbose, $dryRun, $force);
+                    $processedCount += $result['processed'];
+                    $errorCount += $result['errors'];
+                } catch (\Exception $e) {
+                    $errorCount++;
+                    if ($verbose) {
+                        echo "Error processing member {$member->id}: {$e->getMessage()}\n";
+                    }
+                    Flight::get('log')->error('Digest cron error for member', [
+                        'workspace' => $workspaceSlug,
+                        'member_id' => $member->id,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            }
+
+            $totalProcessed += $processedCount;
+            $totalErrors += $errorCount;
+
+            if ($verbose) {
+                echo "Workspace {$workspaceSlug}: {$processedCount} digests sent, {$errorCount} errors\n\n";
+            }
+
+        } catch (\Exception $e) {
+            $totalErrors++;
+            if ($verbose) {
+                echo "Error processing workspace {$workspaceSlug}: {$e->getMessage()}\n\n";
+            }
+        }
+    }
+
+    if ($verbose) {
+        echo "=========================\n";
+        echo "All workspaces complete!\n";
+        echo "Total digests sent: {$totalProcessed}\n";
+        echo "Total errors: {$totalErrors}\n";
+    }
+
+    exit($totalErrors > 0 ? 1 : 0);
+
+} catch (Exception $e) {
+    $message = "FATAL ERROR: " . $e->getMessage();
+
+    if ($verbose) {
+        echo "\n{$message}\n";
+        echo "Stack trace:\n" . $e->getTraceAsString() . "\n";
+    }
+
+    try {
+        $logger = Flight::get('log');
+        if ($logger) {
+            $logger->error($message, ['trace' => $e->getTraceAsString()]);
+        }
+    } catch (Exception $logError) {
+        // Ignore logging errors
+    }
+
+    exit(1);
+}
+
+/**
+ * Process digests for a single member
+ *
+ * @param object $member Member bean
+ * @param array $boards Array of jiraboards beans (already filtered for digest_enabled)
+ * @param bool $verbose Show verbose output
+ * @param bool $dryRun Don't actually send digests
+ * @param bool $force Ignore time windows
+ * @return array ['processed' => int, 'errors' => int]
+ */
+function processMemberDigests($member, array $boards, bool $verbose, bool $dryRun, bool $force): array {
+    if (empty($boards)) {
+        return ['processed' => 0, 'errors' => 0];
+    }
+
+    if ($verbose) {
+        echo "Processing member {$member->id} ({$member->email}), " . count($boards) . " boards\n";
+    }
+
+    $processedCount = 0;
+    $errorCount = 0;
+
+    foreach ($boards as $board) {
+        // Convert bean to array for shouldSendDigest compatibility
+        $boardData = $board->export();
+        $shouldSend = shouldSendDigest($boardData, $force, $verbose);
+
+        if ($shouldSend) {
+            if ($verbose) {
+                echo "  -> Board: {$board->board_name} ({$board->project_key})\n";
+            }
+
+            if ($dryRun) {
+                echo "     [DRY RUN] Would send digest for {$board->board_name}\n";
+                echo "     Digest Time: {$board->digest_time} ({$board->timezone})\n";
+                echo "     Last Digest: " . ($board->last_digest_at ?? 'Never') . "\n";
+                $processedCount++;
+                continue;
+            }
+
+            try {
+                // Use the unified AnalysisService
+                $service = new AnalysisService($member->id, $verbose);
+                $analysisResult = $service->runAnalysis((int)$board->id, [
+                    'send_email' => true,
+                    'analysis_type' => 'digest'
+                ]);
+
+                if ($analysisResult['success']) {
+                    // Update last_digest_at using RedBeanPHP
+                    $board->last_digest_at = date('Y-m-d H:i:s');
+                    Bean::store($board);
+                    $processedCount++;
+
+                    if ($verbose) {
+                        echo "     Digest sent successfully\n";
+                    }
+                } else {
+                    $errorCount++;
+                    if ($verbose) {
+                        echo "     Analysis returned no success\n";
+                    }
+                }
+            } catch (\Exception $e) {
+                $errorCount++;
+                if ($verbose) {
+                    echo "     ERROR: {$e->getMessage()}\n";
+                }
+                Flight::get('log')->error('Board digest failed', [
+                    'member_id' => $member->id,
+                    'board_id' => $board->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    return ['processed' => $processedCount, 'errors' => $errorCount];
+}
+
+/**
+ * Check if it's time to send digest for a board
+ */
+function shouldSendDigest(array $board, bool $force, bool $verbose = false): bool {
+    $digestTime = $board['digest_time'] ?? '08:00';
+    $timezone = $board['timezone'] ?? 'UTC';
+    $boardName = $board['board_name'] ?? "Board {$board['id']}";
+
+    try {
+        $tz = new \DateTimeZone($timezone);
+        $now = new \DateTime('now', $tz);
+        $currentTime = $now->format('H:i');
+
+        // Check if already sent today (always check this, even with --force)
+        $lastDigest = $board['last_digest_at'];
+        if ($lastDigest) {
+            $lastDigestDate = (new \DateTime($lastDigest, $tz))->format('Y-m-d');
+            $today = $now->format('Y-m-d');
+
+            if ($lastDigestDate === $today) {
+                if ($verbose) {
+                    echo "  [SKIP] {$boardName}: Already sent today ({$lastDigest})\n";
+                }
+                return false;
+            }
+        }
+
+        // If force mode, skip time window check
+        if ($force) {
+            if ($verbose) {
+                echo "  [FORCE] {$boardName}: Forcing digest (last: " . ($lastDigest ?? 'never') . ")\n";
+            }
+            return true;
+        }
+
+        // Check if current time is within 15 minutes of digest time
+        $digestParts = explode(':', $digestTime);
+        $currentParts = explode(':', $currentTime);
+
+        $digestMinutes = ((int)$digestParts[0] * 60) + (int)($digestParts[1] ?? 0);
+        $currentMinutes = ((int)$currentParts[0] * 60) + (int)$currentParts[1];
+
+        $diff = abs($currentMinutes - $digestMinutes);
+
+        // Within 15 minute window
+        if ($diff <= 15) {
+            return true;
+        }
+
+        if ($verbose) {
+            echo "  [SKIP] {$boardName}: Outside time window (now: {$currentTime} {$timezone}, digest: {$digestTime}, diff: {$diff} min)\n";
+        }
+        return false;
+
+    } catch (\Exception $e) {
+        if ($verbose) {
+            echo "  [ERROR] {$boardName}: Timezone error - {$e->getMessage()}\n";
+        }
+        Flight::get('log')->warning('Timezone error for board', [
+            'board_id' => $board['id'],
+            'timezone' => $timezone,
+            'error' => $e->getMessage()
+        ]);
+        return false;
+    }
+}
+

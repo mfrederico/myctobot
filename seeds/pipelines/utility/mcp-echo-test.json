@@ -1,0 +1,58 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "MCP Echo Test",
+        "slug": "mcp-echo-test",
+        "description": "Simple test pipeline that echoes input back",
+        "columns_json": [
+            "Execute"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message to echo back"
+                }
+            }
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "echo_message",
+            "label": "Echo Message",
+            "row": 0,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo MCP_message:{context.message}_Key:{context.mcp_key_preview}",
+                "executor": "/bin/bash -c"
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

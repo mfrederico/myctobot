@@ -1,0 +1,314 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Email Release Control v2",
+        "slug": "email-release-control-v2",
+        "description": "Sends an email with a release link, nags every 10 minutes. User must click release within 1 hour or pipeline terminates. On release, sends a follow-up \"have a nice day\" email.",
+        "columns_json": [
+            "Send",
+            "Schedule Nags",
+            "Wait",
+            "Respond"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": [],
+            "required": []
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "send_release_email",
+            "label": "Send Release Email",
+            "row": 0,
+            "col": 0,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "you@example.com",
+                "subject": "\ud83d\udd13 Release Control Required - Action Needed",
+                "content_type": "markdown",
+                "body": "## Release Control\n\nA pipeline is waiting for your approval.\n\n**[\u27a1\ufe0f Click here to RELEASE]({base_url}/pipelines/run/{run_uid})**\n\n---\n\n\u23f0 **This request expires in 1 hour.**\n\nYou will receive reminders every 10 minutes until you release or the timeout is reached."
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_nag_10m",
+            "label": "Nag @ 10min",
+            "row": 0,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 10,
+                "delay_unit": "60",
+                "pipeline_id": "14",
+                "input_data": {
+                    "email": "you@example.com",
+                    "subject": "\u23f0 Reminder: Release Control Still Pending (10 min)",
+                    "run_uid": "{run_uid}",
+                    "minutes_elapsed": 10
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_nag_20m",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "wait_for_release",
+            "label": "Wait for Release",
+            "row": 0,
+            "col": 2,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "Click the RELEASE button to continue the pipeline",
+                "timeout": 3600,
+                "source_webhook": true,
+                "source_form": true,
+                "source_mcp": true,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "title": "Action",
+                            "default": "release"
+                        }
+                    }
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "check_timeout",
+            "label": "Check Timeout",
+            "row": 0,
+            "col": 3,
+            "step_type": "condition",
+            "config_json": {
+                "left": "{prev.output.timed_out}",
+                "operator": "is_true",
+                "then_goto": "terminate",
+                "else_goto": "send_nice_day"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_nag_20m",
+            "label": "Nag @ 20min",
+            "row": 1,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 20,
+                "delay_unit": "60",
+                "pipeline_id": "14",
+                "input_data": {
+                    "email": "you@example.com",
+                    "subject": "\u23f0 Reminder: Release Control Still Pending (20 min)",
+                    "run_uid": "{run_uid}",
+                    "minutes_elapsed": 20
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_nag_30m",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_nice_day",
+            "label": "Send Nice Day",
+            "row": 1,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "you@example.com",
+                "subject": "\u2705 Pipeline Released Successfully!",
+                "content_type": "markdown",
+                "body": "## Have a nice day! \ud83c\udf89\n\nYou successfully released the pipeline.\n\nThank you for your prompt action!"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_nag_30m",
+            "label": "Nag @ 30min",
+            "row": 2,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 30,
+                "delay_unit": "60",
+                "pipeline_id": "14",
+                "input_data": {
+                    "email": "you@example.com",
+                    "subject": "\u23f0 Reminder: Release Control Still Pending (30 min)",
+                    "run_uid": "{run_uid}",
+                    "minutes_elapsed": 30
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_nag_40m",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "terminate",
+            "label": "Timeout Terminate",
+            "row": 2,
+            "col": 3,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "echo 'Pipeline terminated: No release action within 1 hour timeout'"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_nag_40m",
+            "label": "Nag @ 40min",
+            "row": 3,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 40,
+                "delay_unit": "60",
+                "pipeline_id": "14",
+                "input_data": {
+                    "email": "you@example.com",
+                    "subject": "\u23f0 Reminder: Release Control Still Pending (40 min)",
+                    "run_uid": "{run_uid}",
+                    "minutes_elapsed": 40
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_nag_50m",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_nag_50m",
+            "label": "Nag @ 50min",
+            "row": 4,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 50,
+                "delay_unit": "60",
+                "pipeline_id": "14",
+                "input_data": {
+                    "email": "you@example.com",
+                    "subject": "\u26a0\ufe0f FINAL Reminder: Release Control (50 min - 10 min left!)",
+                    "run_uid": "{run_uid}",
+                    "minutes_elapsed": 50
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:wait_for_release",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

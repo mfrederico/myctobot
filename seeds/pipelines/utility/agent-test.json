@@ -1,0 +1,119 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Agent Test",
+        "slug": "agent-test",
+        "description": "Reusable pipeline to test any agent. Spawns the agent, waits for completion, and terminates the session gracefully.",
+        "columns_json": [
+            "Spawn",
+            "Wait",
+            "Reap"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer",
+                    "description": "ID of the agent to test"
+                },
+                "runner_id": {
+                    "type": "integer",
+                    "description": "ID of the workstation/runner to run on"
+                }
+            },
+            "required": [
+                "agent_id",
+                "runner_id"
+            ]
+        },
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "spawn_agent",
+            "label": "Spawn Agent",
+            "row": 0,
+            "col": 0,
+            "step_type": "ai_agent",
+            "config_json": {
+                "agent_id": "{context.agent_id}",
+                "runner_id": "{context.runner_id}",
+                "execution_mode": "runner",
+                "working_dir": "",
+                "prompt": "Hello! Please respond with a brief greeting to confirm you are working. Include the current directory path in your response. After responding, call the `job_complete` MCP tool with success=true and summary=\"Test completed successfully\" to mark this test as complete.",
+                "wait_for_completion": false,
+                "json_output": false
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "wait_complete",
+            "label": "Wait for Completion",
+            "row": 0,
+            "col": 1,
+            "step_type": "harvest",
+            "config_json": {
+                "policy": "all_required",
+                "timeout": 120
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "reap_session",
+            "label": "Terminate Session",
+            "row": 0,
+            "col": 2,
+            "step_type": "reaper",
+            "config_json": {
+                "job_uid": "{spawn_agent.output.job_key}",
+                "wait_for_idle": true,
+                "timeout": 30,
+                "force_kill": false
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

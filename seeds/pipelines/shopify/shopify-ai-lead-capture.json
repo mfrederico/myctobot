@@ -1,0 +1,153 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Shopify AI Lead Capture",
+        "slug": "shopify-ai-lead-capture",
+        "description": "Captures leads from the Shopify AI landing page, stores them, and sends notifications",
+        "columns_json": [
+            "Classify",
+            "Route",
+            "Store",
+            "Notify"
+        ],
+        "trigger_type": "webhook",
+        "trigger_config_json": [],
+        "default_context_json": [],
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "Lead email address"
+                },
+                "store_url": {
+                    "type": "string",
+                    "description": "Shopify store URL"
+                },
+                "use_case": {
+                    "type": "string",
+                    "description": "Primary automation use case"
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Additional notes"
+                }
+            },
+            "required": [
+                "email"
+            ]
+        },
+        "expose_as_tool": false,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "classify_lead",
+            "label": "Classify Lead",
+            "row": 0,
+            "col": 0,
+            "step_type": "llm_call",
+            "config_json": {
+                "provider": "ollama",
+                "model": "qwen3-coder:30b",
+                "max_tokens": 500,
+                "json_output": true,
+                "system_prompt": "You are a lead classifier. Analyze Shopify merchant leads and classify them. Always respond with valid JSON only, no markdown, no explanation.",
+                "prompt": "Classify this lead submission from a Shopify AI automation landing page:\n\nEmail: {context.email}\nStore URL: {context.store_url}\nUse Case: {context.use_case}\nNotes: {context.notes}\n\nClassification Rules:\n- spam: Fake emails (test@test.com, asdf@asdf.com), gibberish, obvious bots, suspicious patterns\n- prospect: Real email domains, legitimate store URLs, genuine interest in automation\n\nRespond with ONLY this JSON:\n{\"classification\": \"spam\" or \"prospect\", \"confidence\": 0.0-1.0, \"reasoning\": \"brief explanation\", \"lead_score\": 1-100}"
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 30,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "route_lead",
+            "label": "Route Lead",
+            "row": 0,
+            "col": 1,
+            "step_type": "switch",
+            "config_json": {
+                "value": "{classify_lead.output.classification}",
+                "cases": {
+                    "prospect": "store_lead",
+                    "spam": "exit"
+                },
+                "default": "exit"
+            },
+            "input_source": null,
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "dynamic",
+            "on_failure": "exit",
+            "timeout_seconds": 10,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "store_lead",
+            "label": "Store Lead",
+            "row": 0,
+            "col": 2,
+            "step_type": "direct_exec",
+            "config_json": {
+                "command": "php /var/www/html/default/myctobot/scripts/clitool.php --workspace=dev --bean=leads --create --data=\"{ \\\"email\\\": \\\"{context.email}\\\", \\\"store_url\\\": \\\"{context.store_url}\\\", \\\"use_case\\\": \\\"{context.use_case}\\\", \\\"notes\\\": \\\"{context.notes}\\\", \\\"source\\\": \\\"shopify-ai\\\", \\\"status\\\": \\\"new\\\", \\\"lead_score\\\": \\\"{classify_lead.output.lead_score}\\\", \\\"classification\\\": \\\"{classify_lead.output.classification}\\\", \\\"created_at\\\": \\\"$(date +%Y-%m-%d\\ %H:%M:%S)\\\" }\"",
+                "executor": "/bin/bash -c",
+                "working_dir": "/var/www/html/default/myctobot"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "notify_team",
+            "label": "Notify Team",
+            "row": 0,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "admin@example.com",
+                "subject": "New Lead (Score: {classify_lead.output.lead_score}): {context.email}",
+                "content_type": "markdown",
+                "body": "## New Qualified Lead from Shopify AI Landing Page\n\n**Email:** {context.email}\n\n**Store URL:** {context.store_url}\n\n**Use Case:** {context.use_case}\n\n**Notes:**\n{context.notes}\n\n---\n\n### AI Classification\n\n- **Score:** {classify_lead.output.lead_score}/100\n- **Confidence:** {classify_lead.output.confidence}\n- **Reasoning:** {classify_lead.output.reasoning}\n\n---\n*Captured via MyCTOBot pipeline - spam leads auto-filtered*"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

@@ -1,0 +1,341 @@
+<?php
+/**
+ * Mailgun Email Service
+ * Handles sending emails via Mailgun API
+ */
+
+namespace app\services;
+
+use \Flight as Flight;
+use GuzzleHttp\Client;
+
+class MailgunService {
+    private ?Client $client = null;
+    private string $domain;
+    private string $fromEmail;
+    private string $fromName;
+    private bool $enabled;
+
+    public function __construct(?int $connectionId = null) {
+        // If a specific connection ID is provided, load that connection directly
+        // Otherwise use the auto-discovery cascade
+        $config = $connectionId
+            ? $this->loadFromConnectionId($connectionId)
+            : $this->loadMailgunConfig();
+
+        $apiKey = $config['key'] ?? '';
+        $this->domain = $config['domain'] ?? '';
+        $this->fromEmail = $config['fromEmail'] ?? SiteConfig::getEmail('noreply');
+        $this->fromName = $config['fromName'] ?? SiteConfig::getName();
+
+        $this->enabled = !empty($apiKey) && !empty($this->domain);
+
+        if ($this->enabled) {
+            $endpoint = !empty($config['endpoint']) ? $config['endpoint'] : 'https://api.mailgun.net';
+            $this->client = new Client([
+                'base_uri' => $endpoint . '/v3/',
+                'auth' => ['api', $apiKey],
+            ]);
+        }
+    }
+
+    /**
+     * Load Mailgun config from database, workspace config, or conf/mailgun.ini fallback
+     */
+    private function loadMailgunConfig(): array {
+        // Method 1: Try database settings first (UI-configured)
+        $dbConfig = $this->loadFromDatabase();
+        if (!empty($dbConfig['key']) && !empty($dbConfig['domain'])) {
+            return $dbConfig;
+        }
+
+        // Method 2: Try workspace/Flight config
+        $apiKey = Flight::get('mailgun.api_key') ?? '';
+        $domain = Flight::get('mailgun.domain') ?? '';
+
+        if (!empty($apiKey) && !empty($domain)) {
+            return [
+                'key' => $apiKey,
+                'domain' => $domain,
+                'fromEmail' => Flight::get('mailgun.from_email') ?? '',
+                'fromName' => Flight::get('mailgun.from_name') ?? '',
+                'endpoint' => Flight::get('mailgun.endpoint') ?? '',
+            ];
+        }
+
+        // Method 3: Fall back to conf/mailgun.ini
+        $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
+        if (file_exists($iniPath)) {
+            $config = parse_ini_file($iniPath);
+            if ($config && !empty($config['key']) && !empty($config['domain'])) {
+                return $config;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Load Mailgun config from database (connections table)
+     */
+    private function loadFromDatabase(): array {
+        try {
+            // Find any enabled mailgun connection (shared or owned by any member)
+            $conn = \app\Bean::findOne('connections', 'connector_type = ? AND enabled = 1 ORDER BY id ASC', ['mailgun']);
+
+            if (!$conn || empty($conn->access_token)) {
+                return [];
+            }
+
+            // Decrypt the API key
+            require_once __DIR__ . '/EncryptionService.php';
+            $apiKey = EncryptionService::decrypt($conn->access_token);
+
+            $domain = $conn->external_eid ?: '';
+            if (empty($apiKey) || empty($domain)) {
+                return [];
+            }
+
+            $metadata = json_decode($conn->metadata_json ?: '{}', true);
+
+            return [
+                'key' => $apiKey,
+                'domain' => $domain,
+                'fromEmail' => $metadata['from_email'] ?? '',
+                'fromName' => $metadata['from_name'] ?? '',
+                'endpoint' => $metadata['endpoint'] ?? '',
+            ];
+        } catch (\Exception $e) {
+            // Database not available or table doesn't exist
+            return [];
+        }
+    }
+
+    /**
+     * Load Mailgun config from a specific connection ID
+     */
+    private function loadFromConnectionId(int $connectionId): array {
+        try {
+            $conn = \app\Bean::load('connections', $connectionId);
+            if (!$conn->id || $conn->connector_type !== 'mailgun' || empty($conn->access_token)) {
+                return [];
+            }
+
+            require_once __DIR__ . '/EncryptionService.php';
+            $apiKey = EncryptionService::decrypt($conn->access_token);
+            $domain = $conn->external_eid ?: '';
+
+            if (empty($apiKey) || empty($domain)) {
+                return [];
+            }
+
+            $metadata = json_decode($conn->metadata_json ?: '{}', true);
+
+            return [
+                'key' => $apiKey,
+                'domain' => $domain,
+                'fromEmail' => $metadata['from_email'] ?? '',
+                'fromName' => $metadata['from_name'] ?? '',
+                'endpoint' => $metadata['endpoint'] ?? '',
+            ];
+        } catch (\Exception $e) {
+            return [];
+        }
+    }
+
+    public function isEnabled(): bool {
+        return $this->enabled;
+    }
+
+    /**
+     * Send an email with markdown content converted to HTML
+     *
+     * @param string $subject Email subject
+     * @param string $markdownContent Markdown content to convert and send
+     * @param string $to Primary recipient email
+     * @param string|null $cc Comma-separated CC recipients (optional)
+     * @param array $attachments Array of file paths to attach
+     */
+    public function sendMarkdownEmail(string $subject, string $markdownContent, string $to, ?string $cc = null, array $attachments = []): bool {
+        if (!$this->enabled) {
+            return false;
+        }
+
+        if (empty($to)) {
+            throw new \RuntimeException('No recipient specified for email');
+        }
+
+        $html = $this->markdownToHtml($markdownContent);
+
+        return $this->send($to, $subject, $html, $markdownContent, $cc, $attachments);
+    }
+
+    /**
+     * Send an email
+     *
+     * @param string $to Primary recipient email
+     * @param string $subject Email subject
+     * @param string $html HTML content
+     * @param string|null $text Plain text content (optional)
+     * @param string|null $cc Comma-separated CC recipients (optional)
+     * @param array $attachments Array of file paths to attach
+     */
+    public function send(string $to, string $subject, string $html, ?string $text = null, ?string $cc = null, array $attachments = []): bool {
+        if (!$this->enabled || !$this->client) {
+            return false;
+        }
+
+        $from = "{$this->fromName} <{$this->fromEmail}>";
+
+        // If we have attachments, use multipart form data
+        if (!empty($attachments)) {
+            return $this->sendWithAttachments($to, $subject, $html, $text, $cc, $attachments, $from);
+        }
+
+        $formParams = [
+            'from' => $from,
+            'to' => $to,
+            'subject' => $subject,
+            'html' => $this->wrapHtml($html),
+            'text' => $text ?? strip_tags($html),
+        ];
+
+        // Add CC recipients if provided
+        if (!empty($cc)) {
+            $formParams['cc'] = $cc;
+        }
+
+        $response = $this->client->post("{$this->domain}/messages", [
+            'form_params' => $formParams,
+        ]);
+
+        return $response->getStatusCode() === 200;
+    }
+
+    /**
+     * Send an email with attachments using multipart form data
+     */
+    private function sendWithAttachments(string $to, string $subject, string $html, ?string $text, ?string $cc, array $attachments, string $from): bool {
+        $multipart = [
+            ['name' => 'from', 'contents' => $from],
+            ['name' => 'to', 'contents' => $to],
+            ['name' => 'subject', 'contents' => $subject],
+            ['name' => 'html', 'contents' => $this->wrapHtml($html)],
+            ['name' => 'text', 'contents' => $text ?? strip_tags($html)],
+        ];
+
+        if (!empty($cc)) {
+            $multipart[] = ['name' => 'cc', 'contents' => $cc];
+        }
+
+        // Add attachments
+        foreach ($attachments as $filePath) {
+            if (!file_exists($filePath)) {
+                continue;
+            }
+
+            $filename = basename($filePath);
+            $mimeType = mime_content_type($filePath) ?: 'application/octet-stream';
+
+            $multipart[] = [
+                'name' => 'attachment',
+                'contents' => fopen($filePath, 'r'),
+                'filename' => $filename,
+                'headers' => ['Content-Type' => $mimeType]
+            ];
+        }
+
+        $response = $this->client->post("{$this->domain}/messages", [
+            'multipart' => $multipart,
+        ]);
+
+        return $response->getStatusCode() === 200;
+    }
+
+    /**
+     * Convert markdown to HTML (email-optimized with inline styles)
+     */
+    private function markdownToHtml(string $markdown): string {
+        return \app\MarkdownParser::parseBasic($markdown, false, true);
+    }
+
+    /**
+     * Wrap HTML content in a styled template
+     */
+    private function wrapHtml(string $content): string {
+        return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        h2 { color: #34495e; margin-top: 30px; }
+        h3 { color: #7f8c8d; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #3498db; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        blockquote {
+            border-left: 4px solid #3498db;
+            margin: 15px 0;
+            padding: 10px 20px;
+            background-color: #f8f9fa;
+        }
+        ul { padding-left: 20px; }
+        li { margin: 5px 0; }
+        hr { border: none; border-top: 1px solid #eee; margin: 30px 0; }
+        strong { color: #2c3e50; }
+        .high { color: #e74c3c; font-weight: bold; }
+        .medium { color: #f39c12; font-weight: bold; }
+        .low { color: #27ae60; font-weight: bold; }
+    </style>
+</head>
+<body>
+{$content}
+</body>
+</html>
+HTML;
+    }
+
+    /**
+     * Check if Mailgun is configured
+     */
+    public static function isConfigured(): bool {
+        // Check connections table first (UI-configured)
+        try {
+            $conn = \app\Bean::findOne('connections', 'connector_type = ? AND enabled = 1 ORDER BY id ASC', ['mailgun']);
+            if ($conn && !empty($conn->access_token) && !empty($conn->external_eid)) {
+                return true;
+            }
+        } catch (\Exception $e) {
+            // Database not available - continue to fallbacks
+        }
+
+        // Check workspace/Flight config
+        $apiKey = Flight::get('mailgun.api_key');
+        $domain = Flight::get('mailgun.domain');
+        if (!empty($apiKey) && !empty($domain)) {
+            return true;
+        }
+
+        // Fall back to conf/mailgun.ini
+        $iniPath = dirname(__DIR__) . '/conf/mailgun.ini';
+        if (file_exists($iniPath)) {
+            $config = parse_ini_file($iniPath);
+            if ($config && !empty($config['key']) && !empty($config['domain'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}

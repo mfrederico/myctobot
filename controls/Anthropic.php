@@ -1,0 +1,260 @@
+<?php
+/**
+ * Anthropic Controller
+ * Handles Anthropic API key management for Enterprise tier
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \RedBeanPHP\R as R;
+use \Exception as Exception;
+use \app\services\TierFeatures;
+use \app\services\EncryptionService;
+
+require_once __DIR__ . '/../services/TierFeatures.php';
+require_once __DIR__ . '/../services/EncryptionService.php';
+require_once __DIR__ . '/../services/AnthropicKeyService.php';
+use \app\Bean;
+use \app\services\AnthropicKeyService;
+
+class Anthropic extends BaseControls\Control {
+
+    /**
+     * Check access - all features now available to logged-in users
+     */
+    private function requireEnterprise(): bool {
+        return $this->requireLogin();
+    }
+
+    /**
+     * Anthropic API key settings page - redirects to multi-key management
+     */
+    public function index() {
+        Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Clear credit balance warning (AJAX)
+     */
+    public function clearwarning() {
+        if (!$this->requireLogin()) return;
+
+        $memberId = $this->member->id;
+
+        try {
+            $creditError = Bean::findOne('enterprisesettings', 'setting_key = ? AND member_id = ?', ['credit_balance_error', $memberId]);
+            if ($creditError) {
+                Bean::trash($creditError);
+            }
+
+            Flight::json(['success' => true]);
+        } catch (\Exception $e) {
+            Flight::json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    // ========================================
+    // Multi-Key Management (connections table)
+    // ========================================
+
+    /**
+     * List all API keys visible to this member (owned + shared)
+     */
+    public function keys() {
+        if (!$this->requireEnterprise()) return;
+
+        $memberId = $this->member->id;
+        $keys = [];
+
+        // Get keys owned by member OR shared with workspace (unified connections table)
+        $keyBeans = Bean::find('connections',
+            ' connector_type = ? AND (member_id = ? OR shared = 1) ORDER BY created_at DESC ',
+            ['anthropic', $memberId]
+        );
+
+        foreach ($keyBeans as $key) {
+            $decrypted = EncryptionService::decrypt($key->access_token);
+            $metadata = json_decode($key->metadata_json ?: '{}', true);
+            $isOwner = ($key->member_id == $memberId);
+            $keys[] = [
+                'id' => $key->id,
+                'name' => $key->connection_name,
+                'model' => $metadata['model'] ?? '',
+                'masked_key' => EncryptionService::maskAnthropicKey($decrypted),
+                'shared' => (bool)$key->shared,
+                'is_owner' => $isOwner,
+                'owner_name' => $metadata['created_by_name'] ?? '',
+                'created_at' => $key->created_at
+            ];
+        }
+
+        $this->render('anthropic/keys', [
+            'title' => 'API Keys',
+            'keys' => $keys,
+            'member_id' => $memberId
+        ]);
+    }
+
+    /**
+     * Add a new API key
+     */
+    public function addkey() {
+        if (!$this->requireEnterprise()) return;
+
+        if (Flight::request()->method !== 'POST') {
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        if (!$this->validateCSRF()) return;
+
+        $name = trim(Flight::request()->data->key_name ?? '');
+        $apiKey = trim(Flight::request()->data->api_key ?? '');
+        $model = Flight::request()->data->key_model ?? 'claude-sonnet-4-20250514';
+        $shared = !empty(Flight::request()->data->shared);
+
+        if (empty($name) || empty($apiKey)) {
+            $this->flash('error', 'Name and API key are required.');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        if (!preg_match('/^sk-ant-/', $apiKey)) {
+            $this->flash('error', 'Invalid API key format. Should start with sk-ant-');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        try {
+            $encrypted = EncryptionService::encrypt($apiKey);
+
+            $key = Bean::dispense('connections');
+            $key->connector_type = 'anthropic';
+            $key->auth_type = 'api_key';
+            $key->member_id = $this->member->id;
+            $key->connection_name = $name;
+            $key->access_token = $encrypted;
+            $key->metadata_json = json_encode([
+                'model' => $model,
+                'created_by_name' => $this->member->display_name ?? $this->member->email,
+            ]);
+            $key->shared = $shared ? 1 : 0;
+            $key->enabled = 1;
+            $key->created_at = date('Y-m-d H:i:s');
+            $key->updated_at = date('Y-m-d H:i:s');
+            Bean::store($key);
+
+            $this->flash('success', 'API key added successfully.');
+            $this->logger->info('Anthropic API key added', ['member_id' => $this->member->id, 'name' => $name, 'shared' => $shared]);
+
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to save API key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Delete an API key (owner only)
+     */
+    public function deletekey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $this->opId() ?? null;
+        if (!$keyId) {
+            $this->flash('error', 'No key specified.');
+            Flight::redirect('/anthropic/keys');
+            return;
+        }
+
+        try {
+            $key = Bean::load('connections', (int)$keyId);
+            if (!$key || !$key->id || $key->connector_type !== 'anthropic') {
+                $this->flash('error', 'Key not found.');
+                Flight::redirect('/anthropic/keys');
+                return;
+            }
+
+            // Only owner can delete
+            if ($key->member_id != $this->member->id) {
+                $this->flash('error', 'You can only delete your own API keys.');
+                Flight::redirect('/anthropic/keys');
+                return;
+            }
+
+            $keyName = $key->connection_name;
+            Bean::trash($key);
+
+            // Reset any boards using this key to NULL (local runner)
+            Bean::exec('UPDATE boards SET aidev_anthropic_key_id = NULL WHERE aidev_anthropic_key_id = ?', [$keyId]);
+
+            $this->flash('success', "API key '{$keyName}' deleted. Affected boards switched to local runner.");
+            $this->logger->info('Anthropic API key deleted', ['member_id' => $this->member->id, 'key_id' => $keyId]);
+
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to delete key: ' . $e->getMessage());
+        }
+
+        Flight::redirect('/anthropic/keys');
+    }
+
+    /**
+     * Toggle sharing for an API key (AJAX, owner only)
+     */
+    public function toggleshare($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = $this->opId() ?? $this->getParam('id');
+        if (!$keyId) {
+            $this->json(['success' => false, 'message' => 'No key specified']);
+            return;
+        }
+
+        try {
+            $key = Bean::load('connections', (int)$keyId);
+            if (!$key || !$key->id || $key->connector_type !== 'anthropic') {
+                $this->json(['success' => false, 'message' => 'Key not found']);
+                return;
+            }
+
+            // Only owner can change sharing
+            if ($key->member_id != $this->member->id) {
+                $this->json(['success' => false, 'message' => 'You can only modify your own API keys']);
+                return;
+            }
+
+            // Toggle shared status
+            $key->shared = $key->shared ? 0 : 1;
+            $key->updated_at = date('Y-m-d H:i:s');
+            Bean::store($key);
+
+            $status = $key->shared ? 'shared with workspace' : 'private';
+            $this->json(['success' => true, 'message' => "Key is now {$status}", 'shared' => (bool)$key->shared]);
+
+        } catch (\Exception $e) {
+            $this->json(['success' => false, 'message' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Test an API key
+     */
+    public function testkey($params = []) {
+        if (!$this->requireEnterprise()) return;
+
+        $keyId = (int) ($this->opId() ?? 0);
+        if (!$keyId) {
+            Flight::json(['success' => false, 'error' => 'No key specified']);
+            return;
+        }
+
+        $result = AnthropicKeyService::testKey($keyId);
+
+        if (!$result['success']) {
+            $this->logger->warning('Anthropic API key test failed', ['error' => $result['error']]);
+        }
+
+        Flight::json($result);
+    }
+}

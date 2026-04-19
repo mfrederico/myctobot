@@ -1,0 +1,233 @@
+<?php
+/**
+ * Projects Controller
+ * Manages CTO Projects dashboard and detail views
+ */
+
+namespace app;
+
+use \Flight as Flight;
+use \RedBeanPHP\R as R;
+use \app\Bean;
+use \app\services\UserDatabaseService;
+use \app\services\CompletionDetector;
+
+require_once __DIR__ . '/../services/UserDatabaseService.php';
+require_once __DIR__ . '/../services/CompletionDetector.php';
+
+class Projects extends BaseControls\Control {
+
+    /**
+     * List all projects
+     */
+    public function index() {
+        if (!$this->requireLogin()) return;
+
+        // Get filter
+        $status = $this->getParam('status');
+
+        // Build query
+        $where = '1=1';
+        $params = [];
+
+        if ($status) {
+            $where .= ' AND status = ?';
+            $params[] = $status;
+        }
+
+        // Get projects
+        $projects = Bean::find('ctoprojects', $where . ' ORDER BY created_at DESC', $params);
+
+        // Get status counts
+        $statusCounts = [
+            'planning' => Bean::count('ctoprojects', 'status = ?', ['planning']),
+            'in_progress' => Bean::count('ctoprojects', 'status = ?', ['in_progress']),
+            'blocked' => Bean::count('ctoprojects', 'status = ?', ['blocked']),
+            'completed' => Bean::count('ctoprojects', 'status = ?', ['completed']),
+        ];
+
+        // Enrich projects with epic counts using associations
+        foreach ($projects as $project) {
+            $project->epic_count = $project->countOwn('ctoepics');
+            $storyCount = 0;
+            foreach ($project->ownCtoepicsList as $epic) {
+                $storyCount += $epic->countOwn('ctostories');
+            }
+            $project->story_count = $storyCount;
+        }
+
+        $this->render('projects/index', [
+            'title' => 'CTO Projects',
+            'projects' => $projects,
+            'status' => $status,
+            'statusCounts' => $statusCounts
+        ]);
+    }
+
+    /**
+     * View project detail
+     */
+    public function view($params = []) {
+        if (!$this->requireLogin()) return;
+
+
+        // Get project ID
+        $projectId = $this->opId() ?? $this->getParam('id');
+        if (!$projectId) {
+            $this->flash('error', 'No project specified');
+            Flight::redirect('/projects');
+            return;
+        }
+
+        // Find project
+        $project = is_numeric($projectId)
+            ? Bean::load('ctoprojects', $projectId)
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
+
+        if (!$project || !$project->id) {
+            $this->flash('error', 'Project not found');
+            Flight::redirect('/projects');
+            return;
+        }
+
+        // Get epics with their stories using associations
+        $epicsWithStories = [];
+        foreach ($project->with(' ORDER BY sequence ASC ')->ownCtoepicsList as $epic) {
+            $epicsWithStories[] = [
+                'epic' => $epic,
+                'stories' => $epic->with(' ORDER BY sequence ASC ')->ownCtostoriesList
+            ];
+        }
+
+        // Get directive info via association
+        $directive = $project->ceodirectives;
+
+        // Get progress using CompletionDetector
+        $detector = new CompletionDetector($this->member->id);
+        $progress = $detector->getProjectProgress($project->id);
+
+        // Parse JSON fields
+        $goals = json_decode($project->goals, true) ?: [];
+        $risks = json_decode($project->risk_assessment, true) ?: [];
+        $techStack = json_decode($project->tech_stack, true) ?: [];
+
+        $this->render('projects/view', [
+            'title' => 'Project: ' . $project->name,
+            'project' => $project,
+            'epicsWithStories' => $epicsWithStories,
+            'directive' => $directive,
+            'progress' => $progress,
+            'goals' => $goals,
+            'risks' => $risks,
+            'techStack' => $techStack
+        ]);
+    }
+
+    /**
+     * Pause project execution
+     */
+    public function pause($params = []) {
+        if (!$this->requireLogin()) return;
+
+
+        $projectId = $this->opId() ?? $this->getParam('id');
+        $project = is_numeric($projectId)
+            ? Bean::load('ctoprojects', $projectId)
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
+
+        if (!$project || !$project->id) {
+            Flight::jsonError('Project not found');
+            return;
+        }
+
+        if ($project->status !== 'in_progress') {
+            Flight::jsonError('Can only pause in-progress projects');
+            return;
+        }
+
+        $project->status = 'blocked';
+        $project->updated_at = date('Y-m-d H:i:s');
+        Bean::store($project);
+
+        $this->logger->info('Project paused', [
+            'project_uid' => $project->project_uid,
+            'member_id' => $this->member->id
+        ]);
+
+        Flight::jsonSuccess(['project_uid' => $project->project_uid], 'Project paused');
+    }
+
+    /**
+     * Resume project execution
+     */
+    public function resume($params = []) {
+        if (!$this->requireLogin()) return;
+
+
+        $projectId = $this->opId() ?? $this->getParam('id');
+        $project = is_numeric($projectId)
+            ? Bean::load('ctoprojects', $projectId)
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
+
+        if (!$project || !$project->id) {
+            Flight::jsonError('Project not found');
+            return;
+        }
+
+        if ($project->status !== 'blocked') {
+            Flight::jsonError('Can only resume blocked projects');
+            return;
+        }
+
+        $project->status = 'in_progress';
+        $project->updated_at = date('Y-m-d H:i:s');
+        Bean::store($project);
+
+        $this->logger->info('Project resumed', [
+            'project_uid' => $project->project_uid,
+            'member_id' => $this->member->id
+        ]);
+
+        Flight::jsonSuccess(['project_uid' => $project->project_uid], 'Project resumed');
+    }
+
+    /**
+     * Generate project report (JSON)
+     */
+    public function report($params = []) {
+        if (!$this->requireLogin()) return;
+
+
+        $projectId = $this->opId() ?? $this->getParam('id');
+        $project = is_numeric($projectId)
+            ? Bean::load('ctoprojects', $projectId)
+            : Bean::findOne('ctoprojects', 'project_uid = ?', [$projectId]);
+
+        if (!$project || !$project->id) {
+            Flight::jsonError('Project not found');
+            return;
+        }
+
+        $detector = new CompletionDetector($this->member->id);
+        $progress = $detector->getProjectProgress($project->id);
+
+        $report = [
+            'generated_at' => date('Y-m-d H:i:s'),
+            'project' => [
+                'id' => $project->project_uid,
+                'name' => $project->name,
+                'description' => $project->description,
+                'status' => $project->status,
+                'completion_percentage' => $project->completion_percentage,
+                'created_at' => $project->created_at,
+                'goals' => json_decode($project->goals, true),
+                'tech_stack' => json_decode($project->tech_stack, true),
+                'estimated_effort' => $project->estimated_effort
+            ],
+            'progress' => $progress,
+            'risks' => json_decode($project->risk_assessment, true)
+        ];
+
+        Flight::jsonSuccess($report, 'Report generated');
+    }
+}

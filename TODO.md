@@ -1,0 +1,6 @@
+- Separate .ini for stripe, and other core myctobot systesm
+- Make sure all mcp's when generated, point to the vanity domain: e.g. https://workspace.myctobot.ai/mcp/{operation} that way if they are configured as a runner on a remote service, it connects back to "home" myctobot for appropriate data.
+- Create a pubkeys page
+-- When initializing a new workspace, do ssh-keygen -t ed25519 in the ~/.ssh folder named ~/.ssh/workspace_ed25519.pub and workspace_ed25519 and use those for ssh auth across machines.
+-- this will allow us to use ssh for github
+-- Allow workspaces to "regen" keys and name them for specific purposes / remoting

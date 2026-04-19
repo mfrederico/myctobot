@@ -1,0 +1,169 @@
+/**
+ * MyCTOBot Customer Support Widget
+ * Usage: <script src="https://dev.myctobot.ai/widget/%%TOKEN%%"></script>
+ */
+(function() {
+    'use strict';
+
+    var currentScript = document.currentScript;
+    var embeddedToken = '%%TOKEN%%';
+
+    var config = {
+        token: embeddedToken || (currentScript && currentScript.dataset && currentScript.dataset.token) || '',
+        position: (currentScript && currentScript.dataset && currentScript.dataset.position) || 'bottom-right',
+        greeting: (currentScript && currentScript.dataset && currentScript.dataset.greeting) || 'Need Help?',
+        baseUrl: '%%BASEURL%%'
+    };
+
+    console.log('MyCTOBot Widget: Initializing', config);
+
+    if (!config.token) {
+        console.error('MyCTOBot Widget: token required');
+        return;
+    }
+
+    if (window.MyCTOBotWidget) {
+        console.log('MyCTOBot Widget: Already initialized');
+        return;
+    }
+    window.MyCTOBotWidget = { config: config };
+
+    // Session persistence via localStorage
+    var STORAGE_KEY = 'myctobot_support_' + config.token;
+    var SESSION_TTL = 3600000; // 1 hour in ms
+
+    function saveSession(sessionToken) {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                sessionToken: sessionToken,
+                timestamp: Date.now()
+            }));
+        } catch (e) {
+            // localStorage may be blocked in some contexts
+        }
+    }
+
+    function getActiveSession() {
+        try {
+            var data = localStorage.getItem(STORAGE_KEY);
+            if (!data) return null;
+            var parsed = JSON.parse(data);
+            if (Date.now() - parsed.timestamp > SESSION_TTL) {
+                localStorage.removeItem(STORAGE_KEY);
+                return null;
+            }
+            return parsed.sessionToken;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function clearSession() {
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {}
+    }
+
+    var isLeft = config.position === 'bottom-left';
+    var posCSS = isLeft ? 'left: 20px;' : 'right: 20px;';
+    var posCSSMobile = isLeft ? 'left: 10px;' : 'right: 10px;';
+
+    var styles = document.createElement('style');
+    styles.textContent = '#myctobot-widget-button{position:fixed;' + posCSS + 'bottom:20px;background:linear-gradient(135deg,#0d6efd 0%,#6610f2 100%);color:#fff;padding:14px 24px;border-radius:30px;cursor:pointer;box-shadow:0 4px 20px rgba(13,110,253,0.4);z-index:999999;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px;transition:transform .2s,box-shadow .2s;border:none}#myctobot-widget-button:hover{transform:translateY(-2px);box-shadow:0 6px 25px rgba(13,110,253,0.5)}#myctobot-widget-button svg{width:20px;height:20px}#myctobot-widget-modal{display:none;position:fixed;' + posCSS + 'bottom:90px;width:380px;height:550px;background:#212529;border-radius:16px;box-shadow:0 10px 40px rgba(0,0,0,0.5);z-index:1000000;overflow:hidden;flex-direction:column}#myctobot-widget-modal.open{display:flex}#myctobot-widget-header{background:linear-gradient(135deg,#0d6efd 0%,#6610f2 100%);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif}#myctobot-widget-header span{font-weight:600;font-size:15px}#myctobot-widget-close{background:rgba(255,255,255,0.2);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px;line-height:1;transition:background .2s}#myctobot-widget-close:hover{background:rgba(255,255,255,0.3)}#myctobot-widget-frame{flex:1;width:100%;border:none;background:#1a1a2e}@media(max-width:450px){#myctobot-widget-modal{width:calc(100vw - 20px);height:calc(100vh - 100px);' + posCSSMobile + 'bottom:80px;border-radius:12px}#myctobot-widget-button{' + posCSSMobile + 'bottom:10px;padding:12px 20px;font-size:14px}}';
+    document.head.appendChild(styles);
+
+    var button = document.createElement('button');
+    button.id = 'myctobot-widget-button';
+    button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>' + config.greeting;
+    document.body.appendChild(button);
+
+    var modal = document.createElement('div');
+    modal.id = 'myctobot-widget-modal';
+    modal.innerHTML = '<div id="myctobot-widget-header"><span>Customer Support</span><button id="myctobot-widget-close">&times;</button></div><iframe id="myctobot-widget-frame" src="" allow="clipboard-write"></iframe>';
+    document.body.appendChild(modal);
+
+    var frame = document.getElementById('myctobot-widget-frame');
+    var closeBtn = document.getElementById('myctobot-widget-close');
+
+    var frameLoaded = false;
+    var activeSessionToken = null;
+
+    function openWidget() {
+        // Check for saved session first
+        var savedSession = getActiveSession();
+        if (savedSession && !activeSessionToken) {
+            // Validate the saved session before loading
+            validateAndLoadSession(savedSession);
+        } else if (!frameLoaded) {
+            frame.src = config.baseUrl + '/customersupport?token=' + config.token + '&embed=1';
+            frameLoaded = true;
+        }
+        modal.classList.add('open');
+        button.style.display = 'none';
+    }
+
+    function validateAndLoadSession(sessionToken) {
+        // Quick server check to see if session is still valid
+        fetch(config.baseUrl + '/customersupport/status/' + sessionToken)
+            .then(function(r) { return r.json(); })
+            .then(function(result) {
+                if (result.success && result.data && result.data.valid) {
+                    // Session still valid - load chat directly
+                    activeSessionToken = sessionToken;
+                    frame.src = config.baseUrl + '/customersupport/chat/' + sessionToken + '?embed=1';
+                    frameLoaded = true;
+                } else {
+                    // Session expired/invalid - clear and show verification
+                    clearSession();
+                    frame.src = config.baseUrl + '/customersupport?token=' + config.token + '&embed=1';
+                    frameLoaded = true;
+                }
+            })
+            .catch(function() {
+                // Network error - try verification form
+                clearSession();
+                frame.src = config.baseUrl + '/customersupport?token=' + config.token + '&embed=1';
+                frameLoaded = true;
+            });
+    }
+
+    function closeWidget() {
+        // Ask iframe if it wants to offer transcript before closing
+        if (activeSessionToken && frame.contentWindow) {
+            frame.contentWindow.postMessage({ type: 'myctobot-request-close' }, '*');
+            return; // iframe will respond with myctobot-close when ready
+        }
+        doClose();
+    }
+
+    function doClose() {
+        modal.classList.remove('open');
+        button.style.display = 'flex';
+    }
+
+    button.addEventListener('click', openWidget);
+    closeBtn.addEventListener('click', closeWidget);
+
+    window.addEventListener('message', function(e) {
+        if (!e.data || typeof e.data !== 'object') return;
+
+        if (e.data.type === 'myctobot-session-started' && e.data.sessionToken) {
+            activeSessionToken = e.data.sessionToken;
+            saveSession(e.data.sessionToken);
+        }
+        if (e.data.type === 'myctobot-close') {
+            doClose();
+        }
+        if (e.data.type === 'myctobot-session-expired') {
+            clearSession();
+            activeSessionToken = null;
+        }
+        if (e.data.type === 'myctobot-escalated') {
+            button.style.background = '#ffc107';
+        }
+    });
+
+    window.MyCTOBotWidget.open = openWidget;
+    window.MyCTOBotWidget.close = doClose;
+    window.MyCTOBotWidget.clearSession = clearSession;
+})();

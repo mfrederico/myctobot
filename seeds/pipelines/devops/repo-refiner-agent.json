@@ -1,0 +1,382 @@
+{
+    "version": "1.0",
+    "exported_at": "2026-02-08T17:19:10-05:00",
+    "source_workspace": "dev",
+    "pipeline": {
+        "name": "Repo Refiner Agent",
+        "slug": "repo-refiner-agent",
+        "description": "Clone a GitHub repo, spawn an AI agent to refine it based on email instructions. Sends status updates every 15 minutes. User interacts via web form links in emails.",
+        "columns_json": [
+            "Setup",
+            "Work Loop",
+            "Cleanup"
+        ],
+        "trigger_type": "manual",
+        "trigger_config_json": [],
+        "default_context_json": {
+            "agent_id": 6,
+            "runner_id": 3,
+            "mcp_server_id": 9
+        },
+        "input_schema_json": {
+            "type": "object",
+            "properties": {
+                "repo_url": {
+                    "type": "string",
+                    "description": "Git repo URL (SSH or HTTPS). SSH format recommended for private repos (git@github.com:user/repo.git) - uses the agent's configured SSH key."
+                },
+                "email": {
+                    "type": "string",
+                    "description": "Email address for status updates and instructions"
+                },
+                "initial_instructions": {
+                    "type": "string",
+                    "description": "Initial instructions for the agent (optional)"
+                }
+            },
+            "required": [
+                "repo_url",
+                "email"
+            ]
+        },
+        "expose_as_tool": true,
+        "is_active": true
+    },
+    "steps": [
+        {
+            "step_name": "bootstrap_remote",
+            "label": "Bootstrap Remote",
+            "row": 0,
+            "col": 0,
+            "step_type": "direct_exec",
+            "config_json": {
+                "workstation_id": "{context.runner_id}",
+                "command": "rm -rf ~/jobs/repo-refiner-{run_uid} && mkdir -p ~/jobs/repo-refiner-{run_uid} && GIT_TERMINAL_PROMPT=0 git clone {context.repo_url} ~/jobs/repo-refiner-{run_uid} && cd ~/jobs/repo-refiner-{run_uid} && git status && pwd && ls -la",
+                "working_dir": "~"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "spawn_agent",
+            "label": "Start AI Agent",
+            "row": 0,
+            "col": 1,
+            "step_type": "ai_agent",
+            "config_json": {
+                "agent_id": "6",
+                "execution_mode": "runner",
+                "runner_id": "3",
+                "working_dir": "~/jobs/repo-refiner-{run_uid}",
+                "prompt": "You are working on refining a codebase. The repository has already been cloned to your current directory.\n\nFirst, explore the codebase structure and understand what it does. Then wait for instructions.\n\nInitial instructions (if any): {context.initial_instructions}\n\nWhen you receive new instructions via the pipeline, implement them carefully. After each major change, commit your work with descriptive messages.\n\nUse the `job_checkpoint` MCP tool periodically to report your progress.\n\nIMPORTANT: Stay active and wait for instructions. Do not exit until told to.",
+                "wait_for_completion": false
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:send_ready_email",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "wait_for_instructions",
+            "label": "Wait for Instructions",
+            "row": 0,
+            "col": 2,
+            "step_type": "wait",
+            "config_json": {
+                "wait_type": "await_input",
+                "prompt": "Enter instructions for the AI agent. What would you like it to work on?",
+                "timeout": 86400,
+                "source_webhook": true,
+                "source_form": true,
+                "source_mcp": true,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "title": "Action",
+                            "enum": [
+                                "instructions",
+                                "complete"
+                            ],
+                            "default": "instructions"
+                        },
+                        "message": {
+                            "type": "string",
+                            "title": "Instructions",
+                            "description": "What should the agent work on?"
+                        }
+                    }
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:check_if_complete",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_status_email",
+            "label": "Send Status Update",
+            "row": 0,
+            "col": 3,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.email}",
+                "subject": "\ud83d\udcca Status Update - Repo Refiner Agent",
+                "content_type": "markdown",
+                "body": "## Status Update\n\n**Repository:** {context.repo_url}\n**Session:** {context.run_uid}\n\nThe agent is still working. Check the session for detailed progress.\n\n---\n\n**[\ud83d\udcdd Send instructions]({base_url}/pipelines/form/{context.run_uid}?step=wait_for_instructions)**\n\n**[\u2705 Mark as Complete]({base_url}/pipelines/input/{context.run_uid}?action=complete)**"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_next_status",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_completion_email",
+            "label": "Send Completion Email",
+            "row": 0,
+            "col": 4,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.email}",
+                "subject": "\u2705 Repo Refiner Agent - Work Complete!",
+                "content_type": "markdown",
+                "body": "## All Done! \ud83c\udf89\n\nThe Repo Refiner Agent has completed its work.\n\n**Repository:** {context.repo_url}\n\nThe changes have been committed to the local clone. You can review them or push to a branch.\n\n---\n\nThank you for using the Repo Refiner Agent!"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "next_col",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_ready_email",
+            "label": "Send Ready Email",
+            "row": 1,
+            "col": 1,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.email}",
+                "subject": "\ud83e\udd16 Repo Refiner Agent Ready - {context.repo_url}",
+                "content_type": "markdown",
+                "body": "## Your AI Agent is Ready!\n\nI've cloned the repository and I'm ready to work on it.\n\n**Repository:** {context.repo_url}\n**Session ID:** {run_uid}\n\n---\n\n### Send Me Instructions\n\n**[\ud83d\udcdd Click here to send instructions]({base_url}/pipelines/form/{run_uid}?step=wait_for_instructions)**\n\n---\n\n### When You're Done\n\n**[\u2705 Mark as Complete]({base_url}/pipelines/input/{run_uid}?action=complete)**\n\n---\n\nYou'll receive status updates every 15 minutes while I'm working."
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:schedule_status_15m",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "check_if_complete",
+            "label": "Check if Complete",
+            "row": 1,
+            "col": 2,
+            "step_type": "condition",
+            "config_json": {
+                "left": "{context._input.action}",
+                "operator": "equals",
+                "right": "complete",
+                "then_goto": "send_completion_email",
+                "else_goto": "send_to_agent"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "next_col",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_next_status",
+            "label": "Schedule Next Status",
+            "row": 1,
+            "col": 3,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 15,
+                "delay_unit": "60",
+                "pipeline_id": "_self",
+                "entry_step": "send_status_email",
+                "input_data": {
+                    "email": "{context.email}",
+                    "repo_url": "{context.repo_url}",
+                    "run_uid": "{context.run_uid}",
+                    "job_uid": "{context.job_uid}"
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "cleanup_session",
+            "label": "Cleanup Session",
+            "row": 1,
+            "col": 4,
+            "step_type": "reaper",
+            "config_json": {
+                "job_uid": "{spawn_agent.output.job_uid}",
+                "wait_for_idle": true,
+                "force_kill": true,
+                "timeout": 30
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "exit",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "schedule_status_15m",
+            "label": "Schedule 15m Status",
+            "row": 2,
+            "col": 1,
+            "step_type": "schedule_task",
+            "config_json": {
+                "task_type": "execute_pipeline",
+                "delay": 15,
+                "delay_unit": "60",
+                "pipeline_id": "_self",
+                "entry_step": "send_status_email",
+                "input_data": {
+                    "email": "{context.email}",
+                    "repo_url": "{context.repo_url}",
+                    "run_uid": "{run_uid}",
+                    "job_uid": "{spawn_agent.output.job_uid}"
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:wait_for_instructions",
+            "on_failure": "next_col",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_to_agent",
+            "label": "Send to Agent",
+            "row": 2,
+            "col": 2,
+            "step_type": "mcp_call",
+            "config_json": {
+                "mcp_server_id": "10",
+                "tool": "send_to_step",
+                "arguments": {
+                    "run_id": "{context.run_id}",
+                    "step_name": "spawn_agent",
+                    "message": "New instructions from user:\n\n{wait_for_instructions.output.message}\n\nPlease implement these changes. Use post_message to report progress."
+                }
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:send_ack_email",
+            "on_failure": "exit",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        },
+        {
+            "step_name": "send_ack_email",
+            "label": "Acknowledge Email",
+            "row": 3,
+            "col": 2,
+            "step_type": "mailgun",
+            "config_json": {
+                "to": "{context.email}",
+                "subject": "\ud83d\udce8 Instructions Received - Working on it!",
+                "content_type": "markdown",
+                "body": "## Got it!\n\nI've received your instructions and I'm working on them now.\n\n**Your request:**\n> {wait_for_instructions.output.message}\n\n---\n\n**[\ud83d\udcdd Send more instructions]({base_url}/pipelines/form/{run_uid}?step=wait_for_instructions)**\n\n**[\u2705 Mark as Complete]({base_url}/pipelines/input/{run_uid}?action=complete)**"
+            },
+            "input_source": "context",
+            "input_config_json": [],
+            "condition_json": [],
+            "output_mappings_json": [],
+            "on_success": "goto:wait_for_instructions",
+            "on_failure": "goto:wait_for_instructions",
+            "timeout_seconds": 300,
+            "retry_count": 0,
+            "retry_delay_seconds": 10,
+            "is_active": true,
+            "run_parallel": false
+        }
+    ],
+    "dependencies": {
+        "ai_agents": [],
+        "mcp_servers": [],
+        "repo_connections": [],
+        "shopify_connections": [],
+        "workstations": []
+    }
+}

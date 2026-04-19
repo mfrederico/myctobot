@@ -1,0 +1,309 @@
+<?php
+/**
+ * Google OAuth Plugin for MyCTOBot
+ * Handles Google Sign-In authentication
+ *
+ * Usage:
+ * 1. Set google_client_id, google_client_secret, google_redirect_uri in config.ini
+ * 2. Call GoogleAuth::getLoginUrl() to get the authorization URL
+ * 3. Handle callback in your auth controller using GoogleAuth::handleCallback()
+ */
+
+namespace app\plugins;
+
+use \Flight as Flight;
+use \app\Bean;
+
+class GoogleAuth {
+
+    private static string $authUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+    private static string $tokenUrl = 'https://oauth2.googleapis.com/token';
+    private static string $userInfoUrl = 'https://www.googleapis.com/oauth2/v2/userinfo';
+
+    /**
+     * Check if Google OAuth is configured
+     */
+    public static function isConfigured(): bool {
+        $clientId = Flight::get('social.google_client_id');
+        $clientSecret = Flight::get('social.google_client_secret');
+        $redirectUri = Flight::get('social.google_redirect_uri');
+
+        return !empty($clientId) && !empty($clientSecret) && !empty($redirectUri);
+    }
+
+    /**
+     * Get Google OAuth authorization URL
+     *
+     * @param string|null $state Optional state parameter for CSRF protection
+     * @return string The authorization URL
+     */
+    public static function getLoginUrl(?string $state = null): string {
+        $clientId = Flight::get('social.google_client_id');
+        $redirectUri = Flight::get('social.google_redirect_uri');
+
+        if (empty($clientId) || empty($redirectUri)) {
+            throw new \RuntimeException('Google OAuth not configured. Set google_client_id and google_redirect_uri in config.ini');
+        }
+
+        // Generate state for CSRF protection if not provided
+        if ($state === null) {
+            $state = bin2hex(random_bytes(16));
+            $_SESSION['google_oauth_state'] = $state;
+        }
+
+        $params = [
+            'client_id' => $clientId,
+            'redirect_uri' => $redirectUri,
+            'response_type' => 'code',
+            'scope' => 'openid email profile',
+            'state' => $state,
+            'access_type' => 'online',
+            'prompt' => 'select_account'
+        ];
+
+        return self::$authUrl . '?' . http_build_query($params);
+    }
+
+    /**
+     * Handle OAuth callback and authenticate/create user
+     *
+     * @param string $code Authorization code from Google
+     * @param string|null $state State parameter for CSRF verification
+     * @return object|false Member bean on success, false on failure
+     */
+    public static function handleCallback(string $code, ?string $state = null) {
+        $logger = Flight::get('log');
+
+        // Verify state parameter (CSRF protection)
+        if ($state !== null && isset($_SESSION['google_oauth_state'])) {
+            if ($state !== $_SESSION['google_oauth_state']) {
+                $logger->warning('Google OAuth state mismatch');
+                return false;
+            }
+            unset($_SESSION['google_oauth_state']);
+        }
+
+        // Exchange code for access token
+        $tokens = self::getAccessToken($code);
+        if (!$tokens || !isset($tokens['access_token'])) {
+            $logger->error('Failed to get Google access token');
+            return false;
+        }
+
+        // Get user info from Google
+        $googleUser = self::getUserInfo($tokens['access_token']);
+        if (!$googleUser || !isset($googleUser['email'])) {
+            $logger->error('Failed to get Google user info');
+            return false;
+        }
+
+        $logger->info('Google user authenticated', ['email' => $googleUser['email']]);
+
+        // Find or create user
+        $member = self::findOrCreateUser($googleUser);
+
+        return $member;
+    }
+
+    /**
+     * Exchange authorization code for access token
+     *
+     * @param string $code Authorization code
+     * @return array|false Token data or false on failure
+     */
+    private static function getAccessToken(string $code) {
+        $clientId = Flight::get('social.google_client_id');
+        $clientSecret = Flight::get('social.google_client_secret');
+        $redirectUri = Flight::get('social.google_redirect_uri');
+
+        $postData = [
+            'client_id' => $clientId,
+            'client_secret' => $clientSecret,
+            'code' => $code,
+            'grant_type' => 'authorization_code',
+            'redirect_uri' => $redirectUri
+        ];
+
+        $ch = curl_init(self::$tokenUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query($postData),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded']
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            Flight::get('log')->error('Google token request failed', [
+                'http_code' => $httpCode,
+                'response' => $response
+            ]);
+            return false;
+        }
+
+        return json_decode($response, true);
+    }
+
+    /**
+     * Get user info from Google using access token
+     *
+     * @param string $accessToken Google access token
+     * @return array|false User info or false on failure
+     */
+    private static function getUserInfo(string $accessToken) {
+        $ch = curl_init(self::$userInfoUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => ["Authorization: Bearer {$accessToken}"]
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            Flight::get('log')->error('Google user info request failed', [
+                'http_code' => $httpCode,
+                'response' => $response
+            ]);
+            return false;
+        }
+
+        return json_decode($response, true);
+    }
+
+    /**
+     * Find existing user or create new one from Google data
+     *
+     * @param array $googleUser Google user data
+     * @return object|false Member bean or false on failure
+     */
+    private static function findOrCreateUser(array $googleUser) {
+        $logger = Flight::get('log');
+        $email = $googleUser['email'];
+        $googleId = $googleUser['id'];
+
+        // First try to find by Google ID
+        $member = Bean::findOne('member', 'google_eid = ?', [$googleId]);
+
+        if ($member) {
+            // Update last login and avatar if changed
+            $member->last_login = date('Y-m-d H:i:s');
+            $member->login_count = ($member->login_count ?? 0) + 1;
+
+            if (!empty($googleUser['picture'])) {
+                $member->avatar_url = $googleUser['picture'];
+            }
+
+            Bean::store($member);
+            return $member;
+        }
+
+        // Try to find by email
+        $member = Bean::findOne('member', 'email = ?', [$email]);
+
+        if ($member) {
+            // Link existing account with Google ID
+            $member->google_eid = $googleId;
+            $member->last_login = date('Y-m-d H:i:s');
+            $member->login_count = ($member->login_count ?? 0) + 1;
+
+            if (!empty($googleUser['picture']) && empty($member->avatar_url)) {
+                $member->avatar_url = $googleUser['picture'];
+            }
+
+            Bean::store($member);
+            $logger->info('Linked existing account to Google', ['id' => $member->id]);
+            return $member;
+        }
+
+        // Create new user - no email verification needed for Google auth
+        $member = Bean::dispense('member');
+        $member->email = $email;
+        $member->username = self::generateUsername($googleUser);
+        $member->password = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT); // Random password
+        $member->google_eid = $googleId;
+        $member->level = LEVELS['MEMBER'];
+        $member->status = 'active'; // Auto-activate - Google verified the email
+        $member->created_at = date('Y-m-d H:i:s');
+        $member->last_login = date('Y-m-d H:i:s');
+        $member->login_count = 1;
+        $member->email_verified = 1; // Google verified
+
+        // Store profile picture URL if available
+        if (isset($googleUser['picture'])) {
+            $member->avatar_url = $googleUser['picture'];
+        }
+
+        // Store name if available
+        if (isset($googleUser['name'])) {
+            $member->display_name = $googleUser['name'];
+        }
+
+        $id = Bean::store($member);
+        $member->id = $id;
+
+        $logger->info('Created new user from Google OAuth', [
+            'id' => $id,
+            'email' => $email
+        ]);
+
+        return $member;
+    }
+
+    /**
+     * Generate unique username from Google data
+     *
+     * @param array $googleUser Google user data
+     * @return string Unique username
+     */
+    private static function generateUsername(array $googleUser): string {
+        // Try to use name first
+        if (isset($googleUser['name'])) {
+            $base = preg_replace('/[^a-zA-Z0-9]/', '', $googleUser['name']);
+        } else {
+            // Fall back to email prefix
+            $base = explode('@', $googleUser['email'])[0];
+            $base = preg_replace('/[^a-zA-Z0-9]/', '', $base);
+        }
+
+        $base = strtolower(substr($base, 0, 20));
+
+        if (empty($base)) {
+            $base = 'user';
+        }
+
+        // Check if username exists, append number if needed
+        $username = $base;
+        $counter = 1;
+
+        while (Bean::count('member', 'username = ?', [$username]) > 0) {
+            $username = $base . $counter;
+            $counter++;
+        }
+
+        return $username;
+    }
+
+    /**
+     * Get Google user info for the currently logged in member
+     * Useful for displaying profile info
+     */
+    public static function getMemberGoogleInfo(int $memberId): ?array {
+        $member = Bean::load('member', $memberId);
+
+        if (!$member || empty($member->google_eid)) {
+            return null;
+        }
+
+        return [
+            'google_eid' => $member->google_eid,
+            'email' => $member->email,
+            'display_name' => $member->display_name,
+            'avatar_url' => $member->avatar_url
+        ];
+    }
+}

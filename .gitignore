@@ -1,0 +1,126 @@
+# Configuration files with sensitive data
+conf/jobexecutor.ini
+conf/config.ini
+conf/shopify.ini
+conf/config.*.ini
+conf/mailgun.ini
+conf/stripe.ini
+conf/atlassian.ini
+config.ini
+stripe
+storage
+
+# But keep the example config
+!/conf/config.example.ini
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Vendor directory (Composer dependencies)
+/vendor/
+
+# Logs
+/log/
+*.log
+logs/
+
+# Cache files
+.playwright-mcp
+/cache/
+*.cache
+
+# Uploads directory
+/uploads/
+
+# Session files
+/sessions/
+sess_*
+
+# Database files (if using SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Temporary files
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# PHP specific
+*.phar
+composer.lock
+
+# Testing
+/phpunit.xml
+/tests/coverage/
+.phpunit.result.cache
+
+# Playwright test artifacts
+/tests/results/
+/tests/reports/
+/playwright-report/
+/test-results/
+
+# Build artifacts
+/build/
+/dist/
+
+# Node modules (if you add any frontend build tools)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Documentation build
+/docs/_build/
+/docs/.build/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Backup files
+*.sql.backup
+*.tar.gz
+*.zip
+
+# Custom project excludes
+/private/
+/backups/
+
+# Keep important directories with .gitkeep
+!.gitkeep
+sql/
+database/
+conf/github.ini
+conf/google.ini
+conf/stitch.ini
+conf/jobexecutor.ini
+
+# But keep example configs
+!conf/stitch.example.ini
+.mcp.json
+data/

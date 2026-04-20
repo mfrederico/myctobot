@@ -19,6 +19,22 @@ use \app\services\MailgunService;
 
 class Signup extends BaseControls\Control {
 
+    public function __construct() {
+        parent::__construct();
+        // When [signup] enabled = false in config, every action on this controller
+        // renders the "closed" page instead of processing the request.
+        if (!Flight::get('signup.enabled')) {
+            $message = Flight::get('signup.closed_message')
+                ?: 'Signups are temporarily closed. Please check back soon.';
+            $this->render('signup/closed', [
+                'title' => 'Signups Temporarily Closed',
+                'message' => $message,
+                'hideFooter' => true,
+            ]);
+            exit;
+        }
+    }
+
     /**
      * Show the workspace signup form
      */
@@ -495,6 +511,10 @@ class Signup extends BaseControls\Control {
         $baseUrl = \app\services\SiteConfig::getBaseUrl();
         $verifyUrl = "{$baseUrl}/signup/verify/{$token}?workspace=" . urlencode($subdomain);
 
+        // Escape user-supplied values before interpolating into the HTML email body.
+        $businessNameHtml = htmlspecialchars($businessName, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $subdomainHtml    = htmlspecialchars($subdomain,    ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
         $html = <<<HTML
 <div style="max-width: 600px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
     <div style="text-align: center; padding: 30px 0;">
@@ -504,11 +524,11 @@ class Signup extends BaseControls\Control {
 
     <div style="background: #f8f9fa; border-radius: 8px; padding: 30px; margin-bottom: 20px;">
         <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
-            Hi there! Thanks for signing up <strong>{$businessName}</strong>.
+            Hi there! Thanks for signing up <strong>{$businessNameHtml}</strong>.
         </p>
         <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
             Your workspace will be available at:<br>
-            <strong style="color: #3498db; font-size: 18px;">{$subdomain}.myctobot.ai</strong>
+            <strong style="color: #3498db; font-size: 18px;">{$subdomainHtml}.myctobot.ai</strong>
         </p>
         <p style="font-size: 16px; color: #333; margin-bottom: 30px;">
             Click the button below to verify your email and activate your workspace:

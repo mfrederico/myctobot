@@ -159,13 +159,19 @@ class InviteService {
         // Get workspace display name
         $workspaceName = $this->getWorkspaceDisplayName();
 
-        // Build email content
+        // Escape user-controlled values before they enter the markdown body —
+        // the markdown renderer runs with escapeHtml=false, so any raw HTML here
+        // would otherwise render in the recipient's email client.
+        $inviterNameSafe   = htmlspecialchars($inviterName,   ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $workspaceNameSafe = htmlspecialchars($workspaceName, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        // Build email content (subject is plain text, not HTML-rendered)
         $subject = "You've been invited to join {$workspaceName} on MyCTOBot";
 
         $markdown = <<<MD
 # Welcome to MyCTOBot!
 
-**{$inviterName}** has invited you to join **{$workspaceName}** as a team member.
+**{$inviterNameSafe}** has invited you to join **{$workspaceNameSafe}** as a team member.
 
 MyCTOBot is an AI-powered development assistant that helps teams manage projects, analyze sprints, and automate development tasks.
 

@@ -134,6 +134,27 @@ if (php_sapi_name() !== 'cli') {
                 h1{color:#e94560;margin-bottom:20px;}p{color:#aaa;}</style></head>
                 <body><div class="box"><h1>Invalid Workspace</h1><p>This workspace name is not available.</p></div></body></html>');
         }
+
+        // Reject invalid slug characters and unknown workspaces — redirect to primary domain.
+        // Without this, subdomain-enumeration scanners get per-host log files created for free.
+        $slugLooksValid = (bool) preg_match('/^[a-z0-9][a-z0-9_-]*$/', $potentialWorkspace);
+        $workspaceConfigFile = BASE_PATH . '/conf/config.' . $potentialWorkspace . '.ini';
+        if (!$slugLooksValid || !file_exists($workspaceConfigFile)) {
+            $configPath = BASE_PATH . '/conf/config.ini';
+            $primaryDomain = null;
+            if (file_exists($configPath)) {
+                $config = parse_ini_file($configPath, true);
+                $primaryDomain = $config['site']['domain'] ?? null;
+            }
+            if (!$primaryDomain) {
+                array_shift($parts);
+                $primaryDomain = implode('.', $parts);
+            }
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $requestUri = $_SERVER['REQUEST_URI'] ?? '/';
+            header("Location: {$protocol}://{$primaryDomain}{$requestUri}", true, 301);
+            exit;
+        }
     }
 
     $_SERVER['WORKSPACE'] = $potentialWorkspace;

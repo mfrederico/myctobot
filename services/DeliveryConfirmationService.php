@@ -418,30 +418,40 @@ class DeliveryConfirmationService {
      * Build email content from details
      */
     private function buildEmailContent(array $details, string $type): string {
+        // These fields originate from webhook payloads (Jira/GitHub/aidev) and can
+        // carry user-authored text. Escape before they enter the markdown body —
+        // the renderer runs with escapeHtml=false, so raw HTML would otherwise
+        // render in the recipient's email client.
+        $esc = fn(string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        $issueKey  = $esc((string)($details['issue_key']  ?? ''));
+        $jobUid    = $esc((string)($details['job_uid']    ?? ''));
+        $timestamp = $esc((string)($details['timestamp']  ?? ''));
+
         if ($type === 'success') {
             $content = "# Directive Completed Successfully\n\n";
-            $content .= "**Issue:** {$details['issue_key']}\n";
-            $content .= "**Job ID:** {$details['job_uid']}\n";
-            $content .= "**Timestamp:** {$details['timestamp']}\n\n";
+            $content .= "**Issue:** {$issueKey}\n";
+            $content .= "**Job ID:** {$jobUid}\n";
+            $content .= "**Timestamp:** {$timestamp}\n\n";
 
             if (!empty($details['pr_url'])) {
-                $prDisplay = $details['pr_number'] ? "PR #{$details['pr_number']}" : 'Pull Request';
-                $content .= "**Pull Request:** [{$prDisplay}]({$details['pr_url']})\n";
+                $prDisplay = $details['pr_number'] ? "PR #" . (int)$details['pr_number'] : 'Pull Request';
+                $content .= "**Pull Request:** [{$prDisplay}](" . $esc((string)$details['pr_url']) . ")\n";
             }
 
             if (!empty($details['branch_name'])) {
-                $content .= "**Branch:** `{$details['branch_name']}`\n";
+                $content .= "**Branch:** `" . $esc((string)$details['branch_name']) . "`\n";
             }
 
             if (!empty($details['summary'])) {
-                $content .= "\n## Summary\n{$details['summary']}\n";
+                $content .= "\n## Summary\n" . $esc((string)$details['summary']) . "\n";
             }
 
             if (!empty($details['files_changed'])) {
                 $fileCount = count($details['files_changed']);
                 $content .= "\n## Files Changed ({$fileCount})\n";
                 foreach (array_slice($details['files_changed'], 0, 10) as $file) {
-                    $content .= "- `{$file}`\n";
+                    $content .= "- `" . $esc((string)$file) . "`\n";
                 }
                 if ($fileCount > 10) {
                     $content .= "- ...and " . ($fileCount - 10) . " more files\n";
@@ -449,15 +459,15 @@ class DeliveryConfirmationService {
             }
         } else {
             $content = "# Directive Failed\n\n";
-            $content .= "**Issue:** {$details['issue_key']}\n";
-            $content .= "**Job ID:** {$details['job_uid']}\n";
-            $content .= "**Timestamp:** {$details['timestamp']}\n\n";
-            $content .= "## Error\n{$details['error_message']}\n";
+            $content .= "**Issue:** {$issueKey}\n";
+            $content .= "**Job ID:** {$jobUid}\n";
+            $content .= "**Timestamp:** {$timestamp}\n\n";
+            $content .= "## Error\n" . $esc((string)($details['error_message'] ?? '')) . "\n";
 
             if (!empty($details['next_steps'])) {
                 $content .= "\n## Recommended Next Steps\n";
                 foreach ($details['next_steps'] as $step) {
-                    $content .= "- {$step}\n";
+                    $content .= "- " . $esc((string)$step) . "\n";
                 }
             }
         }

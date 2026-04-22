@@ -137,6 +137,53 @@
             .crm-sidebar-toggle { display: block; }
             .crm-sidebar.show ~ .crm-sidebar-overlay { display: block; }
         }
+
+        /* Mobile-friendly CRM overrides */
+        @media (max-width: 767.98px) {
+            .container-fluid { padding-left: 12px; padding-right: 12px; }
+            .crm-content .card { border-radius: 8px; }
+            .crm-content .table { font-size: 0.8rem; }
+            .crm-content .table th,
+            .crm-content .table td { padding: 0.4rem; }
+            .crm-content .badge { font-size: 0.7rem; }
+
+            /* DataTables mobile: hide less important columns (Email, Type, Tags, Last Touch) */
+            .crm-content #contactsTable th:nth-child(3),
+            .crm-content #contactsTable td:nth-child(3),
+            .crm-content #contactsTable th:nth-child(4),
+            .crm-content #contactsTable td:nth-child(4),
+            .crm-content #contactsTable th:nth-child(7),
+            .crm-content #contactsTable td:nth-child(7),
+            .crm-content #contactsTable th:nth-child(8),
+            .crm-content #contactsTable td:nth-child(8) { display: none; }
+
+            /* Customers table: hide Tags and Est. Shipments */
+            .crm-content #customersTable th:nth-child(5),
+            .crm-content #customersTable td:nth-child(5),
+            .crm-content #customersTable th:nth-child(7),
+            .crm-content #customersTable td:nth-child(7) { display: none; }
+
+            /* DataTables controls: stack on mobile */
+            .dataTables_wrapper .d-flex { flex-direction: column; gap: 8px; }
+            .dataTables_length, .dataTables_filter { text-align: left !important; }
+            .dataTables_filter input { width: 100% !important; }
+
+            /* Contact view: stack columns */
+            .crm-content .col-md-4,
+            .crm-content .col-md-8 { flex: 0 0 100%; max-width: 100%; }
+
+            /* Touch form: stack controls */
+            .crm-content #touchForm .row .col-md-3,
+            .crm-content #touchForm .row .col-md-2,
+            .crm-content #touchForm .row .col-md-4,
+            .crm-content #touchForm .row .col-md-10 { flex: 0 0 100%; max-width: 100%; margin-bottom: 4px; }
+
+            /* Lead score card */
+            .crm-content .progress { margin-bottom: 8px; }
+
+            /* Ensure tables don't overflow */
+            .table-responsive, .card-body { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
     </style>
 </head>
 <body>

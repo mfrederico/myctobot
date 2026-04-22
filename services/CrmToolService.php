@@ -398,6 +398,60 @@ class CrmToolService
         return $this->success(['contacts' => $result, 'count' => count($result), 'query' => $query]);
     }
 
+    public function composeMessage(array $args): array
+    {
+        $contactId = (int)($args['contact_id'] ?? 0);
+        $channel = $args['channel'] ?? 'email';
+        $subject = trim($args['subject'] ?? '');
+        $body = trim($args['body'] ?? '');
+
+        // If contact_id not provided but name/company given, search for it
+        if (!$contactId && !empty($args['contact_name'])) {
+            $term = '%' . $args['contact_name'] . '%';
+            $found = Bean::findOne('crmcontact',
+                'CONCAT(COALESCE(first_name,""), " ", COALESCE(last_name,"")) LIKE ? OR company_name LIKE ?',
+                [$term, $term]);
+            if ($found) {
+                $contactId = (int)$found->id;
+            }
+        }
+
+        if (!$contactId) return $this->error('contact_id or contact_name is required');
+
+        $contact = Bean::load('crmcontact', $contactId);
+        if (!$contact->id) {
+            return $this->error('Contact not found');
+        }
+
+        $contactName = trim(($contact->first_name ?? '') . ' ' . ($contact->last_name ?? '')) ?: ($contact->company_name ?? 'Unknown');
+        $email = $contact->company_email ?? '';
+
+        if ($channel === 'email') {
+            if (empty($email)) {
+                return $this->error("Contact {$contactName} has no email address on file");
+            }
+
+            $composeUrl = '/communications/compose/' . $contactId;
+
+            // Return navigate action with prefill token — the compose page
+            // reads from sessionStorage to fill subject + body on load.
+            return $this->success([
+                'action' => 'compose_email',
+                'navigate_url' => $composeUrl,
+                'contact_id' => $contactId,
+                'contact_name' => $contactName,
+                'to_email' => $email,
+                'channel' => 'email',
+                'subject' => $subject,
+                'body' => $body,
+                'message' => "Opening email composer for {$contactName} ({$email}). Use [ACTION:navigate url=\"{$composeUrl}\"] to open the compose page. The subject and body will be pre-filled automatically.",
+            ]);
+        }
+
+        // Future channels: sms, linkedin, etc.
+        return $this->error("Channel '{$channel}' is not yet supported. Available: email");
+    }
+
     public function enrichContact(array $args): array
     {
         $contactId = (int)($args['contact_id'] ?? 0);
@@ -735,6 +789,21 @@ class CrmToolService
                         'limit' => ['type' => 'integer', 'description' => 'Max results (default 20, max 100)'],
                     ],
                     'required' => ['query'],
+                ],
+            ],
+            [
+                'name' => 'crm_compose_message',
+                'description' => 'Open the message composer for a CRM contact. Drafts and navigates to the email compose page with pre-filled subject and body. The compose page already includes "Hi {name}," greeting and "Thanks, {sender}" sign-off — do NOT include greetings, sign-offs, or signatures in the body. Only provide the core message content.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'contact_id' => ['type' => 'integer', 'description' => 'Contact ID (use this if known)'],
+                        'contact_name' => ['type' => 'string', 'description' => 'Contact name or company to search for (alternative to contact_id)'],
+                        'channel' => ['type' => 'string', 'enum' => ['email'], 'description' => 'Message channel (default: email)'],
+                        'subject' => ['type' => 'string', 'description' => 'Email subject line'],
+                        'body' => ['type' => 'string', 'description' => 'Email body text'],
+                    ],
+                    'required' => [],
                 ],
             ],
             [

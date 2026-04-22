@@ -46,6 +46,7 @@ class PageAssistantService
         'suggest' => ['target', 'value', 'reason'],
         'select' => ['target', 'value'],
         'navigate' => ['url', 'confirm'],
+        'compose_email' => ['navigate_url', 'subject', 'body'],
         'expand' => ['target'],
         'click' => ['target', 'confirm'],
         'toast' => ['type', 'message'],
@@ -323,6 +324,7 @@ TO EXECUTE ACTIONS, include these tags in your response:
 - [ACTION:focus target="selector"] - Focus an input
 - [ACTION:scroll target="selector"] - Scroll element into view
 - [ACTION:navigate url="/path"] - Go to another page
+- [ACTION:compose_email navigate_url="/communications/compose/ID" subject="Subject" body="Body text"] - Navigate to email composer with pre-filled subject and body. Use this when user asks to compose/draft/write an email.
 - [ACTION:expand target="selector"] - Expand collapsed section
 - [ACTION:click target="selector"] - Click a button/link
 - [ACTION:toast type="info|success|warning|error" message="..."] - Show notification
@@ -1778,7 +1780,7 @@ POLICY;
             unset($action);
         };
 
-        $toolCallback = function (array $toolCall, $result) use (&$toolResults, $onThinking) {
+        $toolCallback = function (array $toolCall, $result) use (&$toolResults, $onThinking, $onChunk) {
             $toolName = $toolCall['name'] ?? 'unknown';
             $toolArgs = $toolCall['arguments'] ?? [];
 
@@ -1791,6 +1793,31 @@ POLICY;
                 'args' => $toolArgs,
                 'result' => $result
             ];
+
+            // Auto-inject actions from tool results (e.g., compose_email)
+            $resultData = is_string($result) ? json_decode($result, true) : $result;
+            if (is_array($resultData)) {
+                // Check nested: {content: [{text: "{...}"}]}
+                $innerText = $resultData['content'][0]['text'] ?? $resultData['text'] ?? null;
+                if ($innerText && is_string($innerText)) {
+                    $innerData = json_decode($innerText, true);
+                    if (is_array($innerData) && !empty($innerData['action'])) {
+                        $resultData = $innerData;
+                    }
+                }
+                if (!empty($resultData['action']) && $resultData['action'] === 'compose_email') {
+                    $composeAction = [
+                        'action' => 'compose_email',
+                        'navigate_url' => $resultData['navigate_url'] ?? '',
+                        'subject' => $resultData['subject'] ?? '',
+                        'body' => $resultData['body'] ?? '',
+                    ];
+                    if ($onChunk) {
+                        $onChunk('', $composeAction);
+                    }
+                    error_log("[PageAssist] Auto-injected compose_email action");
+                }
+            }
 
             if ($onThinking) {
                 $onThinking("Running {$toolName}...");

@@ -147,6 +147,7 @@ class Mcpcrm extends Control
             'crm_log_touch' => $svc->logTouch($args),
             'crm_move_stage' => $svc->moveStage($args),
             'crm_search' => $svc->searchContacts($args),
+            'crm_compose_message' => $svc->composeMessage($args),
             'crm_enrich_contact' => $svc->enrichContact($args),
             'crm_get_stats' => $svc->getStats($args),
             'linkedin_search_companies' => $svc->linkedinSearchCompanies($args),

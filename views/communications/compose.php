@@ -56,13 +56,16 @@ if (isset($member)) {
                         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                         <div class="mb-3">
                             <label class="form-label small mb-1">Subject</label>
-                            <input type="text" name="subject" class="form-control" value="" placeholder="Subject line">
+                            <input type="text" name="subject" class="form-control" value="<?= htmlspecialchars($_GET['subject'] ?? '') ?>" placeholder="Subject line">
                         </div>
                         <div class="mb-3">
                             <label class="form-label small mb-1">Message</label>
-                            <textarea name="message" id="comms-compose-message" rows="10" class="form-control"><p>Hi <?= htmlspecialchars($greetingName) ?>,</p>
+                            <?php $prefillBody = $_GET['body'] ?? ''; ?>
+                            <textarea name="message" id="comms-compose-message" rows="10" class="form-control"><?php if ($prefillBody): ?><p>Hi <?= htmlspecialchars($greetingName) ?>,</p>
+<p><?= htmlspecialchars($prefillBody) ?></p>
+<p>Thanks,<br><?= htmlspecialchars($repLabel) ?></p><?php else: ?><p>Hi <?= htmlspecialchars($greetingName) ?>,</p>
 <p></p>
-<p>Thanks,<br><?= htmlspecialchars($repLabel) ?></p></textarea>
+<p>Thanks,<br><?= htmlspecialchars($repLabel) ?></p><?php endif; ?></textarea>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small mb-1 d-flex align-items-center gap-2">
@@ -100,6 +103,28 @@ if (isset($member)) {
             var form = document.getElementById('comms-compose-form');
             if (form) form.addEventListener('submit', function () { ed.save(); });
             ed.on('init', function () {
+                // Check for assistant-prefilled compose data
+                try {
+                    var prefill = sessionStorage.getItem('assist_compose');
+                    if (prefill) {
+                        sessionStorage.removeItem('assist_compose');
+                        var data = JSON.parse(prefill);
+                        if (data.subject) {
+                            var subjectField = document.querySelector('input[name="subject"]');
+                            if (subjectField) subjectField.value = data.subject;
+                        }
+                        if (data.body) {
+                            var greeting = '<?= htmlspecialchars($greetingName, ENT_QUOTES) ?>';
+                            var repName = '<?= htmlspecialchars($repLabel, ENT_QUOTES) ?>';
+                            ed.setContent(
+                                '<p>Hi ' + greeting + ',</p>' +
+                                '<p>' + data.body.replace(/\n/g, '<br>') + '</p>' +
+                                '<p>Thanks,<br>' + repName + '</p>'
+                            );
+                        }
+                    }
+                } catch (e) {}
+
                 var body = ed.getBody();
                 var target = body ? body.querySelector('p:nth-child(2)') : null;
                 if (target) ed.selection.setCursorLocation(target, 0);

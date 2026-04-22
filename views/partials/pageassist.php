@@ -899,6 +899,19 @@ if (!$assistEnabled) {
                 navigateToUrl(action.url, action.confirm);
                 break;
 
+            case 'compose_email':
+                // Stash form data in sessionStorage, then navigate to compose page
+                if (action.subject || action.body) {
+                    sessionStorage.setItem('assist_compose', JSON.stringify({
+                        subject: action.subject || '',
+                        body: action.body || ''
+                    }));
+                }
+                if (action.navigate_url) {
+                    navigateToUrl(action.navigate_url);
+                }
+                break;
+
             case 'expand':
                 expandElement(action.target);
                 break;

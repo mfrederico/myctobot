@@ -120,10 +120,18 @@ class PageAssistantService
             $this->llmBridge->setWorkspace($this->workspace);
         }
 
-        // Load from .mcp.json config file if specified
-        if ($this->mcpConfigPath && file_exists($this->mcpConfigPath)) {
-            error_log("[PageAssist] Loading MCP config from: {$this->mcpConfigPath}");
-            $results = $this->llmBridge->loadFromConfig($this->mcpConfigPath);
+        // Load workspace-specific MCP config first, fall back to global
+        $mcpPath = $this->mcpConfigPath;
+        if ($this->workspace) {
+            $wsPath = dirname(__DIR__) . '/conf/mcp.' . $this->workspace . '.json';
+            if (file_exists($wsPath)) {
+                $mcpPath = $wsPath;
+            }
+        }
+
+        if ($mcpPath && file_exists($mcpPath)) {
+            error_log("[PageAssist] Loading MCP config from: {$mcpPath}" . ($mcpPath !== $this->mcpConfigPath ? " (workspace: {$this->workspace})" : ''));
+            $results = $this->llmBridge->loadFromConfig($mcpPath);
             foreach ($results as $name => $success) {
                 if ($success) {
                     error_log("[PageAssist] Connected to MCP server: {$name}");
@@ -1367,8 +1375,9 @@ POLICY;
     {
         $output = [];
 
-        // Get local knowledge store entries
+        // Get local knowledge store entries (graceful degradation if DB unavailable)
         if ($this->knowledgeStore) {
+            try {
             $entries = [];
 
             // Get page-specific entries
@@ -1396,22 +1405,28 @@ POLICY;
             foreach ($entries as $entry) {
                 $output[] = "- {$entry['title']}: {$entry['content']}";
             }
+            } catch (\Throwable $e) {
+                error_log("[PageAssist] Knowledge store error (skipping): " . $e->getMessage());
+            }
         }
 
         // Query external RAG service for additional context
         if ($query && $this->useRagService) {
-            $ragResult = $this->queryRagService($query);
-            if ($ragResult && !empty($ragResult['sources'])) {
-                $output[] = "\nFrom knowledge base:";
-                foreach ($ragResult['sources'] as $source) {
-                    $filename = $source['filename'] ?? 'Document';
-                    $content = $source['preview'] ?? $source['content'] ?? '';
-                    // Truncate long content
-                    if (strlen($content) > 300) {
-                        $content = substr($content, 0, 300) . '...';
+            try {
+                $ragResult = $this->queryRagService($query);
+                if ($ragResult && !empty($ragResult['sources'])) {
+                    $output[] = "\nFrom knowledge base:";
+                    foreach ($ragResult['sources'] as $source) {
+                        $filename = $source['filename'] ?? 'Document';
+                        $content = $source['preview'] ?? $source['content'] ?? '';
+                        if (strlen($content) > 300) {
+                            $content = substr($content, 0, 300) . '...';
+                        }
+                        $output[] = "- [{$filename}]: {$content}";
                     }
-                    $output[] = "- [{$filename}]: {$content}";
                 }
+            } catch (\Throwable $e) {
+                error_log("[PageAssist] RAG service error (skipping): " . $e->getMessage());
             }
         }
 

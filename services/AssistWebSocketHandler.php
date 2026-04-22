@@ -258,9 +258,13 @@ class AssistWebSocketHandler
                     'timestamp' => time()
                 ];
 
-                // Learn from this interaction (async/non-blocking in production)
-                $page = $context['page'] ?? 'unknown';
-                $assistService->learnFromInteraction($page, $message, $fullResponse, $allActions);
+                // Learn from this interaction (graceful if DB unavailable)
+                try {
+                    $page = $context['page'] ?? 'unknown';
+                    $assistService->learnFromInteraction($page, $message, $fullResponse, $allActions);
+                } catch (\Throwable $e) {
+                    error_log("[AssistWS] learnFromInteraction error (skipping): " . $e->getMessage());
+                }
             }
 
             // Send done

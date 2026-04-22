@@ -132,9 +132,9 @@ class CrmToolService
             $params[] = '%' . $args['tag'] . '%';
         }
         if (!empty($args['search'])) {
-            $conditions[] = '(first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ? OR company_email LIKE ?)';
             $term = '%' . $args['search'] . '%';
-            $params = array_merge($params, [$term, $term, $term, $term]);
+            $conditions[] = '(CONCAT(COALESCE(first_name,""), " ", COALESCE(last_name,"")) LIKE ? OR company_name LIKE ? OR company_email LIKE ?)';
+            $params = array_merge($params, [$term, $term, $term]);
         }
 
         $extra = implode(' AND ', $conditions) ?: '';
@@ -375,8 +375,17 @@ class CrmToolService
         $limit = min((int)($args['limit'] ?? 20), 100);
         $term = '%' . $query . '%';
 
-        $searchSql = '(first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ? OR company_email LIKE ? OR notes LIKE ? OR tags LIKE ?)';
-        $searchParams = [$term, $term, $term, $term, $term, $term];
+        // Split multi-word queries so "Paul Picton" matches first_name="Paul" + last_name="Picton"
+        $words = preg_split('/\s+/', $query);
+        if (count($words) > 1) {
+            // Match full name via CONCAT, plus each individual field
+            $searchSql = '(CONCAT(COALESCE(first_name,""), " ", COALESCE(last_name,"")) LIKE ?' .
+                         ' OR company_name LIKE ? OR company_email LIKE ? OR notes LIKE ? OR tags LIKE ?)';
+            $searchParams = [$term, $term, $term, $term, $term];
+        } else {
+            $searchSql = '(first_name LIKE ? OR last_name LIKE ? OR company_name LIKE ? OR company_email LIKE ? OR notes LIKE ? OR tags LIKE ?)';
+            $searchParams = [$term, $term, $term, $term, $term, $term];
+        }
 
         [$sql, $sqlParams] = $this->scopeSQL($searchSql, $searchParams);
         $contacts = Bean::find('crmcontact', "{$sql} ORDER BY updated_at DESC LIMIT {$limit}", $sqlParams);

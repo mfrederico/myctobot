@@ -231,6 +231,18 @@ class Crm extends BaseControls\Control {
         $touches = $contact->with(' ORDER BY touch_date DESC ')->ownCrmtouchList;
         $employees = $contact->with(' ORDER BY role_type ASC, name ASC ')->ownCrmemployeeList;
 
+        // Recent email conversations for the contact-page inline summary card.
+        // Sales reps: scoped to their own threads. Admin: all threads on the
+        // contact. We cap at 3 because the card is a glance, not a full index —
+        // the full inbox is a click away via the "Open inbox" link.
+        $threadWhere  = 'crmcontact_id = ? AND is_archived = 0';
+        $threadParams = [(int)$contact->id];
+        if ($this->member->level > LEVELS['ADMIN']) {
+            $threadWhere  .= ' AND member_id = ?';
+            $threadParams[] = (int)$this->member->id;
+        }
+        $recentThreads = Bean::find('emailthread', "{$threadWhere} ORDER BY last_message_at DESC LIMIT 3", $threadParams);
+
         // Load the sales rep who owns this contact
         $owner = Bean::load('member', (int)($contact->memberId ?? 0));
 
@@ -251,6 +263,7 @@ class Crm extends BaseControls\Control {
             'linkedinData' => $linkedinData,
             'linkedinInsights' => $linkedinInsights,
             'hiringSignals' => $hiringSignals,
+            'recentThreads' => $recentThreads,
         ]);
     }
 

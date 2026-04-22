@@ -164,6 +164,9 @@
         <a href="/crm/contacts?filter=prospects" class="nav-link <?= ($crm_page ?? '') === 'prospects' ? 'active' : '' ?>">
             <i class="fas fa-bullseye"></i> Prospects
         </a>
+        <a href="/communications" class="nav-link <?= ($crm_page ?? '') === 'communications' ? 'active' : '' ?>">
+            <i class="fas fa-inbox"></i> Inbox
+        </a>
 
         <div class="nav-section">Accounts</div>
         <a href="/crm/contacts" class="nav-link <?= ($crm_page ?? '') === 'contacts' ? 'active' : '' ?>">

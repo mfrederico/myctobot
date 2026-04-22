@@ -31,6 +31,10 @@ class WorkspaceSchemaBuilder {
     /**
      * Build the complete workspace schema using RedBeanPHP.
      * Runs ALL seed files — use for fresh provisioning only.
+     *
+     * Injects the cannonwms-style seed harness ($_tableCheck / $_defer /
+     * $_deferred / $_scaffold) into the include scope. See seedHarness.md
+     * (or cannonwms docs/SEEDER-GUIDE.md) for usage rules.
      */
     public function build(): void {
         $dsn = "mysql:host={$this->dbHost};dbname={$this->dbName};charset=utf8mb4";
@@ -38,14 +42,53 @@ class WorkspaceSchemaBuilder {
         R::selectDatabase('workspace_provision');
         R::freeze(false);
 
-        $seeders = glob(self::$seedsDir . '/*.php');
-        sort($seeders);
+        // FK checks off during seed run so scaffold rows can carry placeholder
+        // FK values until 90_Cleanup / drainDeferred trashes them.
+        try { R::exec('SET FOREIGN_KEY_CHECKS = 0'); } catch (\Throwable $e) { /* non-MySQL / transient */ }
 
-        foreach ($seeders as $seederFile) {
-            include $seederFile;
+        // ── Seed harness (must be function-local so closures bind correctly) ──
+        $_tableCheck = function (string $table): bool {
+            return (int)R::getCell(
+                'SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = DATABASE() AND table_name = ?',
+                [$table]
+            ) > 0;
+        };
+        $_deferred = [];
+        $_defer = function ($bean) use (&$_deferred) {
+            if ($bean && !empty($bean->id)) $_deferred[] = $bean;
+        };
+        $_scaffold = [];
+
+        try {
+            $seeders = glob(self::$seedsDir . '/*.php');
+            sort($seeders);
+            foreach ($seeders as $seederFile) {
+                include $seederFile;
+            }
+
+            // Safety-net drain — 90_Cleanup.php should have emptied $_deferred
+            // but drain anyway in case it was reordered or skipped.
+            self::drainDeferred($_deferred);
+        } finally {
+            try { R::exec('SET FOREIGN_KEY_CHECKS = 1'); } catch (\Throwable $e) { /* same */ }
         }
 
         self::restoreDatabase();
+    }
+
+    /**
+     * Trash deferred beans in reverse registration order (children first,
+     * parents last) so FK constraints stay satisfied. Idempotent.
+     *
+     * @param array $deferred Passed by reference; emptied in place.
+     */
+    private static function drainDeferred(array &$deferred): void {
+        if (empty($deferred)) return;
+        foreach (array_reverse($deferred) as $bean) {
+            try { R::trash($bean); } catch (\Throwable $e) { /* FK may prevent; scaffold-only */ }
+        }
+        $deferred = [];
     }
 
     /**
@@ -162,7 +205,30 @@ class WorkspaceSchemaBuilder {
                 }
             }
 
-            include $file;
+            // Same seed harness as build() — must be function-local so the
+            // included seed file sees the closures. Single-migration runs
+            // drain $_deferred at the end of this block (90_Cleanup only
+            // runs during a full build).
+            try { R::exec('SET FOREIGN_KEY_CHECKS = 0'); } catch (\Throwable $e) { /* non-MySQL */ }
+            $_tableCheck = function (string $table): bool {
+                return (int)R::getCell(
+                    'SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema = DATABASE() AND table_name = ?',
+                    [$table]
+                ) > 0;
+            };
+            $_deferred = [];
+            $_defer = function ($bean) use (&$_deferred) {
+                if ($bean && !empty($bean->id)) $_deferred[] = $bean;
+            };
+            $_scaffold = [];
+
+            try {
+                include $file;
+                self::drainDeferred($_deferred);
+            } finally {
+                try { R::exec('SET FOREIGN_KEY_CHECKS = 1'); } catch (\Throwable $e) { /* same */ }
+            }
 
             R::exec(
                 'INSERT INTO migrations (migration_name, applied_at) VALUES (?, NOW())

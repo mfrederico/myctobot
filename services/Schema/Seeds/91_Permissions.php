@@ -419,6 +419,14 @@ $permissions = [
     ['agreement', 'sign', 75, 'Submit signed agreement'],
     ['agreement', 'view', 75, 'View signed agreement'],
 
+    // Communications hub (email threads with CRM contacts)
+    ['communications', 'index',    75, 'Communications hub — thread list'],
+    ['communications', 'thread',   75, 'View a single thread'],
+    ['communications', 'compose',  75, 'Start a new thread with a contact'],
+    ['communications', 'reply',    75, 'Post a reply on a thread'],
+    ['communications', 'archive',  75, 'Archive/unarchive a thread'],
+    ['communications', 'poll',     75, 'Poll for thread updates'],
+
     // =========================================================================
     // ADMIN endpoints (level 50) - Administrators
     // =========================================================================

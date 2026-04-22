@@ -127,10 +127,37 @@ class Webhook extends BaseControls\Control {
      * Handle Mailgun incoming email webhook
      * Endpoint: POST /webhook/mailgun
      *
-     * Receives emails sent to workspace@myctobot.ai and creates CEO directives.
-     * Uses the IncomingEmailService for actual processing.
+     * Two recipient patterns are routed here; discriminator picks one:
+     *   reply-{slug}-{token}@myctobot.ai → CrmCommsInboundService (CRM thread reply)
+     *   {workspace}@myctobot.ai          → IncomingEmailService    (CEO directive)
+     *
+     * Mailgun posts the same payload shape for both (form-urlencoded or
+     * multipart with recipient/sender/body-* + timestamp/token/signature),
+     * so we branch on the recipient local-part BEFORE delegating to either
+     * handler — each handler owns its own signature verification afterward.
      */
     public function mailgun() {
+        // Mailgun sends TWO webhook flavors to the same URL when both Receiving
+        // routes AND Event webhooks are configured:
+        //   Receiving (inbound mail)     → form-urlencoded / multipart
+        //   Events (delivered/opened/…)  → application/json with {signature, event-data}
+        // We only care about inbound mail here. 200-accept JSON so Mailgun
+        // doesn't retry the event delivery.
+        $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+        if (stripos($contentType, 'application/json') !== false) {
+            \Flight::json(['accepted' => false, 'reason' => 'events webhook ignored'], 200);
+            return;
+        }
+
+        $recipient = trim((string)($_POST['recipient'] ?? ''));
+
+        require_once __DIR__ . '/../services/CrmCommsInboundService.php';
+        if (\app\services\CrmCommsInboundService::matches($recipient)) {
+            $handler = new \app\services\CrmCommsInboundService();
+            $handler->handle();
+            return;
+        }
+
         require_once __DIR__ . '/../services/IncomingEmailService.php';
         $handler = new \app\services\IncomingEmailService();
         $handler->handleMailgun();

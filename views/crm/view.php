@@ -14,7 +14,14 @@
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <span><i class="fas fa-user"></i> Contact Details</span>
-                    <a href="/crm/edit/<?= $contact->id ?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-edit"></i></a>
+                    <div class="d-flex gap-1">
+                        <?php if (!empty($contact->companyEmail)): ?>
+                            <a href="/communications/compose/<?= $contact->id ?>" class="btn btn-sm btn-outline-primary" title="Send email">
+                                <i class="fas fa-paper-plane"></i>
+                            </a>
+                        <?php endif; ?>
+                        <a href="/crm/edit/<?= $contact->id ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>
+                    </div>
                 </div>
                 <div class="card-body">
                     <h4><?= h($contact->fullName()) ?></h4>
@@ -402,6 +409,57 @@
                 </div>
             </div>
 
+            <!-- Recent email conversations -->
+            <?php if (!empty($recentThreads)): ?>
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-envelope-open-text"></i> Recent Conversations</span>
+                    <?php if (!empty($contact->companyEmail)): ?>
+                        <a href="/communications/compose/<?= (int)$contact->id ?>" class="btn btn-sm btn-outline-primary" title="Send new email">
+                            <i class="fas fa-paper-plane"></i> New
+                        </a>
+                    <?php endif; ?>
+                </div>
+                <div class="list-group list-group-flush">
+                    <?php foreach ($recentThreads as $th):
+                        $unread = (int)$th->unreadCount > 0;
+                        $inbound = ($th->lastDirection ?? 'out') === 'in';
+                    ?>
+                        <a href="/communications/thread/<?= (int)$th->id ?>" class="list-group-item list-group-item-action">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div class="min-w-0 flex-grow-1">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <?php if ($unread): ?>
+                                            <span class="rounded-circle d-inline-block" style="width:8px;height:8px;background:#0d6efd;flex-shrink:0;" title="Unread"></span>
+                                        <?php endif; ?>
+                                        <strong class="text-truncate <?= $unread ? '' : 'fw-semibold' ?>" style="min-width:0;">
+                                            <?= h($th->subject ?: '(no subject)') ?>
+                                        </strong>
+                                    </div>
+                                    <?php if ($th->lastPreview): ?>
+                                        <div class="small text-muted text-truncate mt-1">
+                                            <?php if ($inbound): ?>
+                                                <i class="fas fa-arrow-down text-success me-1"></i>
+                                            <?php else: ?>
+                                                <i class="fas fa-arrow-up text-primary me-1"></i>
+                                            <?php endif; ?>
+                                            <?= h($th->lastPreview) ?>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                                <small class="text-muted text-nowrap">
+                                    <?= $th->lastMessageAt ? date('M j', @strtotime($th->lastMessageAt)) : '' ?>
+                                </small>
+                            </div>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+                <div class="card-footer bg-transparent text-center small">
+                    <a href="/communications" class="text-decoration-none">Open Inbox <i class="fas fa-arrow-right ms-1"></i></a>
+                </div>
+            </div>
+            <?php endif; ?>
+
             <!-- Touches Timeline -->
             <div class="card mb-3">
                 <div class="card-header"><i class="fas fa-history"></i> Touch History</div>
@@ -421,6 +479,11 @@
                                             <?php endif; ?>
                                             <?php if ($t->duration): ?>
                                                 <small class="text-muted">(<?= $t->duration ?> min)</small>
+                                            <?php endif; ?>
+                                            <?php if (!empty($t->emailthreadId)): ?>
+                                                <a href="/communications/thread/<?= (int)$t->emailthreadId ?>" class="ms-1 small text-decoration-none">
+                                                    <i class="fas fa-arrow-up-right-from-square"></i> View thread
+                                                </a>
                                             <?php endif; ?>
                                         </div>
                                         <small class="text-muted"><?= date('M j, Y g:ia', @strtotime($t->touchDate)) ?></small>

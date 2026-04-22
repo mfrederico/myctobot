@@ -40,27 +40,38 @@ class Crm extends BaseControls\Control {
     }
 
     /**
-     * Scope contacts to the current sales rep, or all if admin/root
+     * Visibility filter for crmcontact queries.
+     * Admin/root sees everything. Others see owned OR shared-with contacts.
+     * Returns [sqlFragment, params] to be AND-combined into a WHERE clause.
      */
-    private function scopedContacts(string $extraSql = '', array $params = []): array {
-        $member = $this->member;
-        if ($member->level <= LEVELS['ADMIN']) {
-            // Admin/root sees all
-            $sql = '1=1';
-        } else {
-            $sql = 'member_id = ?';
-            $params = array_merge([$member->id], $params);
+    private function visibilitySql(): array {
+        if ($this->member->level <= LEVELS['ADMIN']) {
+            return ['1=1', []];
         }
-        if ($extraSql) {
-            $sql .= ' AND ' . $extraSql;
-        }
-        return [Bean::find('crmcontact', "{$sql} ORDER BY updated_at DESC", $params), $params];
+        $mid = (int)$this->member->id;
+        $sql = '(member_id = ? OR id IN (SELECT crmcontact_id FROM crmcontact_member WHERE member_id = ?))';
+        return [$sql, [$mid, $mid]];
     }
 
     /**
-     * Check ownership of a contact (or admin override)
+     * Can the member view the contact and log notes/touches/stage changes.
+     * Owner, sharee, or admin.
      */
     private function canAccess($contact): bool {
+        if (!$contact->id) return false;
+        if ($this->member->level <= LEVELS['ADMIN']) return true;
+        if ((int)$contact->memberId === (int)$this->member->id) return true;
+        foreach ($contact->sharedMemberList as $m) {
+            if ((int)$m->id === (int)$this->member->id) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Can the member edit, delete, reassign, or change sharing on the contact.
+     * Owner or admin only.
+     */
+    private function canManage($contact): bool {
         if (!$contact->id) return false;
         if ($this->member->level <= LEVELS['ADMIN']) return true;
         return (int)$contact->memberId === (int)$this->member->id;
@@ -86,39 +97,30 @@ class Crm extends BaseControls\Control {
 
         $member = $this->member;
         $isAdmin = $member->level <= LEVELS['ADMIN'];
+        [$vis, $visParams] = $this->visibilitySql();
 
         // Pipeline counts
         $stages = ['cold', 'warm', 'hot', 'closing'];
         $pipelineCounts = [];
         foreach ($stages as $stage) {
-            $sql = "pipeline_stage = ? AND status_category = 'prospect'";
-            $sqlParams = [$stage];
-            if (!$isAdmin) {
-                $sql .= ' AND member_id = ?';
-                $sqlParams[] = $member->id;
-            }
-            $pipelineCounts[$stage] = Bean::count('crmcontact', $sql, $sqlParams);
+            $sql = "pipeline_stage = ? AND status_category = 'prospect' AND {$vis}";
+            $pipelineCounts[$stage] = Bean::count('crmcontact', $sql, array_merge([$stage], $visParams));
         }
 
         // Customer count
-        $custSql = "status_category = 'customer'";
-        if (!$isAdmin) {
-            $custSql .= ' AND member_id = ?';
-        }
-        $customerCount = Bean::count('crmcontact', $custSql, $isAdmin ? [] : [$member->id]);
+        $customerCount = Bean::count('crmcontact', "status_category = 'customer' AND {$vis}", $visParams);
 
-        // Recent activity
+        // Recent activity — still scoped to this member's own actions (not every action on shared leads)
         $actSql = $isAdmin ? '1=1 ORDER BY created_at DESC LIMIT 15' : 'member_id = ? ORDER BY created_at DESC LIMIT 15';
         $recentActivity = Bean::find('crmactivity', $actSql, $isAdmin ? [] : [$member->id]);
 
         // Recent touches needing follow-up (contacts not touched in 7+ days)
         $weekAgo = date('Y-m-d H:i:s', strtotime('-7 days'));
-        $staleSql = "(last_touch_at IS NULL OR last_touch_at < ?) AND status_category = 'customer'";
-        if (!$isAdmin) {
-            $staleSql .= ' AND member_id = ?';
-        }
-        $staleContacts = Bean::find('crmcontact', $staleSql . ' ORDER BY last_touch_at ASC LIMIT 10',
-            $isAdmin ? [$weekAgo] : [$weekAgo, $member->id]);
+        $staleContacts = Bean::find(
+            'crmcontact',
+            "(last_touch_at IS NULL OR last_touch_at < ?) AND status_category = 'customer' AND {$vis} ORDER BY last_touch_at ASC LIMIT 10",
+            array_merge([$weekAgo], $visParams)
+        );
 
         $this->render('crm/index', [
             'title' => 'CRM Dashboard',
@@ -145,14 +147,10 @@ class Crm extends BaseControls\Control {
 
         $member = $this->member;
         $isAdmin = $member->level <= LEVELS['ADMIN'];
+        [$vis, $visParams] = $this->visibilitySql();
 
-        $sql = '1=1';
-        $sqlParams = [];
-
-        if (!$isAdmin) {
-            $sql .= ' AND member_id = ?';
-            $sqlParams[] = $member->id;
-        }
+        $sql = $vis;
+        $sqlParams = $visParams;
 
         if ($filter === 'prospects') {
             $sql .= " AND status_category = 'prospect'";
@@ -246,6 +244,16 @@ class Crm extends BaseControls\Control {
         // Load the sales rep who owns this contact
         $owner = Bean::load('member', (int)($contact->memberId ?? 0));
 
+        // Sharing: current sharees + full list of reps the owner/admin can share with
+        $canManage = $this->canManage($contact);
+        $sharedReps = $contact->sharedMemberList;
+        $allReps = [];
+        if ($canManage) {
+            $ownerId = (int)($contact->memberId ?? 0);
+            // Anyone below PUBLIC (any real team member) can be a sharee
+            $allReps = Bean::find('member', 'level < ? AND id != ? ORDER BY username ASC', [LEVELS['PUBLIC'], $ownerId]);
+        }
+
         // Parse LinkedIn enrichment data
         $enrichmentAll = json_decode($contact->enrichmentJson ?? '{}', true);
         $linkedinData = $enrichmentAll['linkedin'] ?? [];
@@ -260,11 +268,63 @@ class Crm extends BaseControls\Control {
             'touches' => $touches,
             'employees' => $employees,
             'owner' => $owner,
+            'sharedReps' => $sharedReps,
+            'allReps' => $allReps,
+            'canManage' => $canManage,
             'linkedinData' => $linkedinData,
             'linkedinInsights' => $linkedinInsights,
             'hiringSignals' => $hiringSignals,
             'recentThreads' => $recentThreads,
         ]);
+    }
+
+    /**
+     * Replace the set of members a contact is shared with (AJAX).
+     * Only the owner or an admin can change sharing.
+     * Expects POST: contact_id, member_ids[]
+     */
+    public function share($params = null) {
+        if (!$this->requireAgreement()) return;
+        if (!$this->validateCSRF()) return;
+
+        $contactId = (int)$this->getParam('contact_id');
+        $contact = Bean::load('crmcontact', $contactId);
+
+        if (!$this->canManage($contact)) {
+            $this->jsonError('Only the owner or an admin can change sharing.', 403);
+            return;
+        }
+
+        $ownerId = (int)($contact->memberId ?? 0);
+        $raw = $this->getParam('member_ids', []);
+        if (is_string($raw)) {
+            $raw = array_filter(explode(',', $raw), fn($v) => $v !== '');
+        }
+        $ids = array_values(array_unique(array_map('intval', (array)$raw)));
+        $ids = array_values(array_filter($ids, fn($i) => $i > 0 && $i !== $ownerId));
+
+        $newList = [];
+        $names = [];
+        foreach ($ids as $id) {
+            $m = Bean::load('member', $id);
+            if (!$m->id) continue;
+            $newList[] = $m;
+            $names[] = method_exists($m, 'displayName') ? $m->displayName() : ($m->username ?? "member#{$m->id}");
+        }
+
+        $contact->sharedMemberList = $newList;
+        Bean::store($contact);
+
+        $this->logActivity(
+            'contact_shared',
+            'Shared with: ' . (empty($names) ? 'no one' : implode(', ', $names)),
+            $contact->id
+        );
+
+        $this->jsonSuccess(
+            ['shared_count' => count($newList), 'shared_with' => $names],
+            empty($newList) ? 'Sharing cleared.' : 'Sharing updated.'
+        );
     }
 
     /**
@@ -317,7 +377,7 @@ class Crm extends BaseControls\Control {
         $id = (int)($params['operation']->name ?? 0);
         $contact = Bean::load('crmcontact', $id);
 
-        if (!$this->canAccess($contact)) {
+        if (!$this->canManage($contact)) {
             $this->flash('error', 'Contact not found.');
             Flight::redirect('/crm/contacts');
             return;
@@ -346,7 +406,7 @@ class Crm extends BaseControls\Control {
         $id = (int)$this->getParam('id');
         $contact = Bean::load('crmcontact', $id);
 
-        if (!$this->canAccess($contact)) {
+        if (!$this->canManage($contact)) {
             $this->flash('error', 'Contact not found.');
             Flight::redirect('/crm/contacts');
             return;
@@ -376,7 +436,7 @@ class Crm extends BaseControls\Control {
         $id = (int)$this->getParam('id');
         $contact = Bean::load('crmcontact', $id);
 
-        if (!$this->canAccess($contact)) {
+        if (!$this->canManage($contact)) {
             $this->flash('error', 'Contact not found.');
             Flight::redirect('/crm/contacts');
             return;
@@ -478,14 +538,13 @@ class Crm extends BaseControls\Control {
         if (!$this->requireAgreement()) return;
         $member = $this->member;
         $isAdmin = $member->level <= LEVELS['ADMIN'];
-        $memberSql = $isAdmin ? '' : 'member_id = ? AND';
-        $memberParams = $isAdmin ? [] : [$member->id];
+        [$vis, $visParams] = $this->visibilitySql();
 
         $pipeline = [];
         foreach (['cold', 'warm', 'hot', 'closing'] as $stage) {
             $pipeline[$stage] = Bean::find('crmcontact',
-                "{$memberSql} pipeline_stage = ? AND status_category = 'prospect' ORDER BY updated_at DESC",
-                array_merge($memberParams, [$stage])
+                "{$vis} AND pipeline_stage = ? AND status_category = 'prospect' ORDER BY updated_at DESC",
+                array_merge($visParams, [$stage])
             );
         }
 
@@ -654,7 +713,7 @@ class Crm extends BaseControls\Control {
         $primary = Bean::load('crmcontact', $primaryId);
         $secondary = Bean::load('crmcontact', $secondaryId);
 
-        if (!$this->canAccess($primary) || !$this->canAccess($secondary)) {
+        if (!$this->canManage($primary) || !$this->canManage($secondary)) {
             $this->jsonError('Contact not found.', 404);
             return;
         }
@@ -681,13 +740,10 @@ class Crm extends BaseControls\Control {
         if (!$this->requireAgreement()) return;
         $member = $this->member;
         $isAdmin = $member->level <= LEVELS['ADMIN'];
+        [$vis, $visParams] = $this->visibilitySql();
 
-        $sql = "status_category = 'customer'";
-        $sqlParams = [];
-        if (!$isAdmin) {
-            $sql .= ' AND member_id = ?';
-            $sqlParams[] = $member->id;
-        }
+        $sql = "status_category = 'customer' AND {$vis}";
+        $sqlParams = $visParams;
 
         $status = $this->getParam('status', '');
         if ($status) {

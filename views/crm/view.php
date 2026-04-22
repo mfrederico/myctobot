@@ -20,7 +20,9 @@
                                 <i class="fas fa-paper-plane"></i>
                             </a>
                         <?php endif; ?>
-                        <a href="/crm/edit/<?= $contact->id ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>
+                        <?php if (!empty($canManage)): ?>
+                            <a href="/crm/edit/<?= $contact->id ?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="card-body">
@@ -86,6 +88,7 @@
                                 </button>
                             </form>
                         <?php endif; ?>
+                        <?php if (!empty($canManage)): ?>
                         <form method="post" action="/crm/delete" class="d-inline">
                             <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
                             <input type="hidden" name="id" value="<?= $contact->id ?>">
@@ -93,6 +96,7 @@
                                 <i class="fas fa-trash"></i>
                             </button>
                         </form>
+                        <?php endif; ?>
                     </div>
 
                     <?php if ($contact->notes): ?>
@@ -111,6 +115,51 @@
                     <?php endif; ?>
                 </div>
             </div>
+
+            <!-- Shared With -->
+            <?php
+                $sharedReps = $sharedReps ?? [];
+                $allReps = $allReps ?? [];
+                $canManage = $canManage ?? false;
+            ?>
+            <?php if ($canManage || !empty($sharedReps)): ?>
+                <div class="card mb-3">
+                    <div class="card-header"><i class="fas fa-user-friends"></i> Shared With</div>
+                    <div class="card-body">
+                        <?php if (!$canManage): ?>
+                            <?php if (empty($sharedReps)): ?>
+                                <p class="text-muted mb-0 small">Not shared with anyone else.</p>
+                            <?php else: ?>
+                                <?php foreach ($sharedReps as $rep): ?>
+                                    <span class="badge bg-secondary me-1 mb-1">
+                                        <?= h(method_exists($rep, 'displayName') ? $rep->displayName() : ($rep->username ?? ('member#' . $rep->id))) ?>
+                                    </span>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <?php $sharedIds = array_map(fn($m) => (int)$m->id, $sharedReps); ?>
+                            <form id="shareForm">
+                                <input type="hidden" name="contact_id" value="<?= $contact->id ?>">
+                                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
+                                <label class="form-label small text-muted mb-1">Give other sales reps access to add notes, log touches, and move stages.</label>
+                                <select name="member_ids[]" id="shareSelect" class="form-select form-select-sm" multiple size="<?= min(6, max(3, count($allReps))) ?>">
+                                    <?php foreach ($allReps as $rep): ?>
+                                        <?php $dn = method_exists($rep, 'displayName') ? $rep->displayName() : ($rep->username ?? ('member#' . $rep->id)); ?>
+                                        <option value="<?= (int)$rep->id ?>" <?= in_array((int)$rep->id, $sharedIds, true) ? 'selected' : '' ?>>
+                                            <?= h($dn) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="d-flex justify-content-between align-items-center mt-2">
+                                    <small id="shareStatus" class="text-muted"><?= count($sharedReps) ?> rep<?= count($sharedReps) === 1 ? '' : 's' ?></small>
+                                    <button type="submit" class="btn btn-sm btn-primary">Save Sharing</button>
+                                </div>
+                                <small class="text-muted d-block mt-1">Hold Ctrl/Cmd to select multiple. Owner and admins retain full access.</small>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <!-- Lead Score & Enrichment -->
             <?php
@@ -594,6 +643,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 else alert(res.message);
             });
     });
+
+    // Share form
+    var shareForm = document.getElementById('shareForm');
+    if (shareForm) {
+        shareForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var status = document.getElementById('shareStatus');
+            var body = new URLSearchParams();
+            body.append('contact_id', this.contact_id.value);
+            body.append('csrf_token', this.csrf_token.value);
+            var opts = document.getElementById('shareSelect').selectedOptions;
+            for (var i = 0; i < opts.length; i++) body.append('member_ids[]', opts[i].value);
+            status.textContent = 'Saving...';
+            status.className = 'text-muted';
+            fetch('/crm/share', { method: 'POST', body: body })
+                .then(function(r) { return r.json(); })
+                .then(function(res) {
+                    if (res.success) {
+                        var n = (res.data && res.data.shared_count) || 0;
+                        status.textContent = n + ' rep' + (n === 1 ? '' : 's');
+                        status.className = 'text-success';
+                    } else {
+                        status.textContent = res.message || 'Failed';
+                        status.className = 'text-danger';
+                    }
+                })
+                .catch(function(err) {
+                    status.textContent = 'Error: ' + err.message;
+                    status.className = 'text-danger';
+                });
+        });
+    }
 
     // Move stage buttons
     document.querySelectorAll('.btn-move-stage').forEach(function(btn) {

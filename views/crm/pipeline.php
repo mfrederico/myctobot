@@ -33,7 +33,7 @@
                                     </a>
                                     <small class="text-muted"><?= h($c->companyName) ?></small>
                                     <div class="mt-1">
-                                        <span class="badge bg-<?= $c->accountType === '3pl' ? 'info' : 'success' ?>"><?= strtoupper($c->accountType) ?></span>
+                                        <span class="badge bg-<?= $c->accountType === '3pl' ? 'info' : 'success' ?>"><?= strtoupper($c->accountType ?? '') ?></span>
                                         <?php foreach (array_slice($c->tagArray(), 0, 2) as $t): ?>
                                             <span class="badge bg-dark"><?= h($t) ?></span>
                                         <?php endforeach; ?>

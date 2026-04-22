@@ -183,6 +183,9 @@
 
         <?php if ($member->level <= 50): ?>
         <div class="nav-section">Admin</div>
+        <a href="/crm/teamactivity" class="nav-link <?= ($crm_page ?? '') === 'teamactivity' ? 'active' : '' ?>">
+            <i class="fas fa-users-cog"></i> Team Activity
+        </a>
         <a href="/crm/settings" class="nav-link <?= ($crm_page ?? '') === 'settings' ? 'active' : '' ?>">
             <i class="fas fa-cog"></i> Pipeline Settings
         </a>

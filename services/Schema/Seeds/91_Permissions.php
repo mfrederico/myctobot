@@ -431,7 +431,8 @@ $permissions = [
     // ADMIN endpoints (level 50) - Administrators
     // =========================================================================
 
-    // CRM admin settings
+    // CRM admin
+    ['crm', 'teamactivity', 50, 'CRM Team Activity Dashboard'],
     ['crm', 'settings', 50, 'Prospect pipeline settings'],
     ['crm', 'dosettings', 50, 'Save prospect pipeline settings'],
 

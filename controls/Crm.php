@@ -849,6 +849,108 @@ class Crm extends BaseControls\Control {
     }
 
     /**
+     * Team Activity Dashboard — admin-only view of rep performance
+     * GET /crm/teamactivity
+     */
+    public function teamactivity($params = null) {
+        if (!$this->requireAgreement()) return;
+
+        // Admin only
+        if ($this->member->level > LEVELS['ADMIN']) {
+            $this->flash('error', 'Admin access required.');
+            Flight::redirect('/crm');
+            return;
+        }
+
+        $now = time();
+        $thirtyDaysAgo = date('Y-m-d H:i:s', strtotime('-30 days'));
+        $sevenDaysAgo = date('Y-m-d H:i:s', strtotime('-7 days'));
+
+        // Get all CRM-enabled members
+        $members = Bean::find('member', 'crm_access = 1 ORDER BY last_login DESC');
+
+        $repStats = [];
+        foreach ($members as $m) {
+            $mid = (int)$m->id;
+
+            // Activity counts (last 30 days)
+            $activitiesMonth = Bean::count('crmactivity',
+                'member_id = ? AND created_at >= ?', [$mid, $thirtyDaysAgo]);
+            $activitiesWeek = Bean::count('crmactivity',
+                'member_id = ? AND created_at >= ?', [$mid, $sevenDaysAgo]);
+
+            // Touch counts
+            $touchesMonth = Bean::count('crmtouch',
+                'member_id = ? AND created_at >= ?', [$mid, $thirtyDaysAgo]);
+            $touchesWeek = Bean::count('crmtouch',
+                'member_id = ? AND created_at >= ?', [$mid, $sevenDaysAgo]);
+
+            // Notes
+            $notesMonth = Bean::count('crmnote',
+                'member_id = ? AND created_at >= ?', [$mid, $thirtyDaysAgo]);
+
+            // Contacts owned
+            $contactsOwned = Bean::count('crmcontact', 'member_id = ?', [$mid]);
+
+            // Contacts created (from activity log)
+            $contactsCreated = Bean::count('crmactivity',
+                "member_id = ? AND activity_type = 'contact_created' AND created_at >= ?",
+                [$mid, $thirtyDaysAgo]);
+
+            // Conversions
+            $conversions = Bean::count('crmactivity',
+                "member_id = ? AND activity_type = 'prospect_converted' AND created_at >= ?",
+                [$mid, $thirtyDaysAgo]);
+
+            // Days since last login
+            $lastLogin = $m->last_login ? strtotime($m->last_login) : 0;
+            $daysSinceLogin = $lastLogin ? (int)(($now - $lastLogin) / 86400) : null;
+
+            // Days since last activity
+            $lastActivity = Bean::getCell(
+                'SELECT MAX(created_at) FROM crmactivity WHERE member_id = ?', [$mid]);
+            $daysSinceActivity = $lastActivity ? (int)(($now - strtotime($lastActivity)) / 86400) : null;
+
+            // Status flags
+            $isStale = ($daysSinceLogin === null || $daysSinceLogin > 3)
+                    && ($daysSinceActivity === null || $daysSinceActivity > 3);
+            $isInactive = ($daysSinceLogin === null || $daysSinceLogin > 7)
+                       && ($daysSinceActivity === null || $daysSinceActivity > 7);
+
+            $repStats[] = [
+                'member' => $m,
+                'contacts_owned' => $contactsOwned,
+                'contacts_created_30d' => $contactsCreated,
+                'conversions_30d' => $conversions,
+                'activities_30d' => $activitiesMonth,
+                'activities_7d' => $activitiesWeek,
+                'touches_30d' => $touchesMonth,
+                'touches_7d' => $touchesWeek,
+                'notes_30d' => $notesMonth,
+                'days_since_login' => $daysSinceLogin,
+                'days_since_activity' => $daysSinceActivity,
+                'last_login' => $m->last_login,
+                'last_activity' => $lastActivity,
+                'login_count' => (int)($m->login_count ?? 0),
+                'is_stale' => $isStale,
+                'is_inactive' => $isInactive,
+            ];
+        }
+
+        // Unassigned contacts
+        $unassigned = Bean::count('crmcontact',
+            "(member_id IS NULL OR member_id = 0 OR member_id = '')");
+
+        $this->render('crm/teamactivity', [
+            'title' => 'Team Activity - CRM',
+            'crm_page' => 'teamactivity',
+            'repStats' => $repStats,
+            'unassigned' => $unassigned,
+            'totalContacts' => Bean::count('crmcontact', '1=1'),
+        ]);
+    }
+
+    /**
      * Public API endpoint for external lead capture (e.g., landing-page funnel)
      * Authenticates via shared secret in X-Lead-Key header.
      * POST /crm/apilead

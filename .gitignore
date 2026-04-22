@@ -3,6 +3,7 @@ conf/jobexecutor.ini
 conf/config.ini
 conf/shopify.ini
 conf/config.*.ini
+conf/mcp.*.json
 conf/mailgun.ini
 conf/stripe.ini
 conf/atlassian.ini

@@ -1,0 +1,38 @@
+## TWM Configuration — auto-place windows, no manual positioning
+
+# Don't require manual placement of new windows
+RandomPlacement
+
+# Auto-raise windows on focus
+AutoRaise
+
+# Focus follows mouse
+NoGrabServer
+NoRaiseOnMove
+
+# Opaque window move
+OpaqueMove
+
+# Title bar settings
+TitleFont "-*-helvetica-bold-r-*-*-12-*-*-*-*-*-*-*"
+ResizeFont "-*-helvetica-bold-r-*-*-12-*-*-*-*-*-*-*"
+MenuFont "-*-helvetica-bold-r-*-*-12-*-*-*-*-*-*-*"
+
+# Colors
+Color {
+    BorderColor "grey50"
+    DefaultBackground "#2d2d2d"
+    DefaultForeground "white"
+    TitleBackground "#336699"
+    TitleForeground "white"
+    MenuBackground "#2d2d2d"
+    MenuForeground "white"
+    MenuTitleBackground "#336699"
+    MenuTitleForeground "white"
+}
+
+# Border width
+BorderWidth 2
+
+# Keyboard shortcuts
+"F11" = : window : f.fullzoom

@@ -80,8 +80,55 @@ class Admin extends Control {
         
         // Get all members
         $this->viewData['members'] = Bean::findAll('member', 'ORDER BY created_at DESC');
-        
+
+        // Build a set of member IDs that have a signed sales referral agreement,
+        // so the view can show a "Download Agreement" button only where relevant.
+        $signedIds = [];
+        foreach (Bean::find('salesrepagreement', "status = 'signed'") as $sa) {
+            $signedIds[(int) $sa->member_id] = true;
+        }
+        $this->viewData['signedAgreementIds'] = $signedIds;
+
         $this->render('admin/members', $this->viewData);
+    }
+
+    /**
+     * Download a member's signed sales referral agreement as a PDF.
+     * Route: GET /admin/downloadagreement?id={memberId}
+     */
+    public function downloadagreement($params = []) {
+        $memberId = (int) (Flight::request()->query->id ?? 0);
+        if (!$memberId) {
+            $this->flash('error', 'Member ID required');
+            Flight::redirect('/admin/members');
+            return;
+        }
+
+        $member = Bean::load('member', $memberId);
+        if (!$member->id) {
+            $this->flash('error', 'Member not found');
+            Flight::redirect('/admin/members');
+            return;
+        }
+
+        $agreement = Bean::findOne('salesrepagreement',
+            'member_id = ? AND status = ? ORDER BY signed_at DESC',
+            [$memberId, 'signed']
+        );
+
+        if (!$agreement) {
+            $this->flash('warning', 'This member has not signed a sales referral agreement.');
+            Flight::redirect('/admin/members');
+            return;
+        }
+
+        $this->logger->info('Admin downloaded signed agreement', [
+            'agreement_id'   => $agreement->id,
+            'target_member'  => $memberId,
+            'downloaded_by'  => $this->member->id,
+        ]);
+
+        \app\Agreement::streamSignedPdf($agreement, $member);
     }
 
     /**

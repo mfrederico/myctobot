@@ -19,6 +19,7 @@ namespace app;
 
 use \Flight as Flight;
 use \app\Bean;
+use \app\services\PdfRenderer;
 
 class Agreement extends BaseControls\Control {
 
@@ -160,6 +161,133 @@ class Agreement extends BaseControls\Control {
     }
 
     /**
+     * Download the signed agreement (for the logged-in sales rep) as a PDF.
+     * Route: GET /agreement/download
+     */
+    public function download() {
+        $member = $this->member;
+
+        $agreement = Bean::findOne('salesrepagreement',
+            'member_id = ? AND status = ? ORDER BY signed_at DESC',
+            [$member->id, 'signed']
+        );
+
+        if (!$agreement) {
+            Flight::redirect('/agreement');
+            return;
+        }
+
+        self::streamSignedPdf($agreement, $member);
+    }
+
+    /**
+     * Build the PDF for a signed agreement and stream it as a download.
+     * Shared by the member-facing download() and the admin download route.
+     *
+     * @param object $agreement  A signed salesrepagreement bean.
+     * @param object $member      The member who signed it.
+     */
+    public static function streamSignedPdf($agreement, $member): void {
+        $html = self::buildSignedDocumentHtml($agreement, $member);
+
+        $name = trim((string) ($member->display_name ?? '')) ?: $agreement->typedName;
+        $slug = preg_replace('/[^A-Za-z0-9]+/', '-', $name);
+        $slug = trim($slug, '-') ?: 'sales-rep';
+        $filename = "sales-referral-agreement-{$slug}.pdf";
+
+        $pdf = PdfRenderer::fromHtml($html, [
+            'title'   => 'Sales Referral Agreement',
+            'author'  => 'ClickSimple LLC (DBA ShipCannon)',
+            'subject' => 'Signed Sales Referral Agreement',
+        ]);
+
+        // Stream the PDF directly; bypass the view layer entirely.
+        if (!headers_sent()) {
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: attachment; filename="' . $filename . '"');
+            header('Content-Length: ' . strlen($pdf));
+            header('Cache-Control: private, max-age=0, must-revalidate');
+            header('Pragma: public');
+        }
+        echo $pdf;
+        exit;
+    }
+
+    /**
+     * Render a complete, self-contained HTML document for a signed agreement,
+     * including the full agreement text and the signing record + signature image.
+     * Reflects the exact text that was stored when the agreement was signed.
+     */
+    public static function buildSignedDocumentHtml($agreement, $member): string {
+        $bodyHtml = self::formatAgreementTextHtml((string) $agreement->agreementText);
+        // The shared formatter targets the browser and uses `rem` font sizes,
+        // which TCPDF does not understand (it collapses the text to an unreadable
+        // size). Drop the override so clause text inherits the base PDF font.
+        $bodyHtml = str_replace('font-size:0.9rem;', '', $bodyHtml);
+
+        $signedName  = htmlspecialchars((string) $agreement->typedName);
+        $signedAt    = $agreement->signedAt
+            ? date('F j, Y \a\t g:i A T', strtotime($agreement->signedAt))
+            : 'Unknown';
+        $version     = htmlspecialchars((string) $agreement->agreementVersion);
+        $ipAddress   = htmlspecialchars((string) $agreement->ipAddress);
+        $email       = htmlspecialchars((string) ($member->email ?? ''));
+        $signatureImg = '';
+        if (preg_match('/^data:image\/(png|jpe?g);base64,/', (string) $agreement->signatureData)) {
+            $signatureImg = '<img src="' . htmlspecialchars($agreement->signatureData)
+                . '" style="width:220px;height:auto;" alt="Signature" />';
+        }
+
+        // Inline CSS only — TCPDF supports a CSS subset.
+        return <<<HTML
+<style>
+    h1 { font-size: 15pt; text-align: center; }
+    h2.subtitle { font-size: 10pt; color: #666666; text-align: center; }
+    .agreement-body { font-size: 9.5pt; line-height: 1.5; }
+    .sig-block { border: 1px solid #cccccc; padding: 10px; }
+    .sig-label { font-size: 8pt; color: #888888; }
+    .sig-value { font-size: 10pt; font-weight: bold; }
+    td { vertical-align: top; padding: 4px; }
+</style>
+
+<div class="agreement-body">
+{$bodyHtml}
+</div>
+
+<br><br>
+<h2 style="font-size:11pt; font-weight:bold;">Signature & Signing Record</h2>
+<div class="sig-block">
+    <table cellpadding="4" style="width:100%;">
+        <tr>
+            <td style="width:50%;">
+                <span class="sig-label">Signed By</span><br>
+                <span class="sig-value">{$signedName}</span><br>
+                <span class="sig-label">{$email}</span>
+            </td>
+            <td style="width:50%;">
+                <span class="sig-label">Date &amp; Time</span><br>
+                <span class="sig-value">{$signedAt}</span>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <span class="sig-label">Agreement Version</span><br>
+                <span class="sig-value">v{$version}</span>
+            </td>
+            <td>
+                <span class="sig-label">IP Address</span><br>
+                <span class="sig-value">{$ipAddress}</span>
+            </td>
+        </tr>
+    </table>
+    <br>
+    <span class="sig-label">Signature</span><br>
+    {$signatureImg}
+</div>
+HTML;
+    }
+
+    /**
      * Check if a member has signed the current agreement version.
      * Called by CRM controller to gate access.
      */
@@ -237,7 +365,15 @@ AGREEMENT;
      * Get the agreement as formatted HTML (for display)
      */
     private static function getAgreementHtml($member): string {
-        $text = self::getAgreementText();
+        return self::formatAgreementTextHtml(self::getAgreementText());
+    }
+
+    /**
+     * Format an agreement plain-text body into structured HTML.
+     * Operates on whatever text is passed in (e.g. the stored, signed copy)
+     * so rendered output always reflects exactly what was agreed to.
+     */
+    private static function formatAgreementTextHtml(string $text): string {
         $html = '';
 
         $lines = explode("\n", $text);

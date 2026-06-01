@@ -29,13 +29,14 @@
         "eislambey/eventsource": "^0.1.0",
         "fastmcphp/fastmcphp": "@dev",
         "flightphp/core": "^3.0",
-        "mfrederico/halfbaked": "@dev",
         "gabordemooij/redbean": "dev-master",
         "guzzlehttp/guzzle": "^7.10",
+        "mfrederico/halfbaked": "@dev",
         "monolog/monolog": "^3.5",
         "myctobot/aoe-php": "@dev",
         "nesbot/carbon": "^3.1",
         "stripe/stripe-php": "^19.0",
+        "tecnickcom/tcpdf": "^6.11",
         "vlucas/phpdotenv": "^5.5"
     },
     "require-dev": {

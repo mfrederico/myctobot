@@ -418,6 +418,7 @@ $permissions = [
     ['agreement', 'index', 75, 'View agreement for signing'],
     ['agreement', 'sign', 75, 'Submit signed agreement'],
     ['agreement', 'view', 75, 'View signed agreement'],
+    ['agreement', 'download', 75, 'Download signed agreement PDF'],
 
     // Communications hub (email threads with CRM contacts)
     ['communications', 'index',    75, 'Communications hub — thread list'],
@@ -442,6 +443,7 @@ $permissions = [
     ['admin', 'addmember', 50, 'Add member'],
     ['admin', 'editMember', 50, 'Edit member'],
     ['admin', 'resendinvite', 50, 'Resend member invite'],
+    ['admin', 'downloadagreement', 50, 'Download member signed agreement PDF'],
     ['admin', 'runners', 50, 'Manage workstations'],
     ['admin', 'createrunner', 50, 'Create workstation'],
     ['admin', 'editrunner', 50, 'Edit workstation'],

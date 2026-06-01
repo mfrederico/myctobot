@@ -185,6 +185,13 @@ use app\services\InviteService;
                                            title="Edit Member">
                                             <i class="bi bi-pencil"></i>
                                         </a>
+                                        <?php if (!empty($signedAgreementIds[(int)$member->id])): ?>
+                                            <a href="/admin/downloadagreement?id=<?= $member->id ?>"
+                                               class="btn btn-sm btn-outline-success"
+                                               title="Download Signed Sales Agreement (PDF)">
+                                                <i class="bi bi-file-earmark-pdf"></i>
+                                            </a>
+                                        <?php endif; ?>
                                         <?php if (!$isCurrentUser): ?>
                                             <a href="/admin/members?delete=<?= $member->id ?>"
                                                class="btn btn-sm btn-outline-danger"

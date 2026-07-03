@@ -111,29 +111,50 @@ class SSHKeyService {
     }
 
     /**
-     * Encrypt private key for storage
+     * Encrypt private key for storage.
+     *
+     * SECURITY (HIGH-2): previously AES-256-CBC with the literal 'default-key'
+     * when no config secret was set — every key was decryptable by anyone with
+     * the source + a DB dump. Now uses the libsodium EncryptionService, keyed by
+     * the per-install encryption.master_key, which fails closed if unconfigured.
      */
     public static function encryptPrivateKey(string $privateKey): string {
-        $encryptionKey = Flight::get('app.encryption_key') ?? Flight::get('app.secret') ?? 'default-key';
-
-        // Use OpenSSL AES-256-CBC encryption
-        $iv = openssl_random_pseudo_bytes(16);
-        $encrypted = openssl_encrypt($privateKey, 'aes-256-cbc', $encryptionKey, 0, $iv);
-
-        // Prepend IV for decryption
-        return base64_encode($iv . base64_decode($encrypted));
+        return EncryptionService::encrypt($privateKey);
     }
 
     /**
-     * Decrypt private key from storage
+     * Decrypt private key from storage. Tries the current (libsodium) format,
+     * then falls back to the legacy AES-256-CBC scheme for keys stored before
+     * the migration (those should be rotated).
      */
     public static function decryptPrivateKey(string $encryptedKey): string {
-        $encryptionKey = Flight::get('app.encryption_key') ?? Flight::get('app.secret') ?? 'default-key';
+        try {
+            return EncryptionService::decrypt($encryptedKey);
+        } catch (\Throwable $e) {
+            $legacy = self::legacyDecryptPrivateKey($encryptedKey);
+            if ($legacy !== '' && $legacy !== false) {
+                return $legacy;
+            }
+            throw $e;
+        }
+    }
 
+    /**
+     * Legacy AES-256-CBC decryption for keys stored before the sodium migration.
+     * The insecure 'default-key' fallback has been removed — if no legacy secret
+     * is configured this returns '' and the caller treats the key as unreadable.
+     */
+    private static function legacyDecryptPrivateKey(string $encryptedKey) {
+        $encryptionKey = Flight::get('app.encryption_key') ?? Flight::get('app.secret') ?? '';
+        if ($encryptionKey === '') {
+            return '';
+        }
         $data = base64_decode($encryptedKey);
+        if ($data === false || strlen($data) < 17) {
+            return '';
+        }
         $iv = substr($data, 0, 16);
         $encrypted = base64_encode(substr($data, 16));
-
         return openssl_decrypt($encrypted, 'aes-256-cbc', $encryptionKey, 0, $iv);
     }
 

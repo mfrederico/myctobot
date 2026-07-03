@@ -98,7 +98,29 @@ abstract class Control {
         }
         return true;
     }
-    
+
+    /**
+     * Ownership authorization for load-by-id operations (IDOR prevention).
+     *
+     * Returns true when the current member owns $bean (its owner column matches
+     * the member id) or is an admin/root. Use before any read/update/delete of a
+     * bean loaded from a user-supplied id.
+     *
+     * @param object $bean     A loaded bean (RedBean) or object with an owner column.
+     * @param string $ownerCol The column holding the owning member id (default member_id).
+     */
+    protected function authorizeOwnership($bean, string $ownerCol = 'member_id'): bool {
+        if (!$bean || empty($bean->id)) {
+            return false;
+        }
+        // Admins/root may access any record.
+        if (Flight::hasLevel(LEVELS['ADMIN'])) {
+            return true;
+        }
+        $ownerId = (int) ($bean->$ownerCol ?? 0);
+        return $ownerId > 0 && $ownerId === (int) $this->member->id;
+    }
+
     /**
      * Check if user is logged in
      */

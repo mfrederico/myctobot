@@ -815,9 +815,17 @@ class Workstations extends Control {
             return;
         }
 
-        $includePrivate = $this->getParam('include_private') === '1';
+        // SECURITY (HIGH-3): enforce ownership. Previously any member could read
+        // any key by id (IDOR) and download its decrypted private key.
+        $keyBean = \app\Bean::load('sshkeys', $keyId);
+        if (!$this->authorizeOwnership($keyBean)) {
+            $this->json(['success' => false, 'error' => 'Key not found']);
+            return;
+        }
 
-        $key = \app\services\SSHKeyService::getKey($keyId, $includePrivate);
+        // Never re-expose the private key over the API — it is shown only once at
+        // creation ("cannot be retrieved later"). Return metadata + public key.
+        $key = \app\services\SSHKeyService::getKey($keyId, false);
 
         if (!$key) {
             $this->json(['success' => false, 'error' => 'Key not found']);
@@ -839,6 +847,13 @@ class Workstations extends Control {
         $keyId = (int)($this->opId() ?? 0);
         if (!$keyId) {
             $this->json(['success' => false, 'error' => 'Key ID required']);
+            return;
+        }
+
+        // SECURITY (HIGH-3): enforce ownership before delete (IDOR).
+        $keyBean = \app\Bean::load('sshkeys', $keyId);
+        if (!$this->authorizeOwnership($keyBean)) {
+            $this->json(['success' => false, 'error' => 'Key not found']);
             return;
         }
 

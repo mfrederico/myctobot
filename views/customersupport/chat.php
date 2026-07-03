@@ -22,7 +22,9 @@ $orderNumber = $orderData['name'] ?? 'your order';
     <title>Chat Support - <?= h($shopName) ?></title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Pinned versions + DOMPurify to sanitize rendered markdown (HIGH-5 XSS) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <style>
         :root {
             --primary-gradient: linear-gradient(135deg, #0d6efd 0%, #6610f2 100%);
@@ -601,9 +603,12 @@ $orderNumber = $orderData['name'] ?? 'your order';
             const div = document.createElement('div');
             div.className = 'message message-' + role;
 
-            // Render markdown for assistant messages, plain text for user
-            if (role === 'assistant' && typeof marked !== 'undefined') {
-                div.innerHTML = marked.parse(content);
+            // Render markdown for assistant messages, plain text for user.
+            // SECURITY (HIGH-5): AI/agent output is attacker-influenceable (prompt
+            // injection) and this widget is public + iframe-embeddable, so always
+            // sanitize rendered HTML with DOMPurify.
+            if (role === 'assistant' && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                div.innerHTML = DOMPurify.sanitize(marked.parse(content));
             } else {
                 div.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
             }
@@ -733,10 +738,10 @@ $orderNumber = $orderData['name'] ?? 'your order';
             }
         });
 
-        // Render any server-side markdown content
-        if (typeof marked !== 'undefined') {
+        // Render any server-side markdown content (sanitized — HIGH-5)
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
             document.querySelectorAll('.markdown-content').forEach(el => {
-                el.innerHTML = marked.parse(el.textContent);
+                el.innerHTML = DOMPurify.sanitize(marked.parse(el.textContent));
             });
         }
 

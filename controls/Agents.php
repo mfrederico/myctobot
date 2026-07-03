@@ -794,6 +794,13 @@ class Agents extends BaseControls\Control {
             return;
         }
 
+        // SECURITY (MED path traversal): test_id is interpolated into a /tmp file
+        // path; restrict to a safe charset so '../' cannot escape the directory.
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $testId)) {
+            Flight::jsonError('Invalid test ID', 400);
+            return;
+        }
+
         // Check if this is a pipeline-based test
         if (str_starts_with($testId, 'pipeline-')) {
             $runId = (int) substr($testId, strlen('pipeline-'));

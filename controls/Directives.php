@@ -13,6 +13,7 @@ use \RedBeanPHP\R as R;
 use \app\Bean;
 use \app\services\UserDatabaseService;
 use \app\services\CeoDirectiveService;
+use \app\services\ApiAuthService;
 
 require_once __DIR__ . '/../services/UserDatabaseService.php';
 require_once __DIR__ . '/../services/CeoDirectiveService.php';
@@ -318,6 +319,17 @@ class Directives extends BaseControls\Control {
                 'success' => false,
                 'error' => 'Method not allowed. Use POST.'
             ]);
+            return;
+        }
+
+        // SECURITY (MED): this endpoint queues directives and was completely
+        // unauthenticated (the explicit route in routes/directives.php also
+        // bypasses the permission layer). Require a valid API token.
+        $auth = ApiAuthService::authenticate('directives', 'receive');
+        if (empty($auth['success'])) {
+            $this->logger->warning('Directives receive: unauthenticated request rejected');
+            Flight::response()->status(401);
+            Flight::json(['success' => false, 'error' => 'Unauthorized']);
             return;
         }
 

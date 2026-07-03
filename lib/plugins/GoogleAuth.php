@@ -74,13 +74,15 @@ class GoogleAuth {
     public static function handleCallback(string $code, ?string $state = null) {
         $logger = Flight::get('log');
 
-        // Verify state parameter (CSRF protection)
-        if ($state !== null && isset($_SESSION['google_oauth_state'])) {
-            if ($state !== $_SESSION['google_oauth_state']) {
-                $logger->warning('Google OAuth state mismatch');
-                return false;
-            }
-            unset($_SESSION['google_oauth_state']);
+        // Verify state parameter (CSRF protection) — FAIL CLOSED.
+        // Previously the check was skipped whenever the state or the session value
+        // was missing, allowing login-CSRF / forced login. Require a present,
+        // matching state on every callback (constant-time compare).
+        $sessionState = $_SESSION['google_oauth_state'] ?? '';
+        unset($_SESSION['google_oauth_state']);
+        if (empty($state) || empty($sessionState) || !hash_equals($sessionState, (string)$state)) {
+            $logger->warning('Google OAuth state missing/mismatch — rejecting callback');
+            return false;
         }
 
         // Exchange code for access token

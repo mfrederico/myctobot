@@ -247,9 +247,13 @@ function displayResults(data) {
 
     document.getElementById('resultCount').textContent = results.length + ' result' + (results.length !== 1 ? 's' : '');
 
-    // Display generated answer if available
+    // Display generated answer if available (sanitize — RAG answers can carry
+    // markup poisoned via ingested documents). SECURITY (MED XSS).
     if (answer) {
-        document.getElementById('answerContent').innerHTML = marked.parse(answer);
+        const rendered = (typeof DOMPurify !== 'undefined')
+            ? DOMPurify.sanitize(marked.parse(answer))
+            : escapeHtml(answer);
+        document.getElementById('answerContent').innerHTML = rendered;
         document.getElementById('generatedAnswer').classList.remove('d-none');
     }
 
@@ -314,10 +318,15 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Load marked.js for markdown rendering (if not already loaded)
+// Load marked.js + DOMPurify for SAFE markdown rendering (pinned) — HIGH/MED XSS
 if (typeof marked === 'undefined') {
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js';
     document.head.appendChild(script);
+}
+if (typeof DOMPurify === 'undefined') {
+    const dp = document.createElement('script');
+    dp.src = 'https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js';
+    document.head.appendChild(dp);
 }
 </script>

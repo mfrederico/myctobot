@@ -101,8 +101,11 @@
             const modeColor = bot.mode === 'builder' ? 'primary' : 'success';
             const modeLabel = bot.mode === 'builder' ? 'Builder' : 'Advisor';
             const statusColor = bot.status === 'active' ? 'success' : (bot.status === 'inactive' ? 'warning' : 'secondary');
-            const connName = bot.connection ? bot.connection.name : (bot.mode === 'builder' ? 'Internal' : 'No connection');
-            const pipeName = bot.pipeline ? bot.pipeline.name : 'Not set';
+            // SECURITY (LOW XSS): escape DB/external-derived strings (bot + Shopify
+            // connection/store names) before interpolating into innerHTML.
+            const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            const connName = esc(bot.connection ? bot.connection.name : (bot.mode === 'builder' ? 'Internal' : 'No connection'));
+            const pipeName = esc(bot.pipeline ? bot.pipeline.name : 'Not set');
             const kbCount = (bot.knowledge_bases || []).length;
             const triggerCount = (bot.triggers || []).length;
 
@@ -113,7 +116,7 @@
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-3">
                             <div>
-                                <h5 class="card-title mb-1">${bot.name}</h5>
+                                <h5 class="card-title mb-1">${esc(bot.name)}</h5>
                                 <span class="badge bg-${modeColor} bg-opacity-10 text-${modeColor}">
                                     <i class="bi ${modeIcon} me-1"></i>${modeLabel}
                                 </span>
@@ -130,7 +133,7 @@
                         </div>
                     </div>
                     <div class="card-footer bg-transparent border-0 pt-0">
-                        <a href="/livechat/chatbots/${bot.slug}" class="btn btn-outline-primary btn-sm w-100">
+                        <a href="/livechat/chatbots/${encodeURIComponent(bot.slug)}" class="btn btn-outline-primary btn-sm w-100">
                             <i class="bi bi-gear me-1"></i>Configure
                         </a>
                     </div>

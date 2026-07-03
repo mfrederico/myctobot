@@ -146,6 +146,8 @@ class Apps extends BaseControls\Control
         $pipelineIds = array_filter(array_column($serviceApps, 'pipeline_id'));
         $pipelineNames = [];
         if (!empty($pipelineIds)) {
+            // Cast to int to prevent second-order SQLi via the IN() list (LOW).
+            $pipelineIds = array_map('intval', $pipelineIds);
             $pipelines = Bean::find('pipelines', ' id IN (' . implode(',', $pipelineIds) . ') ');
             foreach ($pipelines as $p) {
                 $pipelineNames[$p->id] = $p->name;

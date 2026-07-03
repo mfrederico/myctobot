@@ -57,8 +57,8 @@ class Runnerapi extends Control {
             return null;
         }
 
-        // Verify token matches
-        if ($job->job_token !== $token) {
+        // Verify token matches (constant-time — SECURITY LOW, CWE-208)
+        if (empty($token) || !hash_equals((string)$job->job_token, (string)$token)) {
             $this->logger->warning('Runner API: Invalid job token', ['job_id' => $job->id]);
             return null;
         }

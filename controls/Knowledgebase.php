@@ -389,6 +389,14 @@ class Knowledgebase extends BaseControls\Control {
             return;
         }
 
+        // SECURITY (HIGH-1): the URL is tenant-controlled and the fetched body is
+        // stored + read back — guard against SSRF to internal/metadata services.
+        $egress = \app\services\EgressGuard::validate($url);
+        if (!$egress['allowed']) {
+            Flight::jsonError('URL not allowed: ' . $egress['reason'], 400);
+            return;
+        }
+
         // Get knowledge base ID from request
         $kbId = $this->getParam('kb_id') ?? $_SESSION['selected_kb'] ?? null;
         if (!$kbId) {

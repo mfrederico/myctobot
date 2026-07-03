@@ -148,11 +148,13 @@ class DocumentIngestionService
      */
     public function fetchUrlText(string $url): string
     {
+        // SECURITY (HIGH-1): defense-in-depth SSRF guard at the fetch sink.
+        \app\services\EgressGuard::assertAllowed($url);
+
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_TIMEOUT => 30,
+        // Safe defaults: http/https only, no redirect following (a redirect to an
+        // internal address is a classic SSRF bypass).
+        curl_setopt_array($ch, \app\services\EgressGuard::curlOptions(30) + [
             CURLOPT_USERAGENT => 'MyCTOBot/1.0'
         ]);
         $html = curl_exec($ch);

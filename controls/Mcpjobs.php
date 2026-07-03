@@ -190,23 +190,38 @@ class Mcpjobs extends Control {
             return true;
         }
 
-        // Method 2: Basic auth with member_id:job_uid (for runner scripts)
+        // Method 2: Basic auth with member_id:job_uid (for runner scripts).
+        // SECURITY (CRIT-4): job_uid is a 128-bit per-job secret and MUST be
+        // validated against a job owned by that member. Previously any
+        // memberId > 0 was accepted and the uid was never checked — and a bare
+        // X-Member-ID header (Method 3) authenticated with no secret at all,
+        // a complete auth bypass on a route that is public at the routing layer.
         $authHeader = $request->getHeader('Authorization') ?? '';
         if (preg_match('/^Basic\s+(.+)$/', $authHeader, $matches)) {
             $decoded = base64_decode($matches[1]);
-            if ($decoded && strpos($decoded, ':') !== false) {
-                list($memberId, $jobId) = explode(':', $decoded, 2);
-                $this->memberId = (int)$memberId;
-                $this->jobId = $jobId;
-                return $this->memberId > 0;
+            if ($decoded !== false && strpos($decoded, ':') !== false) {
+                list($memberId, $jobUid) = explode(':', $decoded, 2);
+                $memberId = (int)$memberId;
+                if ($memberId > 0 && $jobUid !== '' && $this->validateJobCredential($memberId, $jobUid)) {
+                    $this->memberId = $memberId;
+                    $this->jobId = $jobUid;
+                    return true;
+                }
             }
         }
 
-        // Method 3: Custom headers (for runner scripts)
-        $this->memberId = (int)($request->getHeader('X-Member-ID') ?? 0);
-        $this->jobId = $request->getHeader('X-Job-ID') ?? '';
+        // No valid credentials — deny.
+        return false;
+    }
 
-        return $this->memberId > 0;
+    /**
+     * Validate a runner's (member_id, job_uid) pair against a job the member
+     * owns. job_uid is a 128-bit random secret (bin2hex(random_bytes(16))), so a
+     * matching (member_id, job_uid) row proves possession of the job secret.
+     */
+    private function validateJobCredential(int $memberId, string $jobUid): bool {
+        $job = Bean::findOne('aidevjobs', 'job_uid = ? AND member_id = ?', [$jobUid, $memberId]);
+        return $job && (int)$job->id > 0;
     }
 
     /**

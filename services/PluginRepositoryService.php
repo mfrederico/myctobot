@@ -180,8 +180,13 @@ class PluginRepositoryService {
             $baseUrl = $parsed['base_url'] ?? 'https://gitlab.com';
             $projectPath = urlencode($parsed['path']);
 
+            // SECURITY (MED SSRF): self-hosted GitLab base_url comes from a
+            // user-supplied git URL — block internal/metadata targets.
+            \app\services\EgressGuard::assertAllowed($baseUrl);
+
             $response = $this->client->get("{$baseUrl}/api/v4/projects/{$projectPath}", [
-                'headers' => $headers
+                'headers' => $headers,
+                'allow_redirects' => false
             ]);
             $data = json_decode($response->getBody()->getContents(), true);
 

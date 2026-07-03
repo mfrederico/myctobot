@@ -3327,6 +3327,13 @@ PIPELINE;
         $url = $this->substituteVariables($url);
         $body = $this->substituteVariables($bodyTemplate);
 
+        // SECURITY (MED SSRF): webhook_out URLs are tenant-configured and the
+        // response body is returned to the pipeline — block internal/metadata targets.
+        $egress = \app\services\EgressGuard::validate($url);
+        if (!$egress['allowed']) {
+            return ['success' => false, 'error' => 'Blocked outbound URL: ' . $egress['reason']];
+        }
+
         // Build headers
         $headerLines = ['Content-Type: application/json'];
         foreach ($headers as $key => $value) {

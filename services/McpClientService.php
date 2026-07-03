@@ -667,6 +667,10 @@ class McpClientService {
 
         $this->log('debug', "HTTP POST to: {$url}");
 
+        // SECURITY (MED SSRF): the MCP endpoint URL is tenant-configured — block
+        // requests to internal/metadata addresses.
+        \app\services\EgressGuard::assertAllowed($url);
+
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_POST, true);
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($message));

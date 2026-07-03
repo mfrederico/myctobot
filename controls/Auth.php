@@ -110,6 +110,11 @@ class Auth extends BaseControls\Control {
             $password = $request->data->password ?? '';
             $workspace = strtolower(trim($request->data->workspace ?? ''));
             $redirect = $request->data->redirect ?? '/studio';
+            // SECURITY (MED open redirect): only allow same-site relative paths.
+            // Rejects absolute URLs, protocol-relative (//evil), and backslash tricks.
+            if (!is_string($redirect) || !preg_match('#^/[^/\\\\]#', $redirect)) {
+                $redirect = '/studio';
+            }
 
             // Use username if provided, otherwise use email
             $login = $username ?: $email;

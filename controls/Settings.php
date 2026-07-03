@@ -121,6 +121,9 @@ class Settings extends BaseControls\Control {
             return;
         }
 
+        // SECURITY (MED): validate CSRF on this state-changing POST.
+        if (!$this->validateCSRF()) return;
+
         // Update profile on POST
         try {
             $member = Bean::load('member', $this->member->id);
@@ -165,6 +168,8 @@ class Settings extends BaseControls\Control {
 
         // Handle POST actions (upgrade/downgrade)
         if ($request->method === 'POST') {
+            // SECURITY (MED): validate CSRF on subscription tier changes.
+            if (!$this->validateCSRF()) return;
             $action = $this->getParam('action');
 
             if ($action === 'upgrade') {

@@ -2479,6 +2479,7 @@ class PipelineExecutor {
         // Use !empty() to handle both null and empty strings
         $workingDir = !empty($config['working_dir']) ? $config['working_dir'] : '/tmp';
         $executor = !empty($config['executor']) ? $config['executor'] : '/bin/bash -c';
+        $isRemote = false; // becomes true only when execution is dispatched over SSH to a workstation
 
         // Substitute variables in workstation_id (may be {context.runner_id}) and cast to int
         $workstationIdRaw = $config['workstation_id'] ?? null;
@@ -2512,6 +2513,26 @@ class PipelineExecutor {
                 $sshOpts = "-o StrictHostKeyChecking=accept-new -o BatchMode=yes";
                 $portArg = ($sshPort != 22) ? "-p {$sshPort} " : "";
                 $executor = "ssh {$sshOpts} {$sshKeyArg}{$portArg}{$workstation->ssh_user}@{$workstation->host}";
+                $isRemote = true;
+            }
+        }
+
+        // SECURITY (CRIT-2/3): member-authored pipeline steps must never run
+        // commands locally on the shared, multi-tenant app host — that is direct
+        // RCE. Local execution is disabled unless an operator explicitly opts in
+        // via the pipelines.allow_local_exec config flag (default off). Tenant
+        // work must target the tenant's own workstation (SSH), set above.
+        if (!$isRemote) {
+            $allowLocal = false;
+            if (class_exists('\Flight', false)) {
+                $allowLocal = filter_var(\Flight::get('pipelines.allow_local_exec') ?? false, FILTER_VALIDATE_BOOLEAN);
+            }
+            if (!$allowLocal) {
+                $this->log('warning', 'Blocked local direct_exec (no workstation configured; local execution disabled)');
+                return [
+                    'success' => false,
+                    'error'   => 'Local command execution is disabled. Configure a workstation_id so direct_exec runs on your own remote host.'
+                ];
             }
         }
 
@@ -3542,37 +3563,15 @@ PIPELINE;
                 ];
 
             case 'php':
-                // PHP expression evaluator - can generate or transform data
-                // Expression should be a PHP statement that returns a value
-                // Available variables: $input (the input data), $context (pipeline context)
-                try {
-                    $context = $input['context'] ?? [];
-                    $evalInput = $inputData ? json_decode($inputData, true) : null;
-
-                    // Create a closure to isolate the eval scope
-                    $evalFn = function($input, $context, $expression) {
-                        // The expression should return a value
-                        return eval($expression);
-                    };
-
-                    $result = $evalFn($evalInput, $context, $expression);
-
-                    // Ensure we return an array
-                    if (!is_array($result)) {
-                        $result = ['value' => $result];
-                    }
-
-                    return [
-                        'success' => true,
-                        'output' => $result,
-                        'stdout' => json_encode($result)
-                    ];
-                } catch (\Throwable $e) {
-                    return [
-                        'success' => false,
-                        'error' => 'PHP eval error: ' . $e->getMessage()
-                    ];
-                }
+                // SECURITY (CRIT-2/3): this evaluator ran member-authored code
+                // through eval() — arbitrary PHP execution as the web user on the
+                // shared, multi-tenant app host. It is permanently disabled. Use a
+                // jq/regex parser or a mapping step for data transforms, or run
+                // code remotely on a tenant-owned workstation.
+                return [
+                    'success' => false,
+                    'error'   => 'The "php" parser type is disabled for security reasons. Use jq, regex, or a workstation-based step instead.'
+                ];
 
             case 'regex':
                 // PHP regex

@@ -772,38 +772,13 @@ class Pipelines extends BaseControls\Control {
 
                 case 'bash':
                 case 'direct_exec':
-                    // Test bash command with stdin
-                    // SECURITY: Only allow testing on the local machine, not shards
-                    // And limit what commands can be tested (no rm, no curl to external, etc)
-
-                    $tempFile = tempnam(sys_get_temp_dir(), 'bash_input_');
-                    file_put_contents($tempFile, $input);
-
-                    // Build a safe test command - pipe input to the command
-                    // We wrap in a subshell with timeout for safety
-                    $escapedCmd = $toExecute;
-
-                    // Simple safety checks - block obviously dangerous patterns
-                    $blockedPatterns = ['rm -rf', 'dd if=', 'mkfs', '> /dev', 'curl', 'wget', 'nc ', 'netcat'];
-                    foreach ($blockedPatterns as $pattern) {
-                        if (stripos($escapedCmd, $pattern) !== false) {
-                            Flight::jsonError("Command contains blocked pattern: {$pattern}", 400);
-                            return;
-                        }
-                    }
-
-                    // Run with timeout and capture output
-                    $fullCmd = "timeout {$timeout}s /bin/bash -c " . escapeshellarg($escapedCmd) . " < " . escapeshellarg($tempFile) . " 2>&1";
-                    $output = shell_exec($fullCmd);
-                    $exitCode = 0;  // shell_exec doesn't give us exit code easily
-
-                    unlink($tempFile);
-
-                    Flight::jsonSuccess([
-                        'output' => $output ?? '(no output)',
-                        'exit_code' => $exitCode
-                    ]);
-                    break;
+                    // SECURITY (CRIT-2/3): this ran caller-supplied commands through
+                    // /bin/bash -c on the app host behind a trivially-bypassable
+                    // substring denylist — direct RCE. Local command testing is
+                    // permanently disabled. direct_exec steps execute only on a
+                    // configured remote workstation; test them by running the step.
+                    Flight::jsonError('Local command testing is disabled for security reasons. Configure a workstation and run the step to test it.', 403);
+                    return;
 
                 case 'php':
                     // PHP expressions are risky - just show a preview message

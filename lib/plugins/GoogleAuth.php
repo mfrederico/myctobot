@@ -208,6 +208,16 @@ class GoogleAuth {
         $member = Bean::findOne('member', 'email = ?', [$email]);
 
         if ($member) {
+            // SECURITY (MED): only auto-link a Google identity to an existing
+            // (password) account when Google asserts the email is verified —
+            // otherwise an attacker with an unverified Google account bearing the
+            // victim's email address could take over the account.
+            $emailVerified = !empty($googleUser['verified_email']) || !empty($googleUser['email_verified']);
+            if (!$emailVerified) {
+                $logger->warning('Refusing to link Google login to existing account: email not verified by Google', ['email' => $email]);
+                return false;
+            }
+
             // Link existing account with Google ID
             $member->google_eid = $googleId;
             $member->last_login = date('Y-m-d H:i:s');

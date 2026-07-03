@@ -89,8 +89,16 @@ class MarkdownParser {
         $text = preg_replace('/\*\*(.*?)\*\*/s', '<strong>$1</strong>', $text);
         $text = preg_replace('/(?<!\*)\*(?!\*)([^*\n]+)\*(?!\*)/s', '<em>$1</em>', $text);
 
-        // Convert links
-        $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2">$1</a>', $text);
+        // Convert links — SECURITY (LOW XSS): block dangerous URL schemes
+        // (javascript:/data:/vbscript:) and encode the href to prevent attribute
+        // breakout.
+        $text = preg_replace_callback('/\[([^\]]+)\]\(([^)]+)\)/', function($m) {
+            $url = trim($m[2]);
+            if (preg_match('/^\s*(javascript|data|vbscript):/i', $url)) {
+                $url = '#';
+            }
+            return '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '">' . $m[1] . '</a>';
+        }, $text);
 
         // Convert blockquotes
         $text = preg_replace('/^> (.*)$/m', '<blockquote>$1</blockquote>', $text);

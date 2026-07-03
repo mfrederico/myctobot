@@ -273,9 +273,19 @@ class Bootstrap {
         ini_set('session.cookie_httponly', 1);
         ini_set('session.cookie_samesite', 'Lax');
 
-        // Use HTTPS for cookies in production
-        if ($this->config['app']['environment'] === 'production') {
+        // Set Secure whenever the request is served over HTTPS — do NOT tie this
+        // to the environment name (production was mislabeled 'development' while
+        // served over HTTPS, so the cookie was sent in the clear). CWE-614.
+        $isHttps = (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+            || ((int)($_SERVER['SERVER_PORT'] ?? 0) === 443);
+        if ($isHttps) {
             ini_set('session.cookie_secure', 1);
+        }
+
+        // Display errors only in a genuine development environment (never in prod).
+        if (in_array(strtolower((string)($this->config['app']['environment'] ?? 'production')), ['development', 'dev', 'local'], true)) {
+            ini_set('display_errors', 1);
         }
 
         // Set session name

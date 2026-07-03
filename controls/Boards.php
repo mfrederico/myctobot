@@ -426,6 +426,19 @@ class Boards extends BaseControls\Control {
     public function remove($params = []) {
         if (!$this->requireLogin()) return;
 
+        // SECURITY (HIGH-6): a destructive action must never run on GET (it was
+        // triggerable via a link/redirect with the victim's cookie). Require POST
+        // + CSRF; with the SameSite=Lax session cookie this blocks cross-site CSRF.
+        if (Flight::request()->method !== 'POST') {
+            if (Flight::request()->ajax) {
+                $this->jsonError('POST required', 405);
+            } else {
+                Flight::redirect('/boards');
+            }
+            return;
+        }
+        if (!$this->validateCSRF()) return;
+
         // Board ID comes from URL: /boards/remove/{id}
         $id = $this->opId() ?? $this->getParam('id');
         if (!$id) {

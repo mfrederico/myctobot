@@ -198,8 +198,9 @@ abstract class Control {
      * Validate CSRF token
      */
     protected function validateCSRF() {
-        // Skip CSRF validation if disabled in config
-        if (!Flight::get('security.csrf_enabled')) {
+        // Fail-closed: CSRF is enabled unless the config explicitly disables it.
+        // (Previously a missing key meant "disabled".)
+        if (!self::csrfEnabled()) {
             return true;
         }
 
@@ -232,21 +233,34 @@ abstract class Control {
      * @return bool True if valid or CSRF disabled, false otherwise
      */
     protected function validateCSRFHeader(): bool {
-        // Skip CSRF validation if disabled in config
-        if (!Flight::get('security.csrf_enabled')) {
+        // Fail-closed: enabled unless the config explicitly disables it.
+        if (!self::csrfEnabled()) {
             return true;
         }
 
         $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
         $csrfSession = $_SESSION['csrf_token'] ?? '';
 
-        if (empty($csrfHeader) || $csrfHeader !== $csrfSession) {
+        // Constant-time comparison (avoid token-timing leaks).
+        if (empty($csrfHeader) || empty($csrfSession) || !hash_equals($csrfSession, $csrfHeader)) {
             $this->logger->warning('CSRF header validation failed');
             Flight::jsonError('Invalid security token', 403);
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Whether CSRF protection is active. Fail-closed: enabled unless the config
+     * key security.csrf_enabled is explicitly set to a falsey value.
+     */
+    private static function csrfEnabled(): bool {
+        $setting = Flight::get('security.csrf_enabled');
+        if ($setting === null) {
+            return true; // secure default when unset
+        }
+        return filter_var($setting, FILTER_VALIDATE_BOOLEAN);
     }
     
     /**

@@ -185,6 +185,11 @@ class Knowledgebase extends BaseControls\Control {
                 Flight::jsonError('Knowledge base not found', 404);
                 return;
             }
+            // SECURITY (MED IDOR): only the owner (or an admin) may delete a KB.
+            if (!$this->authorizeOwnership($kb)) {
+                Flight::jsonError('Knowledge base not found', 404);
+                return;
+            }
 
             // Delete all documents in this KB via association
             $workspaceSlug = $this->getWorkspaceSlug();
@@ -269,6 +274,11 @@ class Knowledgebase extends BaseControls\Control {
         try {
             $kb = Bean::load('knowledgebases', $kbId);
             if (!$kb->id) {
+                Flight::jsonError('Knowledge base not found');
+                return;
+            }
+            // SECURITY (MED IDOR): only the owner (or an admin) may upload into a KB.
+            if (!$this->authorizeOwnership($kb)) {
                 Flight::jsonError('Knowledge base not found');
                 return;
             }
@@ -408,6 +418,11 @@ class Knowledgebase extends BaseControls\Control {
         try {
             $kb = Bean::load('knowledgebases', $kbId);
             if (!$kb->id) {
+                Flight::jsonError('Knowledge base not found');
+                return;
+            }
+            // SECURITY (MED IDOR): only the owner (or an admin) may upload into a KB.
+            if (!$this->authorizeOwnership($kb)) {
                 Flight::jsonError('Knowledge base not found');
                 return;
             }
@@ -724,6 +739,11 @@ class Knowledgebase extends BaseControls\Control {
         try {
             $kb = Bean::load('knowledgebases', (int)$kbId);
             if (!$kb->id) {
+                Flight::jsonError('Knowledge base not found', 404);
+                return;
+            }
+            // SECURITY (MED IDOR): only the owner (or an admin) may update a KB.
+            if (!$this->authorizeOwnership($kb)) {
                 Flight::jsonError('Knowledge base not found', 404);
                 return;
             }

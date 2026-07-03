@@ -86,39 +86,7 @@ class PermissionCache {
         $method = strtolower($method);
 
         // Routes that are always public (no database lookup needed)
-        // These include custom routes that don't map to controllers
-        static $publicRoutes = [
-            'index::index',
-            'login::index',         // Custom route /login
-            'login::*',             // Custom route /login/{workspace}
-            'auth::login',
-            'auth::dologin',
-            'auth::logout',
-            'auth::register',
-            'auth::doregister',
-            'auth::forgot',
-            'auth::doforgot',
-            'auth::reset',
-            'auth::doreset',
-            'auth::google',
-            'auth::googlecallback',
-            'auth::invite',          // Accept invitation (public)
-            'auth::verifymember',    // Email verification (public)
-            'error::notfound',
-            'error::forbidden',
-            'error::servererror',
-            'health::index',
-            'webhook::jira',
-            'webhook::github',
-            'signup::index',
-            'signup::pending',
-            'signup::verify',
-            'signup::resend',
-            'landing::*',           // All landing pages are public
-            'mcp::*',               // MCP Gateway - uses Bearer token auth
-            'github::callback',     // OAuth callback - needs public access for workspace redirect
-            'atlassian::callback',  // OAuth callback - needs public access for workspace redirect
-        ];
+        $publicRoutes = self::publicRoutes();
 
         $key = "{$control}::{$method}";
         if (in_array($key, $publicRoutes) || in_array("{$control}::*", $publicRoutes)) {
@@ -157,17 +125,82 @@ class PermissionCache {
             return $hasPermission;
         }
 
-        // No permission found - check if we're in build mode
-        if (Flight::get('build')) {
+        // No permission found - check if we're in build mode.
+        // SECURITY: build-mode auto-allow is a development convenience only. It is
+        // gated to non-production so it can never silently expose routes in prod.
+        if (Flight::get('build') && self::isDevEnvironment()) {
             self::logAccess('build', $key);
-            // Auto-create permission in build mode
+            // Auto-create permission in build mode (dev only)
             self::createPermission($control, $method);
-            return true; // Allow access in build mode
+            return true;
         }
 
-        // Default to public access if no permission defined
-        self::logAccess('default', $key);
-        return $userLevel <= LEVELS['PUBLIC'];
+        // SECURITY (fail-closed): no rule defined => DENY. Previously this
+        // returned "allow if logged in", so any controller method without an
+        // authcontrol row was effectively public. Log an actionable message so
+        // the missing rule can be added deliberately at the correct level.
+        self::logAccess('denied-no-rule', $key);
+        $ws = $_SERVER['WORKSPACE'] ?? ($_SESSION['workspace_slug'] ?? 'default');
+        Flight::get('log')->warning(
+            "[authcontrol] DENY {$control}::{$method} (caller level {$userLevel}) — no rule defined. " .
+            "To allow: php scripts/clitool.php --workspace={$ws} --authcontrol-add " .
+            "--control={$control} --method={$method} --level=<1|50|75|100|101>"
+        );
+        return false;
+    }
+
+    /**
+     * The list of routes that are always public (no DB lookup / no rule needed).
+     * Exposed so tooling (e.g. the authcontrol coverage scanner) can account for
+     * routes covered here rather than by an authcontrol row.
+     *
+     * Entries may be exact "control::method" or a "control::*" wildcard.
+     */
+    public static function publicRoutes(): array {
+        return [
+            'index::index',
+            'login::index',         // Custom route /login
+            'login::*',             // Custom route /login/{workspace}
+            'auth::login',
+            'auth::dologin',
+            'auth::logout',
+            'auth::register',
+            'auth::doregister',
+            'auth::forgot',
+            'auth::doforgot',
+            'auth::reset',
+            'auth::doreset',
+            'auth::google',
+            'auth::googlecallback',
+            'auth::invite',          // Accept invitation (public)
+            'auth::verifymember',    // Email verification (public)
+            'error::notfound',
+            'error::forbidden',
+            'error::servererror',
+            'health::index',
+            'webhook::jira',
+            'webhook::github',
+            'signup::index',
+            'signup::pending',
+            'signup::verify',
+            'signup::resend',
+            'landing::*',           // All landing pages are public
+            'mcp::*',               // MCP Gateway - uses Bearer/token auth in-controller
+            'github::callback',     // OAuth callback - needs public access for workspace redirect
+            'atlassian::callback',  // OAuth callback - needs public access for workspace redirect
+        ];
+    }
+
+    /**
+     * Is this a development environment? Controls whether build-mode auto-allow
+     * is permitted. Production must never auto-create/allow permissions.
+     */
+    private static function isDevEnvironment(): bool {
+        $env = null;
+        if (class_exists('\Flight', false)) {
+            $env = \Flight::get('environment') ?? \Flight::get('app.environment');
+        }
+        return in_array(strtolower((string) $env), ['development', 'dev', 'local'], true);
     }
 
     /**

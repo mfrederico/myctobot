@@ -58,7 +58,15 @@ $options = getopt('', [
     'script',
     'dry-run',
     'limit:',
-    'order:'
+    'order:',
+    // authcontrol (permission) management
+    'authcontrol-add',
+    'authcontrol-scan',
+    'authcontrol-seed-missing',
+    'control:',
+    'method:',
+    'level:',
+    'desc:'
 ]);
 
 if (isset($options['help']) || (count($options) === 0)) {
@@ -122,6 +130,151 @@ if (isset($options['wizard'])) {
 if (isset($options['list'])) {
     $beanCmd = new BeanCommand($manager);
     $beanCmd->listTables();
+    exit(0);
+}
+
+// ----------------------------------------------------------------------------
+// authcontrol (permission) management
+// ----------------------------------------------------------------------------
+
+/**
+ * Enumerate routable controller methods: public methods with all-lowercase
+ * names (CamelCase methods are not URL-routable). Returns [ [control, method], ... ].
+ */
+function ac_enumerateRoutableMethods(string $baseDir): array {
+    $routes = [];
+    foreach (glob($baseDir . '/controls/*.php') as $file) {
+        $control = strtolower(basename($file, '.php'));
+        $src = file_get_contents($file);
+        // public function methodname(   — lowercase name only
+        if (preg_match_all('/public\s+(?:static\s+)?function\s+([a-z][a-z0-9_]*)\s*\(/', $src, $m)) {
+            foreach ($m[1] as $method) {
+                if (in_array($method, ['__construct', '__destruct', '__get', '__set', '__call'], true)) {
+                    continue;
+                }
+                $routes[$control . '::' . $method] = [$control, $method];
+            }
+        }
+    }
+    ksort($routes);
+    return $routes;
+}
+
+function ac_existingRules(): array {
+    $rules = [];
+    foreach (\app\Bean::findAll('authcontrol') as $r) {
+        $rules[strtolower($r->control) . '::' . strtolower($r->method)] = (int) $r->level;
+    }
+    return $rules;
+}
+
+/**
+ * A route is "covered" if it has an authcontrol rule (exact or control::*
+ * wildcard) OR is in PermissionCache's always-public list (which is checked
+ * before authcontrol, so such routes never fall through to the deny default).
+ */
+function ac_isCovered(string $control, string $method, array $rules): bool {
+    $key = $control . '::' . $method;
+    if (isset($rules[$key]) || isset($rules[$control . '::*'])) {
+        return true;
+    }
+    static $public = null;
+    if ($public === null) {
+        $public = class_exists('\app\PermissionCache') ? \app\PermissionCache::publicRoutes() : [];
+    }
+    return in_array($key, $public, true) || in_array($control . '::*', $public, true);
+}
+
+function ac_upsert(string $control, string $method, int $level, ?string $desc = null): string {
+    $control = strtolower($control);
+    $method  = strtolower($method);
+    $existing = \app\Bean::findOne('authcontrol', 'LOWER(control) = ? AND LOWER(method) = ?', [$control, $method]);
+    if ($existing) {
+        $existing->level = $level;
+        if ($desc !== null) { $existing->description = $desc; }
+        \app\Bean::store($existing);
+        $action = 'updated';
+    } else {
+        $bean = \app\Bean::dispense('authcontrol');
+        $bean->control = $control;
+        $bean->method = $method;
+        $bean->level = $level;
+        $bean->description = $desc ?? '';
+        $bean->validcount = 0;
+        $bean->created_at = date('Y-m-d H:i:s');
+        \app\Bean::store($bean);
+        $action = 'created';
+    }
+    if (class_exists('\app\PermissionCache')) { \app\PermissionCache::clear(); }
+    return $action;
+}
+
+if (isset($options['authcontrol-add'])) {
+    $control = $options['control'] ?? null;
+    $method  = $options['method'] ?? null;
+    if (!$control || !$method || !isset($options['level'])) {
+        fwrite(STDERR, "Error: --authcontrol-add requires --control, --method, --level\n");
+        fwrite(STDERR, "  Levels: 1=ROOT 50=ADMIN 75=SALES 100=MEMBER 101=PUBLIC\n");
+        exit(1);
+    }
+    $level = (int) $options['level'];
+    $action = ac_upsert($control, $method, $level, $options['desc'] ?? null);
+    echo "authcontrol {$action}: " . strtolower($control) . "::" . strtolower($method) . " => level {$level}\n";
+    exit(0);
+}
+
+if (isset($options['authcontrol-scan'])) {
+    $routes = ac_enumerateRoutableMethods($baseDir);
+    $rules  = ac_existingRules();
+    $gaps = [];
+    foreach ($routes as $key => [$control, $method]) {
+        if (!ac_isCovered($control, $method, $rules)) {
+            $gaps[] = $key;
+        }
+    }
+    echo "Routable methods: " . count($routes) . " | covered (rule or public): " . (count($routes) - count($gaps)) . " | GAPS (would be DENIED): " . count($gaps) . "\n";
+    if ($gaps) {
+        echo "\nMethods with NO authcontrol rule (fail-closed => denied):\n";
+        foreach ($gaps as $g) { echo "  {$g}\n"; }
+        echo "\nGrant one with:\n  php scripts/clitool.php --workspace={$workspace} --authcontrol-add --control=X --method=Y --level=100\n";
+    }
+    exit(0);
+}
+
+if (isset($options['authcontrol-seed-missing'])) {
+    // Level for each gap is INFERRED from the controller's existing sibling
+    // rules (the most restrictive = lowest number, so we never accidentally
+    // widen access). Controllers with no existing rule fall back to --level
+    // (default ROOT=1 = locked, pending manual review). This keeps the app
+    // working after the fail-closed flip while never exposing a sensitive
+    // route more broadly than its siblings already are.
+    $fallback = isset($options['level']) ? (int) $options['level'] : 1;
+    $routes = ac_enumerateRoutableMethods($baseDir);
+    $rules  = ac_existingRules();
+
+    // Most restrictive (lowest) existing level per control.
+    $controlLevel = [];
+    foreach ($rules as $key => $lvl) {
+        $control = explode('::', $key, 2)[0];
+        $controlLevel[$control] = isset($controlLevel[$control]) ? min($controlLevel[$control], $lvl) : $lvl;
+    }
+
+    $seeded = 0;
+    foreach ($routes as $key => [$control, $method]) {
+        if (ac_isCovered($control, $method, $rules)) {
+            continue;
+        }
+        $level = $controlLevel[$control] ?? $fallback;
+        $note  = isset($controlLevel[$control]) ? "inherited from {$control}::" : 'fallback (review)';
+        if ($dryRun) {
+            echo "[DRY-RUN] would seed {$key} => level {$level} ({$note})\n";
+        } else {
+            ac_upsert($control, $method, $level, 'auto-seeded: ' . $note);
+            echo "seeded {$key} => level {$level} ({$note})\n";
+        }
+        $seeded++;
+    }
+    echo ($dryRun ? "[DRY-RUN] " : "") . "Seeded {$seeded} missing route(s). Review any at level 1 (fallback) and set the correct level.\n";
     exit(0);
 }
 

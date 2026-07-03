@@ -155,6 +155,24 @@ Flight::map('getMember', function() {
         return $guest;
     }
 
+    // SECURITY (CRIT-1 defense-in-depth): bind the session to its workspace.
+    // If the active workspace (from the validated subdomain) does not match the
+    // workspace the session was established in, refuse to load the member — this
+    // prevents a session from being honored against a different tenant's database
+    // and impersonating that tenant's same-id member.
+    if (php_sapi_name() !== 'cli') {
+        $activeWs  = strtolower((string)($_SERVER['WORKSPACE'] ?? 'default')) ?: 'default';
+        $sessionWs = strtolower((string)($_SESSION['workspace_slug'] ?? 'default')) ?: 'default';
+        if ($activeWs !== $sessionWs) {
+            Flight::get('log')->warning('Session/workspace mismatch — rejecting member load', [
+                'active_workspace'  => $activeWs,
+                'session_workspace' => $sessionWs,
+            ]);
+            unset($_SESSION['member']);
+            return Flight::getMember();
+        }
+    }
+
     // Refresh member data from database
     $member = Bean::load('member', $_SESSION['member']['id']);
     if ($member->id) {

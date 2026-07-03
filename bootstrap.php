@@ -475,33 +475,36 @@ class Bootstrap {
             return $defaultConfigFile;
         }
 
-        // Determine workspace from subdomain or query parameter
-        // Both methods are interchangeable and work the same way
-        $workspace = null;
+        // Determine the workspace STRICTLY from the validated subdomain.
+        // SECURITY (CRIT-1): the workspace is the tenant boundary and must NOT
+        // be selectable from request input. Honoring ?workspace= here allowed an
+        // authenticated user to point the active DB at another tenant and be
+        // re-authenticated as that tenant's same-id member. DB selection on web
+        // requests derives only from the subdomain (validated by public/index.php).
+        $workspace = $_SERVER['WORKSPACE'] ?? null;
 
-        // Check for subdomain (first part if 3+ parts)
-        // gwt.myctobot.ai → gwt
-        // myctobot.ai → null (no subdomain)
-        $parts = explode('.', $host);
-        if (count($parts) >= 3) {
-            $workspace = $parts[0];
+        // Fallback: derive from the subdomain if the front controller didn't set
+        // it. Never from $_GET / $_REQUEST.
+        //   gwt.myctobot.ai → gwt ;  myctobot.ai → null (no subdomain)
+        if (empty($workspace)) {
+            $parts = explode('.', $host);
+            if (count($parts) >= 3) {
+                $workspace = $parts[0];
+            }
         }
 
-        // Query parameter ?workspace= overrides subdomain if both present
-        if (isset($_GET['workspace']) && !empty($_GET['workspace'])) {
-            $workspace = $_GET['workspace'];
+        // Validate the slug (lowercase, alnum-led, [a-z0-9_-] only). Rejects
+        // spoofed values and blocks path traversal into arbitrary config.*.ini.
+        if (!empty($workspace) && !preg_match('/^[a-z0-9][a-z0-9_-]*$/', strtolower($workspace))) {
+            $workspace = null;
         }
 
-        // If we have a workspace, set it in $_REQUEST and load workspace config
         if (!empty($workspace)) {
-            // Normalize workspace and make it available globally
-            $_REQUEST['workspace'] = $workspace;
-            $_GET['workspace'] = $workspace;
-
-            // Check if workspace config exists
+            $workspace = strtolower($workspace);
             $workspaceConfigFile = "conf/config.{$workspace}.ini";
-            if (file_exists($workspaceConfigFile)) {
-                // Set session workspace if not in CLI mode
+            // Defense in depth: the resolved path must be exactly the expected
+            // file name (no traversal) before it is used.
+            if (basename($workspaceConfigFile) === "config.{$workspace}.ini" && file_exists($workspaceConfigFile)) {
                 if (php_sapi_name() !== 'cli') {
                     $_SESSION['workspace_slug'] = $workspace;
                 }

@@ -6,6 +6,16 @@ use \Exception as Exception;
 
 // Define permission levels - customize as needed
 define('LEVELS', ['ROOT'=>1, 'ADMIN'=>50, 'SALES'=>75, 'MEMBER'=>100, 'PUBLIC'=>101]);
+
+// Display metadata for each level, keyed by level value.
+// Order here drives the order options render in dropdowns.
+define('LEVEL_META', [
+    1   => ['label' => 'Root',   'badge' => 'bg-danger',           'description' => 'Full system access, can delete admins'],
+    50  => ['label' => 'Admin',  'badge' => 'bg-warning text-dark','description' => 'Manage members, settings, integrations'],
+    75  => ['label' => 'Sales',  'badge' => 'bg-info text-dark',   'description' => 'CRM access for sales reps'],
+    100 => ['label' => 'Member', 'badge' => 'bg-primary',          'description' => 'Standard user, can use dashboards & run analysis'],
+    101 => ['label' => 'Public', 'badge' => 'bg-secondary',        'description' => 'Guest, not logged in'],
+]);
 define('DEFAULT_LANG', 'EN');
 define('BASEURL', 'example.com'); // Change this to your domain
 define('CLASS_NAMESPACE', 'app'); // Change this to your app namespace
@@ -34,6 +44,7 @@ Flight::map('defaultRoute', function($prefix = '') {
     Flight::route($prefix.'/(@class(/@method(/@op(/@opid(/.*?)))))', 
     function($class = null, $function = null, $operation = null, $operationid = null, $route = null) {
         Flight::view()->set('LEVELS', LEVELS);
+        Flight::view()->set('LEVEL_META', LEVEL_META);
         
         // Default to index if not specified
         if (empty($class)) $class = 'index';

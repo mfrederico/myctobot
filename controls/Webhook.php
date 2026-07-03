@@ -67,16 +67,22 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Validate signature if secret is configured
+        // SECURITY (HIGH-4): verify the signature UNCONDITIONALLY and fail closed.
+        // Previously verification was skipped when no secret was configured (the
+        // default in every workspace), so forged payloads triggered AI-dev jobs.
         $secret = Flight::get('webhooks.jira_secret');
-        if (!empty($secret)) {
-            $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? $_SERVER['HTTP_X_ATLASSIAN_WEBHOOK_SIGNATURE'] ?? '';
-            if (!$this->validateJiraSignature($payload, $signature, $secret)) {
-                $this->logger->warning('Jira webhook: invalid signature');
-                Flight::response()->status(401);
-                echo json_encode(['error' => 'Invalid signature']);
-                return;
-            }
+        if (empty($secret)) {
+            $this->logger->error('Jira webhook rejected: webhooks.jira_secret is not configured (fail-closed)');
+            Flight::response()->status(401);
+            echo json_encode(['error' => 'Webhook signing secret not configured']);
+            return;
+        }
+        $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? $_SERVER['HTTP_X_ATLASSIAN_WEBHOOK_SIGNATURE'] ?? '';
+        if (!$this->validateJiraSignature($payload, $signature, $secret)) {
+            $this->logger->warning('Jira webhook: invalid signature');
+            Flight::response()->status(401);
+            echo json_encode(['error' => 'Invalid signature']);
+            return;
         }
 
         $data = json_decode($payload, true);
@@ -1408,10 +1414,18 @@ class Webhook extends BaseControls\Control {
             return;
         }
 
-        // Validate signature using repo-specific secret
+        // SECURITY (HIGH-4): verify unconditionally and fail closed. Legacy repo
+        // connections may have an empty webhook_secret — reject those rather than
+        // processing forged push/PR events.
         $secret = $repoConnection['webhook_secret'] ?? '';
         $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
-        if (!empty($secret) && !$this->validateGitHubSignature($payload, $signature, $secret)) {
+        if (empty($secret)) {
+            $this->logger->error('GitHub webhook rejected: no webhook_secret on repo connection (fail-closed)', ['repo' => $repoFullName]);
+            Flight::response()->status(401);
+            echo json_encode(['error' => 'Webhook signing secret not configured']);
+            return;
+        }
+        if (!$this->validateGitHubSignature($payload, $signature, $secret)) {
             $this->logger->warning('GitHub webhook: invalid signature', ['repo' => $repoFullName]);
             Flight::response()->status(401);
             echo json_encode(['error' => 'Invalid signature']);

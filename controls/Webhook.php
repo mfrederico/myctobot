@@ -713,8 +713,11 @@ class Webhook extends BaseControls\Control {
                 if ($cloudId) {
                     // Jira issue
                     Atlassian::removeLabelsOnExit($issueKey, $memberId, $cloudId);
-                } elseif (preg_match('#^([^/]+)/([^#]+)#(\d+)$#', $issueKey, $matches)) {
-                    // GitHub issue (format: owner/repo#123)
+                } elseif (preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $matches)) {
+                    // GitHub issue (format: owner/repo#123).
+                    // Keep '/' delimiters: with '#' delimiters the '#' inside
+                    // [^#] closes the pattern early and PCRE reads ']' as a
+                    // modifier, which threw and 500'd the whole webhook.
                     Github::removeLabelsOnExit($matches[1], $matches[2], (int) $matches[3], $memberId);
                 }
             }

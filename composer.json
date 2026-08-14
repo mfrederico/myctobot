@@ -29,7 +29,7 @@
         "eislambey/eventsource": "^0.1.0",
         "fastmcphp/fastmcphp": "@dev",
         "flightphp/core": "^3.0",
-        "gabordemooij/redbean": "dev-master",
+        "gabordemooij/redbean": "^5.7",
         "guzzlehttp/guzzle": "^7.10",
         "mfrederico/halfbaked": "@dev",
         "monolog/monolog": "^3.5",

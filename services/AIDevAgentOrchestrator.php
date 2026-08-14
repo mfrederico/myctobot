@@ -104,6 +104,16 @@ You have access to GitHub tools via MCP. **ALWAYS use these tools for GitHub ope
 mcp__github__add_issue_comment(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, body="Your message here")
 ```
 
+**CRITICAL - every comment you post MUST end with this signature line:**
+```
+[agent:AI Developer]
+```
+Comments you write fire a webhook that feeds new comments back into this session.
+The signature is how that webhook tells your own writes apart from a human's. Omit
+it and you will be handed your own comment back and end up replying to yourself.
+If the `github_comment` tool from the myctobot MCP server is available, prefer it -
+it adds the signature for you.
+
 **Example - Close the issue:**
 ```
 mcp__github__update_issue(owner="{$owner}", repo="{$repo}", issue_number={$issueNumber}, state="closed")
@@ -870,7 +880,7 @@ jira_comment_with_image(
    - Post questions using `jira_comment(issue_key, message)` before proceeding with implementation.
    - Wait for a response (the user will send it via Jira and you'll receive updates).
    - Example clarifying questions: "Which specific element should be modified?", "Should this apply to all pages or just X?", "What should happen when Y occurs?"
-2. **Fetch Attachments**: If there are image attachments, use `jira_get_issue` to list them, then `jira_get_attachment(attachment_id)` to view them.
+2. **Read Attachments**: Ticket attachments have already been downloaded to the `attachments/` folder in your working directory - see the Attachments section above for the exact paths. Open those files directly. Do NOT try to fetch the original attachment URLs; they require credentials you do not have and will 404.
 3. **Repository**: The repo is already cloned to `{$repoPath}` and checked out to `{$defaultBranch}`.
    **IMPORTANT: Do NOT `cd {$repoPath}`** - stay in the current directory and reference files as `{$repoPath}/path/to/file`. Use `git -C {$repoPath} <command>` for git operations.
 4. **Analyze the codebase**: Find relevant files for the implementation.
@@ -885,7 +895,7 @@ jira_comment_with_image(
 ## Important Guidelines
 - **Ask First**: If requirements are unclear or ambiguous, post a clarifying question to Jira BEFORE implementing.
 - **Check URLs**: If URLs are mentioned, visit them to understand current state.
-- **Download images**: If attachments exist, download and view them.
+- **View attachments**: Attachments are already on disk under `attachments/`. Open and view them rather than trying to download anything.
 - **Iterate**: Don't just write code blindly. Verify your understanding first.
 - **Be thorough**: Check your changes work correctly before creating the PR.
 - **No emojis**: Do NOT use emojis in Jira comments or any communication. Keep messages professional and plain text.

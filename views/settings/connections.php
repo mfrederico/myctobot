@@ -458,6 +458,40 @@
                         <span class="badge bg-light text-dark" style="font-size: 0.65rem;"><?= h($feat) ?></span>
                         <?php endforeach; ?>
                     </div>
+                    <?php
+                    // OAuth connectors: show the redirect URL that must be registered
+                    // in the provider's app settings, plus any credential/mismatch issues.
+                    $callbackUrl = $connections[$key]['callback_url'] ?? null;
+                    $configuredUri = $connections[$key]['redirect_uri'] ?? null;
+                    $isConfigured = $connections[$key]['configured'] ?? true;
+                    $uriMismatch = $configuredUri && $callbackUrl && $configuredUri !== $callbackUrl;
+                    if ($callbackUrl && !$comingSoon):
+                    ?>
+                    <div class="border-top pt-2 mt-2 text-start">
+                        <?php if (!$isConfigured): ?>
+                        <div class="badge bg-warning-subtle text-warning-emphasis mb-1" style="font-size: 0.65rem;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Credentials not configured
+                        </div>
+                        <?php endif; ?>
+                        <label class="text-muted d-block" style="font-size: 0.65rem;">Redirect URL</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control font-monospace" style="font-size: 0.6rem;"
+                                   value="<?= h($callbackUrl) ?>" readonly
+                                   onclick="this.select()">
+                            <button class="btn btn-outline-secondary" type="button"
+                                    title="Copy redirect URL"
+                                    onclick="copyRedirectUrl(this, '<?= h($callbackUrl) ?>')">
+                                <i class="bi bi-clipboard"></i>
+                            </button>
+                        </div>
+                        <?php if ($uriMismatch): ?>
+                        <div class="text-danger mt-1" style="font-size: 0.6rem;">
+                            <i class="bi bi-exclamation-circle me-1"></i>
+                            Configured redirect_uri differs: <span class="font-monospace"><?= h($configuredUri) ?></span>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <div class="card-footer bg-transparent border-0 pt-0">
                     <?php if ($comingSoon): ?>
@@ -507,6 +541,35 @@
 </style>
 
 <script>
+function copyRedirectUrl(btn, url) {
+    const icon = btn.querySelector('i');
+    const restore = () => { icon.className = 'bi bi-clipboard'; };
+
+    const done = (ok) => {
+        icon.className = ok ? 'bi bi-check-lg text-success' : 'bi bi-x-lg text-danger';
+        setTimeout(restore, 1500);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(() => done(true), () => done(false));
+        return;
+    }
+
+    // Fallback for non-HTTPS / older browsers
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+        done(document.execCommand('copy'));
+    } catch (e) {
+        done(false);
+    }
+    document.body.removeChild(ta);
+}
+
 function testConnection(type, url) {
     const btn = event.target;
     const originalText = btn.innerHTML;

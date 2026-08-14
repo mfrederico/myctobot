@@ -46,7 +46,7 @@ WEBHOOK_URL="${WEBHOOK_BASE}/webhook/aidev"
 # Build the payload with job metadata
 PAYLOAD=$(cat <<EOF
 {
-  "job_id": "$MYCTOBOT_JOB_ID",
+  "job_uid": "$MYCTOBOT_JOB_ID",
   "member_id": ${MYCTOBOT_MEMBER_ID:-0},
   "workspace": "${MYCTOBOT_WORKSPACE:-default}",
   "status": "checkpoint",
@@ -55,6 +55,10 @@ PAYLOAD=$(cat <<EOF
 EOF
 )
 
+# /webhook/aidev validates the global cron.api_key, NOT the member API key.
+# Fall back to MYCTOBOT_API_KEY only for older dispatchers that didn't set this.
+WEBHOOK_KEY="${MYCTOBOT_WEBHOOK_KEY:-$MYCTOBOT_API_KEY}"
+
 echo "Posting checkpoint to webhook..."
 echo "  Job ID: $MYCTOBOT_JOB_ID"
 echo "  Webhook: $WEBHOOK_URL"
@@ -62,7 +66,7 @@ echo "  Webhook: $WEBHOOK_URL"
 # POST to webhook
 HTTP_CODE=$(curl -s -o /tmp/webhook_response.txt -w "%{http_code}" \
     -X POST "$WEBHOOK_URL" \
-    -H "Authorization: Bearer ${MYCTOBOT_API_KEY}" \
+    -H "Authorization: Bearer ${WEBHOOK_KEY}" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD" 2>/dev/null || echo "000")
 

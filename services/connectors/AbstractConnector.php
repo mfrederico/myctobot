@@ -25,6 +25,21 @@ abstract class AbstractConnector implements ConnectorInterface {
      * @param string|null $section    Optional INI section name (null = use {key} or flat)
      * @return array Loaded config values
      */
+    /**
+     * The callback URL this connector expects the provider to redirect back to.
+     *
+     * Derived from the current host so each workspace subdomain reports its own
+     * value - this is what must be registered in the provider's app settings.
+     *
+     * @return string
+     */
+    public static function getCallbackUrl(): string {
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+
+        return "{$scheme}://{$host}/connections/callback/" . static::getKey();
+    }
+
     protected static function loadConfig(string $key, array $configKeys, ?string $section = null): array {
         $config = array_fill_keys($configKeys, null);
         $basePath = dirname(__DIR__, 2);

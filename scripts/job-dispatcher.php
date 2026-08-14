@@ -62,6 +62,7 @@ require_once $baseDir . '/bootstrap.php';
 require_once $baseDir . '/lib/plugins/AtlassianAuth.php';
 require_once $baseDir . '/services/JiraClient.php';
 require_once $baseDir . '/services/GitHubClient.php';
+require_once $baseDir . '/services/JobAttachmentService.php';
 require_once $baseDir . '/services/EncryptionService.php';
 require_once $baseDir . '/services/AIDevAgentOrchestrator.php';
 require_once $baseDir . '/services/AIDevStatusService.php';
@@ -225,7 +226,9 @@ if (!is_dir($workDir)) {
 if (is_dir("{$workDir}/repo")) {
     exec("rm -rf " . escapeshellarg("{$workDir}/repo"));
 }
-@mkdir("{$workDir}/attachments", 0755, true);
+// 0700: the work dir sits in shared /tmp and these are a customer's design files.
+@mkdir("{$workDir}/attachments", 0700, true);
+@chmod("{$workDir}/attachments", 0700);
 
 // ============================================
 // Fetch Full Jira Issue Details
@@ -240,6 +243,7 @@ $commentText = '';
 $attachmentInfo = '';
 $linkedIssuesInfo = '';
 $urlsToCheck = [];
+$attachmentResult = ['stored' => [], 'failed' => [], 'skipped' => 0, 'urls' => []];
 
 if ($provider === 'github') {
     // ============================================
@@ -302,8 +306,34 @@ if ($provider === 'github') {
             echo "  Warning: Could not fetch comments: " . $e->getMessage() . "\n";
         }
 
-        // Extract URLs from description and comments
-        $urlsToCheck = extractUrls($description . ' ' . $commentText);
+        // Download attachments before extracting URLs. GitHub's user-attachments
+        // assets 404 anonymously on private repos, so handing the agent the bare
+        // URL guarantees a failed fetch - pull them to disk instead.
+        $attachmentResult = \app\services\JobAttachmentService::pullGitHub(
+            $description . ' ' . $commentText,
+            $githubToken,
+            $workDir
+        );
+
+        if (!empty($attachmentResult['stored'])) {
+            echo "  Attachments downloaded: " . count($attachmentResult['stored'])
+                . ($attachmentResult['skipped'] ? " ({$attachmentResult['skipped']} already present)" : '') . "\n";
+            foreach ($attachmentResult['stored'] as $file) {
+                echo "    + {$file['path']} ({$file['mime']})\n";
+            }
+        }
+        foreach ($attachmentResult['failed'] as $failure) {
+            echo "    ! {$failure}\n";
+        }
+
+        $attachmentInfo = \app\services\JobAttachmentService::formatForPrompt($attachmentResult, 'GitHub');
+
+        // Extract URLs from description and comments, minus the ones already
+        // pulled down - re-listing them would send the agent chasing a 404.
+        $urlsToCheck = array_values(array_diff(
+            extractUrls($description . ' ' . $commentText),
+            $attachmentResult['urls']
+        ));
         if (!empty($urlsToCheck)) {
             echo "  URLs found: " . count($urlsToCheck) . "\n";
         }
@@ -356,21 +386,40 @@ if ($provider === 'github') {
             $commentText .= "**{$author}** ({$created}):\n{$body}\n\n";
         }
 
-        // Extract attachments
+        // Extract attachments and pull them to disk. The /attachment/content/
+        // URLs need the tenant's OAuth token, which the agent does not have, so
+        // listing the URL alone left it unable to open anything.
         $attachments = $issue['fields']['attachment'] ?? [];
         $attachmentInfo = '';
         if (!empty($attachments)) {
             echo "  Attachments: " . count($attachments) . "\n";
-            $attachmentInfo = "## Attachments\n";
-            $attachmentInfo .= "The following files are attached to this ticket. Download and examine them as needed:\n\n";
-            foreach ($attachments as $att) {
-                $attachmentInfo .= "- **{$att['filename']}** ({$att['mimeType']}, " . number_format($att['size']) . " bytes)\n";
-                $attachmentInfo .= "  Download URL: {$att['content']}\n";
+
+            $attachmentResult = \app\services\JobAttachmentService::pullJira(
+                $attachments,
+                $jiraClient,
+                $workDir
+            );
+
+            if (!empty($attachmentResult['stored'])) {
+                echo "  Attachments downloaded: " . count($attachmentResult['stored'])
+                    . ($attachmentResult['skipped'] ? " ({$attachmentResult['skipped']} already present)" : '') . "\n";
+                foreach ($attachmentResult['stored'] as $file) {
+                    echo "    + {$file['path']} ({$file['mime']})\n";
+                }
             }
+            foreach ($attachmentResult['failed'] as $failure) {
+                echo "    ! {$failure}\n";
+            }
+
+            $attachmentInfo = \app\services\JobAttachmentService::formatForPrompt($attachmentResult, 'Jira');
         }
 
-        // Extract URLs from description and comments
-        $urlsToCheck = extractUrls($description . ' ' . $commentText);
+        // Extract URLs from description and comments, minus any attachment URLs
+        // already pulled to disk.
+        $urlsToCheck = array_values(array_diff(
+            extractUrls($description . ' ' . $commentText),
+            $attachmentResult['urls'] ?? []
+        ));
         if (!empty($urlsToCheck)) {
             echo "  URLs found: " . count($urlsToCheck) . "\n";
         }
@@ -1125,10 +1174,12 @@ if ($agentBean && $agentBean->id) {
             }
 
             if ($serverType === 'sse') {
-                // SSE transport
+                // SSE transport - key must be 'type' (matching stdio/http below);
+                // Claude Code ignores servers declared with 'transport' and the
+                // server silently fails to load.
                 $mcpServers->$serverName = (object) [
-                    'url' => $substitute($server->url),
-                    'transport' => 'sse'
+                    'type' => 'sse',
+                    'url' => $substitute($server->url)
                 ];
             } elseif ($serverType === 'http') {
                 // HTTP transport - substitute placeholders in headers and URL
@@ -1252,6 +1303,7 @@ $claudeSettings = [
 ];
 
 // Add hooks if configured in agent
+$hooksConfig = [];
 if ($agentConfig && !empty($agentConfig['hooks_config'])) {
     echo "  Loading hooks from agent config...\n";
     $hooksConfig = $agentConfig['hooks_config'];
@@ -1262,6 +1314,36 @@ if ($agentConfig && !empty($agentConfig['hooks_config'])) {
         }
     }
     echo "    {$hookCount} hooks configured\n";
+}
+
+// Always sign comments posted through the external GitHub MCP server. Our own
+// gateway signs server-side, but that third-party server is not ours to change -
+// and an unsigned comment loops straight back into this session via the webhook.
+// Appended to the agent's own hooks rather than replacing them.
+if ($provider === 'github') {
+    $signHookSrc = "{$baseDir}/scripts/hooks/sign-github-comment.php";
+    if (is_file($signHookSrc)) {
+        // Copied into the work dir rather than referenced at its absolute path:
+        // on a remote workstation $baseDir does not exist, and a hook that
+        // silently no-ops there would put the echo loop straight back.
+        copy($signHookSrc, "{$workDir}/sign-github-comment.php");
+        chmod("{$workDir}/sign-github-comment.php", 0755);
+
+        $hooksConfig['PreToolUse'] = $hooksConfig['PreToolUse'] ?? [];
+        $hooksConfig['PreToolUse'][] = [
+            'matcher' => 'mcp__github__.*_issue_comment',
+            // CLAUDE_PROJECT_DIR is the directory Claude was started in, which is
+            // the work dir in both the local and the SSH case. Falls back to cwd.
+            'hooks' => [[
+                'type' => 'command',
+                'command' => 'php "${CLAUDE_PROJECT_DIR:-.}/sign-github-comment.php"',
+            ]],
+        ];
+        echo "    + comment signing hook (webhook echo suppression)\n";
+    }
+}
+
+if (!empty($hooksConfig)) {
     $claudeSettings['hooks'] = $hooksConfig;
 }
 
@@ -1305,9 +1387,17 @@ SHOPIFY_ECHO;
 $baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? "https://{$workspace}.myctobot.ai";
 $webhookUrl = $baseUrl;
 
-// Load API key from member's apikeys table (Bearer token for /jobs/cleanup)
+// Load API key from member's apikeys table (Bearer token for /jobs/cleanup,
+// validated by ApiAuthService)
 $apiKeyBean = Bean::findOne('apikeys', 'member_id = ? AND is_active = 1 ORDER BY id ASC', [$memberId]);
 $apiKey = $apiKeyBean ? $apiKeyBean->token : '';
+
+// /webhook/aidev is a DIFFERENT credential - it validates against the global
+// cron.api_key, not a member token. Sending the member key there returns 401.
+$webhookKey = Flight::get('cron.api_key') ?? '';
+
+// Used by the comment-signing hook so the [agent:...] marker names the agent.
+$agentName = $agentConfig['name'] ?? 'AI Developer';
 
 // Hook environment variables for multi-workspace support
 $hookEnvSection = <<<HOOK_ENV
@@ -1323,7 +1413,46 @@ export MYCTOBOT_MEMBER_ID="{$memberId}"
 export MYCTOBOT_PROJECT_ROOT="{$repoDir}"
 export MYCTOBOT_WEBHOOK_URL="{$webhookUrl}"
 export MYCTOBOT_API_KEY="{$apiKey}"
+export MYCTOBOT_WEBHOOK_KEY="{$webhookKey}"
+export MYCTOBOT_AGENT_NAME="{$agentName}"
 HOOK_ENV;
+
+// The exports above only apply to THIS script. When Claude runs on a remote
+// workstation the SSH command starts a fresh shell, so they must be replayed
+// there or send-checkpoint.sh has no job id / webhook key and bails out.
+// NOTE: these land in the remote process list (visible to `ps` for other users
+// on that host). See docs/RUNNER_ENV_PLAN.md for the env-file hardening.
+$remoteEnvVars = [
+    'MYCTOBOT_APP_ROOT'    => $baseDir,
+    'MYCTOBOT_WORKSPACE'   => $workspace,
+    'MYCTOBOT_BASEURL'     => $baseUrl,
+    'MYCTOBOT_JOB_ID'      => $jobId,
+    'MYCTOBOT_JOB_UID'     => $jobUid,
+    'MYCTOBOT_ISSUE_KEY'   => $issueKey,
+    'MYCTOBOT_MEMBER_ID'   => $memberId,
+    'MYCTOBOT_WEBHOOK_URL' => $webhookUrl,
+    'MYCTOBOT_API_KEY'     => $apiKey,
+    'MYCTOBOT_WEBHOOK_KEY' => $webhookKey,
+    'MYCTOBOT_AGENT_NAME'  => $agentName,
+];
+
+// Two variants, matching the $ollamaSshEnv* pattern below: the remote command is
+// wrapped in single quotes in print mode and double quotes in the heredoc, so the
+// value quoting has to be the opposite of its enclosing quote in each case.
+$remoteEnvExportsSingle = ''; // for embedding inside a single-quoted SSH arg
+$remoteEnvExportsDouble = ''; // for embedding inside a double-quoted SSH arg
+
+foreach ($remoteEnvVars as $envName => $envValue) {
+    $envValue = (string) $envValue;
+
+    // Inside single quotes: wrap the value in double quotes, escaping anything
+    // the remote shell would otherwise expand.
+    $dq = str_replace(['\\', '"', '$', '`'], ['\\\\', '\\"', '\\$', '\\`'], $envValue);
+    $remoteEnvExportsSingle .= "export {$envName}=\"{$dq}\" && ";
+
+    // Inside double quotes: single-quoted values are literal to the remote shell.
+    $remoteEnvExportsDouble .= "export {$envName}=" . escapeshellarg($envValue) . " && ";
+}
 
 // Copy send-checkpoint.sh to work directory (saves checkpoint, keeps session alive)
 $finishJobSrc = "{$baseDir}/scripts/send-checkpoint.sh";
@@ -1666,7 +1795,10 @@ if ($usePrintMode) {
             "scp {$scpKeyFlag}-P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.mcp.json 2>/dev/null; " .
             "scp {$scpKeyFlag}-P {$wsPort} CLAUDE.md {$wsUser}@{$wsHost}:{$remoteWorkDir}/CLAUDE.md 2>/dev/null; " .
             "scp {$scpKeyFlag}-P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.claude/settings.json 2>/dev/null; " .
-            "ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && {$ollamaSshEnvSingle}cd {$remoteWorkDir} && claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
+            "scp {$scpKeyFlag}-P {$wsPort} send-checkpoint.sh {$wsUser}@{$wsHost}:{$remoteWorkDir}/send-checkpoint.sh 2>/dev/null; " .
+            "scp {$scpKeyFlag}-rp -P {$wsPort} attachments {$wsUser}@{$wsHost}:{$remoteWorkDir}/ 2>/dev/null; " .
+            "scp {$scpKeyFlag}-P {$wsPort} sign-github-comment.php {$wsUser}@{$wsHost}:{$remoteWorkDir}/sign-github-comment.php 2>/dev/null; " .
+            "ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && {$remoteEnvExportsSingle}{$ollamaSshEnvSingle}cd {$remoteWorkDir} && chmod +x send-checkpoint.sh 2>/dev/null; claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
     } else {
         $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < {$workDir}/prompt.txt";
     }
@@ -1731,9 +1863,13 @@ scp {$scpKeyFlag}-P {$wsPort} prompt.txt {$wsUser}@{$wsHost}:{$remoteWorkDir}/pr
 scp {$scpKeyFlag}-P {$wsPort} .mcp.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.mcp.json 2>/dev/null || true
 scp {$scpKeyFlag}-P {$wsPort} CLAUDE.md {$wsUser}@{$wsHost}:{$remoteWorkDir}/CLAUDE.md 2>/dev/null || true
 scp {$scpKeyFlag}-P {$wsPort} .claude/settings.json {$wsUser}@{$wsHost}:{$remoteWorkDir}/.claude/settings.json 2>/dev/null || true
+scp {$scpKeyFlag}-P {$wsPort} send-checkpoint.sh {$wsUser}@{$wsHost}:{$remoteWorkDir}/send-checkpoint.sh 2>/dev/null || true
+# -p preserves the 0600/0700 modes so attachments do not land world-readable
+scp {$scpKeyFlag}-rp -P {$wsPort} attachments {$wsUser}@{$wsHost}:{$remoteWorkDir}/ 2>/dev/null || true
+scp {$scpKeyFlag}-P {$wsPort} sign-github-comment.php {$wsUser}@{$wsHost}:{$remoteWorkDir}/sign-github-comment.php 2>/dev/null || true
 
 # Run claude on remote workstation
-ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && {$ollamaSshEnvDouble}cd {$remoteWorkDir} && claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
+ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && {$remoteEnvExportsDouble}{$ollamaSshEnvDouble}cd {$remoteWorkDir} && chmod +x send-checkpoint.sh 2>/dev/null; claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""
 SSHSCRIPT;
         file_put_contents($sshScriptFile, $sshScriptContent);
         chmod($sshScriptFile, 0755);

@@ -18,6 +18,7 @@ namespace app;
 
 use \Flight as Flight;
 use \Exception as Exception;
+use \app\services\ConnectionsService;
 use \app\services\ConnectorRegistry;
 use \app\services\OAuthStateService;
 use \app\services\EncryptionService;
@@ -68,7 +69,7 @@ class Connections extends BaseControls\Control {
             ? $connectorClass::loadOAuthConfig()
             : [];
 
-        if (empty($config)) {
+        if (!ConnectionsService::isOAuthConfigured($connectorClass)) {
             $this->flash('error', "{$meta['name']} OAuth is not configured. Please contact your administrator.");
             Flight::redirect('/settings/connections');
             return;

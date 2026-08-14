@@ -167,11 +167,31 @@ class McpGatewayToolService
         $message = $args['message'] ?? '';
         if (!$issueKey || !$message) throw new \Exception('issue_key and message required');
 
+        // Sign the comment so the webhook can tell our own writes apart from a
+        // human's. Without this the issue_comment event is fed straight back into
+        // the running session and the agent answers itself. Mirrors the Jira tool.
+        $message = self::signAgentComment($message);
+
         $parsed = $this->parseGitHubIssueKey($issueKey);
         $gh = $this->getGitHubClient();
         $gh->addIssueComment($parsed['owner'], $parsed['repo'], $parsed['number'], $message);
 
         return "Comment added to {$issueKey}";
+    }
+
+    /**
+     * Append the agent signature used for webhook echo suppression.
+     *
+     * Idempotent - the model sometimes copies a signature out of context.
+     */
+    public static function signAgentComment(string $message): string {
+        if (preg_match('/\[agent:[^\]]+\]/', $message)) {
+            return $message;
+        }
+
+        $agentName = $_SERVER['HTTP_X_MCP_AGENT_NAME'] ?? 'AI Developer';
+
+        return $message . "\n\n[agent:{$agentName}]";
     }
 
     private function githubCloseIssue(array $args): string
@@ -183,7 +203,7 @@ class McpGatewayToolService
         $gh = $this->getGitHubClient();
 
         if (!empty($args['comment'])) {
-            $gh->addIssueComment($parsed['owner'], $parsed['repo'], $parsed['number'], $args['comment']);
+            $gh->addIssueComment($parsed['owner'], $parsed['repo'], $parsed['number'], self::signAgentComment($args['comment']));
         }
 
         $gh->closeIssue($parsed['owner'], $parsed['repo'], $parsed['number']);

@@ -1261,9 +1261,26 @@ class Webhook extends BaseControls\Control {
      * comments to running tmux sessions so Claude can react to real-time updates.
      */
     private function augmentGitHubLocalSession(string $issueKey, int $memberId, string $author, string $body): void {
-        // Skip bot comments (our own comments)
+        // Skip bot comments (our own comments).
+        //
+        // NOTE: neither of these catches the agent's own writes on their own. The
+        // agent posts with the MEMBER's OAuth token, so the author is a normal user
+        // login with no 'bot' in it, and its milestone comments ("AI Developer
+        // starting work...") do not contain the string 'MyCTOBot'. The agent
+        // signature check below is what actually breaks the echo loop.
         if (strpos(strtolower($author), 'bot') !== false || strpos($body, 'MyCTOBot') !== false) {
             $this->logger->debug('GitHub: Skipping bot comment', ['author' => $author]);
+            return;
+        }
+
+        // Skip comments carrying the agent signature (same mechanism as Jira).
+        // Without this, every comment the agent posts fires issue_comment, gets
+        // injected back into its own session, and it responds to itself.
+        if (preg_match('/\[agent:[^\]]+\]/', $body)) {
+            $this->logger->debug('GitHub: Skipping agent-signed comment', [
+                'issue_key' => $issueKey,
+                'author' => $author
+            ]);
             return;
         }
 
@@ -1285,11 +1302,23 @@ class Webhook extends BaseControls\Control {
             GitOperations::ensureRepoCloned($workDir, $issueKey, $memberId);
         }
 
+        // Backstop against a runaway echo loop. The signature check above only
+        // covers comments posted through our own MCP gateway; the agent is also
+        // told to use the external github MCP server, whose writes we cannot sign.
+        // If that ever loops, this stops it rather than letting the session spin.
+        if ($workDir && !$this->allowSessionForward($workDir, $issueKey)) {
+            return;
+        }
+
         $this->logger->info('GitHub: Augmenting running session with new comment', [
             'issue_key' => $issueKey,
             'member_id' => $memberId,
             'author' => $author
         ]);
+
+        // Pull attachments BEFORE truncating - an image dropped at the end of a
+        // long comment would otherwise have its URL cut off.
+        $attachmentNote = $this->pullCommentAttachments($body, $memberId, (string) $workDir);
 
         // Truncate very long comments
         if (strlen($body) > 2000) {
@@ -1298,6 +1327,10 @@ class Webhook extends BaseControls\Control {
 
         // Build message for Claude
         $message = "[GITHUB UPDATE] New comment from @{$author}: {$body}";
+
+        if ($attachmentNote !== '') {
+            $message .= "\n" . $attachmentNote;
+        }
 
         // Send to session
         if ($tmux->sendMessage($message)) {
@@ -1311,6 +1344,107 @@ class Webhook extends BaseControls\Control {
                 'issue_key' => $issueKey,
                 'member_id' => $memberId
             ]);
+        }
+    }
+
+    /**
+     * Rate-limit how many webhook comments may be pushed into one session.
+     *
+     * An echo loop (agent comments -> webhook -> agent reads its own comment ->
+     * comments again) is self-sustaining and burns tokens until someone notices.
+     * Anything above this rate is not a human talking to the agent.
+     *
+     * State lives in the per-job work directory, so it is per-tenant by
+     * construction and disappears with the job.
+     *
+     * @param string $workDir  Session work directory
+     * @param string $issueKey For logging
+     * @return bool True if the forward is allowed
+     */
+    private function allowSessionForward(string $workDir, string $issueKey): bool {
+        $maxForwards = 12;   // per window
+        $windowSecs  = 300;  // 5 minutes
+
+        $file = rtrim($workDir, '/') . '/.comment-forwards.json';
+        $now = time();
+
+        $stamps = [];
+        if (is_file($file)) {
+            $decoded = json_decode((string) @file_get_contents($file), true);
+            if (is_array($decoded)) {
+                $stamps = array_filter($decoded, fn($t) => is_numeric($t) && ($now - (int) $t) < $windowSecs);
+            }
+        }
+
+        if (count($stamps) >= $maxForwards) {
+            $this->logger->warning('GitHub: comment forward rate limit hit - suppressing possible echo loop', [
+                'issue_key' => $issueKey,
+                'forwards_in_window' => count($stamps),
+                'window_seconds' => $windowSecs
+            ]);
+            return false;
+        }
+
+        $stamps[] = $now;
+        @file_put_contents($file, json_encode(array_values($stamps)));
+        @chmod($file, 0600);
+
+        return true;
+    }
+
+    /**
+     * Download any attachments referenced in a webhook comment.
+     *
+     * Comments arrive as raw text, so an image someone drops into the thread
+     * mid-run reaches the agent as a bare github.com/user-attachments URL that
+     * 404s without credentials - the same failure the dispatcher already fixes
+     * for the initial issue body.
+     *
+     * @return string Prompt fragment describing downloaded files (may be empty)
+     */
+    private function pullCommentAttachments(string $body, int $memberId, string $workDir): string {
+        if ($workDir === '' || !is_dir($workDir)) {
+            return '';
+        }
+
+        try {
+            require_once __DIR__ . '/../services/JobAttachmentService.php';
+
+            // The tenant's own GitHub credential - same lookup the dispatcher uses.
+            $conn = Bean::findOne(
+                'connections',
+                'connector_type = ? AND (member_id = ? OR shared = 1) ORDER BY id ASC',
+                ['github', $memberId]
+            );
+
+            if (!$conn || empty($conn->access_token)) {
+                return '';
+            }
+
+            $token = EncryptionService::decrypt($conn->access_token);
+            if (empty($token)) {
+                return '';
+            }
+
+            $result = \app\services\JobAttachmentService::pullGitHub($body, $token, $workDir);
+
+            if (empty($result['stored']) && empty($result['failed'])) {
+                return '';
+            }
+
+            $this->logger->info('GitHub: pulled attachments from comment', [
+                'stored' => count($result['stored']),
+                'failed' => count($result['failed'])
+            ]);
+
+            return \app\services\JobAttachmentService::formatForPrompt($result, 'New GitHub');
+
+        } catch (\Throwable $e) {
+            // Never let an attachment failure stop the comment reaching the agent.
+            $this->logger->warning('GitHub: comment attachment download failed', [
+                'error' => $e->getMessage()
+            ]);
+            return '';
         }
     }
 
@@ -2603,8 +2737,15 @@ class Webhook extends BaseControls\Control {
             }
         }
 
-        // Fallback: search database for jobs with matching current_runner_job_uid
+        // Fallback: search database for jobs with matching current_runner_job_uid.
+        // Also match job_uid - the workstation/SSH dispatch path exports the job_uid
+        // as MYCTOBOT_JOB_ID and never calls startRun(), so current_runner_job_uid
+        // is empty for those jobs and the checkpoint would 404.
         $job = Bean::findOne('aidevjobs', 'current_runner_job_uid = ?', [$runnerJobId]);
+
+        if (!$job) {
+            $job = Bean::findOne('aidevjobs', 'job_uid = ?', [$runnerJobId]);
+        }
 
         if ($job) {
             return [

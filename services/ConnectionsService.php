@@ -62,6 +62,19 @@ class ConnectionsService {
                 'actions' => []
             ];
 
+            // OAuth connectors need their redirect URL registered in the provider's
+            // app settings - surface it (and any mismatch with the configured value)
+            // so an admin can set it up without digging through ini files.
+            if ($connection['auth_type'] === 'oauth' && method_exists($connectorClass, 'getCallbackUrl')) {
+                $connection['callback_url'] = $connectorClass::getCallbackUrl();
+                $connection['configured'] = self::isOAuthConfigured($connectorClass);
+
+                $oauthConfig = method_exists($connectorClass, 'loadOAuthConfig')
+                    ? $connectorClass::loadOAuthConfig()
+                    : [];
+                $connection['redirect_uri'] = $oauthConfig['redirect_uri'] ?? null;
+            }
+
             if (!$connection['coming_soon'] && $connection['available']) {
                 $status = $this->getConnectorStatus($key, $connectorClass);
                 if ($status !== null) {
@@ -73,6 +86,35 @@ class ConnectionsService {
         }
 
         return $connections;
+    }
+
+    /**
+     * Check whether a connector has the credentials it needs to start OAuth.
+     *
+     * loadConfig() pre-fills every key with null, so an unconfigured connector
+     * returns a non-empty array of empty values - the values must be checked.
+     *
+     * @param string $connectorClass FQCN of the connector
+     * @return bool
+     */
+    public static function isOAuthConfigured(string $connectorClass): bool {
+        if (method_exists($connectorClass, 'isOAuthReady')) {
+            return $connectorClass::isOAuthReady();
+        }
+
+        if (!method_exists($connectorClass, 'loadOAuthConfig')) {
+            return false;
+        }
+
+        // Check the credential pair specifically - loadOAuthConfig() injects
+        // default scopes, so "any non-empty value" would be a false positive.
+        // Connectors use either client_id/secret or api_key/secret naming.
+        $config = $connectorClass::loadOAuthConfig();
+
+        $hasId = !empty($config['client_id']) || !empty($config['api_key']);
+        $hasSecret = !empty($config['client_secret']) || !empty($config['api_secret']);
+
+        return $hasId && $hasSecret;
     }
 
     /**

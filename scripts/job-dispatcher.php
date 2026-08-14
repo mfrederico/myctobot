@@ -1806,6 +1806,9 @@ if ($usePrintMode) {
             "scp {$scpKeyFlag}-P {$wsPort} send-checkpoint.sh {$wsUser}@{$wsHost}:{$remoteWorkDir}/send-checkpoint.sh 2>/dev/null; " .
             "scp {$scpKeyFlag}-rp -P {$wsPort} attachments {$wsUser}@{$wsHost}:{$remoteWorkDir}/ 2>/dev/null; " .
             "scp {$scpKeyFlag}-P {$wsPort} sign-github-comment.php {$wsUser}@{$wsHost}:{$remoteWorkDir}/sign-github-comment.php 2>/dev/null; " .
+            // Repo must land before Claude starts - see the note in the SSH
+            // wrapper below. tar over ssh keeps it to a single stream.
+            "{ [ -d repo ] && tar czf - repo | ssh {$sshKeyFlag}-p {$wsPort} {$wsUser}@{$wsHost} 'tar xzf - -C {$remoteWorkDir}'; } || echo 'WARNING: repo sync failed'; " .
             "ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} 'export PATH=\$HOME/.local/bin:\$HOME/.claude/bin:/usr/local/bin:\$PATH && {$remoteEnvExportsSingle}{$ollamaSshEnvSingle}cd {$remoteWorkDir} && chmod +x send-checkpoint.sh 2>/dev/null; claude --print --dangerously-skip-permissions {$modelFlag} < prompt.txt'";
     } else {
         $claudeCmd = "claude --print --dangerously-skip-permissions {$modelFlag} < {$workDir}/prompt.txt";
@@ -1875,6 +1878,28 @@ scp {$scpKeyFlag}-P {$wsPort} send-checkpoint.sh {$wsUser}@{$wsHost}:{$remoteWor
 # -p preserves the 0600/0700 modes so attachments do not land world-readable
 scp {$scpKeyFlag}-rp -P {$wsPort} attachments {$wsUser}@{$wsHost}:{$remoteWorkDir}/ 2>/dev/null || true
 scp {$scpKeyFlag}-P {$wsPort} sign-github-comment.php {$wsUser}@{$wsHost}:{$remoteWorkDir}/sign-github-comment.php 2>/dev/null || true
+
+# Sync the prepared clone BEFORE Claude starts.
+#
+# prompt.txt tells the agent the repo is pre-cloned at ./repo/. It was never
+# synced, so on a remote workstation the agent found nothing there and worked
+# around it - exploring over the GitHub API instead of reading files.
+#
+# The LOCAL clone is copied rather than re-cloned remotely because the
+# dispatcher has already prepared it: branch affinity checkout and the
+# MyCTOBot .gitignore patterns are applied to this working copy.
+#
+# tar over ssh, not scp -r or rsync: one stream instead of a round trip per
+# file, and it needs only tar on the far end. The remote dir is unique per job
+# so there is nothing for rsync's delta transfer to save.
+if [ -d repo ]; then
+    echo "Syncing repository to workstation..."
+    if tar czf - repo | ssh {$sshKeyFlag}-p {$wsPort} {$wsUser}@{$wsHost} "tar xzf - -C {$remoteWorkDir}"; then
+        echo "  Repository synced to {$remoteWorkDir}/repo"
+    else
+        echo "  WARNING: repository sync FAILED - the agent will not find ./repo/"
+    fi
+fi
 
 # Run claude on remote workstation
 ssh {$sshKeyFlag}-t -p {$wsPort} {$wsUser}@{$wsHost} "export PATH=\\\$HOME/.local/bin:\\\$HOME/.claude/bin:/usr/local/bin:\\\$PATH && {$remoteEnvExportsDouble}{$ollamaSshEnvDouble}cd {$remoteWorkDir} && chmod +x send-checkpoint.sh 2>/dev/null; claude --dangerously-skip-permissions {$modelFlag} \"\\\$(cat prompt.txt)\""

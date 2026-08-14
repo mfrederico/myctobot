@@ -119,6 +119,7 @@ database/
 conf/github.ini
 conf/google.ini
 conf/stitch.ini
+conf/aibuilder.ini
 conf/jobexecutor.ini
 
 # But keep example configs

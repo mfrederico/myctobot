@@ -1436,6 +1436,14 @@ $remoteEnvVars = [
     'MYCTOBOT_AGENT_NAME'  => $agentName,
 ];
 
+// git/gh need these too. They are exported in the local wrapper further down,
+// which does not reach a session started over SSH - without them `gh pr create`
+// and authenticated pushes fail on the workstation.
+if (!empty($githubToken)) {
+    $remoteEnvVars['GITHUB_TOKEN'] = $githubToken;
+    $remoteEnvVars['GH_TOKEN'] = $githubToken;
+}
+
 // Two variants, matching the $ollamaSshEnv* pattern below: the remote command is
 // wrapped in single quotes in print mode and double quotes in the heredoc, so the
 // value quoting has to be the opposite of its enclosing quote in each case.

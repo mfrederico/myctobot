@@ -405,7 +405,9 @@ class JobAttachmentService {
         $status   = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $headerSz = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         $type     = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-        curl_close($ch);
+        // No curl_close(): a no-op since PHP 8.0 and deprecated in 8.5, where it
+        // prints a notice into the runner's output on every attachment.
+        unset($ch);
 
         if ($response === false) {
             return null;
@@ -461,7 +463,7 @@ class JobAttachmentService {
         $body   = curl_exec($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $type   = (string) curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-        curl_close($ch);
+        unset($ch);
 
         if ($body === false || $status !== 200 || $body === '') {
             return null;

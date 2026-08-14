@@ -197,27 +197,11 @@
                     </div>
                     <div class="card-body pt-3">
                         <?php
-                        $levelName = 'Unknown';
-                        $levelBadge = 'bg-secondary';
-                        switch($member->level) {
-                            case 0:
-                            case 1:
-                                $levelName = 'Root';
-                                $levelBadge = 'bg-danger';
-                                break;
-                            case 50:
-                                $levelName = 'Admin';
-                                $levelBadge = 'bg-warning text-dark';
-                                break;
-                            case 100:
-                                $levelName = 'Member';
-                                $levelBadge = 'bg-primary';
-                                break;
-                            case 101:
-                                $levelName = 'Public';
-                                $levelBadge = 'bg-secondary';
-                                break;
-                        }
+                        // Treat legacy level 0 as ROOT(1); fall back to a Member-styled badge for unknown values.
+                        $lookupLevel = ((int) $member->level) === 0 ? 1 : (int) $member->level;
+                        $meta = LEVEL_META[$lookupLevel] ?? ['label' => 'Unknown', 'badge' => 'bg-secondary'];
+                        $levelName = $meta['label'];
+                        $levelBadge = $meta['badge'];
                         ?>
                         <div class="d-flex justify-content-between align-items-center mb-2">
                             <span class="text-muted">Role</span>

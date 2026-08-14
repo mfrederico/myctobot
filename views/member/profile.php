@@ -19,25 +19,11 @@
                         <tr>
                             <th>Account Level:</th>
                             <td>
-                                <?php // shouldn't we be pulling this from the flightmap DEFINEs?
-                                $levelName = 'Unknown';
-                                switch($member->level) {
-                                    case 0:
-                                    case 1:
-                                        $levelName = 'ROOT';
-                                        break;
-                                    case 50:
-                                        $levelName = 'ADMIN';
-                                        break;
-                                    case 100:
-                                        $levelName = 'MEMBER';
-                                        break;
-                                    case 101:
-                                        $levelName = 'PUBLIC';
-                                        break;
-                                }
+                                <?php
+                                $lookupLevel = ((int) $member->level) === 0 ? 1 : (int) $member->level;
+                                $levelName = strtoupper(LEVEL_META[$lookupLevel]['label'] ?? 'Unknown');
                                 ?>
-                                <?= $levelName ?> (<?= $member->level ?>)
+                                <?= h($levelName) ?> (<?= (int) $member->level ?>)
                             </td>
                         </tr>
                         <tr>

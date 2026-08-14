@@ -44,11 +44,15 @@
                             <label for="level" class="form-label">User Level</label>
                             <select class="form-select" id="level" name="level" required
                                     <?= ($editMember->username ?? '') === 'public-user-entity' ? 'disabled' : '' ?>>
-                                <option value="0" <?= ($editMember->level ?? 100) == 0 ? 'selected' : '' ?>>ROOT (0)</option>
-                                <option value="1" <?= ($editMember->level ?? 100) == 1 ? 'selected' : '' ?>>ROOT (1)</option>
-                                <option value="50" <?= ($editMember->level ?? 100) == 50 ? 'selected' : '' ?>>ADMIN (50)</option>
-                                <option value="100" <?= ($editMember->level ?? 100) == 100 ? 'selected' : '' ?>>MEMBER (100)</option>
-                                <option value="101" <?= ($editMember->level ?? 100) == 101 ? 'selected' : '' ?>>PUBLIC (101)</option>
+                                <?php
+                                $currentLevel = (int) ($editMember->level ?? 100);
+                                if ($currentLevel === 0) $currentLevel = 1; // legacy ROOT alias
+                                ?>
+                                <?php foreach (LEVEL_META as $value => $meta): ?>
+                                    <option value="<?= $value ?>" <?= $currentLevel === $value ? 'selected' : '' ?>>
+                                        <?= strtoupper(h($meta['label'])) ?> (<?= $value ?>)
+                                    </option>
+                                <?php endforeach; ?>
                             </select>
                             <?php if (($editMember->username ?? '') === 'public-user-entity'): ?>
                                 <input type="hidden" name="level" value="101">

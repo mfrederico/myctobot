@@ -7,22 +7,11 @@
             <div class="card bg-primary text-white">
                 <div class="card-body">
                     <h4 class="card-title">Welcome back, <?= h($member->username) ?>!</h4>
-                    <p class="card-text">You are logged in as 
+                    <p class="card-text">You are logged in as
                         <?php
-                        $levelName = 'Member';
-                        switch($member->level) {
-                            case 0:
-                            case 1:
-                                $levelName = 'Root Administrator';
-                                break;
-                            case 50:
-                                $levelName = 'Administrator';
-                                break;
-                            case 100:
-                                $levelName = 'Member';
-                                break;
-                        }
-                        echo $levelName;
+                        $lookupLevel = ((int) $member->level) === 0 ? 1 : (int) $member->level;
+                        $levelName = LEVEL_META[$lookupLevel]['label'] ?? 'Member';
+                        echo h($levelName);
                         ?>
                     </p>
                 </div>
@@ -183,21 +172,9 @@
                         <dt class="col-sm-4">Account Level:</dt>
                         <dd class="col-sm-8">
                             <?php
-                            $levelBadge = 'badge bg-secondary';
-                            switch($member->level) {
-                                case 0:
-                                case 1:
-                                    $levelBadge = 'badge bg-danger';
-                                    break;
-                                case 50:
-                                    $levelBadge = 'badge bg-warning';
-                                    break;
-                                case 100:
-                                    $levelBadge = 'badge bg-primary';
-                                    break;
-                            }
+                            $levelBadge = 'badge ' . (LEVEL_META[$lookupLevel]['badge'] ?? 'bg-secondary');
                             ?>
-                            <span class="<?= $levelBadge ?>"><?= $levelName ?></span>
+                            <span class="<?= h($levelBadge) ?>"><?= h($levelName) ?></span>
                         </dd>
                         
                         <dt class="col-sm-4">Member ID:</dt>

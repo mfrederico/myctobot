@@ -45,24 +45,25 @@
                         <div class="mb-3">
                             <label for="level" class="form-label">Permission Level *</label>
                             <select class="form-select" id="level" name="level" required>
-                                <option value="100" <?= ($_POST['level'] ?? 100) == 100 ? 'selected' : '' ?>>Member (Standard User)</option>
-                                <option value="50" <?= ($_POST['level'] ?? 100) == 50 ? 'selected' : '' ?>>Admin (Can manage members & settings)</option>
-                                <option value="1" <?= ($_POST['level'] ?? 100) == 1 ? 'selected' : '' ?>>Root (Full system access)</option>
+                                <?php $selectedLevel = (int) ($_POST['level'] ?? 100); ?>
+                                <?php foreach (LEVEL_META as $value => $meta):
+                                    if ($value === 101) continue; // PUBLIC is not a real assignable role
+                                ?>
+                                    <option value="<?= $value ?>" <?= $selectedLevel === $value ? 'selected' : '' ?>>
+                                        <?= h($meta['label']) ?> (<?= h($meta['description']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
                             </select>
                             <div class="form-text">
                                 <table class="table table-sm table-borderless mt-2 mb-0" style="font-size: 0.85em;">
-                                    <tr>
-                                        <td><span class="badge bg-secondary">Member</span></td>
-                                        <td>Can use dashboards, view boards, run analysis</td>
-                                    </tr>
-                                    <tr>
-                                        <td><span class="badge bg-warning text-dark">Admin</span></td>
-                                        <td>+ Manage members, settings, integrations</td>
-                                    </tr>
-                                    <tr>
-                                        <td><span class="badge bg-danger">Root</span></td>
-                                        <td>+ Full system access, can delete admins</td>
-                                    </tr>
+                                    <?php foreach (LEVEL_META as $value => $meta):
+                                        if ($value === 101) continue;
+                                    ?>
+                                        <tr>
+                                            <td><span class="badge <?= h($meta['badge']) ?>"><?= h($meta['label']) ?></span></td>
+                                            <td><?= h($meta['description']) ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
                                 </table>
                             </div>
                         </div>

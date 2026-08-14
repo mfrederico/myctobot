@@ -16,7 +16,7 @@
  *   --verbose     Show all duplicates, not just top ones
  */
 
-$baseDir = dirname(__DIR__);
+$baseDir = dirname(__DIR__, 2);
 chdir($baseDir);
 
 // Parse arguments
@@ -45,8 +45,10 @@ Environment variables:
   OLLAMA_MODEL    Model to use (default: deepseek-coder-v2:16b)
 
 Custom Patterns:
-  Add your own patterns to scripts/duplicate-patterns.json or specify a custom file.
+  Add your own patterns to scripts/hooks/duplicate-patterns.json or specify a custom file.
   Patterns use PHP regex syntax. Severity levels: critical, high, medium, low.
+  Optional "exclude" key: path regex for files that legitimately contain the pattern
+  (e.g. the base-class helper that implements it).
 
 Examples:
   php scripts/check-duplicates.php --quick
@@ -93,7 +95,7 @@ echo "Scanning " . count($files) . " PHP files...\n\n";
 echo "=== Known Pattern Analysis ===\n\n";
 
 // Load patterns from config file
-$patternsFile = $args['patterns'] ?? $baseDir . '/scripts/duplicate-patterns.json';
+$patternsFile = $args['patterns'] ?? __DIR__ . '/duplicate-patterns.json';
 if (!file_exists($patternsFile)) {
     echo "Warning: Patterns file not found: {$patternsFile}\n";
     echo "Using built-in patterns.\n\n";
@@ -109,7 +111,10 @@ if (!file_exists($patternsFile)) {
         $patterns[$name] = [
             'pattern' => '/' . $config['pattern'] . '/',
             'suggestion' => $config['suggestion'],
-            'severity' => $config['severity'] ?? 'medium'
+            'severity' => $config['severity'] ?? 'medium',
+            // Optional path regex - files matching it are the legitimate home for the
+            // pattern (the helper that implements it, generated scaffolding, etc.)
+            'exclude' => isset($config['exclude']) ? '#' . $config['exclude'] . '#' : null
         ];
     }
     echo "Loaded " . count($patterns) . " patterns from: {$patternsFile}\n\n";
@@ -121,6 +126,9 @@ foreach ($files as $filepath) {
     $relativePath = str_replace($baseDir . '/', '', $filepath);
 
     foreach ($patterns as $name => $config) {
+        if (!empty($config['exclude']) && preg_match($config['exclude'], $relativePath)) {
+            continue;
+        }
         if (preg_match_all($config['pattern'], $content, $matches, PREG_OFFSET_CAPTURE)) {
             if (!isset($patternResults[$name])) {
                 $patternResults[$name] = [
@@ -254,8 +262,8 @@ foreach ($blockIndex as $hash => $locations) {
     if (count($locations) < 2) continue;
 
     // Check if locations are in different files or far apart in same file
-    $files = array_unique(array_column($locations, 'file'));
-    if (count($files) >= 2 || count($locations) >= 3) {
+    $blockFiles = array_unique(array_column($locations, 'file'));
+    if (count($blockFiles) >= 2 || count($locations) >= 3) {
         $duplicateBlocks[$hash] = $locations;
     }
 }

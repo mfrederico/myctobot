@@ -32,7 +32,7 @@ fi
 cd "$REPO_ROOT"
 
 # Check if the scanner exists
-if [ ! -f "scripts/check-duplicates.php" ]; then
+if [ ! -f "scripts/hooks/check-duplicates.php" ]; then
     echo -e "${YELLOW}Warning: Duplicate scanner not found, skipping check${NC}"
     exit 0
 fi
@@ -46,7 +46,7 @@ fi
 echo -e "${YELLOW}Running duplicate code check...${NC}"
 
 # Run the scanner and capture output
-OUTPUT=$(php scripts/check-duplicates.php $OPTIONS 2>&1)
+OUTPUT=$(php scripts/hooks/check-duplicates.php $OPTIONS 2>&1)
 EXIT_CODE=$?
 
 # Check for critical violations
@@ -60,7 +60,7 @@ if echo "$OUTPUT" | grep -q "\[CRITICAL\]"; then
     echo "$OUTPUT" | grep -A 10 "\[CRITICAL\]"
     echo ""
     echo -e "${RED}Please fix these critical issues before committing.${NC}"
-    echo -e "Run: ${YELLOW}php scripts/check-duplicates.php --verbose${NC} for details."
+    echo -e "Run: ${YELLOW}php scripts/hooks/check-duplicates.php --verbose${NC} for details."
     echo -e "To skip this check: ${YELLOW}SKIP_DUPLICATE_CHECK=1 git commit${NC}"
     exit 1
 fi

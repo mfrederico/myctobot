@@ -30,6 +30,16 @@ require_once __DIR__ . '/../services/CeoDirectiveLogger.php';
 
 class Webhook extends BaseControls\Control {
 
+    /**
+     * How long closeLocalTmuxSession() may wait for a runner to exit on its own
+     * before force-killing the session.
+     *
+     * Kept well under GitHub's 10s webhook timeout: the handler has already done
+     * a few seconds of work by the time it gets here, and blowing that budget
+     * makes GitHub record the delivery as a failure regardless of what we did.
+     */
+    private const SESSION_EXIT_WAIT_MS = 5000;
+
     /** @var string|null Current CEO directive ID for audit trail */
     private ?string $currentDirectiveId = null;
 
@@ -722,8 +732,27 @@ class Webhook extends BaseControls\Control {
                 }
             }
 
-            // Wait for script to cleanup gracefully
-            sleep(10);
+            // Wait for the script to clean up gracefully - but stay inside
+            // GitHub's webhook budget.
+            //
+            // This used to be a flat sleep(10). GitHub allows a webhook 10
+            // seconds TOTAL before it gives up, so sleeping 10 here guaranteed
+            // the delivery was recorded as failed ("context deadline exceeded
+            // while awaiting headers", status 500) even though this handler had
+            // already done its work correctly. Those phantom failures are what
+            // made the close path look broken.
+            //
+            // Polling instead of sleeping also returns as soon as the runner
+            // has actually exited, which is the common case - the flat sleep
+            // paid the full cost every single time.
+            $waitMs = 0;
+            while ($waitMs < self::SESSION_EXIT_WAIT_MS) {
+                if (!$tmux->exists()) {
+                    break;
+                }
+                usleep(250000);
+                $waitMs += 250;
+            }
         }
 
         // Fallback: cleanup labels directly if script didn't

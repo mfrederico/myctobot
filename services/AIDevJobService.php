@@ -414,6 +414,61 @@ class AIDevJobService {
      * @param int $memberId Member ID
      * @return array ['available' => bool, 'error' => string|null, 'running_count' => int]
      */
+    /**
+     * Mark 'running' jobs whose session is gone as failed, freeing their slot.
+     *
+     * Only called when the concurrency limit has been hit, so the tmux lookups
+     * cost nothing on the normal path.
+     *
+     * Deliberately conservative: a job is only reaped when we can positively
+     * determine no session exists. If the check itself errors we leave the
+     * record alone - a stuck slot is recoverable, killing a live job's record
+     * is not.
+     *
+     * @param int $memberId
+     * @return int Number of jobs reaped
+     */
+    private static function reapDeadRunningJobs(int $memberId): int {
+        $reaped = 0;
+        $workspace = $_SESSION['workspace_slug'] ?? $_SERVER['WORKSPACE'] ?? null;
+
+        $jobs = Bean::find('aidevjobs',
+            ' member_id = ? AND status = ? ',
+            [$memberId, AIDevStatusService::STATUS_RUNNING]
+        );
+
+        foreach ($jobs as $job) {
+            if (empty($job->issue_key)) {
+                continue;
+            }
+
+            try {
+                $tmux = new TmuxService($memberId, $job->issue_key, null, $workspace);
+                if ($tmux->exists()) {
+                    continue;   // genuinely running, leave it
+                }
+            } catch (\Throwable $e) {
+                continue;       // cannot tell - do not touch it
+            }
+
+            $job->status = AIDevStatusService::STATUS_FAILED;
+            $job->error_message = 'Session no longer running (reaped while checking concurrency)';
+            $job->completed_at = date('Y-m-d H:i:s');
+            $job->updated_at = date('Y-m-d H:i:s');
+            Bean::store($job);
+            $reaped++;
+
+            if (Flight::has('log')) {
+                Flight::log()->warning('Reaped dead AI Dev job holding a concurrency slot', [
+                    'job_id' => $job->id,
+                    'issue_key' => $job->issue_key
+                ]);
+            }
+        }
+
+        return $reaped;
+    }
+
     public function checkConcurrency(int $memberId): array {
         // Default limit
         $maxConcurrent = 3;
@@ -432,6 +487,17 @@ class AIDevJobService {
 
         // Count running jobs for this member
         $runningJobs = AIDevStatusService::getRunningJobsCount($memberId);
+
+        // The count above trusts the stored status. A session that dies without
+        // reconciling its record holds a slot forever, and once enough of those
+        // accumulate every future dispatch is refused with "limit reached" while
+        // nothing is actually running. Before refusing, verify.
+        if ($runningJobs >= $maxConcurrent) {
+            $reaped = self::reapDeadRunningJobs($memberId);
+            if ($reaped > 0) {
+                $runningJobs = AIDevStatusService::getRunningJobsCount($memberId);
+            }
+        }
 
         if ($runningJobs >= $maxConcurrent) {
             return [

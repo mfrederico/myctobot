@@ -503,6 +503,14 @@ class AIDevJobService {
         return is_string($out) && trim($out) !== '' ? $out : null;
     }
 
+    /**
+     * Public entry point for the self-heal script: reap any 'running' job whose
+     * session is gone or parked on the login banner. Returns how many.
+     */
+    public static function healStuckJobs(int $memberId): int {
+        return self::reapDeadRunningJobs($memberId);
+    }
+
     private static function reapDeadRunningJobs(int $memberId): int {
         $reaped = 0;
         $workspace = $_SESSION['workspace_slug'] ?? $_SERVER['WORKSPACE'] ?? null;

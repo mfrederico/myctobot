@@ -86,6 +86,36 @@ class ClaudeCredentialService {
     }
 
     /**
+     * Ask the CLI itself whether it has a session.
+     *
+     * `claude auth status` prints JSON with a "loggedIn" boolean. This is the
+     * authoritative answer - it accounts for refresh, API-key setups and
+     * anything else the CLI does internally - so prefer it and fall back to
+     * reading the credential file only when it cannot be run.
+     *
+     * @param string|null $sshPrefix e.g. "ssh -i key -p 22 user@host" (null = local)
+     * @return array{signed_in:bool, reason:string, expires_at:?int}
+     */
+    public static function checkCli(?string $sshPrefix = null): array {
+        $probe = 'claude auth status 2>/dev/null';
+        $cmd = $sshPrefix
+            ? $sshPrefix . ' ' . escapeshellarg('export PATH=$HOME/.local/bin:$HOME/.claude/bin:/usr/local/bin:$PATH && ' . $probe)
+            : $probe;
+
+        $out = @shell_exec($cmd);
+        $data = is_string($out) ? json_decode($out, true) : null;
+
+        if (!is_array($data) || !array_key_exists('loggedIn', $data)) {
+            // Could not run it or could not parse it - fall back to the file.
+            return self::checkWorkstation($sshPrefix);
+        }
+
+        return $data['loggedIn']
+            ? ['signed_in' => true, 'reason' => 'claude auth status: logged in', 'expires_at' => null]
+            : ['signed_in' => false, 'reason' => 'claude auth status: not logged in - run `claude /login` on the workstation', 'expires_at' => null];
+    }
+
+    /**
      * Read and inspect the credential file on a workstation.
      *
      * @param string|null $sshPrefix e.g. "ssh -i key -p 22 user@host" (null = local)

@@ -18,6 +18,7 @@ require_once __DIR__ . '/AIDevStatusService.php';
 require_once __DIR__ . '/RunnerRouter.php';
 require_once __DIR__ . '/ShopifyClient.php';
 require_once __DIR__ . '/TmuxService.php';
+require_once __DIR__ . '/ClaudeCredentialService.php';
 require_once __DIR__ . '/CeoDirectiveLogger.php';
 require_once __DIR__ . '/DeliveryConfirmationService.php';
 require_once __DIR__ . '/../lib/plugins/AtlassianAuth.php';
@@ -428,6 +429,20 @@ class AIDevJobService {
      * @param int $memberId
      * @return int Number of jobs reaped
      */
+    /**
+     * Read a session's visible terminal output, or null if it cannot be read.
+     */
+    private static function capturePane(TmuxService $tmux): ?string {
+        $name = $tmux->getActiveSessionName();
+        if (!$name) {
+            return null;
+        }
+
+        $out = @shell_exec('tmux capture-pane -t ' . escapeshellarg($name) . ' -p -S -40 2>/dev/null');
+
+        return is_string($out) && trim($out) !== '' ? $out : null;
+    }
+
     private static function reapDeadRunningJobs(int $memberId): int {
         $reaped = 0;
         $workspace = $_SESSION['workspace_slug'] ?? $_SERVER['WORKSPACE'] ?? null;
@@ -442,17 +457,37 @@ class AIDevJobService {
                 continue;
             }
 
+            $reason = 'Session no longer running (reaped while checking concurrency)';
+
             try {
                 $tmux = new TmuxService($memberId, $job->issue_key, null, $workspace);
                 if ($tmux->exists()) {
-                    continue;   // genuinely running, leave it
+                    // Alive is not the same as working. When the Claude CLI has no
+                    // usable login it starts, prints "Login expired - Please run
+                    // /login", and parks at a prompt. The session stays up forever,
+                    // so a liveness check alone calls this healthy and the slot is
+                    // never released - the worst version of this bug, because it
+                    // looks fine from every angle except the pane itself.
+                    $pane = self::capturePane($tmux);
+                    if ($pane === null || !ClaudeCredentialService::looksLoggedOut($pane)) {
+                        continue;   // genuinely running, leave it
+                    }
+                    $reason = 'Claude CLI login expired on the workstation; agent never started work';
+                    // Kill the session we actually FOUND. TmuxService::kill() only
+                    // targets the names it computed, and the discovered session
+                    // routinely carries a different suffix, so it would miss.
+                    $found = $tmux->getActiveSessionName();
+                    if ($found) {
+                        @shell_exec('tmux kill-session -t ' . escapeshellarg($found) . ' 2>/dev/null');
+                    }
+                    $tmux->kill();
                 }
             } catch (\Throwable $e) {
                 continue;       // cannot tell - do not touch it
             }
 
             $job->status = AIDevStatusService::STATUS_FAILED;
-            $job->error_message = 'Session no longer running (reaped while checking concurrency)';
+            $job->error_message = $reason;
             $job->completed_at = date('Y-m-d H:i:s');
             $job->updated_at = date('Y-m-d H:i:s');
             Bean::store($job);
@@ -461,7 +496,8 @@ class AIDevJobService {
             if (Flight::has('log')) {
                 Flight::log()->warning('Reaped dead AI Dev job holding a concurrency slot', [
                     'job_id' => $job->id,
-                    'issue_key' => $job->issue_key
+                    'issue_key' => $job->issue_key,
+                    'reason' => $reason
                 ]);
             }
         }

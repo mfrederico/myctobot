@@ -430,6 +430,66 @@ class AIDevJobService {
      * @return int Number of jobs reaped
      */
     /**
+     * Post the reason to the issue and clear the in-progress labels.
+     *
+     * Removing "ai-dev" as well as "myctobot-working" is deliberate and matches
+     * the normal exit path (Github/Atlassian::removeLabelsOnExit): it leaves the
+     * ticket in a state where re-adding the label retries the job, which is what
+     * someone will want to do next.
+     *
+     * NEVER THROWS. A reaped slot must stay reaped even if GitHub or Jira is
+     * unreachable - failing here would undo the fix this whole method exists to
+     * deliver.
+     *
+     * @param object $job      The aidevjobs bean
+     * @param int    $memberId
+     * @param string $reason   Why the job was reaped
+     */
+    private static function notifyIssueOfReap($job, int $memberId, string $reason): void {
+        $issueKey = (string) ($job->issue_key ?? '');
+        if ($issueKey === '') {
+            return;
+        }
+
+        $note = "**MyCTOBot AI Developer stopped**\n\n"
+              . "This job was ended automatically and its slot released.\n\n"
+              . "Reason: {$reason}\n\n"
+              . "No changes were lost - any commits or PRs already made are unaffected. "
+              . "Re-add the `ai-dev` label to run it again.\n\n"
+              . "[agent:MyCTOBot]";
+
+        $cloudId = (string) ($job->cloud_uid ?? '');
+
+        try {
+            if ($cloudId !== '') {
+                // Jira
+                $client = new JiraClient($memberId, $cloudId);
+                $client->addComment($issueKey, $note);
+                \app\Atlassian::removeLabelsOnExit($issueKey, $memberId, $cloudId);
+
+            } elseif (preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $m)) {
+                // GitHub (owner/repo#123)
+                $owner = $m[1];
+                $repo = $m[2];
+                $number = (int) $m[3];
+
+                $token = \app\Github::getTokenStatic($owner, $repo, $memberId);
+                if (!empty($token)) {
+                    (new GitHubClient($token))->addIssueComment($owner, $repo, $number, $note);
+                }
+                \app\Github::removeLabelsOnExit($owner, $repo, $number, $memberId);
+            }
+        } catch (\Throwable $e) {
+            if (Flight::has('log')) {
+                Flight::log()->warning('Could not notify issue tracker about reaped job', [
+                    'issue_key' => $issueKey,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
+    }
+
+    /**
      * Read a session's visible terminal output, or null if it cannot be read.
      */
     private static function capturePane(TmuxService $tmux): ?string {
@@ -492,6 +552,11 @@ class AIDevJobService {
             $job->updated_at = date('Y-m-d H:i:s');
             Bean::store($job);
             $reaped++;
+
+            // Tell the issue tracker too. Reaping only fixes OUR record - the
+            // ticket still carries "myctobot-working" and reads as in progress,
+            // so whoever filed it waits on an agent that is never coming back.
+            self::notifyIssueOfReap($job, $memberId, $reason);
 
             if (Flight::has('log')) {
                 Flight::log()->warning('Reaped dead AI Dev job holding a concurrency slot', [

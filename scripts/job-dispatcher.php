@@ -1399,6 +1399,28 @@ $webhookKey = Flight::get('cron.api_key') ?? '';
 // Used by the comment-signing hook so the [agent:...] marker names the agent.
 $agentName = $agentConfig['name'] ?? 'AI Developer';
 
+// Long-lived Claude CLI token, minted once with `claude setup-token`.
+//
+// Without it the runner falls back to the workstation's stored login, whose
+// access token lives ~8 hours. Several agents starting at once each try to
+// refresh that one shared credential file, one wins and rotates the refresh
+// token, and the losers are left holding a stale one - at which point the CLI
+// starts, prints "Login expired - Please run /login", and parks forever while
+// still holding its concurrency slot.
+//
+// A setup-token has no such race. It bills against the Claude subscription,
+// NOT API credits, so this is not the same trade as ANTHROPIC_API_KEY.
+//
+// Scope note: setup-token sessions carry `user:inference` only. That is what
+// running the model needs; it does mean no Remote Control and no Claude in
+// Chrome from these sessions, neither of which a headless runner uses.
+$claudeOauthToken = Flight::get('claude.oauth_token') ?: (getenv('CLAUDE_CODE_OAUTH_TOKEN') ?: '');
+if (!empty($claudeOauthToken)) {
+    echo "  Claude auth: long-lived setup-token (CLAUDE_CODE_OAUTH_TOKEN)\n";
+} else {
+    echo "  Claude auth: workstation stored login (no setup-token configured)\n";
+}
+
 // Hook environment variables for multi-workspace support
 $hookEnvSection = <<<HOOK_ENV
 
@@ -1416,6 +1438,12 @@ export MYCTOBOT_API_KEY="{$apiKey}"
 export MYCTOBOT_WEBHOOK_KEY="{$webhookKey}"
 export MYCTOBOT_AGENT_NAME="{$agentName}"
 HOOK_ENV;
+
+// Exported separately from the MYCTOBOT_* block: this one is consumed by the
+// Claude CLI itself, not by our hooks.
+if (!empty($claudeOauthToken)) {
+    $hookEnvSection .= "\nexport CLAUDE_CODE_OAUTH_TOKEN=\"{$claudeOauthToken}\"\n";
+}
 
 // The exports above only apply to THIS script. When Claude runs on a remote
 // workstation the SSH command starts a fresh shell, so they must be replayed
@@ -1442,6 +1470,11 @@ $remoteEnvVars = [
 if (!empty($githubToken)) {
     $remoteEnvVars['GITHUB_TOKEN'] = $githubToken;
     $remoteEnvVars['GH_TOKEN'] = $githubToken;
+}
+
+// The CLI needs this on the WORKSTATION, which is where it actually runs.
+if (!empty($claudeOauthToken)) {
+    $remoteEnvVars['CLAUDE_CODE_OAUTH_TOKEN'] = $claudeOauthToken;
 }
 
 // Two variants, matching the $ollamaSshEnv* pattern below: the remote command is

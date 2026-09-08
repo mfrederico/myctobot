@@ -32,6 +32,10 @@ class ClaudeCredentialService {
         'Not logged in',
         'Please run /login',
         'OAuth session expired',
+        // A revoked or expired long-lived setup-token fails this way rather
+        // than with the /login banner, and parks the agent just the same.
+        'OAuth 401',
+        'Mint a fresh token',
     ];
 
     /**

@@ -126,3 +126,4 @@ conf/jobexecutor.ini
 !conf/stitch.example.ini
 .mcp.json
 data/
+conf/claude.ini

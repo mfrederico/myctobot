@@ -134,7 +134,15 @@
             <?php if (!empty($job['last_output'])): ?>
             <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0"><i class="bi bi-terminal"></i> Output</h5>
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-terminal"></i> Output
+                        <?php if (!empty($outputSource)): ?>
+                        <span class="badge bg-secondary ms-2" style="font-weight: normal; font-size: 0.7rem;"
+                              title="This job predates stored output; recovered from the work directory on disk. It may disappear when /tmp is cleaned.">
+                            recovered from <?= h($outputSource) ?>
+                        </span>
+                        <?php endif; ?>
+                    </h5>
                     <button class="btn btn-sm btn-outline-secondary" onclick="toggleOutput()">
                         <i class="bi bi-arrows-expand" id="toggle-icon"></i>
                     </button>

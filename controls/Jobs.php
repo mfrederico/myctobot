@@ -79,13 +79,33 @@ class Jobs extends BaseControls\Control {
         // Format job data for the view
         $jobData = $jobManager->formatJob($job);
 
+        require_once __DIR__ . '/../services/JobTerminalService.php';
+
         // Get job logs
         $logs = $jobManager->getLogs($job->issue_key);
+
+        // Jobs that finished before checkpoints carried raw_output have no
+        // last_output, so the Output card never rendered. The transcript is
+        // often still on disk - fall back to it rather than showing nothing.
+        $outputSource = null;
+        if (empty($jobData['last_output'])) {
+            $recovered = \app\services\JobTerminalService::find(
+                $job->issue_key,
+                $_SESSION['workspace_slug'] ?? $_SERVER['WORKSPACE'] ?? 'default'
+            );
+            if ($recovered) {
+                $jobData['last_output'] = $recovered['text'];
+                $outputSource = $recovered['source'];
+            }
+        } else {
+            $jobData['last_output'] = \app\services\JobTerminalService::clean($jobData['last_output']);
+        }
 
         $this->render('jobs/view', [
             'title' => 'Job: ' . $job->issue_key,
             'job' => $jobData,
-            'logs' => $logs
+            'logs' => $logs,
+            'outputSource' => $outputSource
         ]);
     }
 

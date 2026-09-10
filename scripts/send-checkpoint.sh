@@ -123,6 +123,52 @@ echo "Wrote result to $RESULT_FILE"
 WEBHOOK_BASE="${MYCTOBOT_WEBHOOK_URL:-https://myctobot.ai}"
 WEBHOOK_URL="${WEBHOOK_BASE}/webhook/aidev"
 
+# Capture the terminal BEFORE posting, and ship its tail as result.raw_output.
+#
+# The job view has an Output card gated on last_output, and the webhook already
+# stores result.raw_output there - but nothing ever sent it, so the card was
+# dead for every job and the only record of what an agent actually did was a
+# spawn.log in /tmp that gets cleaned up.
+#
+# Tail, not the whole scrollback: 50k lines of a Claude TUI is mostly redraw
+# noise and would bloat every job row. The end is the part that explains the
+# outcome.
+SESSION_NAME="${TMUX_SESSION_NAME:-}"
+if [[ -z "$SESSION_NAME" && -n "$TMUX" ]]; then
+    SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null || echo "")
+fi
+
+RAW_OUTPUT_TAIL=""
+if [[ -n "$SESSION_NAME" ]] && command -v tmux >/dev/null 2>&1; then
+    RAW_OUTPUT_TAIL=$(tmux capture-pane -t "$SESSION_NAME" -p -S -50000 2>/dev/null | tail -c 60000 || true)
+fi
+
+# Merge it into the result object. Done in python so the terminal text is JSON
+# escaped properly - it is full of quotes, backslashes and control characters.
+if [[ -n "$RAW_OUTPUT_TAIL" ]] && command -v python3 >/dev/null 2>&1; then
+    RESULT_JSON=$(printf '%s' "$RESULT_JSON" | RAW_TAIL="$RAW_OUTPUT_TAIL" python3 -c '
+import json, os, re, sys
+
+try:
+    result = json.load(sys.stdin)
+except Exception:
+    sys.stdout.write(sys.stdin.read())
+    raise SystemExit
+
+if isinstance(result, dict) and not result.get("raw_output"):
+    raw = os.environ.get("RAW_TAIL", "")
+    raw = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", raw)   # strip ANSI
+    raw = re.sub(r"[^\x09\x0a\x0d\x20-\x7e]", "", raw)
+    result["raw_output"] = raw.strip()
+
+print(json.dumps(result))
+') || true
+    # Refresh the local backup so it matches what is actually posted; it was
+    # written above, before the terminal tail existed.
+    echo "$RESULT_JSON" > "$RESULT_FILE"
+    echo "Attached terminal tail to result (${#RAW_OUTPUT_TAIL} bytes captured)"
+fi
+
 # Build the payload with job metadata
 PAYLOAD=$(cat <<EOF
 {
@@ -161,13 +207,7 @@ else
     echo "Result was saved locally to $RESULT_FILE"
 fi
 
-# Get the tmux session name
-SESSION_NAME="${TMUX_SESSION_NAME:-}"
-if [[ -z "$SESSION_NAME" && -n "$TMUX" ]]; then
-    # Extract session name from $TMUX (format: /tmp/tmux-uid/default,pid,session_index)
-    SESSION_NAME=$(tmux display-message -p '#S' 2>/dev/null || echo "")
-fi
-
+# SESSION_NAME was resolved above, before the payload was built.
 if [[ -n "$SESSION_NAME" ]]; then
     # Capture terminal snapshot for debugging
     SNAPSHOT_FILE="terminal_snapshot.txt"

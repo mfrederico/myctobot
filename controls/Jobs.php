@@ -41,15 +41,37 @@ class Jobs extends BaseControls\Control {
 
         $jobManager = new AIDevJobManager($this->member->id);
 
-        // Support both numeric ID and issue key lookups
+        // Support both numeric ID and issue key lookups.
+        //
+        // The numeric branch used to require member_id = the current member, which
+        // made every /activity link useless: Activity lists the workspace's jobs
+        // with no owner filter, so any job belonging to someone else - including
+        // the 49 here owned by a member that no longer exists - bounced straight
+        // back with "Job not found".
+        //
+        // It was also the ONLY owner check in the flow. The issue-key branch below
+        // (AIDevJobManager::get) and getLogs() are both workspace-scoped already,
+        // so the same job was reachable by key while its numeric link 404'd.
+        // Admins see any job in the workspace; members keep their own.
+        $isPrivileged = Flight::hasLevel(LEVELS['ADMIN']);
+
         if (ctype_digit($identifier)) {
-            $job = Bean::findOne('aidevjobs', 'id = ? AND member_id = ?', [(int) $identifier, $this->member->id]);
+            $job = $isPrivileged
+                ? Bean::findOne('aidevjobs', 'id = ?', [(int) $identifier])
+                : Bean::findOne('aidevjobs', 'id = ? AND member_id = ?', [(int) $identifier, $this->member->id]);
         } else {
             $job = $jobManager->get($identifier);
         }
 
         if (!$job) {
-            $this->flash('error', 'Job not found');
+            // Say which of the two it is, rather than making someone guess whether
+            // the job is missing or simply not theirs.
+            $exists = ctype_digit($identifier)
+                && Bean::count('aidevjobs', 'id = ?', [(int) $identifier]) > 0;
+
+            $this->flash('error', $exists
+                ? 'That job belongs to another member - ask an administrator to view it.'
+                : 'Job not found');
             Flight::redirect('/activity?type=aidev');
             return;
         }

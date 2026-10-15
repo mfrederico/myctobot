@@ -381,6 +381,15 @@
                                 </span>
                             </div>
                             <?php endif; ?>
+                            <?php if (!empty($bean->last_error)): ?>
+                            <div class="mt-2 alert alert-danger py-1 px-2 mb-0" style="font-size: 0.75rem;">
+                                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                                <?= h($bean->last_error) ?>
+                                <?php if ($type === 'github'): ?>
+                                <br><a href="/github/connect" class="alert-link">Reconnect GitHub</a> to fix AI Developer jobs.
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>

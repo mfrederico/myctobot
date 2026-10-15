@@ -426,7 +426,8 @@ class GitHubClient {
      * Generate a URL for cloning with token authentication
      */
     public function getAuthenticatedCloneUrl(string $owner, string $repo): string {
-        return "https://{$this->accessToken}@github.com/{$owner}/{$repo}.git";
+        // x-access-token form survives GitHub redirects; a bare "token@" does not
+        return "https://x-access-token:{$this->accessToken}@github.com/{$owner}/{$repo}.git";
     }
 
     /**

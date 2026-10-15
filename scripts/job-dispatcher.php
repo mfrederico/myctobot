@@ -470,6 +470,7 @@ $repoBean = null;
 $agentConfig = null;
 $agentBean = null;
 $githubToken = '';
+$githubTokenConn = null;   // connections bean the GitHub token came from (for last_error)
 $repoOwner = '';
 $repoName = '';
 $defaultBranch = 'main';
@@ -628,6 +629,7 @@ if (empty($githubToken) && !empty($repoBean->connections_id)) {
     if ($linkedConn->id && !empty($linkedConn->access_token)) {
         try {
             $githubToken = EncryptionService::decrypt($linkedConn->access_token);
+            $githubTokenConn = $linkedConn;
             if (!$isPipelineJob) {
                 echo "  GitHub Token (from linked connection #{$linkedConn->id}): ****" . substr($githubToken, -4) . "\n";
             }
@@ -645,6 +647,7 @@ if (empty($githubToken)) {
     if ($githubConn && !empty($githubConn->access_token)) {
         try {
             $githubToken = EncryptionService::decrypt($githubConn->access_token);
+            $githubTokenConn = $githubConn;
             if (!$isPipelineJob) {
                 echo "  GitHub Token (from connections): ****" . substr($githubToken, -4) . "\n";
             }
@@ -709,19 +712,65 @@ if (!$isPipelineJob) {
     echo "  Repo: {$repoOwner}/{$repoName}\n";
     echo "  Branch: {$defaultBranch}\n\n";
 
-    // Pre-clone the repository
+    // Pre-clone the repository. Any failure here is fatal: without a repo the
+    // Claude session can't do anything, so stop now and tell the user why
+    // instead of starting a session that immediately dies.
     echo "Cloning repository...\n";
-    if (!empty($githubToken) && !empty($repoOwner) && !empty($repoName)) {
-        $cloneCmd = "git clone https://{$githubToken}@github.com/{$repoOwner}/{$repoName}.git " . escapeshellarg($repoDir) . " 2>&1";
-        exec($cloneCmd, $cloneOutput, $cloneExitCode);
-        if ($cloneExitCode === 0) {
-            echo "  Repository cloned successfully\n";
-            exec("git -C " . escapeshellarg($repoDir) . " checkout " . escapeshellarg($defaultBranch) . " 2>&1");
-        } else {
-            echo "  Warning: Clone failed - " . implode("\n", $cloneOutput) . "\n";
+    if (empty($githubToken)) {
+        abortJobBeforeStart($memberId, $jobUid, $issueKey, $provider,
+            "No GitHub token is available for {$repoOwner}/{$repoName}. Connect GitHub under Settings → Connections.",
+            null, true);
+    }
+    if (empty($repoOwner) || empty($repoName)) {
+        abortJobBeforeStart($memberId, $jobUid, $issueKey, $provider,
+            "Repository connection #{$repoBean->id} has no owner/name configured.");
+    }
+
+    // Verify the token against the API first so a dead token gets a clear
+    // message rather than a cryptic git error.
+    $connLabel = $githubTokenConn && $githubTokenConn->id
+        ? "GitHub connection \"" . ($githubTokenConn->connection_name ?: $githubTokenConn->external_name ?: ('#' . $githubTokenConn->id)) . "\""
+        : 'the GitHub token';
+    try {
+        $checkClient = $githubClient ?? new GitHubClient($githubToken);
+        $checkClient->getRepository($repoOwner, $repoName);
+    } catch (\GuzzleHttp\Exception\ClientException $e) {
+        $httpCode = $e->getResponse() ? $e->getResponse()->getStatusCode() : 0;
+        if ($httpCode === 401) {
+            abortJobBeforeStart($memberId, $jobUid, $issueKey, $provider,
+                "GitHub rejected {$connLabel} (HTTP 401: token invalid, expired, or revoked). Reconnect GitHub under Settings → Connections and retry.",
+                $githubTokenConn, true);
+        }
+        if ($httpCode === 403 || $httpCode === 404) {
+            abortJobBeforeStart($memberId, $jobUid, $issueKey, $provider,
+                "{$connLabel} cannot access {$repoOwner}/{$repoName} (HTTP {$httpCode}). Make sure the connected GitHub account has access to this repository (and the OAuth grant covers its organization).",
+                $githubTokenConn, true);
+        }
+        echo "  Warning: GitHub API check returned HTTP {$httpCode}, attempting clone anyway\n";
+    } catch (\Throwable $e) {
+        echo "  Warning: GitHub API check failed (" . $e->getMessage() . "), attempting clone anyway\n";
+    }
+
+    // x-access-token form: git drops a bare "token@" credential when GitHub
+    // redirects, and then prompts for a password. GIT_TERMINAL_PROMPT=0 makes
+    // any remaining auth problem fail fast instead of hanging in tmux.
+    $cloneUrl = "https://x-access-token:{$githubToken}@github.com/{$repoOwner}/{$repoName}.git";
+    $cloneCmd = "GIT_TERMINAL_PROMPT=0 git clone " . escapeshellarg($cloneUrl) . " " . escapeshellarg($repoDir) . " 2>&1";
+    exec($cloneCmd, $cloneOutput, $cloneExitCode);
+    if ($cloneExitCode === 0) {
+        echo "  Repository cloned successfully\n";
+        exec("git -C " . escapeshellarg($repoDir) . " checkout " . escapeshellarg($defaultBranch) . " 2>&1");
+        if ($githubTokenConn && $githubTokenConn->id && !empty($githubTokenConn->last_error)) {
+            $githubTokenConn->last_error = null;
+            Bean::store($githubTokenConn);
         }
     } else {
-        echo "  Warning: No GitHub token or repo info, cannot pre-clone\n";
+        $cloneError = str_replace($githubToken, '****', implode("\n", $cloneOutput));
+        $tokenProblem = (bool) preg_match('/401|403|Authentication failed|could not read (Username|Password)/i', $cloneError);
+        abortJobBeforeStart($memberId, $jobUid, $issueKey, $provider,
+            "Could not clone {$repoOwner}/{$repoName}" . ($tokenProblem ? " - {$connLabel} was rejected. Reconnect GitHub under Settings → Connections and retry." : '.')
+            . "\n\ngit output:\n" . trim($cloneError),
+            $tokenProblem ? $githubTokenConn : null, $tokenProblem);
     }
 
     // Add MyCTOBot generated files to .gitignore
@@ -2294,6 +2343,67 @@ if ($autoAttach) {
 /**
  * Extract URLs from text
  */
+/**
+ * Stop a job before Claude starts and make the reason visible everywhere the
+ * user looks: the job record (dashboard + activity page), the issue tracker,
+ * and the GitHub connection card. Releases the issue labels and exits non-zero.
+ *
+ * @param object|null $tokenConn  connections bean whose token failed (gets last_error)
+ * @param bool        $tokenProblem true when the root cause is GitHub auth/access
+ */
+function abortJobBeforeStart(int $memberId, string $jobUid, string $issueKey, string $provider, string $reason, $tokenConn = null, bool $tokenProblem = false): void {
+    echo "\nERROR: {$reason}\n";
+
+    if ($jobUid !== '') {
+        try {
+            AIDevStatusService::fail($memberId, $jobUid, $reason);
+        } catch (\Throwable $e) {
+            echo "  Warning: could not update job status: " . $e->getMessage() . "\n";
+        }
+    }
+
+    if ($tokenProblem && $tokenConn && $tokenConn->id) {
+        try {
+            $tokenConn->last_error = 'GitHub rejected this token on ' . date('Y-m-d H:i') . ' - reconnect to refresh it.';
+            Bean::store($tokenConn);
+        } catch (\Throwable $e) {
+            echo "  Warning: could not flag connection: " . $e->getMessage() . "\n";
+        }
+    }
+
+    if ($provider === 'github' && preg_match('/^([^\/]+)\/([^#]+)#(\d+)$/', $issueKey, $m)) {
+        $owner = $m[1];
+        $repo = $m[2];
+        $number = (int) $m[3];
+        $workspace = $GLOBALS['workspace'] ?? null;
+        $baseUrl = Flight::get('app.baseurl') ?? Flight::get('baseurl') ?? ($workspace ? "https://{$workspace}.myctobot.ai" : '');
+        $baseUrl = rtrim((string) $baseUrl, '/');
+        $settingsHint = $baseUrl ? "[Settings → Connections]({$baseUrl}/settings/connections)" : 'Settings → Connections';
+        $note = "**MyCTOBot AI Developer could not start**\n\n"
+              . $reason . "\n\n"
+              . ($tokenProblem
+                    ? "A workspace admin needs to reconnect GitHub under {$settingsHint}, then re-add the `ai-dev` label to retry.\n\n"
+                    : "Once the problem above is fixed, re-add the `ai-dev` label to retry.\n\n")
+              . "[agent:MyCTOBot]";
+        try {
+            $token = \app\Github::getTokenStatic($owner, $repo, $memberId);
+            if (!empty($token)) {
+                (new GitHubClient($token))->addIssueComment($owner, $repo, $number, $note);
+                echo "  Posted failure note to {$issueKey}\n";
+            }
+        } catch (\Throwable $e) {
+            echo "  Warning: could not comment on {$issueKey}: " . $e->getMessage() . "\n";
+        }
+        try {
+            \app\Github::removeLabelsOnExit($owner, $repo, $number, $memberId);
+        } catch (\Throwable $e) {
+            echo "  Warning: could not remove labels on {$issueKey}: " . $e->getMessage() . "\n";
+        }
+    }
+
+    exit(1);
+}
+
 function extractUrls(string $text): array {
     $urls = [];
     // Match HTTP/HTTPS URLs

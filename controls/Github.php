@@ -823,17 +823,21 @@ class Github extends BaseControls\Control {
 
     /**
      * Format a clone URL with GitHub authentication
-     * GitHub format: https://{token}@github.com/owner/repo.git
+     * GitHub format: https://x-access-token:{token}@github.com/owner/repo.git
+     *
+     * The x-access-token form is required: with a bare "token@" credential git
+     * drops the username when GitHub redirects and then prompts for a password,
+     * which hangs (tmux) or fails with 401 (GIT_TERMINAL_PROMPT=0).
      *
      * Converts SSH URLs to HTTPS automatically (with warning)
      */
     public static function formatAuthenticatedUrl(string $cloneUrl, string $token): string {
-        $logger = Flight::get('log');
+        $logger = Flight::has('log') ? Flight::get('log') : null;
 
         // Detect SSH URL and convert to HTTPS
         // SSH format: git@github.com:owner/repo.git
         if (preg_match('#^git@github\.com:(.+)$#', $cloneUrl, $matches)) {
-            $logger->warning('Github: Converting SSH URL to HTTPS for authentication', [
+            $logger?->warning('Github: Converting SSH URL to HTTPS for authentication', [
                 'original_url' => $cloneUrl,
                 'note' => 'Consider updating repo connection to use HTTPS URL'
             ]);
@@ -844,9 +848,12 @@ class Github extends BaseControls\Control {
             return $cloneUrl;
         }
 
+        // Strip any credentials already embedded in the URL before adding ours
+        $cloneUrl = preg_replace('#^(https?://)[^@/]+@#', '$1', $cloneUrl);
+
         return preg_replace(
             '#^(https?://)(.*)$#',
-            '$1' . $token . '@$2',
+            '$1x-access-token:' . $token . '@$2',
             $cloneUrl
         );
     }

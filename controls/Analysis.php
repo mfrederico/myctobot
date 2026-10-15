@@ -956,7 +956,7 @@ curl -s -H "Authorization: Bearer \$JIRA_API_TOKEN" "{$jiraHost}/rest/api/3/issu
 ## GitHub Access
 The GITHUB_TOKEN environment variable is set. Use it for git operations:
 ```bash
-git clone https://\$GITHUB_TOKEN@github.com/{$repoOwner}/{$repoName}.git
+git clone https://x-access-token:\$GITHUB_TOKEN@github.com/{$repoOwner}/{$repoName}.git
 ```
 
 ## Your Workflow

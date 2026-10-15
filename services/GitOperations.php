@@ -436,29 +436,39 @@ class GitOperations {
      * Inject authentication token into a git URL
      */
     private function injectTokenIntoUrl(string $url, string $token): string {
+        // If URL already has credentials, drop them so ours replace them
+        $url = preg_replace('#^(https://)[^@/]+@#', '$1', $url);
+
         // Handle HTTPS URLs
         if (preg_match('#^https://([^/]+)/(.+)$#', $url, $matches)) {
-            return "https://{$token}@{$matches[1]}/{$matches[2]}";
+            return "https://{$this->credentialPrefix($matches[1], $token)}@{$matches[1]}/{$matches[2]}";
         }
 
         // Handle git:// URLs - convert to HTTPS with token
         if (preg_match('#^git://([^/]+)/(.+)$#', $url, $matches)) {
-            return "https://{$token}@{$matches[1]}/{$matches[2]}";
+            return "https://{$this->credentialPrefix($matches[1], $token)}@{$matches[1]}/{$matches[2]}";
         }
 
         // Handle SSH URLs - convert to HTTPS with token
         if (preg_match('#^git@([^:]+):(.+)$#', $url, $matches)) {
             $repo = preg_replace('/\.git$/', '', $matches[2]) . '.git';
-            return "https://{$token}@{$matches[1]}/{$repo}";
-        }
-
-        // If URL already has credentials, replace them
-        if (preg_match('#^https://[^:]+:[^@]+@(.+)$#', $url, $matches)) {
-            return "https://{$token}@{$matches[1]}";
+            return "https://{$this->credentialPrefix($matches[1], $token)}@{$matches[1]}/{$repo}";
         }
 
         // Return as-is if format not recognized
         return $url;
+    }
+
+    /**
+     * Credential part of an authenticated clone URL for a given host.
+     * GitHub needs "x-access-token:TOKEN": a bare "TOKEN@" is dropped by git on
+     * redirect, after which git prompts for a password (hang) or fails with 401.
+     */
+    private function credentialPrefix(string $host, string $token): string {
+        if (strcasecmp($host, 'github.com') === 0) {
+            return "x-access-token:{$token}";
+        }
+        return $token;
     }
 
     /**
@@ -591,6 +601,13 @@ class GitOperations {
             if ($conn && !empty($conn->access_token)) {
                 $token = EncryptionService::decrypt($conn->access_token);
             }
+        }
+
+        // Repos connected through the GitHub OAuth flow often have no clone_url
+        // stored; build it from owner/name like the dispatcher does.
+        if (empty($cloneUrl) && ($repo->provider ?? 'github') === 'github'
+            && !empty($repo->repo_owner) && !empty($repo->repo_name)) {
+            $cloneUrl = "https://github.com/{$repo->repo_owner}/{$repo->repo_name}.git";
         }
 
         if (empty($cloneUrl)) {
